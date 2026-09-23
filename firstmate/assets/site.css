@@ -338,3 +338,23 @@ figure.diagram .diagram-scroll { overflow-x: auto; max-width: 100%; }
 @media (max-width: 52rem) {
   figure.diagram svg.c4.c4-dense { min-width: 760px; }
 }
+
+/* ---------- Issues area: ticket tables, kind tags, plain data bar charts ---------- */
+.issues-table th, .issues-table td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+.issues-table th { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--fg-muted); }
+.issues-table td.num, .issues-table td.date { white-space: nowrap; }
+.issues-table td.num { font-variant-numeric: tabular-nums; }
+.tag { display: inline-block; font-size: 0.72rem; padding: 0.04rem 0.45rem; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.tag-defect { color: var(--warn-border); }
+.tag-feature { color: var(--note-border); }
+.tag-question { color: var(--fg-muted); }
+.tag-design-flaw { color: var(--accent); }
+svg.chart { display: block; width: 100%; height: auto; font-family: var(--font-sans); }
+svg.chart .chart-label { fill: var(--fg); font-size: 12px; }
+svg.chart .chart-value { fill: var(--fg-muted); font-size: 11px; }
+svg.chart .chart-bar-defect { fill: var(--warn-border); }
+svg.chart .chart-bar-feature { fill: var(--note-border); }
+svg.chart .chart-bar-question { fill: var(--fg-muted); }
+@media (max-width: 52rem) {
+  svg.chart.chart-dense { min-width: 640px; }
+}

@@ -70,6 +70,25 @@ window.FM_NAV = [
   // end remote
 
   // begin issues
-  { section: "issues", title: "Open tickets", href: "issues/index.html", stub: true },
+  { section: "issues", title: "Open tickets", href: "issues/index.html" },
+  { section: "issues", title: "Worktree and task lifecycle", href: "issues/worktree-and-task-lifecycle.html" },
+  { section: "issues", title: "Backends and terminals", href: "issues/backends-and-terminals.html" },
+  { section: "issues", title: "Status, inbox and wake", href: "issues/status-inbox-and-wake.html" },
+  { section: "issues", title: "Quota and dispatch", href: "issues/quota-and-dispatch.html" },
+  { section: "issues", title: "Crew coordination", href: "issues/crew-coordination.html" },
+  { section: "issues", title: "The no-mistakes pipeline", href: "issues/no-mistakes-pipeline.html" },
+  { section: "issues", title: "Bootstrap and tooling floors", href: "issues/bootstrap-and-tooling-floors.html" },
+  { section: "issues", title: "Composer / idle-state detection", href: "issues/composer-state-detection.html" },
+  { section: "issues", title: "Prompts and briefs", href: "issues/prompts-and-briefs.html" },
+  { section: "issues", title: "Delivery modes and definition of done", href: "issues/delivery-modes-and-dod.html" },
+  { section: "issues", title: "Third-party integrations and usage questions", href: "issues/third-party-integrations-and-forges.html" },
+  { section: "issues", title: "Remote and cloud agents", href: "issues/remote-and-cloud-agents.html" },
+  { section: "issues", title: "Test suite and CI reliability", href: "issues/test-suite-and-ci-reliability.html" },
+  { section: "issues", title: "Observability and token accounting", href: "issues/observability-and-token-accounting.html" },
+  { section: "issues", title: "Backlog and decisions (tickets)", href: "issues/backlog-and-decisions.html" },
+  { section: "issues", title: "Skills and AGENTS.md (tickets)", href: "issues/skills-and-agents-md.html" },
+  { section: "issues", title: "Context and session stability", href: "issues/context-and-session-stability.html" },
+  { section: "issues", title: "Terminology and naming (tickets)", href: "issues/terminology-and-naming.html" },
+  { section: "issues", title: "Themes for a successor", href: "issues/themes.html" },
   // end issues
 ];
