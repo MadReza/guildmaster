@@ -11,12 +11,268 @@
 <div class="layout">
 <nav id="site-nav" aria-label="Site"></nav>
 <main id="main">
-<article>
-<p class="breadcrumb">Components</p>
+<article class="wide">
+<p class="breadcrumb">Components › Prompts and skills</p>
 <h1>Prompts and skills</h1>
-<p class="lede">Will cover every instruction Firstmate hands to an agent: the <code>AGENTS.md</code> charter and its rules, generated briefs and their contract sections, definitions of done, secondmate charters, supervision protocol texts, and the internal and public skills.</p>
-<div class="callout unclear"><span class="callout-title">Stub</span>
-<p>This section is reserved and not yet written. A follow-up task fills it in under <a href="../../AUTHORING.md">the authoring contract</a>. Until then, the <a href="../../c4/containers.html">Level 2 containers page</a> is the entry point for this area.</p></div>
+<p class="lede">How Firstmate is instructed: one always-loaded contract, a set of skills loaded only when their trigger fires, a once-per-session digest, per-harness supervision text, and executable briefs rendered for each worker. This is the part a successor most needs to copy or deliberately replace, because every other part of Firstmate is driven by these words.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Terms follow Firstmate's own vocabulary (captain, first mate, crewmate, secondmate, brief), not Guildmaster's.</p>
+
+<h2 id="what">What this area is</h2>
+<p>Firstmate has no compiled core. Its behaviour is the product of an ordinary harness session (Claude Code, Codex, Pi, and others) reading instruction text, plus bash scripts that enforce what text alone cannot. The repository itself names the instruction surface: its documentation inventory classifies files as <code>agent-runtime</code> when they are "loaded or rendered as an operating contract for Firstmate agents rather than read as product documentation" <code class="cite ps-wrap">docs/documentation-audiences.md:14</code>. That class covers exactly <code>AGENTS.md</code>, <code>CLAUDE.md</code>, every tracked <code>.agents/skills/</code> file, and the eight <code>docs/supervision-protocols/</code> snippets <code class="cite ps-wrap">docs/documentation-audiences.json</code>.</p>
+<p>Two further instruction channels are generated rather than stored: the session-start digest printed by <code>bin/fm-session-start.sh</code>, and the brief text built by <code>bin/fm-brief.sh</code>, <code>bin/fm-dod-lib.sh</code>, and <code>bin/fm-spawn.sh</code>. And one rule makes the scripts themselves part of the prompt: "read each script's header before first use" <code class="cite ps-wrap">AGENTS.md:70</code>.</p>
+<p>Only some of this reaches a running first mate: "Only <code>AGENTS.md</code>, <code>bin/</code>, and <code>.agents/skills/</code> are loaded by a running firstmate; public <code>skills/</code> is an installer-facing surface" <code class="cite ps-wrap">AGENTS.md:572</code>. Once loaded, the text is frozen for that conversation: "A running agent holds <code>AGENTS.md</code> and every skill it has already loaded frozen from the moment it launched, and no verified harness offers a reload" <code class="cite ps-wrap">.agents/skills/updatefirstmate/SKILL.md:20</code>.</p>
+
+<h2 id="components">Components (C4 level 3)</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1200 850" role="img" aria-labelledby="psi-t psi-d">
+<title id="psi-t">Prompts and skills: component view</title>
+<desc id="psi-d">The instruction surface inside the Firstmate code root: AGENTS.md, the session-start digest, skills, script headers, the supervision protocol renderer, the brief scaffold, the launch-brief assembler, the operational-input envelope, and the secondmate charter. It shows which of them reach the supervisor agent and which reach a worker. Numbered arrows are explained in the table below.</desc>
+<defs><marker id="psi-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="24">Prompts and skills — Components (Level 3)</text>
+
+<g class="c4-person">
+<circle cx="120" cy="52" r="16"/>
+<rect x="40" y="68" width="160" height="66" rx="14"/>
+<text class="c4-label" x="120" y="96">Captain</text>
+<text class="c4-desc" x="120" y="114">Chat only</text>
+</g>
+<g class="c4-container">
+<rect x="440" y="44" width="260" height="90" rx="8"/>
+<text class="c4-label" x="570" y="72">Supervisor agent</text>
+<text class="c4-tech" x="570" y="89">[harness session in the code root]</text>
+<text class="c4-desc" x="570" y="107">The first mate, or a secondmate</text>
+<text class="c4-desc" x="570" y="122">in its own home</text>
+</g>
+<g class="c4-container">
+<rect x="920" y="44" width="240" height="90" rx="8"/>
+<text class="c4-label" x="1040" y="72">Worker agent</text>
+<text class="c4-tech" x="1040" y="89">[harness session in a worktree]</text>
+<text class="c4-desc" x="1040" y="107">Ship or scout crewmate</text>
+</g>
+
+<g class="c4-boundary">
+<rect x="20" y="170" width="1160" height="450" rx="10"/>
+<text x="172" y="194">Instruction surface (tracked)</text>
+</g>
+
+<g class="c4-component">
+<rect x="40" y="210" width="230" height="80" rx="8"/>
+<text class="c4-label" x="155" y="236">AGENTS.md charter</text>
+<text class="c4-tech" x="155" y="253">[Markdown, always loaded]</text>
+<text class="c4-desc" x="155" y="270">14 numbered sections, 626 lines</text>
+</g>
+<g class="c4-component">
+<rect x="300" y="210" width="230" height="80" rx="8"/>
+<text class="c4-label" x="415" y="236">Session-start digest</text>
+<text class="c4-tech" x="415" y="253">[bin/fm-session-start.sh]</text>
+<text class="c4-desc" x="415" y="270">Once per session, read once</text>
+</g>
+<g class="c4-component">
+<rect x="560" y="210" width="230" height="80" rx="8"/>
+<text class="c4-label" x="675" y="236">Skills</text>
+<text class="c4-tech" x="675" y="253">[.agents/skills/*/SKILL.md]</text>
+<text class="c4-desc" x="675" y="270">Loaded at a named trigger</text>
+</g>
+<g class="c4-component">
+<rect x="820" y="210" width="230" height="80" rx="8"/>
+<text class="c4-label" x="935" y="236">Script headers</text>
+<text class="c4-tech" x="935" y="253">[bin/*.sh comment + --help]</text>
+<text class="c4-desc" x="935" y="270">Owner of exact mechanics</text>
+</g>
+
+<g class="c4-component">
+<rect x="300" y="350" width="230" height="80" rx="8"/>
+<text class="c4-label" x="415" y="376">Supervision protocol</text>
+<text class="c4-tech" x="415" y="393">[fm-supervision-instructions.sh]</text>
+<text class="c4-desc" x="415" y="410">One snippet per primary harness</text>
+</g>
+<g class="c4-component">
+<rect x="560" y="350" width="230" height="80" rx="8"/>
+<text class="c4-label" x="675" y="376">Brief scaffold</text>
+<text class="c4-tech" x="675" y="393">[fm-brief.sh + fm-dod-lib.sh]</text>
+<text class="c4-desc" x="675" y="410">Executable worker contract</text>
+</g>
+<g class="c4-component">
+<rect x="820" y="350" width="230" height="80" rx="8"/>
+<text class="c4-label" x="935" y="376">Launch-brief assembler</text>
+<text class="c4-tech" x="935" y="393">[bin/fm-spawn.sh]</text>
+<text class="c4-desc" x="935" y="410">Validates, prepends role contract</text>
+</g>
+
+<g class="c4-component">
+<rect x="300" y="490" width="230" height="80" rx="8"/>
+<text class="c4-label" x="415" y="516">Secondmate charter</text>
+<text class="c4-tech" x="415" y="533">[fm-brief.sh --secondmate]</text>
+<text class="c4-desc" x="415" y="550">Idle-by-default job description</text>
+</g>
+<g class="c4-component">
+<rect x="820" y="490" width="190" height="80" rx="8"/>
+<text class="c4-label" x="915" y="516">Operational input</text>
+<text class="c4-tech" x="915" y="533">[fm-operational-input.sh]</text>
+<text class="c4-desc" x="915" y="550">Typed machine envelope</text>
+</g>
+
+<g class="c4-datastore">
+<path d="M40,668 a115,12 0 0,0 230,0 a115,12 0 0,0 -230,0 v58 a115,12 0 0,0 230,0 v-58"/>
+<text class="c4-label" x="155" y="696">Startup memory</text>
+<text class="c4-desc" x="155" y="713">data/captain*.md, learnings.md</text>
+<text class="c4-desc" x="155" y="728">budget 7,500 est. tokens</text>
+</g>
+<g class="c4-container">
+<rect x="300" y="655" width="230" height="80" rx="8"/>
+<text class="c4-label" x="415" y="682">Secondmate home</text>
+<text class="c4-tech" x="415" y="699">[isolated FM_HOME]</text>
+<text class="c4-desc" x="415" y="716">Holds data/charter.md</text>
+</g>
+<g class="c4-datastore">
+<path d="M560,668 a115,12 0 0,0 230,0 a115,12 0 0,0 -230,0 v58 a115,12 0 0,0 230,0 v-58"/>
+<text class="c4-label" x="675" y="696">Task briefs</text>
+<text class="c4-desc" x="675" y="713">data/&lt;id&gt;/brief.md</text>
+<text class="c4-desc" x="675" y="728">data/&lt;id&gt;/launch-brief.md</text>
+</g>
+<g class="c4-external">
+<rect x="920" y="655" width="240" height="80" rx="8"/>
+<text class="c4-label" x="1040" y="682">Harness CLI</text>
+<text class="c4-tech" x="1040" y="699">[claude, codex, pi, grok, …]</text>
+<text class="c4-desc" x="1040" y="716">Carries the first message</text>
+</g>
+
+<!-- 1 captain to supervisor -->
+<g class="c4-rel"><path d="M200,100 L438,100" marker-end="url(#psi-arrow)"/><text class="c4-rel-label" x="318" y="92">asks, decides</text></g>
+<!-- 2 AGENTS.md to supervisor -->
+<g class="c4-rel"><path d="M155,210 V150 H470 V136" marker-end="url(#psi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="300" cy="150" r="10"/><text x="300" y="154">2</text></g>
+<!-- 3 digest to supervisor -->
+<g class="c4-rel"><path d="M415,210 V180 H520 V136" marker-end="url(#psi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="470" cy="180" r="10"/><text x="470" y="184">3</text></g>
+<!-- 4 skills to supervisor -->
+<g class="c4-rel"><path d="M675,210 V180 H620 V136" marker-end="url(#psi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="650" cy="180" r="10"/><text x="650" y="184">4</text></g>
+<!-- 5 script headers to supervisor and worker -->
+<g class="c4-rel"><path d="M880,210 V100 H702" marker-end="url(#psi-arrow)"/></g>
+<g class="c4-rel"><path d="M990,210 V136" marker-end="url(#psi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="880" cy="160" r="10"/><text x="880" y="164">5</text></g>
+<!-- 6 renderer to digest -->
+<g class="c4-rel"><path d="M415,350 V292" marker-end="url(#psi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="415" cy="322" r="10"/><text x="415" y="326">6</text></g>
+<!-- 7 memory to digest -->
+<g class="c4-rel"><path d="M155,656 V320 H340 V292" marker-end="url(#psi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="155" cy="480" r="10"/><text x="155" y="484">7</text></g>
+<!-- 8 supervisor to brief scaffold -->
+<g class="c4-rel"><path d="M545,136 V390 H558" marker-end="url(#psi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="545" cy="320" r="10"/><text x="545" y="324">8</text></g>
+<!-- 9 scaffold to briefs -->
+<g class="c4-rel"><path d="M675,430 V654" marker-end="url(#psi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="675" cy="600" r="10"/><text x="675" y="604">9</text></g>
+<!-- 10 scaffold to charter, charter to secondmate home -->
+<g class="c4-rel"><path d="M610,430 V460 H415 V488" marker-end="url(#psi-arrow)"/></g>
+<g class="c4-rel"><path d="M415,570 V653" marker-end="url(#psi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="415" cy="612" r="10"/><text x="415" y="616">10</text></g>
+<!-- 11 briefs to assembler -->
+<g class="c4-rel"><path d="M790,690 H805 V390 H818" marker-end="url(#psi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="805" cy="600" r="10"/><text x="805" y="604">11</text></g>
+<!-- 12 assembler to envelope -->
+<g class="c4-rel"><path d="M915,430 V488" marker-end="url(#psi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="915" cy="460" r="10"/><text x="915" y="464">12</text></g>
+<!-- 13 envelope to worker -->
+<g class="c4-rel"><path d="M1010,530 H1080 V136" marker-end="url(#psi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="1080" cy="320" r="10"/><text x="1080" y="324">13</text></g>
+<!-- 14 assembler to harness, harness to worker -->
+<g class="c4-rel"><path d="M1035,430 V653" marker-end="url(#psi-arrow)"/></g>
+<g class="c4-rel"><path d="M1140,655 V136" marker-end="url(#psi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="1035" cy="600" r="10"/><text x="1035" y="604">14</text></g>
+
+<g class="c4-legend">
+<rect class="c4-legend-frame" x="20" y="770" width="1160" height="62" rx="6"/>
+<text class="c4-legend-heading" x="34" y="806">Legend</text>
+<g class="c4-person"><rect x="110" y="793" width="32" height="18" rx="7"/></g><text x="150" y="806">Person</text>
+<g class="c4-container"><rect x="220" y="793" width="32" height="18" rx="3"/></g><text x="260" y="806">Container</text>
+<g class="c4-component"><rect x="345" y="793" width="32" height="18" rx="3"/></g><text x="385" y="806">Component</text>
+<g class="c4-datastore"><path d="M480,796 a16,3 0 0,0 32,0 a16,3 0 0,0 -32,0 v12 a16,3 0 0,0 32,0 v-12"/></g><text x="520" y="806">Data store</text>
+<g class="c4-external"><rect x="610" y="793" width="32" height="18" rx="3"/></g><text x="650" y="806">External</text>
+<g class="c4-rel"><path d="M730,802 L770,802"/></g><text x="780" y="806">Loads, writes, or delivers (numbered in the table)</text>
+</g>
+</svg>
+</div>
+<figcaption>Everything inside the dashed boundary is tracked shared material; the memory files, the briefs, and the secondmate home are captain-private records under <code>FM_HOME</code>. The supervisor sees the charter, the digest, skills, and headers; a worker sees only its assembled launch brief, the headers it chooses to read, and, on Claude, one appended system-prompt sentence.</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>#</th><th>From → to</th><th>What travels</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Captain → supervisor</td><td>Chat. The captain never talks to a worker; "All crewmate communication flows through firstmate."</td><td><code class="cite ps-wrap">AGENTS.md:38-39</code></td></tr>
+<tr><td>2</td><td>AGENTS.md → supervisor</td><td>The whole file, at every session, through the harness's own project-instruction loader. On Claude the path is the two-line <code>CLAUDE.md</code> import.</td><td><code class="cite ps-wrap">AGENTS.md:7-9</code> <code class="cite ps-wrap">CLAUDE.md:1-2</code></td></tr>
+<tr><td>3</td><td>Digest → supervisor</td><td>One ordered, bounded digest per session, trusted as that turn's startup and recovery input.</td><td><code class="cite ps-wrap">AGENTS.md:168-176</code></td></tr>
+<tr><td>4</td><td>Skills → supervisor</td><td>A skill body, only when its trigger fires or the captain types its slash command.</td><td><code class="cite ps-wrap">AGENTS.md:576-578</code></td></tr>
+<tr><td>5</td><td>Script headers → any agent</td><td>Exact flags, paths, and formats, read before first use rather than restated in prose.</td><td><code class="cite ps-wrap">AGENTS.md:70</code> <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:34-35</code></td></tr>
+<tr><td>6</td><td>Supervision renderer → digest</td><td>The operating block for the detected primary harness, emitted after the wake queue and before the fleet digest.</td><td><code class="cite ps-wrap">bin/fm-session-start.sh:790-795</code></td></tr>
+<tr><td>7</td><td>Startup memory → digest</td><td>Captain preferences and learnings, printed in full and last. A per-home budget applies, enforced by <code>/stow</code> curation rather than by the digest.</td><td><code class="cite ps-wrap">bin/fm-session-start.sh:945-951</code> <code class="cite ps-wrap">docs/configuration.md:255-258</code></td></tr>
+<tr><td>8</td><td>Supervisor → brief scaffold</td><td>A scaffold call, then the supervisor fills <code>## Captain's intent</code> and <code>## Firstmate spec</code>.</td><td><code class="cite ps-wrap">AGENTS.md:554-558</code></td></tr>
+<tr><td>9</td><td>Scaffold → task briefs</td><td><code>data/&lt;id&gt;/brief.md</code>; the scaffold refuses to overwrite an existing one.</td><td><code class="cite ps-wrap">bin/fm-brief.sh:230-232</code></td></tr>
+<tr><td>10</td><td>Scaffold → charter → secondmate home</td><td>A charter brief, copied into the seeded home as <code>data/charter.md</code>.</td><td><code class="cite ps-wrap">bin/fm-home-seed.sh:17-19</code> <code class="cite ps-wrap">bin/fm-home-seed.sh:946</code></td></tr>
+<tr><td>11</td><td>Task briefs → assembler</td><td>The filled brief, validated for placeholders, empty sections, operator address, and delivery-mode agreement.</td><td><code class="cite ps-wrap">bin/fm-spawn.sh:2724-2747</code> <code class="cite ps-wrap">bin/fm-spawn.sh:2791</code></td></tr>
+<tr><td>12</td><td>Assembler → envelope</td><td><code>launch-brief.md</code> (role contract + brief + optional intent overlay) encoded as the <code>launch-brief</code> operational kind.</td><td><code class="cite ps-wrap">bin/fm-spawn.sh:2751-2769</code> <code class="cite ps-wrap">bin/fm-operational-input.sh:31</code></td></tr>
+<tr><td>13</td><td>Envelope → worker</td><td>The worker's first user message.</td><td><code class="cite ps-wrap">bin/fm-spawn.sh:1859</code></td></tr>
+<tr><td>14</td><td>Assembler → harness → worker</td><td>On Claude only, an appended system-prompt sentence that makes the launch brief and the named inbox first-party.</td><td><code class="cite ps-wrap">bin/fm-spawn.sh:1848-1858</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="pages">Pages in this area</h2>
+<ul class="cards">
+<li><a href="agents-md.html"><strong>AGENTS.md, the always-loaded contract</strong><span>Section map, sizes, what stays inline, the CLAUDE.md pointer, and how a changed file reaches a running session</span></a></li>
+<li><a href="knowledge-placement.html"><strong>Knowledge placement and the one-owner rule</strong><span>The seven-tier decision tree, one owner per contract, the inline-stub pattern, and trigger hygiene</span></a></li>
+<li><a href="skills.html"><strong>The skills system</strong><span>Two-tier layout, frontmatter, agent-only vs user-invocable, trigger-time loading, and the full catalogue</span></a></li>
+<li><a href="session-start-digest.html"><strong>Session-start digest</strong><span>The once-per-session prompt, its nine stages, the read-once contract, truncation, and re-emit</span></a></li>
+<li><a href="supervision-protocols.html"><strong>Supervision protocol text</strong><span>How one harness-specific operating block is rendered, and the repair line guards reuse</span></a></li>
+<li><a href="briefs.html"><strong>Briefs as executable contracts</strong><span>Scaffold anatomy, captain's intent vs Firstmate spec, definitions of done, and spawn-time refusals</span></a></li>
+<li><a href="worker-launch.html"><strong>Worker launch prompt</strong><span>Role contract overlay, intent overlay, the operational envelope, and the Claude system prompt</span></a></li>
+<li><a href="secondmate-charter.html"><strong>Secondmate charter</strong><span>Idle-by-default job description, the parent channel, and marked requests</span></a></li>
+<li><a href="prompt-economy.html"><strong>Prompt economy and the startup memory budget</strong><span>What Firstmate spends context on at startup, what it defers, and how memory is kept under budget</span></a></li>
+<li><a href="walkthrough.html"><strong>End to end: one task's instructions</strong><span>A traced path from a captain's ask to a worker's first turn and back</span></a></li>
+</ul>
+
+<h2 id="principles">The design in five rules</h2>
+<p>These are the organising rules the rest of this area documents. Each is stated by Firstmate itself.</p>
+<dl class="defs">
+<dt>Pay every session only for what every session needs.</dt>
+<dd>"<code>AGENTS.md</code>'s token cost is paid by every session of every fleet member, every time … A skill's cost is paid only by the sessions that actually load it." <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:62-63</code></dd>
+<dt>State every contract once.</dt>
+<dd>"Every contract - a data format, a state machine, a decision procedure - is stated in full exactly once. Every other mention of it is a one-line cross-reference." <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:43-44</code></dd>
+<dt>Put unconditional reads in a script, not in agent turns.</dt>
+<dd>"Every one of those reads is UNCONDITIONAL at every session start, so they belong in a script, not in N agent turns." <code class="cite ps-wrap">bin/fm-session-start.sh:11-12</code></dd>
+<dt>Instructions are the authority; scripts enforce.</dt>
+<dd>"Keep instructions as the authority and discovery layer, but make repeated execution converge safely and make invalid or unsafe states fail closed wherever the runtime can enforce them." <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:81-82</code></dd>
+<dt>A brief is a contract, not advice.</dt>
+<dd>"The scaffold is a safety contract, not a suggestion." <code class="cite ps-wrap">AGENTS.md:567</code></dd>
+</dl>
+
+<h2 id="economy">Prompt economy at a glance</h2>
+<p>Measured on the pinned commit with Firstmate's own conservative estimator, <code>ceil(UTF-8 bytes / 3)</code> <code class="cite ps-wrap">docs/configuration.md:264</code>. Full breakdown on the <a href="prompt-economy.html">prompt economy page</a>.</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Surface</th><th>When it is paid</th><th>Size at <code>ada21f5b</code></th></tr></thead>
+<tbody>
+<tr><td><code>AGENTS.md</code></td><td>Every supervisor session, whole</td><td>85,135 bytes, about 28,400 estimated tokens</td></tr>
+<tr><td>Skill frontmatter (name, description, flags) for 21 tracked skills</td><td>Upper bound on what a harness indexes each session</td><td>11,835 bytes, about 3,900 estimated tokens</td></tr>
+<tr><td>Session-start digest</td><td>Once per session, bounded by 120 s, a 5-line status tail per task, and a 20-row queued limit</td><td>Depends on the fleet; the memory part is budgeted at 7,500 estimated tokens but not truncated</td></tr>
+<tr><td>Skill bodies (21 <code>SKILL.md</code>)</td><td>Only when a trigger fires</td><td>292,155 bytes, about 97,400 estimated tokens</td></tr>
+<tr><td><code>harness-adapters</code> references</td><td>Only the rows one operation selects</td><td>100,940 bytes across 16 files</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="neighbours">Where this area touches others</h2>
+<ul>
+<li>The operational-input envelope, the steering inbox a brief names, and the <code>from-firstmate</code> marker are transport: see <a href="../communication/index.html">Communication</a>.</li>
+<li>The watcher, wake queue, and turn-end guards that the supervision protocol text describes are mechanism: see <a href="../supervision/index.html">Supervision</a>.</li>
+<li>The memory files, <code>data/</code>, and the <code>/stow</code> archive are storage: see <a href="../persistence/index.html">Persistence</a>.</li>
+<li>Kinds of worker, harness adapters, and spawn mechanics: see <a href="../crew/index.html">Crew</a>.</li>
+<li>Delivery modes, no-mistakes, and merge authority that a definition of done encodes: see <a href="../delivery/index.html">Delivery</a>.</li>
+<li>Captain holds and <code>ask-user-authority</code> decisions: see <a href="../backlog-and-decisions/index.html">Backlog and decisions</a>.</li>
+</ul>
 </article>
 </main>
 </div>

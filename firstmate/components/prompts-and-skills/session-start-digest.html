@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session-start digest · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">Components › Prompts and skills</p>
+<h1>Session-start digest</h1>
+<p class="lede">A single bounded script output that replaces every unconditional startup read with one ordered prompt, delivered once per session and governed by a contract that forbids re-reading what it printed.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Prompts and skills</a>. The lock, bootstrap, and wake-queue stages it composes are mechanism owned by <a href="../supervision/index.html">Supervision</a> and <a href="../persistence/index.html">Persistence</a>; this page covers the digest as a prompt.</p>
+
+<h2 id="problem">The problem it solves</h2>
+<p>Before this script, starting a session meant "six-plus separate reads": run bootstrap, read five memory and registry files, lock, drain wakes, then read the backlog, every task's metadata, and every status log. "Every one of those reads is UNCONDITIONAL at every session start, so they belong in a script, not in N agent turns." <code class="cite ps-wrap">bin/fm-session-start.sh:4-12</code></p>
+<p><code>AGENTS.md</code> keeps only the obligation: "Run <code>bin/fm-session-start.sh</code> exactly once at session start. Its header is the single owner of composed commands, ordering, and digest contents." <code class="cite ps-wrap">AGENTS.md:168-169</code> And the consumption rule: "Read the complete digest once and trust it as this turn's startup and recovery input. If the harness shows only a preview and persists the full output to a file, read that file before acting." <code class="cite ps-wrap">AGENTS.md:174-175</code></p>
+
+<h2 id="composition">Composition, not duplication</h2>
+<p>The script "calls fm-lock.sh, fm-bootstrap.sh, fm-wake-drain.sh, and fm-startup-network.sh as real subprocesses and prints their real output. It never re-implements their logic" <code class="cite ps-wrap">bin/fm-session-start.sh:14-17</code>. The only seam it needed in a composed script is an opt-in flag: bootstrap's "detect-only diagnostics without its six mutating sweeps" is <code>FM_BOOTSTRAP_DETECT_ONLY=1</code> "on fm-bootstrap.sh itself (default unset/0 = unchanged behavior), not a fork" <code class="cite ps-wrap">bin/fm-session-start.sh:21-24</code>. <code>AGENTS.md</code> forbids the agent from doing the composition by hand: "Do not reimplement it by separately running its lock, bootstrap, initial wake-drain, or deferred-network components." <code class="cite ps-wrap">AGENTS.md:171</code></p>
+
+<h2 id="stages">The nine stages, in print order</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1100 700" role="img" aria-labelledby="ss-t ss-d">
+<title id="ss-t">Session-start digest stages</title>
+<desc id="ss-d">Nine stages printed in order: lock, bootstrap, wake queue, supervision instructions, read-once contract, fleet state, network checks, context, next step. Lock starts a detached deferred network worker whose result is harvested without waiting at the network-checks stage. When the lock is refused, bootstrap runs detect-only, the wake queue is left untouched, and the network checks do not run; the read-only sections still print. The whole digest runs as one bounded child.</desc>
+<defs><marker id="ss-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">fm-session-start.sh — stages and what each contributes to the prompt</text>
+<g class="c4-boundary"><rect x="20" y="46" width="720" height="630" rx="10"/><text x="34" y="66">One bounded child (FM_SESSION_START_TIMEOUT, default 120 s)</text></g>
+
+<g class="c4-component"><rect x="40" y="80" width="330" height="54" rx="8"/><text class="c4-label" x="205" y="103">1 lock</text><text class="c4-desc" x="205" y="121">verified ownership, or a loud refusal banner</text></g>
+<g class="c4-component"><rect x="40" y="148" width="330" height="54" rx="8"/><text class="c4-label" x="205" y="171">2 bootstrap</text><text class="c4-desc" x="205" y="189">silent unless a diagnostic line is actionable</text></g>
+<g class="c4-component"><rect x="40" y="216" width="330" height="54" rx="8"/><text class="c4-label" x="205" y="239">3 wake-queue</text><text class="c4-desc" x="205" y="257">raw records = this turn's first work queue</text></g>
+<g class="c4-component"><rect x="40" y="284" width="330" height="54" rx="8"/><text class="c4-label" x="205" y="307">4 supervision-instructions</text><text class="c4-desc" x="205" y="325">one operating block for this harness</text></g>
+<g class="c4-component"><rect x="40" y="352" width="330" height="54" rx="8"/><text class="c4-label" x="205" y="375">5 read-once</text><text class="c4-desc" x="205" y="393">the do-not-re-read contract, before its subject</text></g>
+<g class="c4-component"><rect x="40" y="420" width="330" height="54" rx="8"/><text class="c4-label" x="205" y="443">6 fleet-state</text><text class="c4-desc" x="205" y="461">backlog, every meta, status tails, liveness</text></g>
+<g class="c4-component"><rect x="40" y="488" width="330" height="54" rx="8"/><text class="c4-label" x="205" y="511">7 network-checks</text><text class="c4-desc" x="205" y="529">harvested result or "IN PROGRESS"</text></g>
+<g class="c4-component"><rect x="40" y="556" width="330" height="54" rx="8"/><text class="c4-label" x="205" y="579">8 context</text><text class="c4-desc" x="205" y="597">five curated files in full, or ABSENT</text></g>
+<g class="c4-component"><rect x="40" y="624" width="330" height="44" rx="8"/><text class="c4-label" x="205" y="651">9 next-step</text></g>
+
+<g class="c4-rel"><path d="M205,134 V146" marker-end="url(#ss-arrow)"/></g>
+<g class="c4-rel"><path d="M205,202 V214" marker-end="url(#ss-arrow)"/></g>
+<g class="c4-rel"><path d="M205,270 V282" marker-end="url(#ss-arrow)"/></g>
+<g class="c4-rel"><path d="M205,338 V350" marker-end="url(#ss-arrow)"/></g>
+<g class="c4-rel"><path d="M205,406 V418" marker-end="url(#ss-arrow)"/></g>
+<g class="c4-rel"><path d="M205,474 V486" marker-end="url(#ss-arrow)"/></g>
+<g class="c4-rel"><path d="M205,542 V554" marker-end="url(#ss-arrow)"/></g>
+<g class="c4-rel"><path d="M205,610 V622" marker-end="url(#ss-arrow)"/></g>
+
+<text class="ps-note" x="390" y="103">always</text>
+<text class="ps-note" x="390" y="171">locked: full; refused: detect-only</text>
+<text class="ps-note" x="390" y="239">locked only; refused: queue untouched</text>
+<text class="ps-note" x="390" y="307">always; wording differs when read-only</text>
+<text class="ps-note" x="390" y="375">always</text>
+<text class="ps-note" x="390" y="443">always (read-only)</text>
+<text class="ps-note" x="390" y="511">refused: "no network checks" stated</text>
+<text class="ps-note" x="390" y="579">always (read-only)</text>
+<text class="ps-note" x="390" y="651">always; read-only wording when refused</text>
+
+<g class="c4-container"><rect x="820" y="80" width="250" height="90" rx="8"/><text class="c4-label" x="945" y="108">Deferred network stage</text><text class="c4-tech" x="945" y="125">[bin/fm-startup-network.sh]</text><text class="c4-desc" x="945" y="143">own process group, own deadline</text><text class="c4-desc" x="945" y="159">outside the 120 s bound</text></g>
+<g class="c4-rel c4-rel-async"><path d="M370,122 H818" marker-end="url(#ss-arrow)"/><text class="c4-rel-label" x="594" y="114">started right after the lock</text></g>
+<g class="c4-rel c4-rel-async"><path d="M945,170 V530 H372" marker-end="url(#ss-arrow)"/><text class="c4-rel-label" x="850" y="522">harvested without waiting</text></g>
+<g class="c4-external"><rect x="820" y="556" width="250" height="90" rx="8"/><text class="c4-label" x="945" y="584">Durable wake queue</text><text class="c4-tech" x="945" y="601">[check: startup-network]</text><text class="c4-desc" x="945" y="619">a late failure still arrives</text><text class="c4-desc" x="945" y="635">as an ordinary wake</text></g>
+<g class="c4-rel c4-rel-async"><path d="M1000,170 V554" marker-end="url(#ss-arrow)"/><text class="c4-rel-label" x="1000" y="360">if actionable</text></g>
+</svg>
+</div>
+<figcaption>Stage names are the runtime-bound list the truncation banner reports against <code class="cite ps-wrap">bin/fm-session-start.sh:265</code>. Read-only behaviour per stage: <code class="cite ps-wrap">bin/fm-session-start.sh:116-127</code> <code class="cite ps-wrap">AGENTS.md:198</code> <code class="cite ps-wrap">AGENTS.md:204</code>.</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Stage</th><th>What it puts in front of the model</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>1 lock</td><td>Mutation authority first: "acquires the per-home session lock first, before anything mutates shared state". A refused lock is "a loud banner inline, never a silent failure or a non-zero exit that would make an agent skip the rest".</td><td><code class="cite ps-wrap">AGENTS.md:187</code> <code class="cite ps-wrap">bin/fm-session-start.sh:189-192</code></td></tr>
+<tr><td>2 bootstrap</td><td>Nothing on a healthy home: "routine confirmations stay silent by default". An actionable line is itself a skill trigger for <code>bootstrap-diagnostics</code>; <code>BOOTSTRAP_INFO:</code> lines need no load.</td><td><code class="cite ps-wrap">AGENTS.md:188</code> <code class="cite ps-wrap">AGENTS.md:212-213</code></td></tr>
+<tr><td>3 wake-queue</td><td>The raw durable records "prominently as this turn's first work queue", plus bounded <code>OPEN DECISIONS</code>, <code>STATUS OUTCOME BACKSTOP</code>, <code>UNREAD STATUS</code>, and <code>RECORD DIVERGENCE</code> sections, and the generation-bound acknowledgement command.</td><td><code class="cite ps-wrap">AGENTS.md:192-197</code></td></tr>
+<tr><td>4 supervision-instructions</td><td>"exactly one operating block for the detected primary harness"; "The script itself never starts supervision". On Pi and omp it first checks that the tracked extensions are loaded and prints a reminder line if not.</td><td><code class="cite ps-wrap">AGENTS.md:199-200</code> <code class="cite ps-wrap">bin/fm-session-start.sh:750-795</code></td></tr>
+<tr><td>5 read-once</td><td>The contract below.</td><td><code class="cite ps-wrap">bin/fm-session-start.sh:797-826</code></td></tr>
+<tr><td>6 fleet-state</td><td>A compact backlog listing, every <code>state/&lt;id&gt;.meta</code>, a bounded status tail "labeled as wake-EVENT history, not current state", the away posture, and one cheap alive/dead read per endpoint.</td><td><code class="cite ps-wrap">AGENTS.md:201-202</code></td></tr>
+<tr><td>7 network-checks</td><td>The deferred result, or "an explicit statement of what it has not confirmed yet"; a read-only session "runs no network checks at all and says so".</td><td><code class="cite ps-wrap">AGENTS.md:203-204</code></td></tr>
+<tr><td>8 context</td><td><code>data/projects.md</code>, <code>data/secondmates.md</code>, <code>data/captain.md</code>, <code>data/captain-shared.md</code>, <code>data/learnings.md</code>, each delimited, or an explicit <code>ABSENT</code> marker.</td><td><code class="cite ps-wrap">bin/fm-session-start.sh:945-951</code> <code class="cite ps-wrap">AGENTS.md:205-206</code></td></tr>
+<tr><td>9 next-step</td><td>A context-specific pointer back to the supervision block (read-only, quiet, away, Relay, or plain), then "The READ-ONCE CONTRACT section near the top of it governs what may still be read from disk."</td><td><code class="cite ps-wrap">bin/fm-session-start.sh:954-994</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="read-once">The read-once contract</h2>
+<p>This is the prompt-economy clause that makes the digest pay for itself. It is printed verbatim:</p>
+<pre><code>Everything below is printed in full for this session start: every state/*.meta,
+a compact data/backlog.md listing, a bounded tail of every state/*.status,
+data/projects.md, data/secondmates.md, data/captain.md, data/captain-shared.md,
+and data/learnings.md.
+Do NOT re-read any of them after reading this digest, and do NOT bulk-read
+data/backlog.md or state/*.status: re-reading everything defeats the entire
+point of this command.</code></pre>
+<p><code class="cite ps-wrap">bin/fm-session-start.sh:806-812</code>. It then lists the only reasons to go to a source directly: flagged <code>ABSENT</code>, unparseable, older status history or a capped line, a full task body, omitted queued items, unfinished network checks, or a truncation banner naming the stage that would have printed it <code class="cite ps-wrap">bin/fm-session-start.sh:814-825</code>. <code>AGENTS.md</code> states the same exceptions from the agent's side <code class="cite ps-wrap">AGENTS.md:176</code>.</p>
+<p>Two design decisions sit behind its position. It prints <em>before</em> the data it governs, because "a contract that only arrives after the payload it governs is the first thing a truncated digest loses", and because it "carries the truncation caveat that keeps it honest when a stage below it never ran" <code class="cite ps-wrap">bin/fm-session-start.sh:96-99</code>. And absence is meaningful rather than empty: "<code>captain.md</code> absent means use the firstmate repo's built-in defaults, <code>projects.md</code> absent means rebuild it from the clones" <code class="cite ps-wrap">AGENTS.md:206</code>.</p>
+
+<h2 id="ordering">Ordering as truncation defence</h2>
+<p>The digest is delivered through harness hooks that cut oversized output from the tail, and this has happened: "a 70KB digest arrived as lines 1-435 of 578, cutting off eight lines before the live-task inventory. What a truncated tail drops must therefore be the CHEAPEST thing to lose." <code class="cite ps-wrap">bin/fm-session-start.sh:86-90</code> So the order is by recoverability:</p>
+<ul>
+<li>The lock, bootstrap, and wake queue stay first because they "establish mutation authority and this turn's work queue before anything else is read" <code class="cite ps-wrap">bin/fm-session-start.sh:100-101</code>.</li>
+<li>Fleet state precedes context because it "changes every session and is exactly what recovery depends on" <code class="cite ps-wrap">bin/fm-session-start.sh:93-95</code>.</li>
+<li>Curated memory goes last because it "is stable session to session, is already governed by a captain-set budget … and is recoverable with one targeted read" <code class="cite ps-wrap">bin/fm-session-start.sh:90-93</code>.</li>
+</ul>
+
+<h2 id="bounds">What keeps it small and bounded</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Bound</th><th>Default</th><th>Why it is safe</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>Whole-digest runtime</td><td>120 s (<code>FM_SESSION_START_TIMEOUT</code>)</td><td>An unusable value "falls back to the default rather than silently removing the bound"; hosts without <code>timeout</code> use a pure-Bash watchdog.</td><td><code class="cite ps-wrap">bin/fm-session-start.sh:175-186</code> <code class="cite ps-wrap">bin/fm-session-start.sh:278-282</code></td></tr>
+<tr><td>No network on the blocking path</td><td>All five network checks deferred</td><td>"It never reports an unconfirmed check as passed."</td><td><code class="cite ps-wrap">bin/fm-session-start.sh:64-84</code> <code class="cite ps-wrap">AGENTS.md:182-185</code></td></tr>
+<tr><td>Status tail per task</td><td>5 lines (<code>FM_SESSION_START_STATUS_TAIL</code>)</td><td>The full log path is printed with each tail, and a status line is an event, not current state.</td><td><code class="cite ps-wrap">bin/fm-session-start.sh:161-165</code> <code class="cite ps-wrap">bin/fm-session-start.sh:357</code></td></tr>
+<tr><td>Status line length</td><td>220 characters</td><td>Owned by <code>bin/fm-line-cap-lib.sh</code>.</td><td><code class="cite ps-wrap">bin/fm-line-cap-lib.sh:25</code></td></tr>
+<tr><td>Queued backlog rows</td><td>20 (<code>FM_SESSION_START_QUEUED_LIMIT</code>)</td><td>Omissions are disclosed with a remainder count and the command; in-flight, held, and blocked rows are never bounded away.</td><td><code class="cite ps-wrap">bin/fm-session-start.sh:129-141</code> <code class="cite ps-wrap">bin/fm-session-start.sh:359</code></td></tr>
+<tr><td>Done rows</td><td>Never listed</td><td>"10 done rows cost 3.3KB in an observed main-home digest"; history belongs to reporting surfaces.</td><td><code class="cite ps-wrap">bin/fm-session-start.sh:131-133</code></td></tr>
+<tr><td>Task bodies</td><td>Never listed</td><td>Identity fields only; bodies are "targeted follow-up only".</td><td><code class="cite ps-wrap">bin/fm-session-start.sh:146-159</code></td></tr>
+<tr><td>Endpoint state</td><td>A presence check only</td><td>The deeper current-state read is "deliberately" skipped so the digest "stays fast and bounded".</td><td><code class="cite ps-wrap">AGENTS.md:202</code></td></tr>
+<tr><td>Curated memory</td><td>7,500 estimated tokens</td><td>A per-home budget enforced by <code>/stow</code> curation; the digest itself prints the files whole. See <a href="prompt-economy.html#budget">the budget</a>.</td><td><code class="cite ps-wrap">docs/configuration.md:257-258</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="truncation">When it truncates anyway</h2>
+<p>The child writes straight to stdout, "so everything it emitted before the bound was hit is already delivered; the parent then prints a loud STARTUP TRUNCATED banner naming the stage that did not finish and the sections that were therefore never emitted, and still exits 0" <code class="cite ps-wrap">bin/fm-session-start.sh:179-182</code>. The banner tells the agent to reconcile the named stages and rerun, and that "a stage that cannot finish inside the bound is a fleet problem, not a reporting detail" <code class="cite ps-wrap">bin/fm-session-start.sh:317-327</code>. A completed digest records <code>state/.session-start-complete</code> with the lock pid only at the very end <code class="cite ps-wrap">bin/fm-session-start.sh:997-1009</code>, so a truncated run leaves no completion proof and the next clear or compact runs a full startup <code class="cite ps-wrap">docs/sessionstart-nudge.md:35</code>.</p>
+
+<h2 id="delivery">How it is delivered: run tier and nudge tier</h2>
+<p>Whether the harness runs the digest or only asks the agent to run it depends on the harness surface. "The run tier exists because the nudge can only ask. An agent can defer an instruction, including when a first-command skill has its own read-only path." <code class="cite ps-wrap">docs/sessionstart-nudge.md:14-15</code></p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Tier</th><th>Harnesses</th><th>Mechanism</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>Run</td><td>Claude, <code>codex exec</code>, Pi / pi-signed, omp, Cursor</td><td>A native session-open hook or extension runs <code>bin/fm-sessionstart-run.sh</code>, which runs the digest and gates it into context before the first turn.</td><td><code class="cite ps-wrap">docs/sessionstart-nudge.md:10</code></td></tr>
+<tr><td>Nudge</td><td>Grok, OpenCode, and resume-type sources on run-tier harnesses</td><td>A one-line operational input of kind <code>session-start</code> whose body is exactly "Run <code>bin/fm-session-start.sh</code> now, exactly once, before executing any other instructions."</td><td><code class="cite ps-wrap">docs/sessionstart-nudge.md:11</code> <code class="cite ps-wrap">docs/sessionstart-nudge.md:60</code></td></tr>
+<tr><td>Uncovered</td><td>Codex interactive TUI; Cursor compaction</td><td>Nothing fires; <code>AGENTS.md</code> tells the agent to confirm the digest is present and run it itself.</td><td><code class="cite ps-wrap">docs/sessionstart-nudge.md:13</code> <code class="cite ps-wrap">AGENTS.md:172</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>The source of the session-open event decides how much of the digest is rebuilt:</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Source</th><th>Action</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><code>startup</code>, <code>new</code></td><td>Full digest</td><td rowspan="4"><code class="cite ps-wrap">docs/sessionstart-nudge.md:24-29</code></td></tr>
+<tr><td><code>clear</code>, <code>compact</code></td><td><code>--reemit</code> after a proven complete startup, otherwise full</td></tr>
+<tr><td><code>resume</code>, <code>reload</code>, <code>fork</code></td><td>Delegated to the nudge wrapper, normally silent when the lock is still owned</td></tr>
+<tr><td>unreadable or unknown</td><td>Full digest: "Taking the helm redundantly is cheap and idempotent"</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>--reemit</code> is for a process that "ALREADY took the helm at its own startup and has only lost its context (a /clear or a compaction)": it skips the sweeps startup already reconciled but still drains the wake queue, because "queued records are this turn's work queue, they arrived after startup" <code class="cite ps-wrap">bin/fm-session-start.sh:194-209</code>. It prints its own heading saying so <code class="cite ps-wrap">bin/fm-session-start.sh:617-625</code>. On a Pi compaction it may also print the whole current <code>AGENTS.md</code>; see <a href="agents-md.html#frozen">the refresh path</a>.</p>
+
+<h2 id="provenance">Provenance of the digest text</h2>
+<p>The digest is machine output arriving in a conversation, so it must not be mistaken for the captain. Pi "is the only adapter that injects a message rather than hook stdout, so whatever it injects must carry operational provenance or the Ahoy skill would have to guess whether it was captain-authored"; the extension encodes it as <code>session-start</code> operational input <code class="cite ps-wrap">docs/sessionstart-nudge.md:86</code> <code class="cite ps-wrap">docs/sessionstart-nudge.md:92</code>. The nudge carries the same kind <code class="cite ps-wrap">docs/sessionstart-nudge.md:60</code>. The envelope itself is documented under <a href="../communication/index.html">Communication</a>.</p>
+
+<h2 id="failures">Failure behaviour in one place</h2>
+<ul>
+<li><strong>Lock refused:</strong> the digest still prints read-only sections; the agent "must not spawn, steer, merge, drain the wake queue, repair supervision, repair a checkout, or perform any other fleet mutation" <code class="cite ps-wrap">AGENTS.md:179-180</code>.</li>
+<li><strong>Slow network:</strong> "IN PROGRESS" with the unconfirmed checks named; the verdict comes later from <code>bin/fm-startup-network.sh report</code> or a <code>check: startup-network</code> wake <code class="cite ps-wrap">AGENTS.md:185</code>.</li>
+<li><strong>Hook failure:</strong> every ordinary transport path "exits 0, including malformed state and adapter errors, because a Claude SessionStart exit 2 blocks session initialization" <code class="cite ps-wrap">docs/sessionstart-nudge.md:65</code>.</li>
+<li><strong>Oversized on Pi:</strong> the extension keeps at most 512 KiB and appends "a loud <code>PI SESSION-START DELIVERY TRUNCATED</code> marker" <code class="cite ps-wrap">docs/sessionstart-nudge.md:93</code>.</li>
+<li><strong>Running inside a validation gate:</strong> both wrappers "stay silent for a no-mistakes gate agent" <code class="cite ps-wrap">docs/sessionstart-nudge.md:56</code>.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

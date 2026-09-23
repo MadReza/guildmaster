@@ -72,7 +72,17 @@ window.FM_NAV = [
   // end crew
 
   // begin prompts-and-skills
-  { section: "prompts-and-skills", title: "Prompts and skills", href: "components/prompts-and-skills/index.html", stub: true },
+  { section: "prompts-and-skills", title: "Prompts and skills", href: "components/prompts-and-skills/index.html" },
+  { section: "prompts-and-skills", title: "AGENTS.md contract", href: "components/prompts-and-skills/agents-md.html" },
+  { section: "prompts-and-skills", title: "Knowledge placement", href: "components/prompts-and-skills/knowledge-placement.html" },
+  { section: "prompts-and-skills", title: "Skills system", href: "components/prompts-and-skills/skills.html" },
+  { section: "prompts-and-skills", title: "Session-start digest", href: "components/prompts-and-skills/session-start-digest.html" },
+  { section: "prompts-and-skills", title: "Supervision protocol text", href: "components/prompts-and-skills/supervision-protocols.html" },
+  { section: "prompts-and-skills", title: "Briefs as contracts", href: "components/prompts-and-skills/briefs.html" },
+  { section: "prompts-and-skills", title: "Worker launch prompt", href: "components/prompts-and-skills/worker-launch.html" },
+  { section: "prompts-and-skills", title: "Secondmate charter", href: "components/prompts-and-skills/secondmate-charter.html" },
+  { section: "prompts-and-skills", title: "Prompt economy", href: "components/prompts-and-skills/prompt-economy.html" },
+  { section: "prompts-and-skills", title: "End-to-end walkthrough", href: "components/prompts-and-skills/walkthrough.html" },
   // end prompts-and-skills
 
   // begin delivery

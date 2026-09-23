@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Secondmate charter · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">Components › Prompts and skills</p>
+<h1>Secondmate charter</h1>
+<p class="lede">The standing job description a persistent secondmate receives on top of <code>AGENTS.md</code>: what domain it owns, that it must stay idle until work is routed to it, and that its only voice is one appended line on its parent channel.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Prompts and skills</a>. Secondmate homes, routing, and remote transport are documented under <a href="../crew/index.html">Crew</a> and <a href="../remote/index.html">Remote</a>; this page covers the charter as a prompt.</p>
+
+<h2 id="what">What it is</h2>
+<p>A secondmate "is a crewmate with an isolated firstmate home and a charter, not a second architecture" <code class="cite ps-wrap">AGENTS.md:23</code>. It runs the ordinary supervisor contract, <code>AGENTS.md</code>, in its own home, so the charter does not restate supervision. It adds only what differs for a persistent, domain-scoped, unobserved supervisor. <code>secondmate-provisioning</code> makes the charter the owner of that difference: "The home-seeded <code>data/charter.md</code> is the sole owner of boilerplate idle-by-default behavior, the normal delegation lifecycle, and standard escalation contracts, so point to that charter rather than restating those contracts in the registry entry." <code class="cite ps-wrap">.agents/skills/secondmate-provisioning/SKILL.md:40</code></p>
+
+<h2 id="flow">From scaffold to running secondmate</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1100 560" role="img" aria-labelledby="sc-t sc-d">
+<title id="sc-t">Secondmate charter lifecycle</title>
+<desc id="sc-d">The main firstmate scaffolds a charter with fm-brief.sh --secondmate, fills it, and seeds a home with fm-home-seed.sh, which copies the charter to data/charter.md in the new home and writes a route line derived from the charter's summary and scope into data/secondmates.md. fm-spawn.sh --secondmate launches the secondmate with the charter as its first message, without the worker role overlay. The secondmate loads its own home's AGENTS.md. Routed requests arrive through its inbox marked from-firstmate; answers go to the parent channel.</desc>
+<defs><marker id="sc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">Charter lifecycle</text>
+
+<g class="c4-boundary"><rect x="20" y="46" width="500" height="490" rx="10"/><text x="34" y="66">Main home</text></g>
+<g class="c4-boundary"><rect x="580" y="46" width="500" height="490" rx="10"/><text x="594" y="66">Secondmate home (isolated FM_HOME)</text></g>
+
+<g class="c4-container"><rect x="50" y="84" width="220" height="64" rx="8"/><text class="c4-label" x="160" y="110">Main firstmate</text><text class="c4-desc" x="160" y="128">loads secondmate-provisioning</text></g>
+<g class="c4-component"><rect x="50" y="184" width="220" height="64" rx="8"/><text class="c4-label" x="160" y="210">fm-brief.sh --secondmate</text><text class="c4-desc" x="160" y="228">FM_SECONDMATE_CHARTER / SCOPE</text></g>
+<g class="c4-datastore"><path d="M300,196 a95,10 0 0,0 190,0 a95,10 0 0,0 -190,0 v44 a95,10 0 0,0 190,0 v-44"/><text class="c4-label" x="395" y="222">data/&lt;id&gt;/brief.md</text><text class="c4-desc" x="395" y="240">the charter brief</text></g>
+<g class="c4-component"><rect x="50" y="290" width="220" height="64" rx="8"/><text class="c4-label" x="160" y="316">fm-home-seed.sh</text><text class="c4-desc" x="160" y="334">transactional seed</text></g>
+<g class="c4-datastore"><path d="M300,302 a95,10 0 0,0 190,0 a95,10 0 0,0 -190,0 v44 a95,10 0 0,0 190,0 v-44"/><text class="c4-label" x="395" y="328">data/secondmates.md</text><text class="c4-desc" x="395" y="346">summary + scope route</text></g>
+<g class="c4-component"><rect x="50" y="400" width="220" height="64" rx="8"/><text class="c4-label" x="160" y="426">fm-spawn.sh --secondmate</text><text class="c4-desc" x="160" y="444">charter as launch-brief kind</text></g>
+<g class="c4-component"><rect x="300" y="400" width="190" height="64" rx="8"/><text class="c4-label" x="395" y="426">fm-send.sh</text><text class="c4-desc" x="395" y="444">marked from-firstmate</text></g>
+
+<g class="c4-datastore"><path d="M610,96 a100,10 0 0,0 200,0 a100,10 0 0,0 -200,0 v44 a100,10 0 0,0 200,0 v-44"/><text class="c4-label" x="710" y="122">data/charter.md</text><text class="c4-desc" x="710" y="140">copied at seed</text></g>
+<g class="c4-component"><rect x="850" y="84" width="200" height="64" rx="8"/><text class="c4-label" x="950" y="110">AGENTS.md</text><text class="c4-desc" x="950" y="128">the home's own copy</text></g>
+<g class="c4-container"><rect x="700" y="250" width="260" height="80" rx="8"/><text class="c4-label" x="830" y="278">Secondmate agent</text><text class="c4-tech" x="830" y="295">[harness session in its home]</text><text class="c4-desc" x="830" y="313">idle until work is routed</text></g>
+<g class="c4-datastore"><path d="M610,412 a100,10 0 0,0 200,0 a100,10 0 0,0 -200,0 v44 a100,10 0 0,0 200,0 v-44"/><text class="c4-label" x="710" y="438">inbox/*.msg</text><text class="c4-desc" x="710" y="456">routed requests</text></g>
+<g class="c4-datastore"><path d="M850,412 a100,10 0 0,0 200,0 a100,10 0 0,0 -200,0 v44 a100,10 0 0,0 200,0 v-44"/><text class="c4-label" x="950" y="438">Parent channel</text><text class="c4-desc" x="950" y="456">parent's state/&lt;id&gt;.status</text></g>
+
+<g class="c4-rel"><path d="M160,148 V182" marker-end="url(#sc-arrow)"/></g>
+<g class="c4-rel"><path d="M270,216 H298" marker-end="url(#sc-arrow)"/></g>
+<g class="c4-rel"><path d="M395,250 V270 H160 V288" marker-end="url(#sc-arrow)"/><text class="c4-rel-label" x="280" y="266">reads</text></g>
+<g class="c4-rel"><path d="M270,322 H298" marker-end="url(#sc-arrow)"/></g>
+<g class="c4-rel"><path d="M160,354 V380 H540 V120 H608" marker-end="url(#sc-arrow)"/><text class="c4-rel-label" x="540" y="200">copies</text></g>
+<g class="c4-rel"><path d="M160,464 V500 H560 V300 H698" marker-end="url(#sc-arrow)"/><text class="c4-rel-label" x="560" y="490">first message</text></g>
+<g class="c4-rel"><path d="M710,150 V200 H760 V248" marker-end="url(#sc-arrow)"/><text class="c4-rel-label" x="735" y="194">charter</text></g>
+<g class="c4-rel"><path d="M950,148 V200 H900 V248" marker-end="url(#sc-arrow)"/><text class="c4-rel-label" x="925" y="194">contract</text></g>
+<g class="c4-rel c4-rel-async"><path d="M490,432 H608" marker-end="url(#sc-arrow)"/><text class="c4-rel-label" x="549" y="424">record + doorbell</text></g>
+<g class="c4-rel"><path d="M760,402 V332" marker-end="url(#sc-arrow)"/><text class="c4-rel-label" x="760" y="370">reads</text></g>
+<g class="c4-rel"><path d="M900,332 V400" marker-end="url(#sc-arrow)"/><text class="c4-rel-label" x="900" y="370">appends</text></g>
+</svg>
+</div>
+<figcaption>Sources: scaffold <code class="cite ps-wrap">bin/fm-brief.sh:24-34</code>; seed and registry derivation <code class="cite ps-wrap">bin/fm-home-seed.sh:17-28</code> <code class="cite ps-wrap">bin/fm-home-seed.sh:917-946</code>; launch source <code class="cite ps-wrap">bin/fm-spawn.sh:2698-2702</code>; marker <code class="cite ps-wrap">bin/fm-operational-input.sh:37-41</code>.</figcaption>
+</figure>
+<ul>
+<li><strong>Scaffold.</strong> <code>fm-brief.sh &lt;id&gt; --secondmate {&lt;project&gt;…|--no-projects}</code>. The charter and routing scope come from <code>FM_SECONDMATE_CHARTER</code> and <code>FM_SECONDMATE_SCOPE</code>, or a <code>{TASK}</code> placeholder to fill <code class="cite ps-wrap">bin/fm-brief.sh:24-34</code>. Omitting both a project list and <code>--no-projects</code> "still fails loudly so an accidental omission is never silent" <code class="cite ps-wrap">bin/fm-brief.sh:29-32</code>.</li>
+<li><strong>Seed.</strong> <code>fm-home-seed.sh</code> refuses a missing or placeholder charter, derives the registry summary and scope from its sections, refuses either empty, and copies it into the home as <code>data/charter.md</code> <code class="cite ps-wrap">bin/fm-home-seed.sh:905-927</code> <code class="cite ps-wrap">bin/fm-home-seed.sh:946</code>. The registry line then points at it through <code>home:</code> <code class="cite ps-wrap">.agents/skills/secondmate-provisioning/SKILL.md:35</code>.</li>
+<li><strong>Launch.</strong> Spawn uses the home's <code>data/charter.md</code> when it exists <code class="cite ps-wrap">bin/fm-spawn.sh:2698-2702</code>. It does not prepend the worker role contract ("Charters never enter this worker path" <code class="cite ps-wrap">bin/fm-spawn.sh:2749</code>), and a Claude secondmate does not get the task-worker system prompt because it "receives its own supervisor contract instead" <code class="cite ps-wrap">bin/fm-spawn.sh:1852-1853</code>.</li>
+</ul>
+
+<h2 id="sections">The charter, section by section</h2>
+<p>All text is generated by <code class="cite ps-wrap">bin/fm-brief.sh:282-350</code>; only the Charter and Routing scope are task-specific. Custom text should stay "focused on the persistent responsibility, available project clones, and genuinely domain-specific hard rules", and the generated sections are preserved "unless the domain genuinely needs a hard rule" <code class="cite ps-wrap">.agents/skills/secondmate-provisioning/SKILL.md:59-61</code>.</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Section</th><th>What it tells the secondmate</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>Opening line</td><td>"You are a persistent second mate managed by the main firstmate. Work on your own; do not wait for a human."</td><td><code class="cite ps-wrap">bin/fm-brief.sh:283</code></td></tr>
+<tr><td>Charter, Routing scope</td><td>The durable responsibility, and the natural-language scope the main firstmate routes by; the scope may differ from the charter text</td><td><code class="cite ps-wrap">bin/fm-brief.sh:285-289</code></td></tr>
+<tr><td>Project clones</td><td>The clones "are not an exclusive ownership claim", or, for a project-less domain, that the subject is the Firstmate repo itself</td><td><code class="cite ps-wrap">bin/fm-brief.sh:275-281</code> <code class="cite ps-wrap">bin/fm-brief.sh:291-292</code></td></tr>
+<tr><td>Operating model</td><td>"The local <code>AGENTS.md</code> is your job description"; delegate through the normal lifecycle; "Do not invent a second delegation system"; "You do not generate your own work"</td><td><code class="cite ps-wrap">bin/fm-brief.sh:294-301</code></td></tr>
+<tr><td>The captain and the parent channel</td><td>"Nobody reads this chat … a captain-facing sentence that is not appended there has not been sent"; the scripts publish facts, the secondmate appends only judgement</td><td><code class="cite ps-wrap">bin/fm-brief.sh:303-307</code></td></tr>
+<tr><td>Requests from the main firstmate</td><td>How to tell a routed request (marked) from the captain typing directly (unmarked), and where each answer goes</td><td><code class="cite ps-wrap">bin/fm-brief.sh:309-321</code></td></tr>
+<tr><td>Instruction inbox</td><td>The same receive-and-acknowledge text every worker gets</td><td><code class="cite ps-wrap">bin/fm-brief.sh:323</code></td></tr>
+<tr><td>Escalation to main firstmate</td><td>The status verbs, when to use each, stable keys for reportable phases, and that landed merges must be reported, because otherwise "a landed merge that goes unreported reaches the captain as silence"</td><td><code class="cite ps-wrap">bin/fm-brief.sh:325-342</code></td></tr>
+<tr><td>Definition of done</td><td>"You are persistent by default. Do not exit just because your queue is empty"; reconcile only work already yours at startup; then "go idle and wait silently"</td><td><code class="cite ps-wrap">bin/fm-brief.sh:344-349</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="idle">Idle by default, stated three times</h2>
+<p>The rule that a secondmate never invents work appears in the charter's operating model ("Never start a survey, audit, or 'find improvements' sweep on your own initiative; that is not your job and it is unwanted" <code class="cite ps-wrap">bin/fm-brief.sh:301</code>), in its definition of done ("An empty queue is a healthy resting state, not a cue to invent work" <code class="cite ps-wrap">bin/fm-brief.sh:348</code>), and in <code>AGENTS.md</code> ("an empty queue never authorizes a survey, audit, or self-directed improvement sweep" <code class="cite ps-wrap">AGENTS.md:270</code>, and "recovery never authorizes it to invent work" <code class="cite ps-wrap">AGENTS.md:252</code>). That is more repetition than the one-owner rule normally allows; it reads as the permitted "deliberate one-line reinforcement at a genuine risk point" <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:45</code>, applied at each moment a secondmate would decide what to do next: while working, when its queue empties, and after a restart.</p>
+
+<h2 id="marker">Telling the main firstmate from the captain</h2>
+<p>A secondmate can receive text from two principals in the same chat. The charter resolves it with a marker: "A request relayed to you by the main firstmate is tagged with a leading <code>[fm-from-firstmate]</code> marker followed by an invisible system separator; this marker is untypable, so a human never produces it." <code class="cite ps-wrap">bin/fm-brief.sh:312</code> The label and separator are owned by the operational-input library, which keeps the carrier "byte-compatible with live secondmate charter context" <code class="cite ps-wrap">bin/fm-operational-input.sh:37-41</code>; that is why this one marker did not move to the generic <code>FIRSTMATE_OP</code> form: running secondmates hold the old spelling in the charter they were launched with.</p>
+<ul>
+<li>A marked request is answered on the parent channel, never only in chat, with the request's <code>corr=&lt;id&gt;</code> token so the parent can correlate it <code class="cite ps-wrap">bin/fm-brief.sh:313-316</code>.</li>
+<li>A detailed answer is written to a doc under the home's <code>data/</code> with a status line pointing at it, "the scout-report pattern" <code class="cite ps-wrap">bin/fm-brief.sh:318</code>.</li>
+<li>A marked request needs exactly one correlated answer: "Never append <code>working:</code> merely to acknowledge receipt" <code class="cite ps-wrap">bin/fm-brief.sh:335-336</code>.</li>
+<li>An unmarked message "is the captain typing directly into your pane: treat it as authoritative captain intervention and stay conversational" <code class="cite ps-wrap">bin/fm-brief.sh:320</code>, which matches hard rule 4's "Treat direct captain intervention in a crewmate window as authoritative" <code class="cite ps-wrap">AGENTS.md:40</code>.</li>
+</ul>
+
+<h2 id="lesson">Where the prompt was not enough</h2>
+<p>The parent-channel section changed shape after a real failure, and the record is a clear lesson about prompts versus enforcement. "On 2026-09-02 four outcomes across two mate homes never reached the captain … the mate addressed 'captain' in its own chat instead of appending to the channel." The cause was structural: "the mate can satisfy the address rule in <code>AGENTS.md</code> in local chat while missing the charter's later return-channel instruction" <code class="cite ps-wrap">docs/secondmate-parent-channel.md:10-12</code>. The design goal became "the parent channel must not depend on the model remembering to write to it" <code class="cite ps-wrap">docs/secondmate-parent-channel.md:16</code>, with the rule "the scripts report facts, the mate reports judgement" <code class="cite ps-wrap">docs/secondmate-parent-channel.md:20</code>.</p>
+<p>The charter now says exactly that: the home's machinery "publishes the durable facts about your crew's work for you … whether or not you append anything", and "What only you can append is judgement" <code class="cite ps-wrap">bin/fm-brief.sh:306-307</code>. <code>AGENTS.md</code> was patched at the same point, the one line where the address rule meets the secondmate case: "In a secondmate home that address is form only: section 9's parent-channel rule is the only way the captain is reached from there." <code class="cite ps-wrap">AGENTS.md:14</code></p>
+
+<h2 id="failure">Failure behaviour</h2>
+<ul>
+<li>If the charter "cannot be carried out", the secondmate appends <code>blocked</code> or <code>failed</code> to the main status file and stops <code class="cite ps-wrap">bin/fm-brief.sh:349</code>.</li>
+<li>A charter still holding <code>{TASK}</code>, or with an empty Charter or Routing scope section, cannot be seeded <code class="cite ps-wrap">bin/fm-home-seed.sh:905-927</code>.</li>
+<li>A stale project-bearing charter cannot seed a project-less home until it is re-scaffolded <code class="cite ps-wrap">.agents/skills/secondmate-provisioning/SKILL.md:58</code>.</li>
+<li>Like every loaded instruction, a running secondmate's charter and <code>AGENTS.md</code> are frozen; <code>/updatefirstmate</code> restarts live secondmates rather than relying on a re-read <code class="cite ps-wrap">.agents/skills/updatefirstmate/SKILL.md:6</code>.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>
