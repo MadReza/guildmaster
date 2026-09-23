@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Persistence patterns · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Persistence</p>
+<h1>Engineering patterns</h1>
+<p class="lede">The same few techniques recur across dozens of records. Knowing them makes any single record predictable: how it is written, how a stale writer is rejected, and which way it fails.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Persistence</a>.</p>
+
+<h2 id="one-owner">1. One owner per record, and the header is the contract</h2>
+<p>Every record names its single writer, and that writer's header comment owns the format. The configuration guide owns only the top-level layout: "producer script headers and their help own exact child-file fields and mutation contracts" <code class="cite">docs/configuration.md:11</code>. Examples: <code>fm-busy-event.sh</code> is "the ONLY writer" of the busy-state record <code class="cite">bin/fm-busy-event.sh:2-4</code>. <code>.lock-session</code> is "written only by bin/fm-lock.sh" <code class="cite">AGENTS.md:152</code>. The away-posture record is "written only by bin/fm-afk-contract.sh" <code class="cite">AGENTS.md:149</code>. The steering-inbox library is the "ONE owner" of its record format, "none of them restates the format" <code class="cite">bin/fm-task-inbox-lib.sh:5-12</code>. A single owner means one place to change a format and one place to read it.</p>
+
+<h2 id="atomic-replace">2. Atomic replace: write a sibling temporary file, then rename</h2>
+<p>A record that is rewritten is never edited in place. The writer composes the full new content in a temporary file <em>in the same directory</em>, validates it, and renames it over the target. A reader then sees either the old record or the new one, never a partial one.</p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 900 200" role="img" aria-labelledby="ar-title">
+<title id="ar-title">Atomic replace sequence</title>
+<defs><marker id="ar-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="26">Atomic replace, as Firstmate writes it</text>
+<g class="c4-component"><rect x="20" y="50" width="190" height="70" rx="8"/><text class="c4-label" x="115" y="76">Take owner's lock</text><text class="c4-desc" x="115" y="96">meta, marker, queue, …</text></g>
+<g class="c4-component"><rect x="240" y="50" width="190" height="70" rx="8"/><text class="c4-label" x="335" y="76">mktemp beside target</text><text class="c4-desc" x="335" y="96">same dir, same device</text></g>
+<g class="c4-component"><rect x="460" y="50" width="190" height="70" rx="8"/><text class="c4-label" x="555" y="76">Write, chmod, verify</text><text class="c4-desc" x="555" y="96">0600; parse it back</text></g>
+<g class="c4-component"><rect x="680" y="50" width="200" height="70" rx="8"/><text class="c4-label" x="780" y="76">mv -f temp target</text><text class="c4-desc" x="780" y="96">then re-verify target</text></g>
+<g class="c4-rel"><path d="M210,85 H238" marker-end="url(#ar-arrow)"/></g>
+<g class="c4-rel"><path d="M430,85 H458" marker-end="url(#ar-arrow)"/></g>
+<g class="c4-rel"><path d="M650,85 H678" marker-end="url(#ar-arrow)"/></g>
+<g class="c4-boundary"><rect x="20" y="140" width="860" height="44" rx="6"/><text x="32" y="167">Any failure before the rename removes the temporary file and leaves the old record untouched.</text></g>
+</svg>
+</div>
+<figcaption>The same-device check is what makes the rename atomic. <code>fm_pr_private_file_valid</code> compares a file's device with its directory's, read in the same invocation, "which is also what keeps same-directory rename publication atomic" <code class="cite">bin/fm-pr-lib.sh:285-289</code>.</figcaption>
+</figure>
+<p>Instances: task metadata <code class="cite">bin/fm-spawn.sh:4514</code> <code class="cite">bin/fm-pr-check.sh:131-145</code>. The recovery marker, mode 0600 <code class="cite">bin/fm-wake-lib.sh:651-663</code>. The queue rewrite on acknowledgement <code class="cite">bin/fm-wake-drain.sh:727</code>. The relaunch journal <code class="cite">bin/fm-control.sh:597-622</code>. Decision cursors <code class="cite">bin/fm-classify-lib.sh:1172-1179</code>. The trust binding <code class="cite">bin/fm-check-register.sh:33-40</code>. Inherited config <code class="cite">bin/fm-config-inherit-lib.sh:143-170</code>. A same-actor lease refresh <code class="cite">bin/fm-lease.sh:130-145</code>.</p>
+<div class="callout"><span class="callout-title">The known cost of rename</span>
+<p>Renaming over a symlink replaces the link with a regular file. That is why a code-root backlog must never be symlinked into a home: tasks-axi's rename "forks the queue on the first such write" <code class="cite">docs/configuration.md:129</code>. Firstmate's own record paths refuse a final-component symlink outright <code class="cite">docs/configuration.md:316</code>.</p></div>
+
+<h2 id="append-only">3. Append-only event logs, with state derived elsewhere</h2>
+<p>Where many writers report events, Firstmate uses an append. Status logs are "created once (<code>&gt;</code>) and only ever appended to (<code>&gt;&gt;</code>)" <code class="cite">bin/fm-classify-lib.sh:941-944</code>. Queue rows are appended under a lock <code class="cite">bin/fm-wake-lib.sh:1864-1866</code>. The memory archive is "append-only" <code class="cite">.agents/skills/stow/SKILL.md:134</code>. Appending needs no read-modify-write, so a worker can report without a lock. Readers track a byte offset.</p>
+<p>The discipline that makes this safe is that <strong>the log is never mistaken for current state</strong>: "A <code>state/&lt;id&gt;.status</code> line is a wake event, not current-state truth" <code class="cite">AGENTS.md:163</code>. Timestamps in the log "must never decide current state or decision closure" <code class="cite">bin/fm-classify-lib.sh:293</code>.</p>
+
+<h2 id="exclusive-create">4. Exclusive creation as the decision point</h2>
+<p>When two actors race to create something, the filesystem's own create-if-absent operation decides who wins, so no separate check is needed. A lock is won by <code>ln -s owner-dir lock</code> <code class="cite">bin/fm-wake-lib.sh:566</code>. A lease claim is won by a hard <code>ln</code> of a prepared temporary file, which fails if the lease exists <code class="cite">bin/fm-lease.sh:135</code>. Steering-inbox sequence numbers "are never reused within a task: allocation scans both the inbox root and handled/" <code class="cite">bin/fm-task-inbox-lib.sh:42-45</code>.</p>
+
+<h2 id="generations">5. Generation and identity binding to reject stale writers</h2>
+<p>A process can outlive its role. A hook can fire after its worker was relaunched. A watcher can close during handling. A pid can be recycled. Each such case gets a token, minted at the start of an incarnation and presented on every later write. A write carrying an old token is refused.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Binding</th><th>Rejects</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><code>busy_gen</code> plus a monotonic <code>seq</code></td><td>Hook events from a replaced harness incarnation, and out-of-order applies</td><td><code class="cite">bin/fm-busy-lib.sh:19-25</code></td></tr>
+<tr><td><code>spawn_gen</code></td><td>A pending close or snapshot that belongs to an earlier incarnation of the same task id</td><td><code class="cite">bin/fm-spawn.sh:4438</code> <code class="cite">bin/fm-backlog-transition-lib.sh:778-790</code></td></tr>
+<tr><td>Recovery generation</td><td>An acknowledgement of an older episode retiring a newer one</td><td><code class="cite">bin/fm-wake-lib.sh:749-774</code></td></tr>
+<tr><td>Queue sequence cutoff</td><td>An acknowledgement consuming a wake that arrived after presentation, for another actor</td><td><code class="cite">bin/fm-wake-drain.sh:689-702</code></td></tr>
+<tr><td>Branch grant owner (pid plus extension generation)</td><td>A dead branch conversation's grant hiding rows from main</td><td><code class="cite">docs/watcher-continuity.md:77-78</code></td></tr>
+<tr><td>Session anchor pid plus trusted session id</td><td>A dead session keeping the home locked, and a resume claiming another session's lock</td><td><code class="cite">bin/fm-lock.sh:4-21</code> <code class="cite">bin/fm-lock.sh:230-235</code></td></tr>
+<tr><td>Lease pid must equal the session-lock holder</td><td>A lease left by an exited Pi session, even under a recycled pid</td><td><code class="cite">bin/fm-lease-lib.sh:24-33</code></td></tr>
+<tr><td>Watcher <code>pid-identity</code> (start time plus command line)</td><td>Pid reuse posing as a live watcher</td><td><code class="cite">bin/fm-wake-lib.sh:56-90</code></td></tr>
+<tr><td>File identity (device, inode, birth time) plus fold version</td><td>A cursor pointing into a recreated log, or a set folded under an old rule</td><td><code class="cite">bin/fm-classify-lib.sh:934-950</code> <code class="cite">bin/fm-classify-lib.sh:1000-1017</code></td></tr>
+<tr><td>Content hash (<code>.check-trust</code>)</td><td>An edited or substituted check script</td><td><code class="cite">bin/fm-check-lib.sh:38-46</code></td></tr>
+<tr><td><code>endpoint_task_id</code> and the slot owner claim</td><td>Teardown killing or returning an endpoint or slot that now belongs to another task</td><td><code class="cite">docs/configuration.md:153</code> <code class="cite">bin/fm-teardown.sh:81-116</code></td></tr>
+</tbody></table></div>
+
+<h2 id="refuse">6. Refuse rather than proceed when a precondition cannot be proven</h2>
+<p>This is the most consistent stance in the code. Where a script cannot prove the condition that makes an action safe, it refuses, names what it could not prove, and leaves the evidence in place.</p>
+<ul>
+<li>A session that cannot verify the session lock stays read-only <code class="cite">AGENTS.md:179-180</code>.</li>
+<li>A git lock file is removed only on positive proof that it is abandoned. "ANY uncertainty ... returns non-zero" <code class="cite">bin/fm-lock-lib.sh:14-15</code>.</li>
+<li>Teardown refuses before any record is removed when the endpoint close, landed work, check artifacts, or slot ownership cannot be proven <code class="cite">bin/fm-teardown.sh:8-14</code> <code class="cite">bin/fm-teardown.sh:44-51</code>.</li>
+<li>An unreadable slot claim "proves nothing either way and refuses" <code class="cite">bin/fm-teardown.sh:108-111</code>.</li>
+<li>A fresh spawn refuses rather than waits when forced teardown owns the task set <code class="cite">bin/fm-spawn.sh:1496-1506</code>.</li>
+<li>An inherited config item is removed downstream only when its absence is proven. An inspection error changes nothing <code class="cite">bin/fm-config-inherit-lib.sh:192-197</code>.</li>
+<li>An unrecognized <code>config/claude-permission-mode</code> refuses every spawn. "Firstmate never falls back to a permission posture the captain did not choose" <code class="cite">docs/configuration.md:376</code>.</li>
+<li>A state check without a valid binding is refused without execution <code class="cite">bin/fm-watch.sh:2475-2480</code>.</li>
+</ul>
+<p>Where refusing would lose information, the failure direction is chosen deliberately. Readers prefer a duplicate to a loss: a bad presentation offset "reads from byte 0, preferring a bounded duplicate over a lost event" <code class="cite">bin/fm-classify-lib.sh:26-28</code>. A fold whose own read fails returns the last trusted set, "never a bare “empty” as if nothing were open" <code class="cite">bin/fm-classify-lib.sh:954-959</code>. An inbox escalation "deliberately queues the wake before writing the deduplication marker", so a crash produces "a rare duplicate rather than silently lose a wake" <code class="cite">bin/fm-task-inbox-lib.sh:56-59</code>.</p>
+
+<h2 id="journal-first">7. Journal the intent before destroying its evidence</h2>
+<p>When an operation must delete the only record that describes what remains to be done, it writes the intent first. Teardown writes <code>state/&lt;id&gt;.backlog-close</code> before removing the metadata that holds the completion links <code class="cite">bin/fm-backlog-transition-lib.sh:41-49</code>. <code>fm-control.sh relaunch</code> journals each phase and preserves the prior metadata and brief beside the journal <code class="cite">bin/fm-control.sh:569-581</code>. Every append publishes downtime on the recovery marker before the row becomes visible <code class="cite">bin/fm-wake-lib.sh:1852</code>. Replay is designed to be idempotent, so running it twice is harmless <code class="cite">bin/fm-backlog-transition-lib.sh:49-50</code>.</p>
+
+<h2 id="private-files">8. Private-file discipline</h2>
+<p>Records that gate execution or authority are checked for more than content. The checks are: regular file, not a symlink, exact mode, one hard link, and on the containing directory's device <code class="cite">bin/fm-pr-lib.sh:285-296</code>. This applies to check scripts and their bindings, PR-poll sidecars, and task metadata during <code>fm-pr-check.sh</code> <code class="cite">bin/fm-pr-check.sh:126-141</code>. Lifecycle paths must also resolve inside their authorized root <code class="cite">bin/fm-backlog-transition-lib.sh:711-737</code>.</p>
+
+<h2 id="durability">9. Durability that outlives any conversation</h2>
+<p>The design premise is that the agent's context is disposable: "A restart must be a non-event because durable state and live backend inventory, not conversation memory, are authoritative" <code class="cite">AGENTS.md:256</code>. The records described in this section are what a new session rebuilds from. Session start:</p>
+<ol>
+<li>takes the session lock <code class="cite">AGENTS.md:187</code>;</li>
+<li>replays interrupted backlog transitions for this home <code class="cite">bin/fm-bootstrap.sh:1279-1312</code>, and sweeps stale leases <code class="cite">bin/fm-session-start.sh:734</code>;</li>
+<li>drains and presents the durable wake queue with its open decisions and unread status <code class="cite">AGENTS.md:192-197</code>;</li>
+<li>prints every <code>state/&lt;id&gt;.meta</code>, a bounded tail of each status log labeled as event history, the away posture, and one alive-or-dead read of each recorded endpoint <code class="cite">AGENTS.md:201</code>;</li>
+<li>prints the curated memory files <code class="cite">docs/configuration.md:244</code>.</li>
+</ol>
+<p>The same premise shows up in smaller rules. The away-posture record is written "in the same turn as /afk before any other work" <code class="cite">AGENTS.md:467</code>. <code>data/captain.md</code> stays canonical "even if harness memory mirrors it" <code class="cite">AGENTS.md:94</code>.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

@@ -42,7 +42,17 @@ window.FM_NAV = [
   // end supervision
 
   // begin persistence
-  { section: "persistence", title: "Persistence", href: "components/persistence/index.html", stub: true },
+  { section: "persistence", title: "Persistence", href: "components/persistence/index.html" },
+  { section: "persistence", title: "Operational home layout", href: "components/persistence/home-layout.html" },
+  { section: "persistence", title: "Per-task records", href: "components/persistence/task-records.html" },
+  { section: "persistence", title: "Wake queue and recovery marker", href: "components/persistence/wake-queue.html" },
+  { section: "persistence", title: "Locks and leases", href: "components/persistence/locks-and-leases.html" },
+  { section: "persistence", title: "Registered state checks", href: "components/persistence/state-checks.html" },
+  { section: "persistence", title: "Cursors and folded decisions", href: "components/persistence/cursors-and-folds.html" },
+  { section: "persistence", title: "Configuration and inheritance", href: "components/persistence/configuration.html" },
+  { section: "persistence", title: "Durable memory", href: "components/persistence/durable-memory.html" },
+  { section: "persistence", title: "Engineering patterns", href: "components/persistence/patterns.html" },
+  { section: "persistence", title: "What is safe to delete", href: "components/persistence/deletion-safety.html" },
   // end persistence
 
   // begin crew

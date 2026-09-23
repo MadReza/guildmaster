@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Durable memory · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Persistence</p>
+<h1>Durable memory</h1>
+<p class="lede">Three curated files are printed into every session start: captain preferences, shared captain preferences, and learnings. A token budget keeps them small. A cold archive takes what ages out, so nothing is deleted outright.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Persistence</a>.</p>
+
+<h2 id="files">The files</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>File</th><th>Holds</th><th>Scope</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><code>data/captain.md</code></td><td>This home's domain-local captain preferences and working style. Canonical "even if harness memory mirrors it".</td><td>One home</td><td><code class="cite">AGENTS.md:94</code> <code class="cite">docs/configuration.md:244-245</code></td></tr>
+<tr><td><code>data/captain-shared.md</code></td><td>Preferences that apply across every secondmate domain</td><td>Lives only in the primary home. Pushed read-only to each secondmate.</td><td><code class="cite">AGENTS.md:95</code> <code class="cite">docs/configuration.md:246-247</code></td></tr>
+<tr><td><code>data/learnings.md</code></td><td>Fleet-local operational facts and gotchas: "dated, evidence-backed, curated"</td><td>One home. "There is no shared learnings file by captain decision."</td><td><code class="cite">AGENTS.md:96</code> <code class="cite">docs/configuration.md:250-253</code></td></tr>
+<tr><td><code>data/memory-archive.md</code></td><td>The cold tier: retired entries with provenance</td><td>One home. It "never cascades".</td><td><code class="cite">.agents/skills/stow/SKILL.md:132-146</code></td></tr>
+<tr><td><code>config/startup-memory-budget</code></td><td>The per-home allowance for the three startup files together</td><td>Primary-authoritative, inherited</td><td><code class="cite">docs/configuration.md:255-267</code></td></tr>
+</tbody></table></div>
+<p>All three startup files are printed in the session-start context digest. <code>data/captain.md</code> comes after <code>data/projects.md</code> and the optional <code>data/secondmates.md</code> <code class="cite">docs/configuration.md:244</code>, and learnings come after the captain files <code class="cite">docs/configuration.md:251</code>. The charter treats these files, not harness memory, as the record: "regardless of harness memory" <code class="cite">AGENTS.md:164</code>. An <code>ABSENT</code> file in the digest means the built-in defaults, or no learnings captured yet <code class="cite">AGENTS.md:177</code>.</p>
+
+<h2 id="curation">Inspect, then update</h2>
+<p>These files are curated, not journals. Before a change, "inspect the current file and curate the matching bullet in place"; add a new bullet "only for a genuinely new durable preference" <code class="cite">docs/configuration.md:245</code>. Learnings are "created lazily on first learning" and follow the same aging and archive contract, "curate it instead of appending forever" <code class="cite">docs/configuration.md:251-252</code>. This is the opposite of a status log. A status log is append-only because it is an event stream. A memory file is rewritten in place because it is a current operating map.</p>
+
+<h2 id="tiers">Tiers and decay</h2>
+<p>The <code>/stow</code> skill is the single owner of the scheme. "No memory file header may restate" it <code class="cite">.agents/skills/stow/SKILL.md:48-49</code>. In outline:</p>
+<ul>
+<li><strong>Markers.</strong> <code>&lt;!--a:YYYY-MM-DD--&gt;</code> marks an <em>aging</em> entry and <code>&lt;!--p:YYYY-MM-DD--&gt;</code> a <em>perishable</em> one. The date is when the entry was last reinforced. <code>&lt;!--P--&gt;</code> pins an entry in a file whose default tier is not pinned <code class="cite">.agents/skills/stow/SKILL.md:21-25</code>.</li>
+<li><strong>Defaults by file.</strong> Entries in the captain files default to pinned, "because preferences and authority boundaries do not age". Entries in learnings default to aging <code class="cite">.agents/skills/stow/SKILL.md:45</code>.</li>
+<li><strong>Horizons.</strong> An aging entry is stale after 30 days, a perishable one after 7. With the opt-in <code>config/stow-pass-horizon</code> flag, an entry is also stale after 10 passes (aging) or 3 passes (perishable) that evaluated it without reinforcing it <code class="cite">.agents/skills/stow/SKILL.md:38-39</code> <code class="cite">.agents/skills/stow/SKILL.md:70-71</code> <code class="cite">docs/configuration.md:271-274</code>.</li>
+<li><strong>Refusing destruction on missing evidence.</strong> "A pre-existing missing or hand-dropped marker is never grounds for destructive treatment" <code class="cite">.agents/skills/stow/SKILL.md:53</code>.</li>
+</ul>
+
+<h2 id="budget">The startup memory budget</h2>
+<p>The budget is one positive base-10 integer followed by exactly one newline. The file must be regular and single-linked, beneath a <code>config/</code> directory that is not a symlink. "Malformed, multi-line, symlinked, hardlinked, special, or otherwise unsafe values are rejected rather than treated as a default" <code class="cite">docs/configuration.md:261-262</code>. The locked primary bootstrap writes a visible default of 7500 when the file is absent. A secondmate never creates its own default. It receives the primary's value <code class="cite">docs/configuration.md:258-260</code>. The estimate is <code>ceil(UTF-8 bytes / 3)</code> per file, "a conservative portable approximation rather than a provider-exact tokenizer" <code class="cite">docs/configuration.md:264</code>. Commands: <code>bin/fm-startup-memory-budget.sh read</code> and <code>… report</code> <code class="cite">docs/configuration.md:263</code>.</p>
+<p>A secondmate's inherited <code>captain-shared.md</code> counts against the secondmate's own total, even though the secondmate cannot edit it <code class="cite">docs/configuration.md:265</code>. Each home is measured against its own allowance, "rather than against a fleet total" <code class="cite">docs/configuration.md:266</code>.</p>
+
+<h2 id="archive">The cold archive</h2>
+<p>"Stale never means deleted: pruning an entry from an editable memory file always means moving it to <code>data/memory-archive.md</code>, this home's append-only, never-injected cold tier". It is never counted by the budget report. Each archived entry keeps "source file, tier, last-reinforced date, and the reason it left" under a dated pass heading <code class="cite">.agents/skills/stow/SKILL.md:134-137</code>. "Truncating a grown archive is a captain decision, not a mechanism" <code class="cite">.agents/skills/stow/SKILL.md:146</code>. A unique current fact is never simply removed. It is either archived with provenance or moved to a live owner that loads it on demand <code class="cite">.agents/skills/stow/SKILL.md:111</code>.</p>
+<p>How a <code>/stow</code> pass runs, and its automatic cascade to secondmates, belongs to <a href="../prompts-and-skills/index.html">Prompts and skills</a>.</p>
+
+<div class="callout unclear"><span class="callout-title">Open question</span>
+<p>The stow skill names <code>data/memory-archive.md</code> as the cold tier. The charter's <code>data/</code> inventory lists only <code>backlog.md</code>, <code>captain.md</code>, <code>captain-shared.md</code>, <code>learnings.md</code>, <code>projects.md</code>, <code>secondmates.md</code>, and the per-task directories <code class="cite">AGENTS.md:92-100</code>. It does not list the archive or the tasks-axi done archive <code>data/done-archive.md</code> named in <code class="cite">docs/configuration.md:101</code>. Whether other archive files under <code>data/</code> exist by design at this commit is not settled by the sources read for this page.</p></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

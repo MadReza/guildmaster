@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operational home layout · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Persistence</p>
+<h1>Operational home layout</h1>
+<p class="lede">One tracked code root supplies the instructions and scripts. Each Firstmate instance keeps its private records in a separate operational home, selected by <code>FM_HOME</code>.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Persistence</a>.</p>
+
+<h2 id="split">Code root versus home</h2>
+<p>The <strong>code root</strong> is the Firstmate repository checkout. It holds shared, tracked material: <code>AGENTS.md</code>, <code>README.md</code>, <code>CONTRIBUTING.md</code>, <code>.tasks.toml</code>, CI workflows, <code>bin/</code>, and the skill trees <code class="cite">AGENTS.md:45</code>. The <strong>operational home</strong> holds four private, gitignored trees. <code>FM_HOME</code> selects the home, "while scripts continue to come from their tracked code root" <code class="cite">AGENTS.md:54</code>. The repository is "a shared template, while <code>.env</code>, <code>data/</code>, <code>state/</code>, <code>config/</code>, <code>projects/</code>, and <code>.no-mistakes/</code> are captain-private and gitignored" <code class="cite">AGENTS.md:47</code>.</p>
+<p>By default the home is the code root, so a primary instance keeps its private trees inside the checkout. They are ignored there <code class="cite">.gitignore:1-15</code>. A secondmate is a second, persistent home with its own state, backlog, projects, and session lock <code class="cite">AGENTS.md:55</code>.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 900 520" role="img" aria-labelledby="hl-title">
+<title id="hl-title">Code root and operational homes</title>
+<defs><marker id="hl-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">Code root and operational homes</text>
+
+<g class="c4-boundary"><rect x="20" y="50" width="400" height="200" rx="10"/><text x="32" y="240">Code root (tracked; git checkout)</text></g>
+<g class="c4-container"><rect x="40" y="70" width="170" height="70" rx="8"/>
+<text class="c4-label" x="125" y="98">bin/</text>
+<text class="c4-desc" x="125" y="116">every script and library</text></g>
+<g class="c4-container"><rect x="230" y="70" width="170" height="70" rx="8"/>
+<text class="c4-label" x="315" y="98">AGENTS.md · skills</text>
+<text class="c4-desc" x="315" y="116">instructions, docs</text></g>
+<g class="c4-container"><rect x="40" y="155" width="360" height="60" rx="8"/>
+<text class="c4-label" x="220" y="180">.tasks.toml · .no-mistakes.yaml</text>
+<text class="c4-desc" x="220" y="198">tracked defaults read relative to the working directory</text></g>
+
+<g class="c4-boundary"><rect x="460" y="50" width="420" height="440" rx="10"/><text x="472" y="480">Operational home ($FM_HOME; gitignored trees)</text></g>
+<g class="c4-datastore"><path d="M480,82 a90,10 0 0,0 180,0 a90,10 0 0,0 -180,0 v70 a90,10 0 0,0 180,0 v-70"/>
+<text class="c4-label" x="570" y="118">data/</text>
+<text class="c4-desc" x="570" y="136">durable private records</text></g>
+<g class="c4-datastore"><path d="M680,82 a90,10 0 0,0 180,0 a90,10 0 0,0 -180,0 v70 a90,10 0 0,0 180,0 v-70"/>
+<text class="c4-label" x="770" y="118">state/</text>
+<text class="c4-desc" x="770" y="136">runtime records</text></g>
+<g class="c4-datastore"><path d="M480,202 a90,10 0 0,0 180,0 a90,10 0 0,0 -180,0 v70 a90,10 0 0,0 180,0 v-70"/>
+<text class="c4-label" x="570" y="238">config/</text>
+<text class="c4-desc" x="570" y="256">local operating choices</text></g>
+<g class="c4-datastore"><path d="M680,202 a90,10 0 0,0 180,0 a90,10 0 0,0 -180,0 v70 a90,10 0 0,0 180,0 v-70"/>
+<text class="c4-label" x="770" y="238">projects/</text>
+<text class="c4-desc" x="770" y="256">project clones</text></g>
+<g class="c4-component"><rect x="480" y="320" width="380" height="60" rx="8"/>
+<text class="c4-label" x="670" y="345">.env · .no-mistakes/ · scratchpad*</text>
+<text class="c4-desc" x="670" y="363">secrets, local validation state, ignored scratch</text></g>
+<g class="c4-component"><rect x="480" y="395" width="380" height="60" rx="8"/>
+<text class="c4-label" x="670" y="420">.fm-secondmate-home · .fm-secondmate-parent</text>
+<text class="c4-desc" x="670" y="438">secondmate identity and parent route (secondmate only)</text></g>
+
+<g class="c4-rel"><path d="M420,150 H445 V240 H478" marker-end="url(#hl-arrow)"/>
+<text class="c4-rel-label" x="310" y="276">bin/ scripts resolve state/, data/, config/</text></g>
+<g class="c4-rel c4-rel-async"><path d="M200,250 V440 H460" marker-end="url(#hl-arrow)"/>
+<text class="c4-rel-label" x="300" y="432">FM_HOME selects which home</text></g>
+</svg>
+</div>
+<figcaption>With <code>FM_HOME</code> unset the home is the code root itself, and the four trees sit inside the checkout, gitignored. A secondmate home is a separate Firstmate worktree or clone with its own four trees and the two identity markers.</figcaption>
+</figure>
+
+<h2 id="trees">The four trees</h2>
+<p>The layout section of the configuration guide is the single owner of the top-level layout. Producer script headers own each child file's fields <code class="cite">docs/configuration.md:11</code>.</p>
+<dl class="defs">
+<dt><code>data/</code>: durable private fleet records</dt>
+<dd>The project and secondmate registries, captain preferences, optional shared captain preferences, learnings, the backlog, briefs, scout reports, and installed content-addressed extension packages under <code>data/extensions/packages/</code> <code class="cite">docs/configuration.md:13</code>. Per task: <code>data/&lt;id&gt;/brief.md</code> and a scout's <code>data/&lt;id&gt;/report.md</code>, which "survives teardown" <code class="cite">AGENTS.md:99-100</code>. The <code>/stow</code> cold tier <code>data/memory-archive.md</code> also lives here <code class="cite">.agents/skills/stow/SKILL.md:134</code>.</dd>
+<dt><code>state/</code>: runtime records and signals</dt>
+<dd>Task metadata, append-only status events, endpoint signals, watcher and wake-queue coordination, inactive terminal-outcome receipts under <code>state/terminal-outcomes/</code>, extension namespaces, away-mode state, Relay artifacts, secondmate caches, reconcile requests, config-reread generations, steering inboxes, and pending replies <code class="cite">docs/configuration.md:14</code>. The charter lists every entry and its owner <code class="cite">AGENTS.md:102-159</code>.</dd>
+<dt><code>config/</code>: local operating choices</dt>
+<dd>Local, gitignored choices such as the runtime backend, crew harness, dispatch profiles, and explicit extension bindings under <code>config/extensions.d/</code> <code class="cite">docs/configuration.md:15</code>. See <a href="configuration.html">Per-home configuration</a>.</dd>
+<dt><code>projects/</code>: project clones</dt>
+<dd>Clones that Firstmate reads but changes only through "the narrow guarded and concrete captain-approved exceptions in AGENTS.md" <code class="cite">docs/configuration.md:15</code>. Firstmate reads projects and crewmates change them <code class="cite">AGENTS.md:27-28</code>. Crewmates do that in task worktrees provided by Treehouse or Orca <code class="cite">docs/configuration.md:136</code>.</dd>
+</dl>
+<p>Untracked names beginning with <code>scratchpad</code> are ignored so that temporary scratch "does not make porcelain-based secondmate sync guards treat a home as dirty" <code class="cite">docs/configuration.md:16</code> <code class="cite">.gitignore:4</code>.</p>
+
+<h2 id="resolution">How a script resolves the home</h2>
+<p>Every script repeats the same three-line resolution at its top. Two representative copies:</p>
+<pre><code>FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." &amp;&amp; pwd)}"
+FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
+STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"</code></pre>
+<p><code class="cite">bin/fm-lock.sh:31-33</code> <code class="cite">bin/fm-wake-lib.sh:4-9</code></p>
+<ul>
+<li><code>FM_ROOT_OVERRIDE</code> overrides the code root, including the primary checkout that the worktree-tangle guard watches. When <code>FM_HOME</code> is unset it also acts as the older whole-root override <code class="cite">docs/configuration.md:310-311</code>.</li>
+<li><code>FM_STATE_OVERRIDE</code>, <code>FM_DATA_OVERRIDE</code>, <code>FM_PROJECTS_OVERRIDE</code>, and <code>FM_CONFIG_OVERRIDE</code> relocate a single tree. They exist "for tests and specialized harness setup" <code class="cite">docs/configuration.md:313</code>.</li>
+<li>Before <code>fm-brief.sh</code>, <code>fm-spawn.sh</code>, or <code>fm-afk-launch.sh</code> persists a path, it resolves a relative <code>FM_HOME</code>, <code>FM_STATE_OVERRIDE</code>, or <code>FM_DATA_OVERRIDE</code> against the caller's working directory. An unresolvable one is rejected with the offending variable named <code class="cite">docs/configuration.md:314</code>. <code>fm-spawn.sh</code> also rejects control bytes in those raw inputs <code class="cite">docs/configuration.md:315</code>.</li>
+<li>Lifecycle access to a backlog, task record, or pending-close record must resolve inside its configured root. "A final-component symlink is refused even when its target remains within that root" <code class="cite">docs/configuration.md:316</code>. The executable check is <code>fm_backlog_record_parent_authorized</code>, which compares the canonical parent and final path <code class="cite">bin/fm-backlog-transition-lib.sh:711-737</code>.</li>
+</ul>
+
+<h3 id="fm-send">The one deliberate exception: fm-send</h3>
+<p>Most scripts fall back to the code root when <code>FM_HOME</code> is unset. <code>fm-send.sh</code> refuses instead, "so operator steers cannot silently resolve against the wrong home" <code class="cite">docs/configuration.md:312</code>. The implementation refuses an unset or empty <code>FM_HOME</code>, a home that is not a directory, and a missing <code>state/</code> <code class="cite">bin/fm-send.sh:229-241</code>. The steer is the one operation where addressing the wrong home would reach a live agent that belongs to someone else, so failing closed is worth the inconvenience.</p>
+
+<div class="callout"><span class="callout-title">Finding: two spellings of "override"</span>
+<p>Most scripts use <code>${FM_STATE_OVERRIDE:-…}</code>, so an explicitly empty override falls back to the default. <code>fm-check-unregister.sh</code> uses <code>${FM_STATE_OVERRIDE-…}</code> instead, and its header states that "an explicitly empty override … is refused before removal" <code class="cite">bin/fm-check-unregister.sh:4-6</code> <code class="cite">bin/fm-check-unregister.sh:14</code> <code class="cite">bin/fm-check-unregister.sh:26-29</code>. The difference is deliberate for a script that deletes. It does mean that the same environment resolves to different homes in different scripts.</p></div>
+
+<h2 id="secondmate-homes">Secondmate homes</h2>
+<p>A secondmate home is seeded by <code>fm-home-seed.sh</code> as a fresh Firstmate worktree leased from the Treehouse pool under the secondmate's id. "Normal restarts do not free or recycle the home" <code class="cite">docs/configuration.md:287-293</code>. Two root markers identify it:</p>
+<ul>
+<li><code>.fm-secondmate-home</code>: the identity marker. The seed publishes it <em>after</em> the parent binding <code class="cite">bin/fm-home-seed.sh:19-20</code> <code class="cite">bin/fm-home-seed.sh:42-43</code>.</li>
+<li><code>.fm-secondmate-parent</code>: the durable route back to the parent <code class="cite">docs/configuration.md:300</code>.</li>
+</ul>
+<p>Both markers are gitignored, so a freshly seeded home never looks dirty to porcelain safety checks <code class="cite">docs/configuration.md:301-302</code> <code class="cite">.gitignore:7-8</code>. The parent markers form a chain. <code>fm_firstmate_root_home</code> follows local parent bindings upward to find the one machine-local anchor home, where cross-home locks such as the Treehouse project-identity lock live. It stops at a remote binding, fails closed on a malformed or unreachable binding or a cycle, and stops after 64 levels <code class="cite">bin/fm-wake-lib.sh:1183-1230</code>.</p>
+<p>The home label also shapes runtime backends. On Herdr, <code>FM_HOME</code> chooses the workspace label: <code>firstmate</code> for the primary and <code>2ndmate-&lt;id&gt;</code> for a marked secondmate home <code class="cite">docs/configuration.md:167</code>. Zellij and cmux embed a readable home label plus a short hash of <code>FM_ROOT</code> in visible titles instead <code class="cite">docs/configuration.md:174</code> <code class="cite">docs/configuration.md:177</code>.</p>
+
+<h2 id="guarantees">What this layout guarantees, and what it does not</h2>
+<ul>
+<li><strong>Guaranteed:</strong> two instances never share <code>state/</code>, because each holds its own session lock inside its own home <code class="cite">AGENTS.md:55</code>.</li>
+<li><strong>Guaranteed:</strong> tracked-file updates never carry private material, because every private tree is gitignored <code class="cite">.gitignore:1-15</code>. That is exactly why <code>config/</code> inheritance needs its own copy mechanism <code class="cite">bin/fm-config-inherit-lib.sh:30-37</code>.</li>
+<li><strong>Not guaranteed:</strong> a bare <code>tasks-axi</code> run addresses the right backlog. <code>.tasks.toml</code> paths resolve against the working directory, not <code>FM_HOME</code>, so a run from the code root reaches the code root's <code>data/</code>. That is why routine backlog commands go through <code>bin/fm-tasks-axi.sh</code> <code class="cite">docs/configuration.md:128-130</code>.</li>
+<li><strong>Not guaranteed:</strong> symlinking the code-root backlog into a home keeps them in step. tasks-axi writes by renaming a temporary file over its target, which "replaces a symlink with a regular file" and forks the queue on the first write <code class="cite">docs/configuration.md:129</code>.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

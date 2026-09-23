@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Registered state checks · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Persistence</p>
+<h1>Registered state checks</h1>
+<p class="lede">The watcher runs slow polls from <code>state/*.check.sh</code>, but never because a file happens to be there. Each one is either routed to a tracked repository script or run from a private snapshot whose bytes match a registered hash. Anything else is refused and reported.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Persistence</a>.</p>
+
+<h2 id="what">What a state check is</h2>
+<p>A state check is a slow poll that the watcher runs every <code>FM_CHECK_INTERVAL</code> seconds (default 300). Each run gets <code>FM_CHECK_TIMEOUT</code> seconds (default 30) <code class="cite">bin/fm-watch.sh:232-233</code>. The cadence is tracked by the mtime of <code>state/.last-check</code>, "so the cadence survives watcher restarts". Checks are evaluated before the signal scan, so a chatty sibling cannot starve merge detection <code class="cite">bin/fm-watch.sh:2364-2372</code>. A check prints one line when Firstmate should wake and nothing otherwise. The charter's authoring rule for a custom check: "keep it an ordinary single-link mode-<code>0700</code> file, print one line only when firstmate should wake, print nothing otherwise, finish before <code>FM_CHECK_TIMEOUT</code>, then bind its current bytes with <code>bin/fm-check-register.sh &lt;id&gt;</code> before the watcher may execute it" <code class="cite">AGENTS.md:398</code>.</p>
+
+<h2 id="dispositions">Four dispositions</h2>
+<p>For every <code>state/*.check.sh</code> the watcher chooses exactly one of four paths <code class="cite">bin/fm-watch.sh:2374-2418</code>. The inventory states the rule in one line: the watcher "dispatches validated PR data and the byte-identified Relay shim through trusted repository scripts, runs registered custom checks from hash-validated private snapshots, and rejects every other state check without execution" <code class="cite">AGENTS.md:117</code>.</p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 900 430" role="img" aria-labelledby="sc-title">
+<title id="sc-title">How the watcher disposes of each state check</title>
+<defs><marker id="sc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="26">Watcher check sweep: one of four paths</text>
+<g class="c4-datastore"><path d="M330,52 a120,10 0 0,0 240,0 a120,10 0 0,0 -240,0 v50 a120,10 0 0,0 240,0 v-50"/><text class="c4-label" x="450" y="84">state/*.check.sh</text><text class="c4-desc" x="450" y="100">every CHECK_INTERVAL</text></g>
+<g class="c4-component"><rect x="20" y="170" width="200" height="70" rx="8"/><text class="c4-label" x="120" y="194">x-watch.check.sh</text><text class="c4-desc" x="120" y="212">shim bytes validated;</text><text class="c4-desc" x="120" y="226">runs bin/fm-x-poll.sh</text></g>
+<g class="c4-component"><rect x="240" y="170" width="200" height="70" rx="8"/><text class="c4-label" x="340" y="194">PR poll</text><text class="c4-desc" x="340" y="212">sidecar snapshot validated;</text><text class="c4-desc" x="340" y="226">runs bin/fm-pr-poll.sh</text></g>
+<g class="c4-component"><rect x="460" y="170" width="200" height="70" rx="8"/><text class="c4-label" x="560" y="194">Registered custom</text><text class="c4-desc" x="560" y="212">hash matches .check-trust;</text><text class="c4-desc" x="560" y="226">runs a private snapshot</text></g>
+<g class="c4-external"><rect x="680" y="170" width="200" height="70" rx="8"/><text class="c4-label" x="780" y="194">Anything else</text><text class="c4-desc" x="780" y="212">never executed;</text><text class="c4-desc" x="780" y="226">path collected</text></g>
+<g class="c4-rel"><path d="M360,110 L120,168" marker-end="url(#sc-arrow)"/></g>
+<g class="c4-rel"><path d="M410,112 L340,168" marker-end="url(#sc-arrow)"/></g>
+<g class="c4-rel"><path d="M490,112 L560,168" marker-end="url(#sc-arrow)"/></g>
+<g class="c4-rel"><path d="M540,110 L780,168" marker-end="url(#sc-arrow)"/></g>
+<g class="c4-component"><rect x="140" y="300" width="400" height="56" rx="8"/><text class="c4-label" x="340" y="324">Non-empty output</text><text class="c4-desc" x="340" y="342">fm_wake_append check &lt;path&gt; "check: &lt;path&gt;: &lt;out&gt;"</text></g>
+<g class="c4-component"><rect x="600" y="300" width="280" height="56" rx="8"/><text class="c4-label" x="740" y="324">One rejection wake</text><text class="c4-desc" x="740" y="342">check: rejected unauthenticated state checks</text></g>
+<g class="c4-rel"><path d="M120,240 V328 H138" marker-end="url(#sc-arrow)"/></g>
+<g class="c4-rel"><path d="M340,240 V298" marker-end="url(#sc-arrow)"/></g>
+<g class="c4-rel"><path d="M560,240 V270 H500 V298" marker-end="url(#sc-arrow)"/></g>
+<g class="c4-rel"><path d="M780,240 V298" marker-end="url(#sc-arrow)"/></g>
+<g class="c4-datastore"><path d="M330,382 a120,8 0 0,0 240,0 a120,8 0 0,0 -240,0 v30 a120,8 0 0,0 240,0 v-30"/><text class="c4-label" x="450" y="404">state/.wake-queue</text></g>
+<g class="c4-rel"><path d="M340,356 V380" marker-end="url(#sc-arrow)"/></g>
+<g class="c4-rel"><path d="M740,356 V396 H572" marker-end="url(#sc-arrow)"/></g>
+</svg>
+</div>
+<figcaption>The four branches of the sweep in <code class="cite">bin/fm-watch.sh:2374-2485</code>. A merged PR-poll result takes an extra path through merge-outcome publication. That path belongs to the <a href="../delivery/index.html">Delivery</a> area.</figcaption>
+</figure>
+
+<h2 id="trust-record">The content-trust binding</h2>
+<p><code>state/&lt;id&gt;.check-trust</code> is exactly two lines. Any third line fails the read <code class="cite">bin/fm-check-lib.sh:17-36</code>:</p>
+<pre><code>fm-custom-check-v1
+&lt;64 lowercase hex: SHA-256 of state/&lt;id&gt;.check.sh&gt;</code></pre>
+<p>Both files must pass <code>fm_pr_private_file_valid</code>. That means a regular file, not a symlink, with an exact mode (0600 for the trust record, 0700 for the check), on <em>the same device as the <code>state/</code> directory</em> (read in the same invocation), with a link count of exactly 1 <code class="cite">bin/fm-pr-lib.sh:285-296</code>. The device check "refuses a file that is not on that directory's own filesystem, such as one bind-mounted over the name, which is also what keeps same-directory rename publication atomic" <code class="cite">bin/fm-pr-lib.sh:285-289</code>. The single-link rule means a hard link cannot give a file a second, trusted name. The hash comes from <code>shasum -a 256</code>, or <code>sha256sum</code> as a fallback. With neither tool present, nothing can be registered <code class="cite">bin/fm-check-lib.sh:6-15</code>.</p>
+
+<h2 id="register">Registering: <code>fm-check-register.sh &lt;id&gt;</code></h2>
+<p>The header is one sentence: "Bind an intentional custom watcher check to its current bytes." It adds: "Retire with fm-check-unregister.sh &lt;id&gt;; do not hand-compose an rm" <code class="cite">bin/fm-check-register.sh:2-4</code>. The script:</p>
+<ol>
+<li>refuses a malformed id (exit 2) and a symlinked or missing <code>state/</code> <code class="cite">bin/fm-check-register.sh:17-25</code>;</li>
+<li>requires the check to be a regular, non-symlink, mode-0700, single-link file on the state device, and the trust path to be absent or regular on that device <code class="cite">bin/fm-check-register.sh:26-31</code>;</li>
+<li>hashes the check, then writes the two lines under <code>umask 077</code> to a temporary file, <code>chmod 0600</code>, re-validates the destination, and renames <code class="cite">bin/fm-check-register.sh:32-40</code>;</li>
+<li>re-verifies the whole binding with <code>fm_custom_check_registered</code>. If that fails, it <strong>removes the trust record it just wrote</strong> and exits 1 <code class="cite">bin/fm-check-register.sh:41</code>.</li>
+</ol>
+<p>Step 4 means a registration either leaves a binding that verifies, or leaves no binding at all.</p>
+
+<h2 id="execute">Executing a custom check</h2>
+<p>Verifying the check file and then running that same path would leave a window between the two in which the file could change. The watcher closes it with a snapshot <code class="cite">bin/fm-check-lib.sh:48-69</code>:</p>
+<ol>
+<li>Read and validate the trust record. Validate the check file's mode, device, and link count.</li>
+<li>Copy the check to a new private temporary file, <code>state/.fm-custom-check.XXXXXX</code>, and <code>chmod 0600</code>.</li>
+<li>Re-verify the <em>snapshot</em>: regular, not a symlink, mode 600, same device, one link. Hash it and compare with the binding.</li>
+<li>Run the snapshot, never the original path, with <code>bash</code> under <code>timeout</code>, <code>gtimeout</code>, or a Perl alarm fallback. It runs in its own process group, and stdout is captured to a private temporary file <code class="cite">bin/fm-watch.sh:1802-1812</code> <code class="cite">bin/fm-watch.sh:1855-1880</code>.</li>
+<li>Remove the snapshot <code class="cite">bin/fm-watch.sh:2407-2414</code>.</li>
+</ol>
+<p>The file that runs is the one that was hashed. A mode-0600 snapshot is still executable this way, because it is passed to <code>bash</code> as an argument.</p>
+
+<h2 id="other-paths">The other trusted paths</h2>
+<ul>
+<li><strong>PR poll.</strong> The check file must be byte-for-byte the tracked <code>bin/fm-pr-poll.sh</code>. Task and PR data live "only in a private sidecar and are never interpolated into shell source" <code class="cite">bin/fm-pr-check.sh:4-5</code>. The watcher captures a snapshot of the sidecar, takes the task's control lock, checks that the snapshot still matches, and runs the <em>tracked</em> script with the validated fields as arguments. A snapshot that changed is skipped <code class="cite">bin/fm-watch.sh:2388-2406</code>. The sidecar family (<code>.pr-poll</code>, <code>.pr-poll-registration</code>, <code>.pr-poll-retirement</code>, <code>.merge-authority</code>, <code>.pr-poll-merge-notified</code>) is listed at <code class="cite">AGENTS.md:119-123</code>. Invalid retirement receipts are "preserved without running a check or removing poll artifacts" <code class="cite">bin/fm-watch.sh:110-112</code>.</li>
+<li><strong>Relay shim.</strong> <code>x-watch.check.sh</code> is accepted only if <code>fmx_poll_shim_valid</code> identifies its bytes for this home and root. Even then the watcher runs the tracked <code>bin/fm-x-poll.sh</code>, not the shim <code class="cite">bin/fm-watch.sh:2377-2385</code>.</li>
+<li><strong>Generated custom checks.</strong> The watched-tool poll, the mail poll, and the contributions poll are written by their own scripts and then bound with the same <code>fm-check-register.sh</code>, so they run as ordinary registered checks <code class="cite">bin/fm-tool-update-check.sh:14</code> <code class="cite">bin/fm-mail-check.sh:17</code> <code class="cite">bin/fm-contributions.sh:412</code>.</li>
+</ul>
+
+<h2 id="refusal">Refusal and retirement</h2>
+<p>Every file that fails all three trusted paths is added to one list. After the sweep, that list becomes a single wake, <code>check: rejected unauthenticated state checks: &lt;paths&gt;</code>. The files are "refused without execution" <code class="cite">bin/fm-watch.sh:108-109</code> <code class="cite">bin/fm-watch.sh:2475-2480</code>. The watcher does not delete them. Removing a check is the supervisor's decision.</p>
+<p><code>fm-check-unregister.sh &lt;id&gt;</code> removes exactly <code>&lt;id&gt;.check.sh</code> and <code>&lt;id&gt;.check-trust</code>, and each must be an ordinary single-link file on the state device. It refuses an explicitly empty <code>FM_STATE_OVERRIDE</code> or a symlinked <code>state/</code> before removing anything <code class="cite">bin/fm-check-unregister.sh:2-8</code>. Teardown validates a task's check artifacts the same way before destructive cleanup and preserves the task's state if that proof fails <code class="cite">bin/fm-teardown.sh:76-80</code>.</p>
+
+<h2 id="trace">Trace: a custom check from authoring to wake</h2>
+<ol>
+<li>The supervisor writes <code>state/deploy-x.check.sh</code>, a script that prints <code>deployed</code> once a URL answers, and runs <code>chmod 0700</code> on it.</li>
+<li><code>bin/fm-check-register.sh deploy-x</code> writes <code>state/deploy-x.check-trust</code> and prints <code>registered: state/deploy-x.check.sh</code> <code class="cite">bin/fm-check-register.sh:42</code>.</li>
+<li>On the next sweep, the file is not the Relay shim and has no PR sidecar. <code>fm_custom_check_snapshot_prepare</code> succeeds and the snapshot runs.</li>
+<li>Output <code>deployed</code> becomes <code>fm_wake_append check state/deploy-x.check.sh "check: state/deploy-x.check.sh: deployed"</code>, and the watcher exits with that reason <code class="cite">bin/fm-watch.sh:2466-2472</code>.</li>
+<li>If anyone edits the check without re-registering, the hash no longer matches. The file then lands in the rejection wake instead of running.</li>
+</ol>
+
+<div class="callout"><span class="callout-title">Finding: the check library has no contract header</span>
+<p><code>bin/fm-check-lib.sh</code> starts directly with its variables and functions, with no header comment <code class="cite">bin/fm-check-lib.sh:1-4</code>. By the project's own rule, the script header is the contract. Here the contract is spread across the charter's authoring rule <code class="cite">AGENTS.md:398</code>, the inventory line <code class="cite">AGENTS.md:117-118</code>, the registrar's two-line header, and the watcher's call sites.</p></div>
+<div class="callout unclear"><span class="callout-title">Open question: the threat being defended against</span>
+<p>The source states what the binding does, not which attacker it defends against. It never says whether it is meant to stop a worker, a stray tool, or an accidental overwrite from placing an executable in <code>state/</code>. The mechanism detects any change to the registered bytes, and it refuses symlinks, hard links, and cross-device substitutions. How the binding is supposed to hold against a process running as the same user, which could simply re-register, is not stated. Compare the lease library, which states its threat model explicitly <code class="cite">bin/fm-lease-lib.sh:35-45</code>.</p></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>
