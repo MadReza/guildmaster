@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cross-home handoff · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Backlog and decisions</p>
+<h1>Cross-home handoff</h1>
+<p class="lede">When a queued item belongs to a secondmate's domain, <code>fm-backlog-handoff.sh</code> moves it out of the main backlog into that secondmate home's own backlog, then wakes the secondmate. The secondmate owns its own queue. The main backlog never keeps a copy.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Backlog and decisions</a>. Secondmate homes themselves belong to <a href="../crew/index.html">Crew</a> and <a href="../remote/index.html">Remote</a>.</p>
+
+<h2 id="why">Why it exists</h2>
+<p>"Hand already-identified, in-scope backlog items off from the main firstmate backlog to a secondmate's own home backlog. Use this when a secondmate is created (or whenever an existing queued item should become its domain's work) so the secondmate owns its queue from day one instead of the item staying stranded in the main backlog." <code class="cite">bin/fm-backlog-handoff.sh:2-6</code> It follows from the backlog contract: "Work routed to a secondmate is recorded in that secondmate home's own backlog, not the main backlog" <code class="cite">AGENTS.md:536</code>. "<code>secondmate-provisioning</code> and <code>bin/fm-backlog-handoff.sh</code> own cross-home handoff safety." <code class="cite">AGENTS.md:545</code></p>
+<p>The provisioning skill gives the usage: "Read <code>data/backlog.md</code>, pick queued items that fit the new scope, and move them with: <code>bin/fm-backlog-handoff.sh &lt;secondmate-id&gt; &lt;item-key&gt;...</code>". "After seeding, run this handoff for the new secondmate's in-scope queued items." <code class="cite">.agents/skills/secondmate-provisioning/SKILL.md:185-193</code></p>
+
+<h2 id="split">Who decides what</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Owner</th><th>Responsibility</th></tr></thead>
+<tbody>
+<tr><td>The supervisor</td><td>"Scope-matching is firstmate's JUDGMENT: you pass the task-id keys you have already judged in-scope for the secondmate."</td></tr>
+<tr><td><code>fm-backlog-handoff.sh</code></td><td>Resolves the home from <code>data/secondmates.md</code>. Proves the destination is a genuine seeded secondmate home. Moves Queued items only. Classifies every key before changing anything. Warns about public relay commitments that would go stale.</td></tr>
+<tr><td><code>tasks-axi mv &lt;id&gt;... --to &lt;dest&gt;</code></td><td>Moves each block byte-exact, keeps section placement, and moves a connected set "atomically with blocked-by links preserved". It "refuses a move that would strand a dependency across the two files".</td></tr>
+</tbody>
+</table></div>
+<p class="evidence"><code class="cite">bin/fm-backlog-handoff.sh:8-39</code>. Delegating the move "removes the awk that used to re-implement block extraction and insertion here, so the format has exactly one parser and cannot drift out of sync (the body-orphaning class of bug fixed in PR #401 was exactly that drift)" <code class="cite">bin/fm-backlog-handoff.sh:11-15</code>.</p>
+
+<h2 id="validation">Validation before anything moves</h2>
+<ul>
+<li><strong>A genuine secondmate home.</strong> The destination may not be the filesystem root, the active home, or the Firstmate repo. It may not be inside either, or an ancestor of either. It must carry <code>.fm-secondmate-home</code> naming this exact id, plus <code>AGENTS.md</code> and <code>bin/</code> <code class="cite">bin/fm-backlog-handoff.sh:208-260</code>.</li>
+<li><strong>Real files.</strong> Neither backlog may be a symlink or a non-regular file <code class="cite">bin/fm-backlog-handoff.sh:262-272</code>.</li>
+<li><strong>Classify every key first.</strong> Each key is sorted as already in the secondmate backlog (skip, idempotent), Queued in main (move), In flight, Done, some other section, or missing. "Abort with no changes if any key matches neither backlog." In flight is refused. Done is refused because "Done records stay with their home and are pruned/archived". Missing keys are refused. In every refusal "nothing was moved" <code class="cite">bin/fm-backlog-handoff.sh:953-996</code>. The classifier "reads only section headings and item header lines - never item bodies" <code class="cite">bin/fm-backlog-handoff.sh:274-279</code>.</li>
+<li><strong>Body indentation.</strong> Any continuation line that is not two-space indented refuses the handoff "rather than risk leaving it orphaned" <code class="cite">bin/fm-backlog-handoff.sh:1017-1028</code>.</li>
+<li><strong>Compatible <code>tasks-axi</code></strong> with atomic multi-id <code>mv</code>. The manual knob is ignored here: "the <code>config/backlog-backend=manual</code> knob only governs firstmate's own hand-editing of its own backlog, not this validated helper" <code class="cite">bin/fm-backlog-handoff.sh:44-48</code>.</li>
+</ul>
+
+<h2 id="local">Local route</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 920 420" role="img" aria-labelledby="bd-ho-t bd-ho-d">
+<title id="bd-ho-t">Local handoff sequence</title>
+<desc id="bd-ho-d">The supervisor runs fm-backlog-handoff with a secondmate id and keys. Under the registry and handoff locks, the script validates the home and classifies every key against both backlogs, refusing without changes on any In flight, Done or missing key. It records a prepared wake for this exact batch, seeds the three-section scaffold if the destination is new, and runs one atomic tasks-axi mv from the main backlog to the secondmate backlog. It then promotes the wake marker and sends a marked wake through fm-send; a failed local wake fails the command, with the move intact, so rerunning retries the wake.</desc>
+<defs><marker id="bd-ho-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">Local handoff</text>
+<g class="c4-container"><rect x="20" y="46" width="140" height="44" rx="8"/><text class="c4-label" x="90" y="73">Supervisor</text></g>
+<g class="c4-component"><rect x="200" y="46" width="170" height="44" rx="8"/><text class="c4-label" x="285" y="73">fm-backlog-handoff.sh</text></g>
+<g class="c4-datastore"><path d="M410,52 a70,7 0 0,0 140,0 a70,7 0 0,0 -140,0 v30 a70,7 0 0,0 140,0 v-30"/><text class="c4-label" x="480" y="76">main backlog</text></g>
+<g class="c4-datastore"><path d="M590,52 a75,7 0 0,0 150,0 a75,7 0 0,0 -150,0 v30 a75,7 0 0,0 150,0 v-30"/><text class="c4-label" x="665" y="76">secondmate backlog</text></g>
+<g class="c4-container"><rect x="780" y="46" width="130" height="44" rx="8"/><text class="c4-label" x="845" y="73">Secondmate</text></g>
+<g class="c4-rel c4-rel-async"><path d="M90,90 L90,400"/></g>
+<g class="c4-rel c4-rel-async"><path d="M285,90 L285,400"/></g>
+<g class="c4-rel c4-rel-async"><path d="M480,92 L480,400"/></g>
+<g class="c4-rel c4-rel-async"><path d="M665,92 L665,400"/></g>
+<g class="c4-rel c4-rel-async"><path d="M845,90 L845,400"/></g>
+<g class="c4-rel"><path d="M90,118 L283,118" marker-end="url(#bd-ho-arrow)"/><text class="c4-rel-label" x="187" y="111">&lt;secondmate-id&gt; &lt;key&gt;...</text></g>
+<g class="c4-rel"><path d="M285,150 L323,150 L323,172 L289,172" marker-end="url(#bd-ho-arrow)"/><text class="c4-rel-label" x="400" y="165">locks · validate home</text></g>
+<g class="c4-rel"><path d="M285,205 L663,205" marker-end="url(#bd-ho-arrow)"/><text class="c4-rel-label" x="570" y="198">classify each key in both backlogs</text></g>
+<g class="c4-rel c4-rel-async"><path d="M480,232 L287,232" marker-end="url(#bd-ho-arrow)"/><text class="c4-rel-label" x="383" y="248">In flight / Done / missing → refuse all</text></g>
+<g class="c4-rel"><path d="M285,278 L323,278 L323,300 L289,300" marker-end="url(#bd-ho-arrow)"/><text class="c4-rel-label" x="420" y="293">wake marker: prepared for this batch</text></g>
+<g class="c4-rel"><path d="M480,330 L663,330" marker-end="url(#bd-ho-arrow)"/><text class="c4-rel-label" x="571" y="323">tasks-axi mv ids… --to (one transaction)</text></g>
+<g class="c4-rel"><path d="M285,370 L843,370" marker-end="url(#bd-ho-arrow)"/><text class="c4-rel-label" x="565" y="363">marked wake via fm-send: "New routed work is in your backlog…"</text></g>
+</svg>
+</div>
+<figcaption>If the move fails, a scaffold the script just created is removed, the prepared wake is discarded, and "nothing was moved" <code class="cite">bin/fm-backlog-handoff.sh:1067-1085</code>. A local route "moves directly into the destination backlog, and a missing or rejected local wake makes that command fail with the move intact so rerunning the same handoff retries its prepared wake intent" <code class="cite">bin/fm-backlog-handoff.sh:63-66</code>.</figcaption>
+</figure>
+<p>The wake text is fixed: "New routed work is in your backlog. Run bin/fm-session-start.sh now, then act on the routed task." <code class="cite">bin/fm-backlog-handoff.sh:98</code> It goes through <code>fm-send.sh</code> to the secondmate's recorded endpoint. A seeded home that has not yet been spawned is a valid destination, "but its missing endpoint is reported rather than pretending the task was started" <code class="cite">bin/fm-backlog-handoff.sh:350-355</code> <code class="cite">bin/fm-backlog-handoff.sh:550-569</code>. A prepared wake "is bound to the exact sorted requested-key batch; an unrelated handoff to that mate refuses until the original batch is retried, so it cannot discard wake intent for work that already moved" <code class="cite">bin/fm-backlog-handoff.sh:59-62</code>.</p>
+
+<h2 id="remote">Remote route</h2>
+<p>"Remote routes use an outbox handoff: one atomic local tasks-axi mv removes the selected set from the dispatchable backlog into data/handoff/&lt;id&gt;.outbox.md, then an idempotent confined transfer and fm-backlog-receive.sh deliver it." <code class="cite">bin/fm-backlog-handoff.sh:50-52</code> "No two-phase journal exists." <code class="cite">bin/fm-backlog-handoff.sh:62</code></p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 920 380" role="img" aria-labelledby="bd-rho-t bd-rho-d">
+<title id="bd-rho-t">Remote handoff sequence</title>
+<desc id="bd-rho-d">fm-backlog-handoff moves the selected set from the main backlog into a local outbox with one atomic tasks-axi mv, finishing any older outbox batch first. It snapshots the outbox, records its byte count, SHA-256 and a new generation number, and puts it on the remote home through fm-on and fm-remote-file.sh into state/handoff. It then runs fm-backlog-receive.sh on the remote home, which checks that every item is Queued, skips keys already present, and moves the rest with one tasks-axi mv. On confirmed receipt the local outbox is released and a best-effort wake is attempted; an undelivered wake stays pending for later retries.</desc>
+<defs><marker id="bd-rho-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">Remote handoff</text>
+<g class="c4-component"><rect x="20" y="46" width="170" height="44" rx="8"/><text class="c4-label" x="105" y="73">fm-backlog-handoff.sh</text></g>
+<g class="c4-datastore"><path d="M220,52 a65,7 0 0,0 130,0 a65,7 0 0,0 -130,0 v30 a65,7 0 0,0 130,0 v-30"/><text class="c4-label" x="285" y="76">main backlog</text></g>
+<g class="c4-datastore"><path d="M380,52 a80,7 0 0,0 160,0 a80,7 0 0,0 -160,0 v30 a80,7 0 0,0 160,0 v-30"/><text class="c4-label" x="460" y="70">data/handoff/</text><text class="c4-desc" x="460" y="85">&lt;id&gt;.outbox.md</text></g>
+<g class="c4-external"><rect x="570" y="46" width="150" height="44" rx="8"/><text class="c4-label" x="645" y="66">fm-on (SSH)</text><text class="c4-desc" x="645" y="82">remote home</text></g>
+<g class="c4-component"><rect x="750" y="46" width="160" height="44" rx="8"/><text class="c4-label" x="830" y="66">fm-backlog-</text><text class="c4-label" x="830" y="82">receive.sh</text></g>
+<g class="c4-rel c4-rel-async"><path d="M105,90 L105,360"/></g>
+<g class="c4-rel c4-rel-async"><path d="M285,92 L285,360"/></g>
+<g class="c4-rel c4-rel-async"><path d="M460,92 L460,360"/></g>
+<g class="c4-rel c4-rel-async"><path d="M645,90 L645,360"/></g>
+<g class="c4-rel c4-rel-async"><path d="M830,90 L830,360"/></g>
+<g class="c4-rel"><path d="M285,120 L458,120" marker-end="url(#bd-rho-arrow)"/><text class="c4-rel-label" x="372" y="113">tasks-axi mv ids… --to outbox</text></g>
+<g class="c4-rel"><path d="M105,160 L643,160" marker-end="url(#bd-rho-arrow)"/><text class="c4-rel-label" x="375" y="153">put state/handoff/&lt;id&gt;.outbox.md · bytes · sha256 · generation</text></g>
+<g class="c4-rel"><path d="M105,200 L828,200" marker-end="url(#bd-rho-arrow)"/><text class="c4-rel-label" x="466" y="193">run fm-backlog-receive.sh (same bytes, hash, generation)</text></g>
+<g class="c4-rel"><path d="M830,230 L868,230 L868,252 L834,252" marker-end="url(#bd-rho-arrow)"/><text class="c4-rel-label" x="740" y="275">all Queued? skip present keys · one mv</text></g>
+<g class="c4-rel c4-rel-async"><path d="M830,300 L107,300" marker-end="url(#bd-rho-arrow)"/><text class="c4-rel-label" x="466" y="293">confirmed receipt</text></g>
+<g class="c4-rel"><path d="M105,335 L458,335" marker-end="url(#bd-rho-arrow)"/><text class="c4-rel-label" x="282" y="328">release outbox · best-effort wake</text></g>
+</svg>
+</div>
+<figcaption>The outbox is authoritative until receipt is confirmed. "A present outbox remains the remote retry trigger only until backlog receipt is confirmed, then it is released independently of the best-effort receiver wake." <code class="cite">bin/fm-backlog-handoff.sh:53-56</code></figcaption>
+</figure>
+<ul>
+<li><strong>Older batches first.</strong> A fresh handoff never appends to an older recovery batch. "a confirmed wake can survive when outbox cleanup fails; if new work were staged into that outbox, the old confirmation would suppress the wake for the new work" <code class="cite">bin/fm-backlog-handoff.sh:813-824</code>.</li>
+<li><strong>Half-applied moves.</strong> "A hard local kill can land tasks-axi's target persist before its source persist. The outbox is already authoritative in that state, so converge by deleting only duplicates that tasks-axi itself confirms are dependency-safe." <code class="cite">bin/fm-backlog-handoff.sh:833-836</code></li>
+<li><strong>Confined transfer.</strong> The put goes through <code>fm-on.sh --stdin &lt;id&gt; fm-remote-file.sh put state/handoff/&lt;id&gt;.outbox.md 1048576 &lt;bytes&gt; &lt;sha&gt; &lt;generation&gt;</code>. An unknown outcome keeps the outbox: "outbox preserved at $outbox" <code class="cite">bin/fm-backlog-handoff.sh:688-701</code>.</li>
+<li><strong>Receiver.</strong> The delivered file "must be a non-symlink backlog-format scratch file confined to FM_HOME/state/handoff. Every item must be Queued. Keys already present in data/backlog.md are skipped; every remaining key moves in one dependency-closed <code>tasks-axi mv</code> transaction under tasks-axi's own locks." It clears a stale lock at most once, and only for "its own backlog or delivered lock whose pid is dead and whose mtime is at least 30 seconds old" <code class="cite">bin/fm-backlog-receive.sh:2-16</code>.</li>
+<li><strong>Wake is best effort.</strong> After receipt, "the outbox is released and the handoff succeeds regardless of the best-effort wake outcome; an undelivered remote wake remains separately tracked in wake-pending state and is retried under the same correlation" <code class="cite">bin/fm-backlog-handoff.sh:66-70</code>.</li>
+</ul>
+
+<h2 id="resume">Resuming after interruption</h2>
+<p><code>fm-backlog-handoff.sh --resume-pending</code> retries pending wakes and outboxes <code class="cite">bin/fm-backlog-handoff.sh:921-926</code>. Bootstrap runs it when <code>data/handoff/</code> exists and mutation is authorised <code class="cite">bin/fm-bootstrap.sh:854-857</code>. "Bootstrap retries pending outboxes and wakes when mutation is authorized and emits <code>SECONDMATE_HANDOFF:</code> for any outboxes that remain." <code class="cite">.agents/skills/secondmate-provisioning/SKILL.md:200</code></p>
+
+<h2 id="relay">Public relay commitments</h2>
+<p>A public relay reply is bound to its work by home and id. Moving the work out of this home therefore makes that binding stale. After a successful move the script warns, for example: "warning: &lt;key&gt; still owes a public reply bound to main/&lt;key&gt;; rebind it to secondmate:&lt;id&gt; …". It also warns when this home has an open public loop with nothing owed. "The move is not blocked: rebinding or rechain is a relay-side decision the caller makes." <code class="cite">bin/fm-backlog-handoff.sh:28-32</code> <code class="cite">bin/fm-backlog-handoff.sh:324-348</code></p>
+
+<h2 id="decisions">Decisions stay in the owning home</h2>
+<p>Handoff moves work items. The captain-hold policy separately requires calls to be registered where the originating work lives: "secondmate-owned work registers in that secondmate home's backlog, and a question already held anywhere is never re-registered as a second row" <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:25</code>. A secondmate's holds reach the captain through its <a href="captain-holds.html#parent">parent channel</a> and its bounded home summary (<a href="buckets.html#cross-home">buckets</a>).</p>
+<div class="callout unclear" id="held"><span class="callout-title">Not settled by the source: handing off a held item</span>
+<p>The classifier looks only at the section. A captain-held row in <code>## Queued</code> is therefore classified as movable <code class="cite">bin/fm-backlog-handoff.sh:961-974</code>. Nothing in the script refuses it, and nothing records whether the hold's parent-channel line should then come from the new home. The source does not say whether handing off a held item is intended, tolerated, or an oversight.</p></div>
+<div class="callout unclear" id="adapter"><span class="callout-title">Not settled by the source: non-markdown homes</span>
+<p>The handoff hard-codes <code>MAIN_BACKLOG="$DATA/backlog.md"</code> and <code>SUB_BACKLOG="$SUB_HOME/data/backlog.md"</code>, classifies keys with <code>awk</code> over those files, and runs <code>tasks-axi mv … --file "$MAIN_BACKLOG" --to "$SUB_BACKLOG"</code> <code class="cite">bin/fm-backlog-handoff.sh:86</code> <code class="cite">bin/fm-backlog-handoff.sh:949</code> <code class="cite">bin/fm-backlog-handoff.sh:1072</code>. A home whose adapter is Beads keeps no such file, so every key would classify as missing. The configuration document says only that handoff "delegates the item move to <code>tasks-axi mv</code>" <code class="cite">docs/configuration.md:117</code>. The read source does not settle whether handoff is meant to support non-markdown homes.</p></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

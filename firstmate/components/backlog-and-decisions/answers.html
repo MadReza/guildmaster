@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recording answers · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Backlog and decisions</p>
+<h1>Recording answers</h1>
+<p class="lede">A captain call is resolved only by writing down what the captain said. <code>answer</code> records those words in the task and then either closes the call or releases the gated work. Every channel that carries an answer, whether chat or a board, feeds one keyed intake that ends in that same <code>answer</code>.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Backlog and decisions</a>. Previous: <a href="captain-holds.html">Captain holds</a>.</p>
+
+<h2 id="rule">The rule</h2>
+<p>"Never close anything the captain owns without recording what he actually said: <code>bin/fm-captain-hold.sh answer</code> writes his exact words into the task and closes a question-shaped call, while <code>--release</code> frees a captain-gated work item to proceed." <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:30</code> An answer can also be evidence rather than words. That case is <a href="reconcile.html">reconcile close</a>, and "Never use <code>answer</code> for an evidence-only moot call" <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:46</code>.</p>
+
+<h2 id="answer">The <code>answer</code> subcommand</h2>
+<pre><code>fm-captain-hold.sh answer &lt;task-id&gt; --decision-file &lt;path&gt; [--release]</code></pre>
+<p class="evidence"><code class="cite">bin/fm-captain-hold.sh:25</code>. Implementation: <code class="cite">bin/fm-captain-hold.sh:997-1110</code>.</p>
+<ol>
+<li><strong>Load the words.</strong> The decision file must exist, be non-empty, and be at most 8192 bytes. Its SHA-256 is the <em>decision digest</em> <code class="cite">bin/fm-captain-hold.sh:322-332</code>.</li>
+<li><strong>Lock and read.</strong> It takes the per-task control lock and reads the row's state, <code>hold_kind</code>, and body.</li>
+<li><strong>Write the resolution record</strong> at the top of the body, beneath any leading hold-set stamp. The previous body is kept below it and archived through <code>--archive-body</code> <code class="cite">bin/fm-captain-hold.sh:910-941</code>.</li>
+<li><strong>Close.</strong> <code>--release</code> runs <code>tasks-axi unhold</code>. Otherwise it applies any retained artifact from a pending-close record, then runs <code>tasks-axi done</code> <code class="cite">bin/fm-captain-hold.sh:966-973</code>.</li>
+<li><strong>Normalise.</strong> It removes the stamp, which restores "resolution-first body ordering", verifies the record survived, publishes <code>resolved</code> on the parent channel, and retires any pending reconcile request. It prints <code>answered: &lt;id&gt;</code> or <code>released: &lt;id&gt;</code>.</li>
+</ol>
+<h3 id="record-format">The resolution record (Level 4)</h3>
+<pre><code>Resolution recorded by fm-captain-hold.
+Decision digest: &lt;sha256 of the decision text&gt;
+Resolution mode: answered | released | repaired | reconciled
+
+Captain decision:
+&lt;the decision text, verbatim&gt;</code></pre>
+<p class="evidence"><code class="cite">bin/fm-captain-hold.sh:503-511</code>. For <code>reconciled</code>, the label becomes <code>Reconciliation evidence:</code>. Records are prepended, "so the first match is the newest record" <code class="cite">bin/fm-captain-hold.sh:462-474</code>. Their count gives the parent-channel occurrence number and the <code>--identity</code> suffix.</p>
+
+<h3 id="branches">What <code>answer</code> does in each state</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Row state</th><th>Existing record</th><th>Outcome</th></tr></thead>
+<tbody>
+<tr><td>Open, captain-held (including a date-expired hold)</td><td>None, or a different digest</td><td>Writes a new record on top, then closes or releases. "A re-held task may record a new answer on top."</td></tr>
+<tr><td>Open, captain-held</td><td>Same digest</td><td>An interrupted close is finished. The mode must match: a <code>released</code> record needs <code>--release</code>, and an <code>answered</code> record forbids it. "a retry cannot silently flip a release into a close" <code class="cite">bin/fm-captain-hold.sh:1060-1082</code>.</td></tr>
+<tr><td>Done</td><td>Same digest, compatible mode</td><td>An idempotent replay. Prints <code>answered:</code>. <code>--release</code> is refused because it "cannot reopen a closed task" <code class="cite">bin/fm-captain-hold.sh:1023-1041</code>.</td></tr>
+<tr><td>Done</td><td>Different digest</td><td>Refused: "records a different captain decision".</td></tr>
+<tr><td>Done</td><td>None, but <code>hold_kind: captain</code> survives</td><td><strong>Repair.</strong> Writes a <code>repaired</code> record retroactively and checks the task stays closed. Prints <code>repaired:</code> <code class="cite">bin/fm-captain-hold.sh:1042-1057</code>.</td></tr>
+<tr><td>Done</td><td>None, never captain-held</td><td>Refused: "was never held for the captain; nothing to record an answer on".</td></tr>
+<tr><td>Open, not held</td><td>A <code>released</code> record, same digest, with <code>--release</code></td><td>A release replay. Anything else fails: "not held for the captain; hold it first or name the right task" <code class="cite">bin/fm-captain-hold.sh:1097-1109</code>.</td></tr>
+</tbody>
+</table></div>
+<p>The repair path exists because "tasks-axi keeps hold_kind through a close, so it is the surviving proof this really was the captain's item rather than ordinary finished work" <code class="cite">bin/fm-captain-hold.sh:1043-1045</code>. An ordinary finished task "cannot be dressed up as an answered captain call" <code class="cite">bin/fm-captain-hold.sh:66-70</code>.</p>
+<h3 id="expired">Expired deferrals stay answerable</h3>
+<p>"A hold that expired by date (<code>--until</code> in the past) is still answerable: the surviving hold annotations, not tasks-axi's live <code>held:</code> bit, prove the captain owned it." <code class="cite">bin/fm-captain-hold.sh:70-72</code></p>
+
+<h2 id="release">Release versus closure</h2>
+<p>The two close modes correspond to the two shapes a call can take. "it closes a question-shaped call, while <code>answer --release</code> frees a captain-gated work item to proceed without completing it" <code class="cite">docs/captain-hold-lifecycle.md:17</code>.</p>
+<div class="table-wrap"><table>
+<thead><tr><th></th><th>Close (default)</th><th>Release (<code>--release</code>)</th></tr></thead>
+<tbody>
+<tr><td>Shape</td><td>A question whose answer is the deliverable</td><td>Work waiting on the captain's go</td></tr>
+<tr><td><code>tasks-axi</code></td><td><code>done</code></td><td><code>unhold</code>: the row stays Queued or In flight</td></tr>
+<tr><td>Mode recorded</td><td><code>answered</code></td><td><code>released</code></td></tr>
+<tr><td>Afterwards</td><td>The call leaves Captain's Call. The row is Done.</td><td>The work can be dispatched, or merged. Cleanup closes it after landing.</td></tr>
+</tbody>
+</table></div>
+<p><strong>A merge approval is a release, not a close.</strong> "A merge approval uses that existing release path because approval permits the merge to proceed; cleanup closes the work only after it lands and records what shipped. Closing a held row at merge approval instead records completion before landing, so the backlog claims completion before the work actually ships." <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:31-32</code> The merge entrypoints enforce this. "a captain approval must be recorded as an <code>answer --release</code> before this entrypoint is invoked" <code class="cite">bin/fm-pr-merge.sh:69-72</code>. Both <code>fm-pr-merge.sh</code> and <code>fm-merge-local.sh</code> refuse a row that <code>open</code> reports as still held <code class="cite">bin/fm-merge-local.sh:118-130</code>. The away posture does not change this: "neither posture releases a captain hold" <code class="cite">bin/fm-pr-merge.sh:76-78</code>.</p>
+<p>When an answer changes what a task must build, the skill hands off to <code>AGENTS.md</code> section 7's Validate contract, which preserves "the captain's words in the brief" and steers the worker <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:33</code>.</p>
+
+<h2 id="intake">One keyed-answer intake</h2>
+<p>"'A keyed answer resolves its matching captain-held task' is a single capability, owned here and nowhere else." <code class="cite">bin/fm-captain-hold.sh:74-76</code></p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 920 420" role="img" aria-labelledby="bd-ans-t bd-ans-d">
+<title id="bd-ans-t">Answer channels feed one intake</title>
+<desc id="bd-ans-d">Chat through fm-send --resolve-key and a bound captured source through fm-procevent both pipe keyed lines into fm-captain-hold.sh answers. The captured source first reads its binding from state/decision-bindings. The intake refuses reconcile, resolves each key to a captain-held task, builds the decision text, and calls answer, which writes the record and runs done or unhold through tasks-axi. The supervisor can also call answer directly with a decision file.</desc>
+<defs><marker id="bd-ans-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">Answer channels</text>
+<g class="c4-container"><rect x="20" y="60" width="230" height="74" rx="8"/><text class="c4-label" x="135" y="86">Chat</text><text class="c4-tech" x="135" y="102">[fm-send --resolve-key]</text><text class="c4-desc" x="135" y="119">keys the status log no longer owns</text></g>
+<g class="c4-container"><rect x="20" y="170" width="230" height="74" rx="8"/><text class="c4-label" x="135" y="196">Captured source</text><text class="c4-tech" x="135" y="212">[fm-procevent + adapter answers]</text><text class="c4-desc" x="135" y="229">e.g. the Lavish Bearings board</text></g>
+<g class="c4-container"><rect x="20" y="300" width="230" height="74" rx="8"/><text class="c4-label" x="135" y="326">Supervisor, directly</text><text class="c4-tech" x="135" y="342">[answer --decision-file]</text><text class="c4-desc" x="135" y="359">the captain's words in a file</text></g>
+<g class="c4-component"><rect x="330" y="100" width="240" height="96" rx="8"/><text class="c4-label" x="450" y="128">answers</text><text class="c4-tech" x="450" y="144">[fm-captain-hold.sh · stdin]</text><text class="c4-desc" x="450" y="162">refuse reconcile · resolve key</text><text class="c4-desc" x="450" y="177">build decision text · skip loudly</text></g>
+<g class="c4-component"><rect x="660" y="100" width="240" height="96" rx="8"/><text class="c4-label" x="780" y="128">answer</text><text class="c4-tech" x="780" y="144">[fm-captain-hold.sh]</text><text class="c4-desc" x="780" y="162">record the words, then</text><text class="c4-desc" x="780" y="177">done or unhold</text></g>
+<g class="c4-datastore"><path d="M330,300 a120,9 0 0,0 240,0 a120,9 0 0,0 -240,0 v58 a120,9 0 0,0 240,0 v-58"/><text class="c4-label" x="450" y="330">state/decision-bindings/</text><text class="c4-desc" x="450" y="347">&lt;source-id&gt;.origin (opt-in)</text></g>
+<g class="c4-datastore"><path d="M660,300 a120,9 0 0,0 240,0 a120,9 0 0,0 -240,0 v58 a120,9 0 0,0 240,0 v-58"/><text class="c4-label" x="780" y="330">Backlog row</text><text class="c4-desc" x="780" y="347">via tasks-axi</text></g>
+<g class="c4-rel"><path d="M250,97 L328,125" marker-end="url(#bd-ans-arrow)"/><text class="c4-rel-label" x="290" y="95">keyed lines</text></g>
+<g class="c4-rel c4-rel-async"><path d="M250,205 L328,175" marker-end="url(#bd-ans-arrow)"/><text class="c4-rel-label" x="290" y="210">keyed lines</text></g>
+<g class="c4-rel"><path d="M200,244 L200,272 L400,272 L400,290" marker-end="url(#bd-ans-arrow)"/><text class="c4-rel-label" x="350" y="266">binding &lt;source&gt;?</text></g>
+<g class="c4-rel"><path d="M570,148 L658,148" marker-end="url(#bd-ans-arrow)"/><text class="c4-rel-label" x="614" y="141">per key</text></g>
+<g class="c4-rel"><path d="M250,337 L300,337 L300,240 L620,240 L620,180 L658,180" marker-end="url(#bd-ans-arrow)"/><text class="c4-rel-label" x="470" y="234">direct answer</text></g>
+<g class="c4-rel"><path d="M780,196 L780,289" marker-end="url(#bd-ans-arrow)"/><text class="c4-rel-label" x="780" y="262">update --archive-body · done | unhold</text></g>
+</svg>
+</div>
+<figcaption>A channel only turns what it received into keyed lines. "It must never map keys to tasks, build decision records, choose a close mode beyond what its card declared, or close anything itself." <code class="cite">bin/fm-captain-hold.sh:114-116</code></figcaption>
+</figure>
+<h3 id="answers-format">Input format and parsing</h3>
+<pre><code>fm-captain-hold.sh answers [&lt;legacy-origin&gt; | --any-origin] --source &lt;provenance&gt;
+# stdin, one per line:
+&lt;task-id&gt;\t&lt;answer&gt;\t&lt;label&gt;[\t&lt;mode&gt;]</code></pre>
+<p class="evidence"><code class="cite">bin/fm-captain-hold.sh:26</code> <code class="cite">bin/fm-captain-hold.sh:1207-1348</code></p>
+<ul>
+<li><strong>Key.</strong> "The key IS the task id - no identity arithmetic." It must match <code>[A-Za-z0-9._-]</code> and be at most 128 characters. A bad key is dropped silently. The answer and label are sanitised: control characters are stripped and the text is capped at 512 characters <code class="cite">bin/fm-captain-hold.sh:1199-1201</code> <code class="cite">bin/fm-captain-hold.sh:1240-1245</code>.</li>
+<li><strong>Reserved value.</strong> The exact answer <code>reconcile</code> is matched "before it reads the close mode, visibly refuses it, and never passes it to <code>answer</code>". It prints <code>refused: &lt;key&gt; (reconcile requests require a bound captured source)</code> <code class="cite">bin/fm-captain-hold.sh:96-100</code> <code class="cite">bin/fm-captain-hold.sh:1246-1250</code>.</li>
+<li><strong>Mode.</strong> An empty mode or <code>done</code> completes the call. <code>release</code> lifts the hold. "anything else is skipped" <code class="cite">bin/fm-captain-hold.sh:80-82</code>.</li>
+<li><strong>Decision text.</strong> This is a pure function of the inputs, "so the same answer delivered twice is idempotent rather than a conflicting decision" <code class="cite">bin/fm-captain-hold.sh:1182-1190</code>:
+<pre><code>Captain answered this call through &lt;source&gt;.
+Task: &lt;task-id&gt;
+Answer: &lt;answer&gt;
+Answer as shown to the captain: &lt;label&gt;</code></pre></li>
+<li><strong>Outcome per key.</strong> <code>closed: &lt;id&gt;</code>, or <code>skipped: &lt;id&gt; (&lt;reason&gt;)</code> when the key names no task, is not captain-held, or is already closed, or when the mode mismatches a replay. The run ends with <code>answers: closed=N skipped=M</code> and "exits nonzero when any key was skipped" <code class="cite">bin/fm-captain-hold.sh:82-87</code> <code class="cite">bin/fm-captain-hold.sh:1346-1347</code>.</li>
+<li><strong>Provenance.</strong> "<code>--source</code> is provenance text recorded in the durable decision, never a behavior switch: this command has no per-channel branch and no knowledge of chat, review decks, or any transport." <code class="cite">bin/fm-captain-hold.sh:87-89</code></li>
+</ul>
+<p>Each key finally runs <code>"$0" answer "$id" --decision-file "$tmp" [--release]</code>, "so every guard applies identically no matter which channel the answer arrived on" <code class="cite">bin/fm-captain-hold.sh:78-79</code> <code class="cite">bin/fm-captain-hold.sh:1333</code>.</p>
+
+<h3 id="chat">Channel 1: chat (<code>fm-send --resolve-key</code>)</h3>
+<p>When the supervisor answers a worker's keyed question in chat, <code>fm-send --resolve-key &lt;key&gt;</code> closes that key in the task's status log itself: "the captain-facing OPEN DECISIONS record closes at answer time and never depends on the busy worker writing a matching resolved line" <code class="cite">bin/fm-send.sh:154-160</code>. If the status log no longer owns the key, because it was already transferred to a captain-held task, fm-send resolves the key to that task instead. It tries the key as a task id first, then <code>&lt;task&gt;-decision-&lt;key&gt;</code>, and accepts only a row that is not Done and is <code>hold_kind: captain</code> <code class="cite">bin/fm-send.sh:565-584</code> <code class="cite">bin/fm-send.sh:639-647</code>. After the answer is delivered, it pipes <code>&lt;task-id&gt;\t&lt;answer&gt;\t</code> into <code>answers --source "a firstmate answer sent to &lt;task&gt;"</code> <code class="cite">bin/fm-send.sh:734-746</code>. "fm-send closes nothing itself" <code class="cite">bin/fm-send.sh:188-193</code>.</p>
+<p>If the key matches neither record, the send is refused and nothing is sent: "no open decision or blocker with that key … and no captain-held task … still open (already closed or mistyped)" <code class="cite">bin/fm-send.sh:646</code>. Answering a decision is main-owned while the captain is attended. The away posture relocates that guard to the supervision branch <code class="cite">bin/fm-send.sh:649-663</code>. The status-log side of this is documented under <a href="../communication/index.html">Communication</a>.</p>
+
+<h3 id="captured">Channel 2: captured sources (<code>fm-procevent</code>)</h3>
+<p>A process-event source, such as the Lavish board's answer poll, captures a result detached from its origin. For a bound source, the runner pipes the adapter's own <code>answers &lt;result-file&gt;</code> output into the intake with <code>--source "the captured result &lt;id&gt; sequence &lt;n&gt;"</code> <code class="cite">bin/fm-procevent.sh:435-445</code>. This is "silenced and best-effort … because this never acknowledges anything" <code class="cite">bin/fm-procevent.sh:430-434</code>. The runner "names no adapter, parses no result, and carries no decision rule" <code class="cite">docs/captain-hold-lifecycle.md:60</code>. Only built-in adapters may feed the intake: "Trusted external process-event adapters intentionally expose no answer operation and cannot feed this authority-bearing intake" <code class="cite">docs/captain-hold-lifecycle.md:61</code>. The Lavish adapter "reads only rows tagged <code>choice</code>, relays a card's declared close mode, and can never let freeform captain prose forge a task id or a mode" <code class="cite">docs/captain-hold-lifecycle.md:62</code>.</p>
+
+<h3 id="bindings">Source bindings</h3>
+<pre><code>fm-captain-hold.sh bind &lt;source-id&gt; [&lt;legacy-origin&gt; | --any-origin]
+fm-captain-hold.sh unbind &lt;source-id&gt;
+fm-captain-hold.sh binding &lt;source-id&gt;
+
+# state/decision-bindings/&lt;source-id&gt;.origin (mode 0600)
+schema=fm-decision-binding.v1
+origin=(any)</code></pre>
+<p class="evidence"><code class="cite">bin/fm-captain-hold.sh:28-30</code> <code class="cite">bin/fm-captain-hold.sh:1114-1180</code></p>
+<p>"a source with no binding feeds nothing, so this whole path is opt-in per source and an unbound source behaves as if it did not exist. <code>bind</code> deliberately does not require the source to exist yet, so a channel can be bound BEFORE it is armed." <code class="cite">bin/fm-captain-hold.sh:121-124</code> The board enforces that order: binding "ALWAYS precedes arm, so the board can never produce an answer that has nowhere to go" <code class="cite">bin/fm-bearings-board.sh:21-24</code>. A corrupted binding is "a hard error rather than a silent 'unbound': feeding nothing is the safe direction only when it is a deliberate choice, never when it is a corrupted record" <code class="cite">bin/fm-captain-hold.sh:1124-1127</code>. Retiring a source unbinds it <code class="cite">bin/fm-procevent.sh:2033</code>. The <code>(any)</code> marker cannot collide with a real id, because "Slug validation rejects parentheses" <code class="cite">bin/fm-captain-hold.sh:315-317</code>.</p>
+<p>An unbound source, or a key naming no captain-held task, "simply feed nothing: the answer is still captured and firstmate is still woken, and closing falls back to the direct command above" <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:37</code>.</p>
+
+<h2 id="retire">What an answer also retires</h2>
+<p>"A successful normal answer also retires any pending request, because an answered call has no remaining re-check obligation." <code class="cite">docs/captain-hold-lifecycle.md:95</code> <code class="cite">bin/fm-captain-hold.sh:1402-1410</code> When a pending-close record retained a PR or report for this row, the answer copies it into the row first, so the delivery still reaches Recently Landed (<a href="transitions.html#replay">replay</a>).</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

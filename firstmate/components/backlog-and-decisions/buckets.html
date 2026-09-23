@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hold buckets · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Backlog and decisions</p>
+<h1>Hold buckets</h1>
+<p class="lede">Every captain hold is sorted into exactly one presentation bucket: <code>live</code>, <code>blocked</code>, <code>dated</code>, or <code>aged</code>. Only <code>live</code> holds are waiting on the captain now. They appear on Captain's Call. The other three appear in Charted Next, with the reason they are waiting.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Backlog and decisions</a>. The snapshot and Bearings as a whole belong to <a href="../observability/index.html">Observability</a>.</p>
+
+<h2 id="why">What it is for</h2>
+<p>A decision list is only useful if every open decision is on it exactly once, and nothing on it is waiting on something other than the captain. Two rules make that true.</p>
+<ul>
+<li><strong>Structure only, never prose.</strong> The bucket is decided "only from structured fields - <code>hold_kind</code>, <code>state</code>, <code>hold_until</code>, <code>unresolved_blocker_ids</code>, and the machine-written hold-set timestamp. Hold reason and body prose are never matched, so no wording can hide, reveal, or reclassify a decision." <code class="cite">docs/captain-hold-lifecycle.md:125-126</code></li>
+<li><strong>Total and exclusive.</strong> "No captain hold can fall through them and none can match two, which is what keeps a hold from vanishing from every view." <code class="cite">docs/captain-hold-lifecycle.md:127-128</code></li>
+</ul>
+<p>A regression fixture tests the first rule directly. A hold whose reason says "DEFERRED by captain revisit later", but which carries no <code>--until</code>, stays <code>live</code>, "because only structured fields classify" <code class="cite">tests/fm-bearings-snapshot.test.sh:1150-1151</code> <code class="cite">tests/fm-bearings-snapshot.test.sh:1164</code>.</p>
+
+<h2 id="classifier">The classifier</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 900 380" role="img" aria-labelledby="bd-bk-t bd-bk-d">
+<title id="bd-bk-t">Hold bucket decision</title>
+<desc id="bd-bk-d">A row that is not a captain hold, or is Done, gets a null bucket. Otherwise: any unresolved blocker gives blocked; else a hold-until date still in the future gives dated; else an undated hold at least FM_SNAPSHOT_UNDATED_HOLD_AGE_DAYS old gives aged; else live. Only live is captain actionable and shows on Captain's Call; blocked, dated and aged render as Charted Next gates.</desc>
+<defs><marker id="bd-bk-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">hold_bucket</text>
+<g class="c4-component"><rect x="290" y="50" width="320" height="52" rx="8"/><text class="c4-label" x="450" y="72">captain hold, reason set,</text><text class="c4-desc" x="450" y="90">and not Done?</text></g>
+<g class="c4-component"><rect x="290" y="132" width="320" height="52" rx="8"/><text class="c4-label" x="450" y="163">any unresolved blocker?</text></g>
+<g class="c4-component"><rect x="290" y="214" width="320" height="52" rx="8"/><text class="c4-label" x="450" y="245">hold_until after today?</text></g>
+<g class="c4-component"><rect x="290" y="296" width="320" height="52" rx="8"/><text class="c4-label" x="450" y="318">undated, and age ≥ threshold</text><text class="c4-desc" x="450" y="336">(default 14 days)?</text></g>
+<g class="c4-container"><rect x="680" y="50" width="200" height="52" rx="8"/><text class="c4-label" x="780" y="72">null</text><text class="c4-desc" x="780" y="90">not a captain hold</text></g>
+<g class="c4-container"><rect x="680" y="132" width="200" height="52" rx="8"/><text class="c4-label" x="780" y="154">blocked</text><text class="c4-desc" x="780" y="172">Charted Next: blocked-by …</text></g>
+<g class="c4-container"><rect x="680" y="214" width="200" height="52" rx="8"/><text class="c4-label" x="780" y="236">dated</text><text class="c4-desc" x="780" y="254">Charted Next: until &lt;date&gt;</text></g>
+<g class="c4-container"><rect x="680" y="296" width="200" height="52" rx="8"/><text class="c4-label" x="780" y="318">aged</text><text class="c4-desc" x="780" y="336">Charted Next: held &lt;n&gt;d</text></g>
+<g class="c4-container"><rect x="20" y="296" width="200" height="52" rx="8"/><text class="c4-label" x="120" y="318">live</text><text class="c4-desc" x="120" y="336">Captain's Call</text></g>
+<g class="c4-rel"><path d="M610,76 L678,76" marker-end="url(#bd-bk-arrow)"/><text class="c4-rel-label" x="644" y="69">no</text></g>
+<g class="c4-rel"><path d="M610,158 L678,158" marker-end="url(#bd-bk-arrow)"/><text class="c4-rel-label" x="644" y="151">yes</text></g>
+<g class="c4-rel"><path d="M610,240 L678,240" marker-end="url(#bd-bk-arrow)"/><text class="c4-rel-label" x="644" y="233">yes</text></g>
+<g class="c4-rel"><path d="M610,322 L678,322" marker-end="url(#bd-bk-arrow)"/><text class="c4-rel-label" x="644" y="315">yes</text></g>
+<g class="c4-rel"><path d="M450,102 L450,130" marker-end="url(#bd-bk-arrow)"/><text class="c4-rel-label" x="470" y="120">yes</text></g>
+<g class="c4-rel"><path d="M450,184 L450,212" marker-end="url(#bd-bk-arrow)"/><text class="c4-rel-label" x="470" y="202">no</text></g>
+<g class="c4-rel"><path d="M450,266 L450,294" marker-end="url(#bd-bk-arrow)"/><text class="c4-rel-label" x="470" y="284">no</text></g>
+<g class="c4-rel"><path d="M290,322 L222,322" marker-end="url(#bd-bk-arrow)"/><text class="c4-rel-label" x="256" y="315">no</text></g>
+</svg>
+</div>
+<figcaption>The expression is <code class="cite">bin/fm-fleet-snapshot.sh:563-570</code>. <code>captain_actionable</code> means "waiting on the captain now", and it is exactly <code>hold_bucket == "live"</code> <code class="cite">bin/fm-fleet-snapshot.sh:40-41</code>.</figcaption>
+</figure>
+<dl class="defs">
+<dt>Unresolved blocker</dt><dd>A <code>blocked-by</code> id whose structured record is not Done, including an id missing from the backlog: "missing ids stay open" <code class="cite">bin/fm-fleet-snapshot.sh:26-27</code> <code class="cite">bin/fm-fleet-snapshot.sh:545-554</code>.</dd>
+<dt>After today</dt><dd>A <code>hold_until</code> string compared with the observation date. A date equal to today is due, matching <code>tasks-axi</code>'s "inactive on and after that date" <code class="cite">bin/fm-fleet-snapshot.sh:144-151</code>.</dd>
+<dt>Age</dt><dd><code>hold_age_days = days_between((.hold_set // .since); $now)</code>. It counts from the <a href="captain-holds.html#stamp">hold-set stamp</a>, falling back to <code>since</code> for older unstamped holds, as "floored elapsed days" <code class="cite">bin/fm-fleet-snapshot.sh:535</code> <code class="cite">bin/fm-fleet-snapshot.sh:562</code> <code class="cite">docs/captain-hold-lifecycle.md:127</code>.</dd>
+<dt>Threshold</dt><dd><code>FM_SNAPSHOT_UNDATED_HOLD_AGE_DAYS</code>, default 14. A value of 0 "ages every hold with a non-negative computed age" <code class="cite">bin/fm-fleet-snapshot.sh:207-211</code> <code class="cite">bin/fm-fleet-snapshot.sh:282-285</code>.</dd>
+</dl>
+<div class="callout"><span class="callout-title">Aging is a safety net, not a deferral</span>
+<p>"That aging is a projection safety net only. The durable deferral remains re-holding with <code>--until</code>." <code class="cite">docs/captain-hold-lifecycle.md:131-132</code> An aged hold is still an open captain call. <code>open</code> returns 0 for it, and teardown still retains its row. It has only left the default Captain's Call view.</p></div>
+
+<h2 id="placement">Where each bucket renders</h2>
+<p><code>bin/fm-bearings-snapshot.sh</code> "places each captain hold by its <code>hold_bucket</code> and inspects no prose of its own" <code class="cite">docs/captain-hold-lifecycle.md:135</code>.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Bucket</th><th>Default view</th><th>Gate note</th><th>With <code>--all-decisions</code></th></tr></thead>
+<tbody>
+<tr><td><code>live</code></td><td>Captain's Call</td><td>—</td><td>Captain's Call</td></tr>
+<tr><td><code>blocked</code></td><td>Charted Next gate, counted in <code>omitted[]</code></td><td><code>blocked-by a,b +N more</code>, capped at 70 characters</td><td>Moved to Captain's Call, gate dropped</td></tr>
+<tr><td><code>dated</code></td><td>Charted Next gate</td><td><code>until &lt;date&gt;</code></td><td>Captain's Call, gate dropped</td></tr>
+<tr><td><code>aged</code></td><td>Charted Next gate</td><td><code>held &lt;n&gt;d</code></td><td>Captain's Call, gate dropped</td></tr>
+</tbody>
+</table></div>
+<p class="evidence"><code class="cite">bin/fm-bearings-snapshot.sh:36-47</code> <code class="cite">bin/fm-bearings-snapshot.sh:380-403</code> <code class="cite">docs/captain-hold-lifecycle.md:136-138</code>. The bearings skill repeats the rule: "A <code>live</code> hold appears in Captain's Call; <code>blocked</code>, <code>dated</code>, and <code>aged</code> holds appear as disclosed Charted Next gates stating their structured reason" <code class="cite">.agents/skills/bearings/SKILL.md:52-53</code>.</p>
+<p>"An actively worked held task may also appear in Underway, which reports running work independently of those decision buckets." <code class="cite">docs/captain-hold-lifecycle.md:139</code> On the board, "A Captain's Call decision key is the captain-held TASK ID from <code>decisions_open</code>" <code class="cite">.agents/skills/bearings/SKILL.md:101</code>. That is how an answer on a card flows back through the <a href="answers.html#intake">keyed intake</a>.</p>
+
+<h2 id="hygiene">Card hygiene on the board</h2>
+<p>Before publishing, the board cross-checks every decision card "on exact identity and none on prose". It drops a card in three cases: when <code>open --distinguish-absent</code> returns 1, when the task id or its <code>pr_url</code> appears in the payload's own landed rows, or when a landed row carries the same artifact at an equal or newer version. It keeps a card on exit 2 or 3, "because a card wrongly shown is recoverable and a call wrongly hidden is not". Each dropped card is named on stderr as <code>dropped-landed-card:</code> <code class="cite">docs/captain-hold-lifecycle.md:101-115</code> <code class="cite">bin/fm-bearings-board.sh:49-55</code>.</p>
+
+<h2 id="cross-home">Secondmate holds in the parent's view</h2>
+<p>A secondmate home publishes a bounded summary. There, "an actionable captain hold [is classified] as <code>captain_decision</code> and preserves every captain hold in the bounded queued inventory of the owning home" <code class="cite">docs/captain-hold-lifecycle.md:133</code>. Summaries must declare the current hold-classifier schema, and "older summaries are rejected" <code class="cite">bin/fm-fleet-snapshot.sh:262-266</code>. Three limits are accepted deliberately <code class="cite">docs/captain-hold-lifecycle.md:141-147</code>:</p>
+<ul>
+<li>A remote or secondmate hold keeps the producer home's age and aging decision from capture time. The parent does not recompute it.</li>
+<li>"A rare concurrent answer-close and re-hold race can leave the newly re-held task without its age basis."</li>
+<li>Summaries are capped by <code>FM_SNAPSHOT_SECONDMATE_DECISIONS</code> and <code>FM_SNAPSHOT_SECONDMATE_QUEUED</code> (default 20 each) <code class="cite">bin/fm-fleet-snapshot.sh:162-163</code>. A deferred hold past those caps "is not exported, so it can be neither gated nor revealed".</li>
+</ul>
+
+<h2 id="adapter">Open question: non-markdown homes</h2>
+<div class="callout unclear"><span class="callout-title">Not settled by the source</span>
+<p>The snapshot computes buckets by parsing the markdown file <code>$DATA/backlog.md</code> directly with <code>jq</code>. When that file is absent it reports <code>present:false</code> with no records <code class="cite">bin/fm-fleet-snapshot.sh:134</code> <code class="cite">bin/fm-fleet-snapshot.sh:384-390</code>. It does not call <code>tasks-axi</code> for rows. A home on the Beads adapter keeps no such file, and the source read here does not show how its captain holds reach <code>decisions_open</code> and Captain's Call. It may be through a mechanism outside this area, or not at all.</p></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

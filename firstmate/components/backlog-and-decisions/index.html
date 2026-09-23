@@ -11,12 +11,278 @@
 <div class="layout">
 <nav id="site-nav" aria-label="Site"></nav>
 <main id="main">
-<article>
-<p class="breadcrumb">Components</p>
+<article class="wide">
+<p class="breadcrumb">Components › Backlog and decisions</p>
 <h1>Backlog and decisions</h1>
-<p class="lede">Will cover the durable work queue and every decision record: the <code>tasks-axi</code> backlog contract and automatic transitions, captain holds, keyed open decisions and their fold, ask-user authority, record divergence, and backlog handoff to secondmates.</p>
-<div class="callout unclear"><span class="callout-title">Stub</span>
-<p>This section is reserved and not yet written. A follow-up task fills it in under <a href="../../AUTHORING.md">the authoring contract</a>. Until then, the <a href="../../c4/containers.html">Level 2 containers page</a> is the entry point for this area.</p></div>
+<p class="lede">Firstmate keeps one durable queue of work items, and it holds every decision only the captain can make as an ordinary task in that queue. It never uses a separate decision type, and it never leaves a decision only in the conversation.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Where Firstmate hands the backlog format to the external <code>tasks-axi</code> tool, the page says so and quotes the help text of the installed <code>tasks-axi 0.2.5</code>. Firstmate's own floor is 0.2.4 (<code class="cite">bin/fm-tasks-axi-lib.sh:45</code>).</p>
+
+<h2 id="what">What this area does</h2>
+<p>The area has two jobs, and both use one record.</p>
+<ul>
+<li><strong>The work queue.</strong> "The configured <code>tasks-axi</code> backend is the durable queue; the tracked default is <code>data/backlog.md</code>. It tracks work items only, never agents; persistent secondmates never appear as backlog items." <code class="cite">AGENTS.md:534-535</code> Dispatch and cleanup move items through that queue for you (<a href="transitions.html">automatic transitions</a>). The supervisor files items, records decisions, and keeps notes current <code class="cite">AGENTS.md:540</code>.</li>
+<li><strong>Decisions held for the captain.</strong> "A decision is simply a task held for the captain: create the task with <code>bin/fm-tasks-axi.sh add</code> when needed, then always hold it through <code>bin/fm-captain-hold.sh hold &lt;id&gt; --reason "&lt;reason&gt;"</code>, with <code>--until &lt;date&gt;</code> when the captain defers it." <code class="cite">AGENTS.md:537</code></li>
+</ul>
+
+<h2 id="intent">Design intent</h2>
+<p>The sources state three principles directly. Every mechanism in this area follows from one of them.</p>
+<dl class="defs">
+<dt>One primitive for work and decisions</dt>
+<dd>"A decision is not a separate thing in this system: it is an ordinary backlog task held for the captain, and the task id is the identity every surface and channel uses." <code class="cite">docs/captain-hold-lifecycle.md:8</code> The script header repeats this: "There is no separate decision type." <code class="cite">bin/fm-captain-hold.sh:12-14</code> Older installs had a separate decision identity, <code>&lt;origin&gt;-decision-&lt;key&gt;</code>. That identity has collapsed into plain task ids and is now kept only for compatibility (<a href="captain-holds.html#legacy">legacy identities</a>). The policy prefers holding the work item a question gates, and creates a new row "only when no work item exists to hold" <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:20</code>.</dd>
+<dt>Durable rather than conversational</dt>
+<dd>A decision the fleet should remember goes into the backlog, not into chat: "When a main-side thread such as a pending captain decision or relay reminder is worth durable tracking, file it as its own work item and hold it through that wrapper." <code class="cite">AGENTS.md:538</code> Each mechanism downstream keeps an open call alive through things that would otherwise erase it. Cleanup reopens the row instead of closing it (<a href="transitions.html#retain">retain</a>). An interrupted cleanup replays from a record on disk (<a href="transitions.html#replay">replay</a>). A reconcile request is written to disk "so the obligation to re-check cannot be lost between the wake that carried the answer and the turn that acts on it" <code class="cite">docs/captain-hold-lifecycle.md:81</code>.</dd>
+<dt>Answered in the captain's own words</dt>
+<dd>"Never close anything the captain owns without recording what he actually said" <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:30</code>. <code>answer</code> takes a decision file, writes its digest and text into the task body under a <code>Captain decision:</code> label, and only then closes or releases the task <code class="cite">bin/fm-captain-hold.sh:56-62</code>. Anything that closes a call without the captain's words must say so. An evidence-backed reconciliation is recorded under a different label, <code>Reconciliation evidence:</code>, "so it can never read as the captain's words" <code class="cite">bin/fm-captain-hold.sh:106-108</code>.</dd>
+</dl>
+<p>A fourth rule runs through the scripts: <strong>scripts never read prose to guess at decisions.</strong> <code>fm-captain-hold.sh</code> "never reads report, visual-review, chat, or terminal prose to guess whether the captain owes an answer. The invoking agent decides what is genuinely waiting on the captain" <code class="cite">bin/fm-captain-hold.sh:5-8</code>. The presentation layer also buckets holds "only from structured fields … no wording can hide, reveal, or reclassify a decision" <code class="cite">docs/captain-hold-lifecycle.md:125-126</code>.</p>
+
+<h2 id="components">Components (C4 Level 3)</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1200 840" role="img" aria-labelledby="bd-cmp-t bd-cmp-d">
+<title id="bd-cmp-t">Backlog and decisions: components</title>
+<desc id="bd-cmp-d">Six components inside the area boundary: the fm-tasks-axi.sh wrapper, the fm-tasks-axi-lib.sh backend library, fm-backlog-handoff.sh, the fm-decision-hold.sh shim, fm-captain-hold.sh, and fm-backlog-transition-lib.sh. Outside the boundary: the captain, the supervisor agent, answer channels, lifecycle scripts, readers and guards, the external tasks-axi CLI, and three data stores (the home backlog, a secondmate backlog, and state records). Numbered arrows key into the interactions table.</desc>
+<defs><marker id="bd-cmp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">Backlog and decisions — Components (Level 3)</text>
+
+<g class="c4-person">
+<circle cx="150" cy="60" r="18"/>
+<rect x="60" y="78" width="180" height="70" rx="14"/>
+<text class="c4-label" x="150" y="106">Captain</text>
+<text class="c4-desc" x="150" y="126">Decides; words recorded</text>
+</g>
+<g class="c4-container">
+<rect x="300" y="64" width="340" height="86" rx="8"/>
+<text class="c4-label" x="470" y="90">Supervisor agent</text>
+<text class="c4-tech" x="470" y="106">[harness session · AGENTS.md §10]</text>
+<text class="c4-desc" x="470" y="123">Files work, holds calls, relays them,</text>
+<text class="c4-desc" x="470" y="138">records the captain's answers</text>
+</g>
+
+<g class="c4-boundary"><rect x="20" y="180" width="890" height="285" rx="10"/><text x="380" y="456">Backlog and decisions · this area</text></g>
+
+<g class="c4-component">
+<rect x="40" y="210" width="240" height="90" rx="8"/>
+<text class="c4-label" x="160" y="237">fm-tasks-axi.sh</text>
+<text class="c4-tech" x="160" y="253">[bash wrapper]</text>
+<text class="c4-desc" x="160" y="270">Routes every routine call to</text>
+<text class="c4-desc" x="160" y="285">THIS home's backlog</text>
+</g>
+<g class="c4-component">
+<rect x="320" y="210" width="260" height="90" rx="8"/>
+<text class="c4-label" x="450" y="237">fm-backlog-handoff.sh</text>
+<text class="c4-tech" x="450" y="253">[bash · with fm-backlog-receive.sh]</text>
+<text class="c4-desc" x="450" y="270">Moves Queued items into a</text>
+<text class="c4-desc" x="450" y="285">secondmate home's backlog</text>
+</g>
+<g class="c4-component">
+<rect x="620" y="210" width="260" height="90" rx="8"/>
+<text class="c4-label" x="750" y="237">fm-captain-hold.sh</text>
+<text class="c4-tech" x="750" y="253">[bash · 12 subcommands]</text>
+<text class="c4-desc" x="750" y="270">hold · answer(s) · reconcile ·</text>
+<text class="c4-desc" x="750" y="285">complete · verify · open · diverged</text>
+</g>
+<g class="c4-component">
+<rect x="40" y="340" width="240" height="90" rx="8"/>
+<text class="c4-label" x="160" y="367">fm-tasks-axi-lib.sh</text>
+<text class="c4-tech" x="160" y="383">[sourced bash library]</text>
+<text class="c4-desc" x="160" y="400">Backend precedence, manual</text>
+<text class="c4-desc" x="160" y="415">switch, version + feature probe</text>
+</g>
+<g class="c4-component">
+<rect x="360" y="340" width="220" height="90" rx="8"/>
+<text class="c4-label" x="470" y="367">fm-decision-hold.sh</text>
+<text class="c4-tech" x="470" y="383">[retired-surface shim]</text>
+<text class="c4-desc" x="470" y="400">Maps pre-collapse commands</text>
+<text class="c4-desc" x="470" y="415">onto fm-captain-hold.sh</text>
+</g>
+<g class="c4-component">
+<rect x="620" y="340" width="260" height="90" rx="8"/>
+<text class="c4-label" x="750" y="367">fm-backlog-transition-lib.sh</text>
+<text class="c4-tech" x="750" y="383">[sourced bash library]</text>
+<text class="c4-desc" x="750" y="400">Gate, addressing, start / done /</text>
+<text class="c4-desc" x="750" y="415">retain, pending-close replay</text>
+</g>
+
+<g class="c4-external">
+<rect x="40" y="500" width="240" height="80" rx="8"/>
+<text class="c4-label" x="160" y="527">tasks-axi</text>
+<text class="c4-tech" x="160" y="543">[external CLI · floor 0.2.4]</text>
+<text class="c4-desc" x="160" y="560">Owns the backlog format</text>
+</g>
+
+<g class="c4-datastore">
+<path d="M40,640 a120,9 0 0,0 240,0 a120,9 0 0,0 -240,0 v70 a120,9 0 0,0 240,0 v-70"/>
+<text class="c4-label" x="160" y="668">data/backlog.md</text>
+<text class="c4-tech" x="160" y="684">[+ data/done-archive.md]</text>
+<text class="c4-desc" x="160" y="700">The home's durable work queue</text>
+</g>
+<g class="c4-datastore">
+<path d="M320,640 a130,9 0 0,0 260,0 a130,9 0 0,0 -260,0 v70 a130,9 0 0,0 260,0 v-70"/>
+<text class="c4-label" x="450" y="668">Secondmate backlog</text>
+<text class="c4-tech" x="450" y="684">[&lt;home&gt;/data/backlog.md · outbox]</text>
+<text class="c4-desc" x="450" y="700">The receiving home's queue</text>
+</g>
+<g class="c4-datastore">
+<path d="M620,640 a130,9 0 0,0 260,0 a130,9 0 0,0 -260,0 v70 a130,9 0 0,0 260,0 v-70"/>
+<text class="c4-label" x="750" y="668">state/ records</text>
+<text class="c4-tech" x="750" y="684">[backlog-close · bindings · requests]</text>
+<text class="c4-desc" x="750" y="700">Crash replay and answer seams</text>
+</g>
+
+<g class="c4-container">
+<rect x="940" y="210" width="240" height="90" rx="8"/>
+<text class="c4-label" x="1060" y="237">Answer channels</text>
+<text class="c4-tech" x="1060" y="253">[fm-send --resolve-key · fm-procevent]</text>
+<text class="c4-desc" x="1060" y="270">Carry the captain's keyed</text>
+<text class="c4-desc" x="1060" y="285">answers into one intake</text>
+</g>
+<g class="c4-container">
+<rect x="940" y="340" width="240" height="90" rx="8"/>
+<text class="c4-label" x="1060" y="367">Lifecycle scripts</text>
+<text class="c4-tech" x="1060" y="383">[fm-spawn · fm-teardown · fm-bootstrap]</text>
+<text class="c4-desc" x="1060" y="400">Own the task record; fuse the</text>
+<text class="c4-desc" x="1060" y="415">backlog transition into it</text>
+</g>
+<g class="c4-container">
+<rect x="940" y="500" width="240" height="90" rx="8"/>
+<text class="c4-label" x="1060" y="527">Readers and guards</text>
+<text class="c4-tech" x="1060" y="543">[snapshot · Bearings · drain · watch · merge]</text>
+<text class="c4-desc" x="1060" y="560">Bucket holds, flag divergence,</text>
+<text class="c4-desc" x="1060" y="575">refuse merging held work</text>
+</g>
+
+<g class="c4-rel"><path d="M240,113 L298,113" marker-end="url(#bd-cmp-arrow)"/></g>
+<g class="c4-rel"><path d="M340,150 L190,208" marker-end="url(#bd-cmp-arrow)"/></g>
+<g class="c4-rel"><path d="M460,150 L452,208" marker-end="url(#bd-cmp-arrow)"/></g>
+<g class="c4-rel"><path d="M600,150 L715,208" marker-end="url(#bd-cmp-arrow)"/></g>
+<g class="c4-rel"><path d="M940,255 L882,255" marker-end="url(#bd-cmp-arrow)"/></g>
+<g class="c4-rel"><path d="M940,385 L882,385" marker-end="url(#bd-cmp-arrow)"/></g>
+<g class="c4-rel"><path d="M750,340 L750,302" marker-end="url(#bd-cmp-arrow)"/></g>
+<g class="c4-rel"><path d="M580,350 L640,302" marker-end="url(#bd-cmp-arrow)"/></g>
+<g class="c4-rel"><path d="M160,300 L160,338" marker-end="url(#bd-cmp-arrow)"/></g>
+<g class="c4-rel"><path d="M160,430 L160,498" marker-end="url(#bd-cmp-arrow)"/></g>
+<g class="c4-rel"><path d="M160,580 L160,629" marker-end="url(#bd-cmp-arrow)"/></g>
+<g class="c4-rel"><path d="M335,300 L335,629" marker-end="url(#bd-cmp-arrow)"/></g>
+<g class="c4-rel"><path d="M750,430 L750,629" marker-end="url(#bd-cmp-arrow)"/></g>
+<g class="c4-rel"><path d="M940,545 L915,545 L915,290 L882,290" marker-end="url(#bd-cmp-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M1000,590 L1000,748 L160,748 L160,721" marker-end="url(#bd-cmp-arrow)"/><text class="c4-rel-label" x="600" y="742">parses the markdown rows directly (read-only)</text></g>
+
+<g class="c4-rel-num"><circle cx="269" cy="113" r="9"/><text x="269" y="117">1</text></g>
+<g class="c4-rel-num"><circle cx="265" cy="179" r="9"/><text x="265" y="183">2</text></g>
+<g class="c4-rel-num"><circle cx="456" cy="179" r="9"/><text x="456" y="183">3</text></g>
+<g class="c4-rel-num"><circle cx="658" cy="179" r="9"/><text x="658" y="183">4</text></g>
+<g class="c4-rel-num"><circle cx="911" cy="244" r="9"/><text x="911" y="248">5</text></g>
+<g class="c4-rel-num"><circle cx="911" cy="398" r="9"/><text x="911" y="402">6</text></g>
+<g class="c4-rel-num"><circle cx="766" cy="321" r="9"/><text x="766" y="325">7</text></g>
+<g class="c4-rel-num"><circle cx="610" cy="326" r="9"/><text x="610" y="330">8</text></g>
+<g class="c4-rel-num"><circle cx="176" cy="319" r="9"/><text x="176" y="323">9</text></g>
+<g class="c4-rel-num"><circle cx="176" cy="484" r="9"/><text x="176" y="488">10</text></g>
+<g class="c4-rel-num"><circle cx="176" cy="605" r="9"/><text x="176" y="609">11</text></g>
+<g class="c4-rel-num"><circle cx="335" cy="560" r="9"/><text x="335" y="564">12</text></g>
+<g class="c4-rel-num"><circle cx="750" cy="560" r="9"/><text x="750" y="564">13</text></g>
+<g class="c4-rel-num"><circle cx="927" cy="470" r="9"/><text x="927" y="474">14</text></g>
+<g class="c4-rel-num"><circle cx="1000" cy="660" r="9"/><text x="1000" y="664">15</text></g>
+
+<g class="c4-legend">
+<rect class="c4-legend-frame" x="20" y="776" width="1160" height="46" rx="6"/>
+<text class="c4-legend-heading" x="32" y="804">Legend</text>
+<g class="c4-person"><rect x="100" y="791" width="30" height="16" rx="7"/></g><text x="138" y="804">Person</text>
+<g class="c4-container"><rect x="200" y="791" width="30" height="16" rx="3"/></g><text x="238" y="804">Container</text>
+<g class="c4-component"><rect x="320" y="791" width="30" height="16" rx="3"/></g><text x="358" y="804">Component</text>
+<g class="c4-datastore"><path d="M450,794 a15,3 0 0,0 30,0 a15,3 0 0,0 -30,0 v10 a15,3 0 0,0 30,0 v-10"/></g><text x="488" y="804">Data store</text>
+<g class="c4-external"><rect x="580" y="791" width="30" height="16" rx="3"/></g><text x="618" y="804">External system</text>
+<g class="c4-rel"><path d="M740,799 L772,799"/></g><text x="780" y="804">Calls / writes</text>
+<g class="c4-rel c4-rel-async"><path d="M890,799 L922,799"/></g><text x="930" y="804">Read-only projection</text>
+</g>
+</svg>
+</div>
+<figcaption>Level 3 inside one operational home. Numbers key into the <a href="#interactions">interactions table</a>. For clarity only the backend library is drawn calling <code>tasks-axi</code>. In fact every component that reads or writes a backlog row reaches <code>tasks-axi</code>: the wrapper, the transition library, <code>fm-captain-hold.sh</code>, and the handoff.</figcaption>
+</figure>
+
+<h3 id="interactions">Interactions</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>#</th><th>From → to</th><th>What happens</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Captain → supervisor</td><td>The captain answers in chat or on the Bearings board. The supervisor relays each call as a decision, "do not use the word hold in captain chat".</td><td><code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:63</code></td></tr>
+<tr><td>2</td><td>Supervisor → wrapper</td><td>Every routine backlog read or mutation: <code>add</code>, <code>show</code>, <code>ready</code>, <code>update</code>, <code>block</code>, and so on.</td><td><code class="cite">bin/fm-tasks-axi.sh:7-9</code> <code class="cite">AGENTS.md:544</code></td></tr>
+<tr><td>3</td><td>Supervisor → handoff</td><td>Routes in-scope Queued items to a secondmate. The supervisor judges the scope; the script validates and moves.</td><td><code class="cite">bin/fm-backlog-handoff.sh:8-11</code></td></tr>
+<tr><td>4</td><td>Supervisor → captain-hold</td><td><code>hold</code>, <code>answer</code>, <code>complete</code>, and the <code>reconcile</code> outcomes.</td><td><code class="cite">AGENTS.md:537</code> <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:57-65</code></td></tr>
+<tr><td>5</td><td>Channels → captain-hold</td><td>Keyed <code>&lt;task-id&gt;\t&lt;answer&gt;\t&lt;label&gt;[\t&lt;mode&gt;]</code> lines on stdin to <code>answers</code>. Board reconcile rows go to <code>reconcile-requests</code>.</td><td><code class="cite">bin/fm-send.sh:734-746</code> <code class="cite">bin/fm-procevent.sh:435-458</code></td></tr>
+<tr><td>6</td><td>Lifecycle → transition library</td><td>Spawn fuses <code>start</code> into publishing the task record. Teardown fuses <code>done</code> or <code>retain</code> into removing it. Bootstrap replays a crash.</td><td><code class="cite">bin/fm-backlog-transition-lib.sh:7-19</code></td></tr>
+<tr><td>7</td><td>Teardown → captain-hold <code>open</code></td><td>Before the automatic close, teardown asks whether the row is still an open captain call: 0 means retain, 1 means close, and 2 means refuse.</td><td><code class="cite">bin/fm-teardown.sh:545-562</code></td></tr>
+<tr><td>8</td><td>Shim → captain-hold</td><td>The retired <code>fm-decision-hold.sh</code> commands map onto the collapsed surface, for one release.</td><td><code class="cite">bin/fm-decision-hold.sh:2-28</code></td></tr>
+<tr><td>9</td><td>Wrapper → backend library</td><td>Resolves the addressing and the backend. Refuses on a caller <code>--file</code>, an unresolvable data directory, or a symlinked backlog.</td><td><code class="cite">bin/fm-tasks-axi.sh:22-44</code></td></tr>
+<tr><td>10</td><td>Components → <code>tasks-axi</code></td><td>Runs from the data directory's parent, with <code>--file &lt;data&gt;/backlog.md</code> only on the markdown adapter.</td><td><code class="cite">bin/fm-backlog-transition-lib.sh:30-39</code></td></tr>
+<tr><td>11</td><td><code>tasks-axi</code> → backlog</td><td>Writes the file by renaming a temp file over the target.</td><td><code class="cite">docs/configuration.md:129</code></td></tr>
+<tr><td>12</td><td>Handoff → secondmate backlog</td><td>One atomic <code>tasks-axi mv &lt;id&gt;... --to</code>. On a remote route the move goes into an outbox first.</td><td><code class="cite">bin/fm-backlog-handoff.sh:1072</code> <code class="cite">bin/fm-backlog-handoff.sh:50-52</code></td></tr>
+<tr><td>13</td><td>Transitions and holds → state</td><td><code>state/&lt;id&gt;.backlog-close</code>, <code>state/decision-bindings/</code>, and <code>state/reconcile-requests/</code>.</td><td><code class="cite">AGENTS.md:113</code> <code class="cite">AGENTS.md:135-136</code></td></tr>
+<tr><td>14</td><td>Readers → captain-hold</td><td>The board and the merge scripts ask <code>open</code>. The wake drain asks <code>diverged</code>. The watcher asks <code>open --identity</code>.</td><td><code class="cite">bin/fm-bearings-board.sh:281</code> <code class="cite">bin/fm-pr-merge.sh:878</code> <code class="cite">bin/fm-wake-drain.sh:516</code> <code class="cite">bin/fm-watch.sh:1545</code></td></tr>
+<tr><td>15</td><td>Snapshot → backlog file</td><td><code>fm-fleet-snapshot.sh</code> parses <code>data/backlog.md</code> itself, never mutating it, and assigns hold buckets.</td><td><code class="cite">bin/fm-fleet-snapshot.sh:17-18</code> <code class="cite">bin/fm-fleet-snapshot.sh:384-393</code></td></tr>
+</tbody>
+</table></div>
+
+<h2 id="catalogue">Component catalogue</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Component</th><th>Responsibility</th><th>Reads / writes</th><th>Page</th></tr></thead>
+<tbody>
+<tr><td><code>bin/fm-tasks-axi.sh</code></td><td>Runs <code>tasks-axi</code> against this home's backlog from any working directory. It exists because a bare <code>tasks-axi</code> run from the code root "forks the queue whenever the home lives elsewhere".</td><td>This home's backlog, through <code>tasks-axi</code>.</td><td><a href="backlog.html">The work queue</a></td></tr>
+<tr><td><code>bin/fm-tasks-axi-lib.sh</code></td><td>Backend precedence, the <code>config/backlog-backend</code> manual switch, and the compatibility probe (version floor plus two feature probes), with its verdict memoised.</td><td><code>.tasks.toml</code>, <code>~/.tasks-axi/config.toml</code>, <code>config/backlog-backend</code>.</td><td><a href="backends.html">Backends</a></td></tr>
+<tr><td><code>bin/fm-backlog-transition-lib.sh</code></td><td>The pairing invariant between the task record and its row, the single gate, addressing, bounded <code>tasks-axi</code> calls, and the pending-close record with its replay.</td><td>Backlog rows; <code>state/&lt;id&gt;.meta</code>; <code>state/&lt;id&gt;.backlog-close</code>.</td><td><a href="transitions.html">Automatic transitions</a></td></tr>
+<tr><td><code>bin/fm-captain-hold.sh</code></td><td>Every mechanical step of a captain call: creation, the recorded answer, the keyed-answer intake, source bindings, reconcile, the completion gate, the open predicate, and the divergence report.</td><td>Backlog rows and bodies; task metadata; status logs (read, plus transfer appends); <code>state/decision-bindings/</code>; <code>state/reconcile-requests/</code>; the parent channel.</td><td><a href="captain-holds.html">Captain holds</a>, <a href="answers.html">Answers</a>, <a href="reconcile.html">Reconcile</a>, <a href="completion-gate.html">Completion gate</a>, <a href="divergence.html">Divergence</a></td></tr>
+<tr><td><code>bin/fm-decision-hold.sh</code></td><td>A transitional shim over the retired decision commands. It "will be removed in the release after the collapse lands".</td><td>Through <code>fm-captain-hold.sh</code> only.</td><td><a href="captain-holds.html#legacy">Legacy identities</a></td></tr>
+<tr><td><code>bin/fm-backlog-handoff.sh</code>, <code>bin/fm-backlog-receive.sh</code></td><td>Moves already-judged Queued items into a secondmate's own backlog, local or remote, and wakes the receiver.</td><td>The main and secondmate backlogs; the registry; the outbox; the wake-pending marker.</td><td><a href="handoff.html">Cross-home handoff</a></td></tr>
+</tbody>
+</table></div>
+<p class="evidence">Evidence: <code class="cite">bin/fm-tasks-axi.sh:17-20</code> <code class="cite">bin/fm-tasks-axi-lib.sh:1-43</code> <code class="cite">bin/fm-backlog-transition-lib.sh:1-57</code> <code class="cite">bin/fm-captain-hold.sh:2-10</code> <code class="cite">bin/fm-decision-hold.sh:7-8</code> <code class="cite">bin/fm-backlog-handoff.sh:2-6</code>.</p>
+
+<h2 id="pages">Pages in this area</h2>
+<ul class="cards">
+<li><a href="backlog.html"><strong>The work queue</strong><span>Rows, states, dependencies, date gates, retention, addressing</span></a></li>
+<li><a href="backends.html"><strong>Backends and manual mode</strong><span>tasks-axi adapters, the manual alternative, the gate</span></a></li>
+<li><a href="transitions.html"><strong>Automatic transitions</strong><span>Dispatch and teardown move rows, and refuse rather than claim success</span></a></li>
+<li><a href="captain-holds.html"><strong>Captain holds</strong><span>A decision is a held task: creation, stamp, deferral, lifecycle</span></a></li>
+<li><a href="answers.html"><strong>Recording answers</strong><span>answer, release vs closure, the one keyed-answer intake</span></a></li>
+<li><a href="reconcile.html"><strong>Reconcile requests</strong><span>Re-check reality: close with evidence, or note and keep</span></a></li>
+<li><a href="completion-gate.html"><strong>Completion gate</strong><span>Investigations and reviews may not finish with a call unheld</span></a></li>
+<li><a href="divergence.html"><strong>Record divergence</strong><span>The status log says resolved; the backlog says still held</span></a></li>
+<li><a href="buckets.html"><strong>Hold buckets</strong><span>live, blocked, dated, aged: Captain's Call vs Charted Next</span></a></li>
+<li><a href="handoff.html"><strong>Cross-home handoff</strong><span>Moving work into a secondmate's own backlog</span></a></li>
+<li><a href="walkthrough.html"><strong>End-to-end walkthrough</strong><span>One gated ship task from filing to landing</span></a></li>
+</ul>
+
+<h2 id="guarantees">What the area guarantees, and what it refuses</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Guarantee</th><th>How it fails</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>Outside the teardown crash window, a task record exists exactly when its row is In flight.</td><td>Spawn and teardown refuse, or exit non-zero with a recorded pending close, rather than report success.</td><td><code class="cite">bin/fm-backlog-transition-lib.sh:7-13</code></td></tr>
+<tr><td>Cleanup never closes a captain call.</td><td>If the hold cannot be read, teardown refuses before any destructive step. <code>--force</code> does not lift this.</td><td><code class="cite">bin/fm-teardown.sh:30-43</code></td></tr>
+<tr><td>Only the captain's words, or recorded evidence, close a call.</td><td><code>answer</code> requires a decision file. <code>reconcile close</code> requires an evidence file and a pending board request.</td><td><code class="cite">docs/captain-hold-lifecycle.md:97</code></td></tr>
+<tr><td>Every channel resolves answers through one intake.</td><td>Unknown, unheld, closed, or reconcile-valued keys are reported as <code>skipped:</code> or <code>refused:</code>, and the command exits non-zero.</td><td><code class="cite">bin/fm-captain-hold.sh:74-89</code></td></tr>
+<tr><td>Each captain hold lands in exactly one presentation bucket.</td><td>The buckets are total and exclusive, and computed from structured fields only.</td><td><code class="cite">docs/captain-hold-lifecycle.md:127-128</code></td></tr>
+<tr><td>Contradictory records are surfaced, never auto-fixed.</td><td><code>diverged</code> "closes NOTHING".</td><td><code class="cite">bin/fm-captain-hold.sh:1741-1746</code></td></tr>
+<tr><td>A handoff moves either every selected item or none.</td><td>One atomic <code>tasks-axi mv</code>. Any key missing, In flight, or Done aborts the whole handoff.</td><td><code class="cite">bin/fm-backlog-handoff.sh:953-996</code></td></tr>
+</tbody>
+</table></div>
+
+<h2 id="neighbours">Where this area touches others</h2>
+<ul>
+<li><a href="../communication/index.html">Communication</a> owns the status log, keyed <code>needs-decision</code> lines, the OPEN DECISIONS fold, <code>fm-send</code>, and the parent channel. This area relies on the fold's closing verbs (<a href="divergence.html">divergence</a>) and publishes hold lines on the parent channel (<a href="captain-holds.html#parent">parent channel</a>).</li>
+<li><a href="../supervision/index.html">Supervision</a> owns the wake drain that prints RECORD DIVERGENCE, and the watcher whose stale alarm is bounded by <code>open --identity</code>.</li>
+<li><a href="../crew/index.html">Crew</a> owns <code>fm-spawn.sh</code> and <code>fm-teardown.sh</code>. This area documents only the backlog transition fused into them.</li>
+<li><a href="../delivery/index.html">Delivery</a> owns merges. The merge entrypoints refuse a still-held task (<a href="answers.html#release">release</a>), and <code>ask-user-authority</code> decides which findings reach the captain at all.</li>
+<li><a href="../observability/index.html">Observability</a> owns the fleet snapshot and Bearings. This area documents only how holds are bucketed (<a href="buckets.html">hold buckets</a>).</li>
+<li><a href="../persistence/index.html">Persistence</a> owns the operational home layout (<code>data/</code>, <code>state/</code>, <code>config/</code>) and the lock primitives used here.</li>
+<li><a href="../remote/index.html">Remote</a> owns remote secondmate homes. The remote outbox route is summarised in <a href="handoff.html#remote">handoff</a>.</li>
+</ul>
+
+<h2 id="open">Open questions</h2>
+<p>These places are where the source does not settle behaviour. Each is detailed on its page.</p>
+<ul>
+<li>How a home on a non-markdown adapter (Beads) feeds the fleet snapshot, which parses <code>data/backlog.md</code> directly (<a href="buckets.html#adapter">buckets</a>).</li>
+<li>Whether handoff works at all on a non-markdown home, since it reads and moves <code>data/backlog.md</code> by path (<a href="handoff.html#adapter">handoff</a>).</li>
+<li>Whether a captain-held Queued item may be handed off. The classifier looks only at the section (<a href="handoff.html#held">handoff</a>).</li>
+</ul>
 </article>
 </main>
 </div>

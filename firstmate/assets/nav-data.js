@@ -110,7 +110,18 @@ window.FM_NAV = [
   // end delivery
 
   // begin backlog-and-decisions
-  { section: "backlog-and-decisions", title: "Backlog and decisions", href: "components/backlog-and-decisions/index.html", stub: true },
+  { section: "backlog-and-decisions", title: "Backlog and decisions", href: "components/backlog-and-decisions/index.html" },
+  { section: "backlog-and-decisions", title: "The work queue", href: "components/backlog-and-decisions/backlog.html" },
+  { section: "backlog-and-decisions", title: "Backends and manual mode", href: "components/backlog-and-decisions/backends.html" },
+  { section: "backlog-and-decisions", title: "Automatic transitions", href: "components/backlog-and-decisions/transitions.html" },
+  { section: "backlog-and-decisions", title: "Captain holds", href: "components/backlog-and-decisions/captain-holds.html" },
+  { section: "backlog-and-decisions", title: "Recording answers", href: "components/backlog-and-decisions/answers.html" },
+  { section: "backlog-and-decisions", title: "Reconcile requests", href: "components/backlog-and-decisions/reconcile.html" },
+  { section: "backlog-and-decisions", title: "Completion gate", href: "components/backlog-and-decisions/completion-gate.html" },
+  { section: "backlog-and-decisions", title: "Record divergence", href: "components/backlog-and-decisions/divergence.html" },
+  { section: "backlog-and-decisions", title: "Hold buckets", href: "components/backlog-and-decisions/buckets.html" },
+  { section: "backlog-and-decisions", title: "Cross-home handoff", href: "components/backlog-and-decisions/handoff.html" },
+  { section: "backlog-and-decisions", title: "End-to-end walkthrough", href: "components/backlog-and-decisions/walkthrough.html" },
   // end backlog-and-decisions
 
   // begin observability

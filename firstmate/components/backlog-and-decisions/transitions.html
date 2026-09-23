@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Automatic transitions · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Backlog and decisions</p>
+<h1>Automatic transitions</h1>
+<p class="lede">Dispatch and cleanup move the backlog row themselves, in the same process and under the same lock as the task record they create or remove. If the move does not land, they refuse or fail loudly rather than report success.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Backlog and decisions</a>. The rest of <code>fm-spawn.sh</code> and <code>fm-teardown.sh</code> belongs to <a href="../crew/index.html">Crew</a>.</p>
+
+<h2 id="invariant">The invariant</h2>
+<blockquote><p>"In ordinary successful lifecycle state, <code>state/&lt;id&gt;.meta</code> exists &lt;=&gt; this home's backlog row for &lt;id&gt; is In flight; the one teardown crash window is represented by <code>state/&lt;id&gt;.backlog-close</code>. The script performing the mechanical record change owns the paired backlog transition and runs it in the same process, under the per-task meta lock it already holds, before it reports success. Nothing else - not a later agent turn, not a printed reminder - is load-bearing for the pairing."</p></blockquote>
+<p class="evidence"><code class="cite">bin/fm-backlog-transition-lib.sh:7-13</code></p>
+<div class="table-wrap"><table>
+<thead><tr><th>Script</th><th>Record change</th><th>Fused transition</th></tr></thead>
+<tbody>
+<tr><td><code>bin/fm-spawn.sh</code></td><td>Publishes <code>state/&lt;id&gt;.meta</code></td><td><code>tasks-axi start</code></td></tr>
+<tr><td><code>bin/fm-teardown.sh</code></td><td>Removes <code>state/&lt;id&gt;.meta</code></td><td><code>tasks-axi done</code>, or <code>tasks-axi reopen</code> with the deliverable recorded when the row is still an open captain call</td></tr>
+<tr><td><code>bin/fm-bootstrap.sh</code></td><td>None of its own</td><td>"replays whatever a crash left behind, THIS HOME ONLY"</td></tr>
+</tbody>
+</table></div>
+<p class="evidence"><code class="cite">bin/fm-backlog-transition-lib.sh:14-21</code>. The fleet snapshot's classifier and <code>fm-secondmate-reconcile.sh</code>'s cross-home nudge "stay defense in depth, not the primary mechanism".</p>
+
+<h2 id="why-refuse">Why they refuse rather than report success</h2>
+<p><code>AGENTS.md</code> states the contract: "When the automatic transition gate applies, dispatch and completion move the item themselves - <code>bin/fm-spawn.sh</code> and <code>bin/fm-teardown.sh</code> own those transitions and refuse rather than report success without them - so what remains yours is filing the item before dispatch, recording decisions, and keeping notes current" <code class="cite">AGENTS.md:540</code>. The reasoning appears in three places.</p>
+<ul>
+<li><strong>A reminder is not a mechanism.</strong> Before the fusion, the backlog could fall out of step whenever an agent forgot the separate edit. Now "the ordinary successful path cannot leave the backlog and live task set out of sync" <code class="cite">docs/configuration.md:106</code>. Teardown's own comment reads: "Closing the backlog item is this script's own last act on the record, not a printed instruction for a later turn" <code class="cite">bin/fm-teardown.sh:1539-1542</code>.</li>
+<li><strong>A refusal early is free; a refusal late strands things.</strong> Spawn proves the row can move "BEFORE any endpoint, worktree, or record exists: a refusal here costs nothing to unwind, while the same refusal after publication would strand a live pane" <code class="cite">bin/fm-spawn.sh:3100-3103</code>.</li>
+<li><strong>An exit code is not proof.</strong> After an interrupted spawn, the exit path re-reads the row, "because the commit's own exit status has been observed to agree with a row that did not actually move (fm-yi4j evidence, 2026-09-05)". It then reports "exactly what was verified or attempted - never intent phrased as outcome" <code class="cite">bin/fm-spawn.sh:4531-4537</code>.</li>
+</ul>
+
+<h2 id="dispatch">Dispatch: <code>fm-spawn.sh</code></h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 920 540" role="img" aria-labelledby="bd-disp-t bd-disp-d">
+<title id="bd-disp-t">Dispatch sequence: the fused In-flight transition</title>
+<desc id="bd-disp-d">The supervisor runs fm-spawn. Spawn asks the transition gate, probes the row through tasks-axi, and refuses unless the row is queued or in flight with no hold and no blocker, and no pending backlog-close record exists. It takes the meta lock, publishes the task record, creates the endpoint and delivers the launch, then commits tasks-axi start as the final fallible step, bounded at 30 seconds with one retry. If the commit fails, it rolls the record back.</desc>
+<defs><marker id="bd-disp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">Dispatch sequence</text>
+<g class="c4-container"><rect x="20" y="46" width="140" height="44" rx="8"/><text class="c4-label" x="90" y="73">Supervisor</text></g>
+<g class="c4-component"><rect x="210" y="46" width="140" height="44" rx="8"/><text class="c4-label" x="280" y="73">fm-spawn.sh</text></g>
+<g class="c4-component"><rect x="390" y="46" width="160" height="44" rx="8"/><text class="c4-label" x="470" y="66">transition lib</text><text class="c4-desc" x="470" y="82">gate · probe · dispatch</text></g>
+<g class="c4-external"><rect x="590" y="46" width="140" height="44" rx="8"/><text class="c4-label" x="660" y="73">tasks-axi</text></g>
+<g class="c4-datastore"><path d="M760,52 a70,7 0 0,0 140,0 a70,7 0 0,0 -140,0 v30 a70,7 0 0,0 140,0 v-30"/><text class="c4-label" x="830" y="76">state/&lt;id&gt;.meta</text></g>
+<g class="c4-rel c4-rel-async"><path d="M90,90 L90,520"/></g>
+<g class="c4-rel c4-rel-async"><path d="M280,90 L280,520"/></g>
+<g class="c4-rel c4-rel-async"><path d="M470,90 L470,520"/></g>
+<g class="c4-rel c4-rel-async"><path d="M660,90 L660,520"/></g>
+<g class="c4-rel c4-rel-async"><path d="M830,90 L830,520"/></g>
+<g class="c4-rel"><path d="M90,120 L278,120" marker-end="url(#bd-disp-arrow)"/><text class="c4-rel-label" x="185" y="113">fm-spawn.sh &lt;id&gt; …</text></g>
+<g class="c4-rel"><path d="M280,155 L468,155" marker-end="url(#bd-disp-arrow)"/><text class="c4-rel-label" x="375" y="148">transition applies?</text></g>
+<g class="c4-rel"><path d="M470,190 L658,190" marker-end="url(#bd-disp-arrow)"/><text class="c4-rel-label" x="565" y="183">show &lt;id&gt; (row probe)</text></g>
+<g class="c4-rel c4-rel-async"><path d="M660,222 L282,222" marker-end="url(#bd-disp-arrow)"/><text class="c4-rel-label" x="470" y="215">"queued no no" · else refuse, nothing created</text></g>
+<g class="c4-rel"><path d="M280,262 L828,262" marker-end="url(#bd-disp-arrow)"/><text class="c4-rel-label" x="555" y="255">refuse if &lt;id&gt;.backlog-close exists · take meta lock · publish record</text></g>
+<g class="c4-rel"><path d="M280,300 L318,300 L318,322 L284,322" marker-end="url(#bd-disp-arrow)"/><text class="c4-rel-label" x="420" y="315">create endpoint, deliver launch (unwindable)</text></g>
+<g class="c4-rel"><path d="M280,362 L468,362" marker-end="url(#bd-disp-arrow)"/><text class="c4-rel-label" x="375" y="355">dispatch transition</text></g>
+<g class="c4-rel"><path d="M470,398 L658,398" marker-end="url(#bd-disp-arrow)"/><text class="c4-rel-label" x="565" y="391">start &lt;id&gt; (≤ 30 s, one retry)</text></g>
+<g class="c4-rel c4-rel-async"><path d="M280,448 L828,448" marker-end="url(#bd-disp-arrow)"/><text class="c4-rel-label" x="555" y="441">on failure: remove record + busy state, print hand cleanup</text></g>
+<g class="c4-rel c4-rel-async"><path d="M280,488 L92,488" marker-end="url(#bd-disp-arrow)"/><text class="c4-rel-label" x="185" y="481">success only after start</text></g>
+</svg>
+</div>
+<figcaption>Solid arrows are calls. Dashed arrows are returns or failure paths. The <code>start</code> commit is deliberately the last fallible step, "so every earlier launch-delivery failure remains unwindable" <code class="cite">bin/fm-spawn.sh:4521-4529</code>.</figcaption>
+</figure>
+<ol>
+<li><strong>Preflight, before anything exists.</strong> If the gate applies, a missing row refuses with the command to fix it: "task $ID has no backlog item in this home, so dispatching it would leave a worker no record owns; add it first (bin/fm-tasks-axi.sh add $ID '&lt;title&gt;' --kind $KIND) and re-run". A row that is not dispatchable refuses "before creating its endpoint or local copy". A gate result of 2 refuses because the data directory is inaccessible <code class="cite">bin/fm-spawn.sh:3104-3133</code>. Under the away posture, the supervision branch may dispatch only <code>queued no no</code> rows <code class="cite">bin/fm-spawn.sh:3117-3122</code>.</li>
+<li><strong>A pending close blocks a new worker.</strong> Spawn refuses while <code>state/&lt;id&gt;.backlog-close</code> exists: "finish or repair that close before dispatching a new worker" <code class="cite">bin/fm-spawn.sh:3140-3143</code>.</li>
+<li><strong>Publish the record first.</strong> The meta is published under the per-task meta lock <code class="cite">bin/fm-spawn.sh:4513-4519</code>. The lock is held through launch delivery, so teardown "cannot observe or complete a fresh provisional record between its state check and <code>tasks-axi start</code>" <code class="cite">bin/fm-spawn.sh:4579-4584</code>. Spawn needs no crash marker, because "it publishes the meta first, so a crash leaves the meta itself as the evidence that the row is owed a start" <code class="cite">bin/fm-backlog-transition-lib.sh:50-52</code>.</li>
+<li><strong>Commit.</strong> <code>fm_backlog_dispatch_transition</code> re-probes the row, refuses one that is no longer dispatchable, and runs <code>start</code> only for <code>queued no no</code>. A row already In flight is accepted as-is <code class="cite">bin/fm-backlog-transition-lib.sh:828-850</code>. The call is bounded by <code>FM_TASKS_AXI_TIMEOUT</code> (default 30 s here) and retried once <code class="cite">bin/fm-spawn.sh:4928-4945</code>.</li>
+<li><strong>Failure.</strong> A fresh dispatch rolls back the record and busy state, then prints "its record was removed so no worker is left that the backlog does not own - close out endpoint $T and local copy $WT by hand". If the rollback itself is incomplete, spawn says so <code class="cite">bin/fm-spawn.sh:4946-4960</code> <code class="cite">bin/fm-backlog-transition-lib.sh:852-867</code>.</li>
+</ol>
+
+<h2 id="close">Completion: <code>fm-teardown.sh</code></h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 920 560" role="img" aria-labelledby="bd-td-t bd-td-d">
+<title id="bd-td-t">Teardown sequence: close or retain</title>
+<desc id="bd-td-d">Teardown asks fm-captain-hold open whether the row is still an open captain call: 0 selects retain, 1 selects close, and anything else refuses before any destructive step. After the landed-work and scout completion gates, it writes the pending-close record with mode=retain when retaining, then performs destructive cleanup, then runs the close or retain transition under the meta lock: remove the task record, run tasks-axi done with the deliverable (or record the deliverable and reopen), then remove the pending-close record. A failure after the record is written exits 1 and leaves the record for the next session start to replay.</desc>
+<defs><marker id="bd-td-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">Teardown sequence</text>
+<g class="c4-component"><rect x="30" y="46" width="150" height="44" rx="8"/><text class="c4-label" x="105" y="73">fm-teardown.sh</text></g>
+<g class="c4-component"><rect x="220" y="46" width="150" height="44" rx="8"/><text class="c4-label" x="295" y="66">fm-captain-hold.sh</text><text class="c4-desc" x="295" y="82">open</text></g>
+<g class="c4-datastore"><path d="M400,52 a80,7 0 0,0 160,0 a80,7 0 0,0 -160,0 v30 a80,7 0 0,0 160,0 v-30"/><text class="c4-label" x="480" y="70">state/&lt;id&gt;.meta</text><text class="c4-desc" x="480" y="85">+ &lt;id&gt;.backlog-close</text></g>
+<g class="c4-component"><rect x="590" y="46" width="140" height="44" rx="8"/><text class="c4-label" x="660" y="73">transition lib</text></g>
+<g class="c4-external"><rect x="760" y="46" width="140" height="44" rx="8"/><text class="c4-label" x="830" y="73">tasks-axi</text></g>
+<g class="c4-rel c4-rel-async"><path d="M105,90 L105,540"/></g>
+<g class="c4-rel c4-rel-async"><path d="M295,90 L295,540"/></g>
+<g class="c4-rel c4-rel-async"><path d="M480,92 L480,540"/></g>
+<g class="c4-rel c4-rel-async"><path d="M660,90 L660,540"/></g>
+<g class="c4-rel c4-rel-async"><path d="M830,90 L830,540"/></g>
+<g class="c4-rel"><path d="M105,120 L293,120" marker-end="url(#bd-td-arrow)"/><text class="c4-rel-label" x="200" y="113">open &lt;id&gt;</text></g>
+<g class="c4-rel c4-rel-async"><path d="M295,152 L107,152" marker-end="url(#bd-td-arrow)"/><text class="c4-rel-label" x="200" y="145">0 retain · 1 close · 2 refuse</text></g>
+<g class="c4-rel"><path d="M105,188 L143,188 L143,210 L109,210" marker-end="url(#bd-td-arrow)"/><text class="c4-rel-label" x="300" y="203">landed-work gates · scout: report + verify</text></g>
+<g class="c4-rel"><path d="M105,250 L478,250" marker-end="url(#bd-td-arrow)"/><text class="c4-rel-label" x="290" y="243">write &lt;id&gt;.backlog-close (mode=retain if 0)</text></g>
+<g class="c4-rel"><path d="M105,288 L143,288 L143,310 L109,310" marker-end="url(#bd-td-arrow)"/><text class="c4-rel-label" x="310" y="303">destructive cleanup: endpoint, worktree, inbox</text></g>
+<g class="c4-rel"><path d="M105,350 L658,350" marker-end="url(#bd-td-arrow)"/><text class="c4-rel-label" x="380" y="343">close | retain transition (meta lock held)</text></g>
+<g class="c4-rel"><path d="M660,385 L482,385" marker-end="url(#bd-td-arrow)"/><text class="c4-rel-label" x="570" y="378">remove &lt;id&gt;.meta</text></g>
+<g class="c4-rel"><path d="M660,420 L828,420" marker-end="url(#bd-td-arrow)"/><text class="c4-rel-label" x="745" y="413">done --pr|--report|--note</text></g>
+<g class="c4-rel"><path d="M660,450 L828,450" marker-end="url(#bd-td-arrow)"/><text class="c4-rel-label" x="745" y="443">or: update body · reopen</text></g>
+<g class="c4-rel"><path d="M660,485 L482,485" marker-end="url(#bd-td-arrow)"/><text class="c4-rel-label" x="570" y="478">remove &lt;id&gt;.backlog-close</text></g>
+<g class="c4-rel c4-rel-async"><path d="M660,520 L107,520" marker-end="url(#bd-td-arrow)"/><text class="c4-rel-label" x="380" y="513">failure here: exit 1, record kept, replayed at next session start</text></g>
+</svg>
+</div>
+<figcaption>The pending-close record is written before any destructive step, and it is removed only once the row transition has landed <code class="cite">bin/fm-backlog-transition-lib.sh:41-48</code> <code class="cite">bin/fm-backlog-transition-lib.sh:869-885</code>.</figcaption>
+</figure>
+<ol>
+<li><strong>Gate.</strong> A gate result of 2 refuses: "task $ID cannot be torn down because its backlog data directory is inaccessible". A result of 1 records the skip reason <code class="cite">bin/fm-teardown.sh:488-497</code>. When the gate applies, the record must carry a <code>spawn_gen</code> that "identifies one exact incarnation", or teardown refuses <code class="cite">bin/fm-teardown.sh:499-543</code>.</li>
+<li><strong>Ask about the captain.</strong> Teardown asks, "before any destructive step, so 'cannot tell' can refuse while everything is intact" <code class="cite">bin/fm-teardown.sh:545-562</code>. On any exit other than 0 or 1 it prints "fix that read and retry rather than risk closing a captain call with no recorded answer".</li>
+<li><strong>Choose the deliverable.</strong> A scout closes with <code>--report &lt;data&gt;/&lt;id&gt;/report.md</code>. A local-only ship closes with <code>--note "local main"</code>. Any other ship closes with <code>--pr &lt;url&gt;</code> from its own record <code class="cite">bin/fm-teardown.sh:1518-1537</code>. A scout without a report, or one that fails the <a href="completion-gate.html">completion gate</a>, is refused earlier <code class="cite">bin/fm-teardown.sh:3280-3293</code>.</li>
+<li><strong>Record the intent.</strong> <code>fm_backlog_close_marker_write</code> stages and validates the record, then publishes it atomically <code class="cite">bin/fm-teardown.sh:3427-3442</code>. If it cannot be recorded, teardown is "retaining every durable task record" and exits.</li>
+<li><strong>Clean up, then transition.</strong> After the endpoint, worktree, and inbox are gone, and still under the meta lock, teardown runs <code>close</code> or <code>retain</code> <code class="cite">bin/fm-teardown.sh:3668-3685</code>. On failure it reports "its endpoint and local copy are cleaned up, but its backlog item could not be closed atomically … the pending close is recorded and the next session start retries it" and exits 1.</li>
+<li><strong>Tell the supervisor what happened.</strong> <code>backlog_refresh_reminder</code> prints what already happened. After a close it prints "Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates …". After a retain it prints "still held for the captain with its deliverable recorded. Relay the question and close it only with bin/fm-captain-hold.sh answer." When the gate was skipped, it prints the hand edit that is owed <code class="cite">bin/fm-teardown.sh:1543-1564</code>.</li>
+</ol>
+<p>None of this loosens the landed-work gates: "the transition runs only on the paths that already proceed to remove the record" <code class="cite">bin/fm-teardown.sh:28-29</code>.</p>
+
+<h2 id="retain">Retain: cleanup never closes a captain call</h2>
+<p>The hold policy prefers holding the very work item a question gates. "the backlog row a finished task's cleanup is about to close is routinely the captain's own call" <code class="cite">docs/captain-hold-lifecycle.md:36</code>. When <code>open</code> returns 0, only the close changes. <code>fm_backlog_retain</code> runs three steps <code class="cite">bin/fm-backlog-transition-lib.sh:580-671</code>:</p>
+<ol>
+<li>It appends one line to the end of the body, <code>Deliverable of the finished work: &lt;PR url | report path | note&gt;</code>, unless that exact line is already present.</li>
+<li>It copies a supported artifact into the row's structured fields: any <code>--pr</code>, or a <code>--report</code> only when it is exactly <code>data/&lt;id&gt;/report.md</code> <code class="cite">bin/fm-backlog-transition-lib.sh:571-578</code>.</li>
+<li>It runs <code>tasks-axi reopen</code>, which returns the row to Queued with its hold intact.</li>
+</ol>
+<p>The row "remains on the appropriate Captain's Call or Charted Next decision surface instead of reading as work still under way" <code class="cite">docs/captain-hold-lifecycle.md:38</code>. <code>--force</code> does not lift this, "because it authorizes discarding unlanded work, never the captain's question" <code class="cite">docs/captain-hold-lifecycle.md:45</code>.</p>
+<div class="callout"><span class="callout-title">Known gaps, recorded upstream</span>
+<p>Two retained deliveries cannot reach the row under <code>tasks-axi 0.2.5</code>. A local-only delivery's note is lost, "because <code>--note</code> exists on <code>tasks-axi done</code> but not on <code>tasks-axi update</code>". A relocated report is lost because "tasks-axi accepts only <code>data/&lt;id&gt;/report.md</code>". Both are "recorded for separate upstream work" <code class="cite">docs/captain-hold-lifecycle.md:40-43</code>.</p></div>
+
+<h2 id="replay">The pending-close record and its replay</h2>
+<p>Only teardown needs a durable record. "it removes the meta and with it the completion links, so a process killed between the two halves would leave nothing to reconstruct the close from" <code class="cite">bin/fm-backlog-transition-lib.sh:41-44</code>.</p>
+<h3 id="marker-format">Format (Level 4)</h3>
+<pre><code>id=&lt;task-id&gt;
+data=&lt;absolute data directory&gt;
+spawn_gen=&lt;the incarnation this close belongs to&gt;
+cleanup_incomplete=0|1
+mode=retain                      (only for a captain-held row; absent means close)
+arg=--pr
+arg=https://…/pull/N             (or --report / --note pairs)</code></pre>
+<p class="evidence">Writer: <code class="cite">bin/fm-backlog-transition-lib.sh:1109-1118</code>. Validator: <code class="cite">bin/fm-backlog-transition-lib.sh:905-960</code>. The note <code>local main</code> is serialised as <code>local%20main</code> and restored on replay <code class="cite">bin/fm-backlog-transition-lib.sh:1101-1108</code> <code class="cite">bin/fm-backlog-transition-lib.sh:1178-1180</code>.</p>
+<p>The validator refuses a record with control bytes, an unknown line, duplicate fields, a mode other than <code>close</code> or <code>retain</code>, an id that differs from its filename, or a missing <code>data</code> or <code>spawn_gen</code>. It "pins the data path to this home's configured root before any recovery mutation" <code class="cite">bin/fm-backlog-transition-lib.sh:45-48</code>. Writer and replay share this one validator, so teardown "never publishes or acts on a close replay would reject".</p>
+<h3 id="replay-results">Replay at session start</h3>
+<p><code>backlog_record_reconcile</code> in bootstrap takes the control lock and the meta lock for each record, trying each lock without waiting, and calls <code>fm_backlog_close_marker_replay</code> <code class="cite">bin/fm-bootstrap.sh:1278-1316</code>. Replay validates before mutating anything <code class="cite">bin/fm-backlog-transition-lib.sh:1154-1255</code>:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Situation</th><th>Replay does</th><th>Result → bootstrap prints</th></tr></thead>
+<tbody>
+<tr><td>A meta with a <em>different</em> <code>spawn_gen</code> exists</td><td>Removes the record, which belongs to an older incarnation</td><td><code>stale</code> → nothing</td></tr>
+<tr><td>A meta with the same <code>spawn_gen</code> exists</td><td>Marks <code>cleanup_incomplete=1</code>, removes the meta, then continues</td><td><code>*_incomplete</code> → "its endpoint or local copy may remain and should be reconciled"</td></tr>
+<tr><td>The row is now an open captain call</td><td>Upgrades the mode to retain, whatever the record says</td><td><code>retained</code> → "kept the captain call for $label open with its deliverable recorded"</td></tr>
+<tr><td>The row is Done and the mode is retain</td><td>The captain answered first. Retires the record only</td><td><code>answered</code> → "the captain had already answered its call"</td></tr>
+<tr><td>The row is Done and the mode is close</td><td>Re-runs <code>done</code>, which is idempotent: it "backfills links without moving the close date"</td><td><code>closed</code></td></tr>
+<tr><td>The row is absent</td><td>Removes the record</td><td><code>stale</code></td></tr>
+<tr><td>Validation or recovery fails</td><td>Leaves everything in place</td><td><code>BACKLOG_RECONCILE: $label: recorded backlog close could not be replayed: …</code></td></tr>
+</tbody>
+</table></div>
+<p class="evidence"><code class="cite">bin/fm-backlog-transition-lib.sh:1181-1254</code> <code class="cite">bin/fm-bootstrap.sh:1293-1313</code> <code class="cite">bin/fm-backlog-transition-lib.sh:49-50</code></p>
+<p>If the captain answers <em>before</em> replay, <code>answer</code> validates the record and first "copies any supported retained pull request or report into the row before closing it, after which replay retires the record" <code class="cite">docs/captain-hold-lifecycle.md:39</code> <code class="cite">bin/fm-captain-hold.sh:948-964</code>. An invalid record refuses the answer and names the record and the reason <code class="cite">docs/captain-hold-lifecycle.md:44</code>.</p>
+<h3 id="heal">Healing drift: records without a moved row</h3>
+<p>The same sweep then walks every <code>state/*.meta</code>. It skips any meta whose pending-close record survives, because "A pending close remains authoritative even when replay failed". It heals exactly one case: "Heal only the unambiguous case: a queued row for a record this home already owns. A held row is the captain's to move, and a closed row is a contradiction this sweep must not resolve by resurrecting the item." <code class="cite">bin/fm-bootstrap.sh:1318-1369</code> Secondmate records and Orca cleanup-recovery records are excluded. The sweep "never reads or writes another home" <code class="cite">bin/fm-bootstrap.sh:1246-1253</code>.</p>
+
+<h2 id="interrupted-spawn">An interrupted spawn</h2>
+<p>If a signal arrives while the commit is running, spawn defers it. On exit, <code>spawn_report_preserved_state</code> re-reads both halves under the same lock. It reports "verified preserved" only when the record is present and the row reads <code>in_flight no no</code>. If the row did not move, it moves it and verifies again. Otherwise it tells the operator exactly what to close out by hand <code class="cite">bin/fm-spawn.sh:4538-4567</code>. The regression suite is <code>tests/fm-backlog-atomicity.test.sh</code> <code class="cite">docs/configuration.md:109</code>.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Completion gate · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Backlog and decisions</p>
+<h1>Completion gate</h1>
+<p class="lede">An investigation or visual review often surfaces questions only the captain can answer. It cannot count as complete until every such question is carried by a captain-held task. The supervisor attests that inventory with <code>complete</code>, and scout teardown refuses to erase the source until <code>verify</code> passes.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Backlog and decisions</a>.</p>
+
+<h2 id="why">Why a gate</h2>
+<p>A scout's report and a Lavish review are temporary. Teardown removes the task's metadata, and a review session ends. A captain question that lives only in that prose is lost when it goes. The policy: "Every unresolved question that belongs to the captain and is discovered while producing, reading, presenting, or ending an investigation or visual review must be carried by a captain-held task in the authoritative backlog of the home that owns the originating work before that work or review may be treated as complete." <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:19</code> "A completed investigation and an ended visual review use this same owner and completion command; a visual tool, including Lavish, never owns a parallel completion policy." <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:24</code></p>
+<p>Deciding what counts as a captain question is the agent's job, because "scripts must not infer captain calls from report prose, visual-review artifacts, terminal output, or chat" <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:15</code>. The gate checks only that the agent recorded an inventory and that every entry in it is durable. <code>AGENTS.md</code> sets the trigger: "Before treating the investigation or any visual review as complete, load <code>captain-hold-lifecycle</code>; teardown enforces that shared completion gate." <code class="cite">AGENTS.md:413</code></p>
+
+<h2 id="flow">The flow</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 920 330" role="img" aria-labelledby="bd-cg-t bd-cg-d">
+<title id="bd-cg-t">Completion gate flow</title>
+<desc id="bd-cg-d">The supervisor reads the whole report or review and inventories genuine captain choices. It holds one task per gate, then runs complete with every held task id, or with --none. Complete appends decisions_reviewed=1 and decision_keys to the origin's task metadata, and transfers every still-open keyed status decision with a captain-held close line. Scout teardown later runs verify, which requires the attestation, requires every inventoried task to still be durable, and requires that no keyed status decision is open.</desc>
+<defs><marker id="bd-cg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">Inventory, attest, verify</text>
+<g class="c4-datastore"><path d="M20,62 a85,8 0 0,0 170,0 a85,8 0 0,0 -170,0 v60 a85,8 0 0,0 170,0 v-60"/><text class="c4-label" x="105" y="90">Report / review</text><text class="c4-desc" x="105" y="107">data/&lt;id&gt;/report.md</text></g>
+<g class="c4-container"><rect x="230" y="56" width="190" height="76" rx="8"/><text class="c4-label" x="325" y="82">Supervisor</text><text class="c4-tech" x="325" y="98">[captain-hold-lifecycle]</text><text class="c4-desc" x="325" y="115">inventories genuine calls</text></g>
+<g class="c4-component"><rect x="460" y="56" width="180" height="76" rx="8"/><text class="c4-label" x="550" y="82">hold</text><text class="c4-tech" x="550" y="98">[one task per gate]</text><text class="c4-desc" x="550" y="115">question + options in reason</text></g>
+<g class="c4-component"><rect x="680" y="56" width="220" height="76" rx="8"/><text class="c4-label" x="790" y="82">complete</text><text class="c4-tech" x="790" y="98">[&lt;origin&gt; ids… | --none]</text><text class="c4-desc" x="790" y="115">verify each, then attest</text></g>
+<g class="c4-datastore"><path d="M680,206 a110,8 0 0,0 220,0 a110,8 0 0,0 -220,0 v56 a110,8 0 0,0 220,0 v-56"/><text class="c4-label" x="790" y="232">state/&lt;origin&gt;.meta</text><text class="c4-desc" x="790" y="249">decisions_reviewed · decision_keys</text></g>
+<g class="c4-datastore"><path d="M460,206 a90,8 0 0,0 180,0 a90,8 0 0,0 -180,0 v56 a90,8 0 0,0 180,0 v-56"/><text class="c4-label" x="550" y="232">state/&lt;origin&gt;.status</text><text class="c4-desc" x="550" y="249">captain-held [key=…] transfer</text></g>
+<g class="c4-component"><rect x="230" y="200" width="190" height="72" rx="8"/><text class="c4-label" x="325" y="226">verify</text><text class="c4-tech" x="325" y="242">[called by scout teardown]</text><text class="c4-desc" x="325" y="259">refuses teardown on failure</text></g>
+<g class="c4-rel"><path d="M190,94 L228,94" marker-end="url(#bd-cg-arrow)"/><text class="c4-rel-label" x="209" y="84">reads</text></g>
+<g class="c4-rel"><path d="M420,94 L458,94" marker-end="url(#bd-cg-arrow)"/></g>
+<g class="c4-rel"><path d="M640,94 L678,94" marker-end="url(#bd-cg-arrow)"/><text class="c4-rel-label" x="659" y="84">ids</text></g>
+<g class="c4-rel"><path d="M790,132 L790,196" marker-end="url(#bd-cg-arrow)"/><text class="c4-rel-label" x="825" y="170">append</text></g>
+<g class="c4-rel"><path d="M720,132 L600,198" marker-end="url(#bd-cg-arrow)"/><text class="c4-rel-label" x="650" y="160">transfer open keys</text></g>
+<g class="c4-rel c4-rel-async"><path d="M420,236 L458,236" marker-end="url(#bd-cg-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M325,272 L325,306 L760,306 L760,272" marker-end="url(#bd-cg-arrow)"/><text class="c4-rel-label" x="545" y="300">attestation present · every entry still durable · no open keyed decision</text></g>
+</svg>
+</div>
+<figcaption>The skill's operating sequence, steps 1 to 4, is to read everything, inventory, hold, and complete. Steps 5 to 7 relay, close, and confirm <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:57-65</code>.</figcaption>
+</figure>
+
+<h2 id="complete"><code>complete &lt;origin-id&gt; (--none | &lt;task-id&gt;...)</code></h2>
+<p class="evidence">Contract: <code class="cite">bin/fm-captain-hold.sh:131-142</code>. Implementation: <code class="cite">bin/fm-captain-hold.sh:1623-1702</code>.</p>
+<ol>
+<li><strong>Ownership.</strong> The origin must belong to this home: a task record, a <code>data/&lt;origin&gt;/report.md</code>, or a backlog row. Otherwise: "origin $origin is not owned by the active home" <code class="cite">bin/fm-captain-hold.sh:426-430</code> <code class="cite">bin/fm-captain-hold.sh:1638</code>.</li>
+<li><strong>Union.</strong> The supplied ids are unioned, sorted, with the existing <code>decision_keys=</code>. "Later review passes may add ids." <code class="cite">bin/fm-captain-hold.sh:439-445</code></li>
+<li><strong>Durability.</strong> Every entry is resolved (exact, legacy, or migrated) and must be "actively captain-held, or closed with a recorded answer" <code class="cite">bin/fm-captain-hold.sh:513-529</code> <code class="cite">bin/fm-captain-hold.sh:795-811</code>. A task closed by a bare <code>tasks-axi done</code> fails here. "the completion gate keeps failing until <code>answer</code> records the decision the captain actually gave" <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:47</code>.</li>
+<li><strong><code>--none</code>.</strong> This is "an explicit semantic attestation that the just-reviewed surface has no unresolved captain call". It is refused while the origin's status log still has an open keyed decision: "hold a captain task for what remains, or answer them, before attesting --none" <code class="cite">bin/fm-captain-hold.sh:1667-1671</code>.</li>
+<li><strong>Attest.</strong> Under the task metadata lock, it appends <code>decisions_reviewed=1</code> and <code>decision_keys=&lt;sorted,comma,list&gt;</code>, but only when they change <code class="cite">bin/fm-captain-hold.sh:1673-1678</code>. The metadata reader takes the last value of a key <code class="cite">bin/fm-captain-hold.sh:447-449</code>.</li>
+<li><strong>Transfer.</strong> For every still-open keyed status decision, it appends <code>captain-held [key=&lt;key&gt;]: tracked by &lt;keys&gt;</code>. This is one guarded self-announced append, so it "do[es] not wake this same session" <code class="cite">bin/fm-captain-hold.sh:1680-1698</code>. The transfer stops the status fold from duplicating a Captain's Call item. It is also why the <a href="divergence.html">divergence guard</a> treats <code>captain-held</code> as a verified close rather than a contradiction.</li>
+<li><strong>Report.</strong> It prints <code>complete: &lt;origin&gt; captain-call inventory reviewed (&lt;keys&gt;)</code>, plus <code>[attested through the configured prefix: …]</code> for any Beads id resolved by name alone, "so the guess stays auditable" <code class="cite">bin/fm-captain-hold.sh:1700-1701</code>.</li>
+</ol>
+<p><strong>After teardown.</strong> When the origin's metadata is already gone, <code>complete</code> still verifies every listed task, then prints its line. It writes no metadata and makes no transfer. "A post-teardown visual review can complete against the surviving report and durable tasks without recreating volatile task metadata." <code class="cite">docs/captain-hold-lifecycle.md:26</code> <code class="cite">bin/fm-captain-hold.sh:1630-1636</code></p>
+
+<h2 id="verify"><code>verify &lt;origin-id&gt;</code></h2>
+<p>This subcommand is read-only. Scout teardown calls it after checking that the report exists and before removing any source state, "so teardown cannot erase a source before this gate has succeeded" <code class="cite">bin/fm-captain-hold.sh:143-145</code>. It fails if:</p>
+<ul>
+<li>the metadata is absent, or lacks <code>decisions_reviewed=1</code>: "origin $origin has no completed captain-call inventory";</li>
+<li>any inventory entry is no longer durable;</li>
+<li>any keyed status decision is open. It "fails on any keyed status decision that opened after the last <code>complete</code>, which makes re-running <code>complete</code> the repair" <code class="cite">docs/captain-hold-lifecycle.md:31</code>.</li>
+</ul>
+<p class="evidence"><code class="cite">bin/fm-captain-hold.sh:1704-1730</code></p>
+<p>Teardown's refusal reads: "REFUSED: scout task $ID has not passed the captain-call completion gate. Inventory its report and any visual review through bin/fm-captain-hold.sh before teardown." <code class="cite">bin/fm-teardown.sh:3287-3292</code> "The <code>--force</code> path remains the explicit captain-approved discard escape hatch." <code class="cite">docs/captain-hold-lifecycle.md:32</code></p>
+
+<h2 id="example">A worked example</h2>
+<p>Suppose a scout <code>sample-scout</code> reports two open questions, and both gate the same follow-up work item <code>sample-fix</code>. Following the skill, the supervisor holds that one work item and gives its reason both questions:</p>
+<pre><code>bin/fm-captain-hold.sh hold sample-fix --reason "choose approach A or B; also confirm scope X"
+bin/fm-captain-hold.sh complete sample-scout sample-fix
+# complete: sample-scout captain-call inventory reviewed (sample-fix)
+bin/fm-teardown.sh sample-scout      # verify passes; the report link is recorded</code></pre>
+<p>The call stays on Captain's Call until an <code>answer</code> records the captain's words. The ids are illustrative. The command shapes come from <code class="cite">bin/fm-captain-hold.sh:23-32</code> and the policy lines <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:20-23</code>.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>
