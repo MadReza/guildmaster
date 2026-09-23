@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Containers · Firstmate C4</title>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">C4 model › Level 2</p>
+<h1>Containers</h1>
+<p class="lede">The separately running processes and separately kept stores inside one Firstmate instance, what each is responsible for, and how they talk. Everything here was traced from the scripts, not from the docs alone.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="context.html">System context</a>.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1340 1150" role="img" aria-labelledby="cnt-title cnt-desc">
+<title id="cnt-title">Firstmate containers (C4 level 2)</title>
+<desc id="cnt-desc">Inside one operational home: the supervisor agent, session start, wait hooks, watcher, away sub-supervisor, checks, toolbelt scripts, durable wake queue, status logs, steering inboxes, side channels, home records, backend adapter layer, workers, the Pi supervision branch, persistent local and remote secondmate homes, and fleet views. Numbered arrows are explained in the interactions table below the diagram.</desc>
+<defs><marker id="cnt-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="32">Firstmate — Containers (Level 2)</text>
+<g class="c4-person">
+<circle cx="195" cy="68" r="20"/>
+<rect x="95" y="82" width="200" height="76" rx="16"/>
+<text class="c4-label" x="195" y="117.5">Captain</text>
+<text class="c4-desc" x="195" y="134.5">Talks only to the first mate</text>
+</g>
+<g class="c4-boundary"><rect x="20" y="200" width="1060" height="830" rx="10"/><text class="c4-boundary-label" x="32" y="1020">Firstmate · one operational home (FM_HOME) + code root</text></g>
+<g class="c4-container">
+<rect x="50" y="245" width="280" height="96" rx="8"/>
+<text class="c4-label" x="190" y="276">Supervisor agent</text>
+<text class="c4-tech" x="190" y="291">[harness session reading AGENTS.md]</text>
+<text class="c4-desc" x="190" y="308">The first mate: judges, dispatches,</text>
+<text class="c4-desc" x="190" y="322">escalates; never edits projects</text>
+</g>
+<g class="c4-container">
+<rect x="50" y="375" width="280" height="96" rx="8"/>
+<text class="c4-label" x="190" y="406">Session start</text>
+<text class="c4-tech" x="190" y="421">[bin/fm-session-start.sh]</text>
+<text class="c4-desc" x="190" y="438">Lock, bootstrap, wake drain, protocol</text>
+<text class="c4-desc" x="190" y="452">block, fleet and context digests</text>
+</g>
+<g class="c4-container">
+<rect x="50" y="505" width="280" height="96" rx="8"/>
+<text class="c4-label" x="190" y="536">Wait and turn-end hooks</text>
+<text class="c4-tech" x="190" y="551">[Stop hooks · Pi/omp extensions · plugins]</text>
+<text class="c4-desc" x="190" y="568">Arm the watcher, rewake on an</text>
+<text class="c4-desc" x="190" y="582">actionable close, block blind turn ends</text>
+</g>
+<g class="c4-container">
+<rect x="50" y="635" width="280" height="96" rx="8"/>
+<text class="c4-label" x="190" y="666">Watcher</text>
+<text class="c4-tech" x="190" y="681">[bin/fm-watch.sh · bash poll loop]</text>
+<text class="c4-desc" x="190" y="698">Absorbs benign wakes; queues and</text>
+<text class="c4-desc" x="190" y="712">exits on actionable ones</text>
+</g>
+<g class="c4-container">
+<rect x="50" y="765" width="280" height="96" rx="8"/>
+<text class="c4-label" x="190" y="796">Away sub-supervisor</text>
+<text class="c4-tech" x="190" y="811">[bin/fm-supervise-daemon.sh]</text>
+<text class="c4-desc" x="190" y="828">Owns triage while state/.afk exists;</text>
+<text class="c4-desc" x="190" y="842">injects batched digests</text>
+</g>
+<g class="c4-container">
+<rect x="50" y="895" width="280" height="96" rx="8"/>
+<text class="c4-label" x="190" y="926">Checks and event sources</text>
+<text class="c4-tech" x="190" y="941">[state/*.check.sh · bin/fm-procevent.sh]</text>
+<text class="c4-desc" x="190" y="958">PR merge polls, custom checks,</text>
+<text class="c4-desc" x="190" y="972">long-polling process sources</text>
+</g>
+<g class="c4-container">
+<rect x="380" y="245" width="280" height="96" rx="8"/>
+<text class="c4-label" x="520" y="276">Toolbelt</text>
+<text class="c4-tech" x="520" y="291">[bin/fm-*.sh lifecycle scripts]</text>
+<text class="c4-desc" x="520" y="308">spawn, send, control, teardown, merge,</text>
+<text class="c4-desc" x="520" y="322">hold, drain: every guarded mutation</text>
+</g>
+<g class="c4-datastore">
+<path d="M380,384 a140,9 0 0,0 280,0 a140,9 0 0,0 -280,0 v78 a140,9 0 0,0 280,0 v-78"/>
+<text class="c4-label" x="520" y="410.5">Durable wake queue</text>
+<text class="c4-tech" x="520" y="425.5">[state/.wake-queue]</text>
+<text class="c4-desc" x="520" y="442.5">epoch · seq · kind · key · payload</text>
+<text class="c4-desc" x="520" y="456.5">kept until a generation-bound ack</text>
+</g>
+<g class="c4-datastore">
+<path d="M380,514 a140,9 0 0,0 280,0 a140,9 0 0,0 -280,0 v78 a140,9 0 0,0 280,0 v-78"/>
+<text class="c4-label" x="520" y="540.5">Status event logs</text>
+<text class="c4-tech" x="520" y="555.5">[state/&lt;id&gt;.status]</text>
+<text class="c4-desc" x="520" y="572.5">Append-only wake events from</text>
+<text class="c4-desc" x="520" y="586.5">workers and secondmates</text>
+</g>
+<g class="c4-datastore">
+<path d="M380,644 a140,9 0 0,0 280,0 a140,9 0 0,0 -280,0 v78 a140,9 0 0,0 280,0 v-78"/>
+<text class="c4-label" x="520" y="670.5">Steering inboxes</text>
+<text class="c4-tech" x="520" y="685.5">[state/&lt;id&gt;.inbox/NNN.msg]</text>
+<text class="c4-desc" x="520" y="702.5">Durable steers; mv into handled/</text>
+<text class="c4-desc" x="520" y="716.5">is the acknowledgement</text>
+</g>
+<g class="c4-container">
+<rect x="380" y="765" width="280" height="96" rx="8"/>
+<text class="c4-label" x="520" y="796">Captain side channels</text>
+<text class="c4-tech" x="520" y="811">[fm-inbox · Relay poll · mail · voice]</text>
+<text class="c4-desc" x="520" y="828">Out-of-band notes and public</text>
+<text class="c4-desc" x="520" y="842">mentions become check wakes</text>
+</g>
+<g class="c4-datastore">
+<path d="M380,904 a140,9 0 0,0 280,0 a140,9 0 0,0 -280,0 v78 a140,9 0 0,0 280,0 v-78"/>
+<text class="c4-label" x="520" y="930.5">Operational home records</text>
+<text class="c4-tech" x="520" y="945.5">[data/ · state/ · config/ · projects/]</text>
+<text class="c4-desc" x="520" y="962.5">Backlog, briefs, reports, task meta,</text>
+<text class="c4-desc" x="520" y="976.5">preferences, read-only clones</text>
+</g>
+<g class="c4-container">
+<rect x="750" y="245" width="280" height="96" rx="8"/>
+<text class="c4-label" x="890" y="276">Backend adapter layer</text>
+<text class="c4-tech" x="890" y="291">[bin/fm-backend.sh · bin/backends/*.sh]</text>
+<text class="c4-desc" x="890" y="308">One dispatch surface over tmux,</text>
+<text class="c4-desc" x="890" y="322">Herdr, Zellij, Orca and cmux</text>
+</g>
+<g class="c4-container">
+<rect x="750" y="375" width="280" height="96" rx="8"/>
+<text class="c4-label" x="890" y="406">Worker agent</text>
+<text class="c4-tech" x="890" y="421">[ship or scout · harness in own worktree]</text>
+<text class="c4-desc" x="890" y="438">Does the project work; reports only</text>
+<text class="c4-desc" x="890" y="452">through status, inbox and PRs</text>
+</g>
+<g class="c4-container">
+<rect x="750" y="505" width="280" height="96" rx="8"/>
+<text class="c4-label" x="890" y="536">Pi supervision branch</text>
+<text class="c4-tech" x="890" y="551">[second conversation in the pi process]</text>
+<text class="c4-desc" x="890" y="568">Pi only: takes eligible task-local</text>
+<text class="c4-desc" x="890" y="582">wakes; stores outcomes durably</text>
+</g>
+<g class="c4-container">
+<rect x="750" y="635" width="280" height="96" rx="8"/>
+<text class="c4-label" x="890" y="666">Persistent secondmate home</text>
+<text class="c4-tech" x="890" y="681">[isolated FM_HOME with its own first mate]</text>
+<text class="c4-desc" x="890" y="698">The same containers one level down;</text>
+<text class="c4-desc" x="890" y="712">reports through the parent channel</text>
+</g>
+<g class="c4-container">
+<rect x="750" y="765" width="280" height="96" rx="8"/>
+<text class="c4-label" x="890" y="796">Remote secondmate home</text>
+<text class="c4-tech" x="890" y="811">[whole home on an SSH host]</text>
+<text class="c4-desc" x="890" y="828">Driven through fm-on and a remote</text>
+<text class="c4-desc" x="890" y="842">job worker; replies are mirrored</text>
+</g>
+<g class="c4-container">
+<rect x="750" y="895" width="280" height="96" rx="8"/>
+<text class="c4-label" x="890" y="926">Fleet views</text>
+<text class="c4-tech" x="890" y="941">[fm-fleet-snapshot · Bearings · summaries]</text>
+<text class="c4-desc" x="890" y="958">Read-only structured fleet state</text>
+<text class="c4-desc" x="890" y="972">for heartbeats and digests</text>
+</g>
+<g class="c4-external">
+<rect x="1110" y="253" width="210" height="80" rx="8"/>
+<text class="c4-label" x="1215" y="283">Runtime session backends</text>
+<text class="c4-tech" x="1215" y="298">[tmux · Herdr · Zellij · Orca · cmux]</text>
+<text class="c4-desc" x="1215" y="315">Terminal endpoints</text>
+</g>
+<g class="c4-external">
+<rect x="1110" y="383" width="210" height="80" rx="8"/>
+<text class="c4-label" x="1215" y="413">Agent harness CLIs</text>
+<text class="c4-tech" x="1215" y="428">[claude · codex · pi · grok · …]</text>
+<text class="c4-desc" x="1215" y="445">Run every agent</text>
+</g>
+<g class="c4-external">
+<rect x="1110" y="513" width="210" height="80" rx="8"/>
+<text class="c4-label" x="1215" y="543">Treehouse</text>
+<text class="c4-tech" x="1215" y="558">[worktree pool]</text>
+<text class="c4-desc" x="1215" y="575">Clean worktrees, leases</text>
+</g>
+<g class="c4-external">
+<rect x="1110" y="643" width="210" height="80" rx="8"/>
+<text class="c4-label" x="1215" y="673">Forges and no-mistakes</text>
+<text class="c4-tech" x="1215" y="688">[GitHub · GitLab · validation daemon]</text>
+<text class="c4-desc" x="1215" y="705">PRs, checks, pipeline</text>
+</g>
+<g class="c4-external">
+<rect x="1110" y="773" width="210" height="80" rx="8"/>
+<text class="c4-label" x="1215" y="803">Remote SSH host</text>
+<text class="c4-tech" x="1215" y="818">[ssh · launchd]</text>
+<text class="c4-desc" x="1215" y="835">Hosts a remote home</text>
+</g>
+<g class="c4-external">
+<rect x="380" y="1060" width="280" height="72" rx="8"/>
+<text class="c4-label" x="520" y="1086">tasks-axi</text>
+<text class="c4-tech" x="520" y="1101">[backlog CLI]</text>
+<text class="c4-desc" x="520" y="1118">Owns data/backlog.md writes</text>
+</g>
+<g class="c4-rel">
+<path d="M195,158 L195,245" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M190,375 L190,341" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M330,293.0 L380,293.0" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M190,601 L190,635" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel c4-rel-async">
+<path d="M50,553.0 C 30,553.0 30,293.0 50,293.0" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M330,693.0 L380,571.0" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M330,671.0 L380,437.0" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M520,341 L520,375" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M660,313.0 L684,313.0 L684,683.0 L660,683.0" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel c4-rel-async">
+<path d="M330,713.0 L380,713.0" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel c4-rel-async">
+<path d="M50,703.0 C 30,703.0 30,943.0 50,943.0" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M190,765 L190,731" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M660,273.0 L750,273.0" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M890,341 L890,375" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M750,448.0 L660,665.0" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M750,423.0 L660,543.0" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M660,327.0 L700,327.0 L700,943.0 L660,943.0" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M750,663.0 L660,573.0" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M750,693.0 L660,703.0" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel c4-rel-async">
+<path d="M750,553.0 L660,443.0" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel c4-rel-async">
+<path d="M380,833.0 L330,933.0" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M750,943.0 L660,943.0" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M520,1060 L520,991" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M1030,293.0 L1110,293.0" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M1030,423.0 L1110,423.0" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel c4-rel-async">
+<path d="M1030,448.0 L1110,553.0" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M1030,463.0 L1110,683.0" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M1030,813.0 L1110,813.0" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel-num"><circle cx="195" cy="202" r="9"/><text x="195" y="206">1</text></g>
+<g class="c4-rel-num"><circle cx="190" cy="358" r="9"/><text x="190" y="362">2</text></g>
+<g class="c4-rel-num"><circle cx="355" cy="293" r="9"/><text x="355" y="297">3</text></g>
+<g class="c4-rel-num"><circle cx="190" cy="618" r="9"/><text x="190" y="622">4</text></g>
+<g class="c4-rel-num"><circle cx="35" cy="423" r="9"/><text x="35" y="427">5</text></g>
+<g class="c4-rel-num"><circle cx="355" cy="632" r="9"/><text x="355" y="636">6</text></g>
+<g class="c4-rel-num"><circle cx="347" cy="583" r="9"/><text x="347" y="587">7</text></g>
+<g class="c4-rel-num"><circle cx="520" cy="358" r="9"/><text x="520" y="362">8</text></g>
+<g class="c4-rel-num"><circle cx="684" cy="643" r="9"/><text x="684" y="647">9</text></g>
+<g class="c4-rel-num"><circle cx="355" cy="713" r="9"/><text x="355" y="717">10</text></g>
+<g class="c4-rel-num"><circle cx="35" cy="823" r="9"/><text x="35" y="827">11</text></g>
+<g class="c4-rel-num"><circle cx="190" cy="748" r="9"/><text x="190" y="752">12</text></g>
+<g class="c4-rel-num"><circle cx="725" cy="273" r="9"/><text x="725" y="277">13</text></g>
+<g class="c4-rel-num"><circle cx="890" cy="358" r="9"/><text x="890" y="362">14</text></g>
+<g class="c4-rel-num"><circle cx="732" cy="483" r="9"/><text x="732" y="487">15</text></g>
+<g class="c4-rel-num"><circle cx="732" cy="445" r="9"/><text x="732" y="449">16</text></g>
+<g class="c4-rel-num"><circle cx="700" cy="903" r="9"/><text x="700" y="907">17</text></g>
+<g class="c4-rel-num"><circle cx="732" cy="647" r="9"/><text x="732" y="651">18</text></g>
+<g class="c4-rel-num"><circle cx="732" cy="694" r="9"/><text x="732" y="698">19</text></g>
+<g class="c4-rel-num"><circle cx="732" cy="541" r="9"/><text x="732" y="545">20</text></g>
+<g class="c4-rel-num"><circle cx="355" cy="883" r="9"/><text x="355" y="887">21</text></g>
+<g class="c4-rel-num"><circle cx="732" cy="943" r="9"/><text x="732" y="947">22</text></g>
+<g class="c4-rel-num"><circle cx="520" cy="1045" r="9"/><text x="520" y="1049">23</text></g>
+<g class="c4-rel-num"><circle cx="1080" cy="293" r="9"/><text x="1080" y="297">24</text></g>
+<g class="c4-rel-num"><circle cx="1080" cy="423" r="9"/><text x="1080" y="427">25</text></g>
+<g class="c4-rel-num"><circle cx="1080" cy="500.5" r="9"/><text x="1080" y="504.5">26</text></g>
+<g class="c4-rel-num"><circle cx="1082" cy="585" r="9"/><text x="1082" y="589">27</text></g>
+<g class="c4-rel-num"><circle cx="1080" cy="813" r="9"/><text x="1080" y="817">28</text></g>
+<g class="c4-legend">
+<rect class="c4-legend-frame" x="1120" y="30" width="200" height="174" rx="6"/>
+<text class="c4-legend-heading" x="1132" y="50">Legend</text>
+<g class="c4-person"><rect x="1132" y="62" width="32" height="16" rx="7"/></g>
+<text x="1174" y="74">Person</text>
+<g class="c4-container"><rect x="1132" y="86" width="32" height="16" rx="3"/></g>
+<text x="1174" y="98">Container</text>
+<g class="c4-datastore"><path d="M1132,113 a16,3 0 0,0 32,0 a16,3 0 0,0 -32,0 v11 a16,3 0 0,0 32,0 v-11"/></g>
+<text x="1174" y="122">Data store</text>
+<g class="c4-external"><rect x="1132" y="134" width="32" height="16" rx="3"/></g>
+<text x="1174" y="146">External system</text>
+<g class="c4-rel"><path d="M1132,166 L1164,166"/></g>
+<text x="1174" y="170">Uses / writes</text>
+<g class="c4-rel c4-rel-async"><path d="M1132,190 L1164,190"/></g>
+<text x="1174" y="194">Polled or event-driven</text>
+</g>
+</svg>
+</div>
+<figcaption>Level 2. Numbers key into the <a href="#interactions">interactions table</a>. Dashed arrows are polled or event-driven. A persistent secondmate home repeats this whole picture one level down, inside its own <code>FM_HOME</code>.</figcaption>
+</figure>
+
+<h2 id="shape">The shape in one paragraph</h2>
+<p>Firstmate splits two kinds of work. Exact, repeatable mechanics live in bash scripts. Judgement lives in an agent. "the two never mix" <code class="cite">VISION.md:34</code>. The <strong>supervisor agent</strong> is an ordinary harness session that loads <code>AGENTS.md</code> as its job description <code class="cite">AGENTS.md:7-9</code>. It changes nothing directly: every spawn, steer, lifecycle action, merge, hold, and cleanup goes through a guarded script in the <strong>toolbelt</strong> <code class="cite">AGENTS.md:329-339</code> <code class="cite">AGENTS.md:363</code>.</p>
+<p>A zero-token <strong>watcher</strong> in bash sleeps on the fleet. It absorbs benign wakes and writes actionable ones to a <strong>durable wake queue</strong> before exiting, which wakes the agent <code class="cite">bin/fm-watch.sh:3-4</code> <code class="cite">bin/fm-watch.sh:258-261</code>. <strong>Workers</strong> run in isolated worktrees inside a <strong>runtime session backend</strong>. They receive instructions through durable <strong>steering inboxes</strong> and report through append-only <strong>status event logs</strong>. Every obligation is a record in the <strong>operational home</strong>, so "a restart must be a non-event" <code class="cite">AGENTS.md:256</code>.</p>
+
+<h2 id="catalogue">Container catalogue</h2>
+
+<h3 id="supervision-side">Supervision</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Container</th><th>Responsibility</th><th>Runs as / owned by</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr id="c-supervisor"><td><strong>Supervisor agent</strong><br>(the first mate)</td><td>The captain's only point of contact. It resolves intake, dispatches ship and scout work, supervises, escalates only real decisions, and reports outcomes in plain language. It never writes to a project; it delegates project work to workers.</td><td>A harness session in the code root. <code>CLAUDE.md</code> is an <code>@AGENTS.md</code> import. A lock-refused session stays read-only.</td><td><code class="cite">AGENTS.md:3</code> <code class="cite">AGENTS.md:20-28</code> <code class="cite">CLAUDE.md:2</code> <code class="cite">AGENTS.md:179-180</code></td></tr>
+<tr id="c-session-start"><td><strong>Session start</strong></td><td>Runs exactly once per session. It composes real subprocesses in fixed order and prints one read-once digest: lock, bootstrap, wake drain, the harness supervision block, the fleet digest, network checks (run in a deferred worker off the blocking path), and the context digest. It never arms the watcher itself.</td><td><code>bin/fm-session-start.sh</code> calling <code>fm-lock.sh</code>, <code>fm-bootstrap.sh</code>, <code>fm-wake-drain.sh</code>, <code>fm-startup-network.sh</code>, <code>fm-supervision-instructions.sh</code></td><td><code class="cite">bin/fm-session-start.sh:14-15</code> <code class="cite">bin/fm-session-start.sh:29-59</code> <code class="cite">AGENTS.md:168-174</code> <code class="cite">AGENTS.md:182-185</code></td></tr>
+<tr id="c-lock"><td>Session lock</td><td>Ensures only one supervisor mutates a home. The lock is per home, and the anchor pid is on line 1 of <code>state/.lock</code>. It is a record the other containers check, not a separate process.</td><td><code>bin/fm-lock.sh</code>, <code>bin/fm-session-lock-lib.sh</code></td><td><code class="cite">bin/fm-lock.sh:2-4</code> <code class="cite">bin/fm-session-lock-lib.sh:4-5</code></td></tr>
+<tr id="c-hooks"><td><strong>Wait and turn-end hooks</strong></td><td>These are the harness-specific halves of supervision. They keep exactly one live watcher cycle, rewake the agent when the cycle closes on an actionable wake, and block or follow up a turn that would end with work under way and no supervision. Each harness has its own shape. Claude uses a Stop <code>asyncRewake</code> hook. Cursor parks its <code>stop</code> hook. Pi and omp use tracked extensions. OpenCode uses a TUI plugin. Grok uses background-notify cycles. Codex uses foreground checkpoints.</td><td><code>.claude/settings.json</code>, <code>.cursor/hooks.json</code>, <code>.codex/hooks.json</code>, <code>.grok/hooks/</code>, <code>.pi/extensions/</code>, <code>.omp/extensions/</code>, <code>.opencode/plugins/</code>; <code>bin/fm-watch-arm.sh</code>, <code>bin/fm-claude-stop-autoarm.sh</code>, <code>bin/fm-turnend-guard.sh</code></td><td><code class="cite">.claude/settings.json:43-49</code> <code class="cite">docs/architecture.md:155-166</code> <code class="cite">bin/fm-watch-arm.sh:28-32</code> <code class="cite">bin/fm-claude-stop-autoarm.sh:44-46</code> <code class="cite">bin/fm-turnend-guard.sh:11-13</code> <code class="cite">AGENTS.md:422-426</code></td></tr>
+<tr id="c-watcher"><td><strong>Watcher</strong></td><td>A singleton bash poll loop, every <code>FM_POLL</code> (15 s by default). It classifies <code>signal</code>, <code>stale</code>, <code>check</code>, and <code>heartbeat</code> wakes. Benign ones are absorbed into <code>state/.watch-triage.log</code>. Actionable ones go to the queue, and then the watcher exits. It also re-rings steering inboxes, runs checks, reconciles process-event sources, and detects a stalled secondmate queue. Its liveness beacon is <code>state/.last-watcher-beat</code>.</td><td><code>bin/fm-watch.sh</code>, sourcing <code>fm-wake-lib.sh</code> and <code>fm-classify-lib.sh</code></td><td><code class="cite">bin/fm-watch.sh:3-4</code> <code class="cite">bin/fm-watch.sh:220</code> <code class="cite">bin/fm-watch.sh:2090</code> <code class="cite">bin/fm-watch.sh:2309</code> <code class="cite">bin/fm-wake-lib.sh:1841</code> <code class="cite">docs/architecture.md:98</code> <code class="cite">docs/architecture.md:65-67</code></td></tr>
+<tr id="c-away"><td><strong>Away sub-supervisor</strong></td><td>Used on every harness except Pi. While <code>state/.afk</code> exists, it runs the watcher as a child and self-handles the routine majority of wakes in bash. It escalates batched digests into the supervisor pane (tmux or Herdr only) and raises a wedge alarm if delivery stalls. The captain's away words live verbatim in <code>state/.afk-contract</code>.</td><td><code>bin/fm-supervise-daemon.sh</code>, <code>bin/fm-afk-contract.sh</code>, <code>bin/fm-afk-launch.sh</code>, <code>bin/fm-afk-return.sh</code></td><td><code class="cite">bin/fm-supervise-daemon.sh:4-7</code> <code class="cite">bin/fm-supervise-daemon.sh:16</code> <code class="cite">bin/fm-afk-contract.sh:7</code> <code class="cite">AGENTS.md:468-469</code> <code class="cite">docs/configuration.md:183-189</code></td></tr>
+<tr id="c-pi-branch"><td><strong>Pi supervision branch</strong></td><td>Pi primaries only. A second conversation inside the same <code>pi</code> process takes eligible task-local wake rows off main, records each outcome in an append-only store, and merges captain-facing outcomes back into main. Per-task leases decide which actor, main or branch, may change a task.</td><td><code>.pi/extensions/fm-branch-supervision.ts</code>, <code>bin/fm-branch-prompt.sh</code>, <code>bin/fm-branch-outcome.sh</code>, <code>bin/fm-lease-lib.sh</code>, <code>bin/fm-wake-grant.sh</code></td><td><code class="cite">docs/pi-supervision-branch.md:8</code> <code class="cite">docs/pi-supervision-branch.md:18</code> <code class="cite">docs/architecture.md:137-140</code> <code class="cite">bin/fm-branch-outcome.sh:6</code> <code class="cite">bin/fm-lease-lib.sh:15</code></td></tr>
+<tr id="c-checks"><td><strong>Checks and event sources</strong></td><td>Slow authenticated polls that the watcher runs every <code>FM_CHECK_INTERVAL</code>. These are the byte-static PR/MR merge poll, custom checks bound to their bytes, and Relay, mail, and tool-update shims; the watcher rejects any other check file. It also covers long-polling process-to-event sources supervised outside the agent's turn. Any output line becomes a <code>check</code> wake.</td><td><code>state/&lt;id&gt;.check.sh</code>, <code>bin/fm-pr-check.sh</code>, <code>bin/fm-pr-poll.sh</code>, <code>bin/fm-check-register.sh</code>, <code>bin/fm-procevent.sh</code></td><td><code class="cite">bin/fm-watch.sh:2371-2414</code> <code class="cite">bin/fm-pr-check.sh:2-4</code> <code class="cite">bin/fm-check-register.sh:2</code> <code class="cite">bin/fm-procevent.sh:2-4</code> <code class="cite">AGENTS.md:117</code></td></tr>
+</tbody></table></div>
+
+<h3 id="records-side">Records and queues</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Container</th><th>Responsibility</th><th>Format / owner</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr id="c-queue"><td><strong>Durable wake queue</strong></td><td>Holds every actionable wake until the handling turn acknowledges it with the exact generation-bound <code>--ack-through</code> command the drain prints. An interrupted turn therefore loses nothing. Each drain also prints the fleet-wide OPEN DECISIONS, UNREAD STATUS, and RECORD DIVERGENCE sections.</td><td><code>state/.wake-queue</code>: <code>epoch⇥seq⇥kind⇥key⇥payload</code>, one row per wake. Written by <code>fm-wake-lib.sh</code>; presented by <code>fm-wake-drain.sh</code>.</td><td><code class="cite">AGENTS.md:145</code> <code class="cite">bin/fm-wake-lib.sh:1862</code> <code class="cite">bin/fm-wake-drain.sh:2-7</code> <code class="cite">bin/fm-wake-drain.sh:860</code> <code class="cite">AGENTS.md:428-433</code></td></tr>
+<tr id="c-status"><td><strong>Status event logs</strong></td><td>Workers append wake events here, and so do secondmates through the parent channel. These are events, not current truth. Current state comes from <code>fm-crew-state.sh</code>, which prefers the no-mistakes run step and the semantic busy verdict over the log. Keyed <code>needs-decision</code> and <code>blocked</code> stay open until a matching <code>resolved</code> line.</td><td><code>state/&lt;id&gt;.status</code>, one line per event: <code>verb [key=…] [at=&lt;epoch&gt;]: text</code>. The verbs are working, needs-decision, blocked, paused, done, failed, note, resolved, and captain-held.</td><td><code class="cite">AGENTS.md:103</code> <code class="cite">AGENTS.md:163</code> <code class="cite">bin/fm-classify-lib.sh:169-172</code> <code class="cite">bin/fm-classify-lib.sh:285-288</code> <code class="cite">bin/fm-crew-state.sh:25</code></td></tr>
+<tr id="c-inbox"><td><strong>Steering inboxes</strong></td><td>How the supervisor tells a worker something. A message is a durable numbered record. The worker's terminal only gets a constant doorbell line, and the worker moving the file to <code>handled/</code> is the acknowledgement. The watcher re-rings unacknowledged records every 90 s by default and escalates after the ring limit.</td><td><code>state/&lt;id&gt;.inbox/NNN.msg</code>, schema <code>fm-task-inbox.v1</code>. Owned by <code>fm-task-inbox-lib.sh</code>; written by <code>fm-send.sh</code>.</td><td><code class="cite">bin/fm-task-inbox-lib.sh:24-31</code> <code class="cite">bin/fm-task-inbox-lib.sh:47-53</code> <code class="cite">bin/fm-task-inbox-lib.sh:81-82</code> <code class="cite">bin/fm-task-inbox-lib.sh:268</code> <code class="cite">AGENTS.md:335</code></td></tr>
+<tr id="c-home"><td><strong>Operational home records</strong></td><td>Everything durable and private to one instance. <code>data/</code> holds the backlog, briefs, scout reports, captain preferences, learnings, and project and secondmate registries. <code>state/</code> holds task metadata, runtime markers, and the stores above. <code>config/</code> holds local operating choices. <code>projects/</code> holds clones that are read-only to Firstmate.</td><td>The <code>FM_HOME</code> tree. Each script resolves <code>FM_HOME</code>, then <code>state/</code>, <code>data/</code>, and <code>projects/</code>, inline.</td><td><code class="cite">AGENTS.md:58</code> <code class="cite">AGENTS.md:60-161</code> <code class="cite">bin/fm-spawn.sh:417-418</code> <code class="cite">bin/fm-spawn.sh:452-454</code> <code class="cite">.gitignore:1-13</code></td></tr>
+<tr id="c-side"><td><strong>Captain side channels</strong></td><td>Ways work or questions reach Firstmate other than chat. Captain inbox notes and the voice handover's requests append a <code>check</code> wake. Relay mentions are stored under <code>state/x-inbox/</code> by a check shim. Unseen mail raises a <code>check</code> wake. All except the inbox are opt-in.</td><td><code>bin/fm-inbox.sh</code>, <code>bin/fm-x-poll.sh</code>, <code>bin/fm-mail.sh</code>, <code>bin/fm-voice-relay.py</code></td><td><code class="cite">bin/fm-inbox.sh:356</code> <code class="cite">bin/fm-x-poll.sh:15-18</code> <code class="cite">bin/fm-bootstrap.sh:1026</code> <code class="cite">bin/fm-mail.sh:379</code> <code class="cite">AGENTS.md:138</code></td></tr>
+<tr id="c-views"><td><strong>Fleet views</strong></td><td>Read-only structured projections of the whole fleet, with schema <code>fm-fleet-snapshot.v1</code>. They are used for heartbeat review, <code>/bearings</code>, and the human fleet view. Every home publishes <code>state/home-summary.json</code> atomically, and the parent reads it, over SSH for remote homes.</td><td><code>bin/fm-fleet-snapshot.sh</code>, <code>bin/fm-fleet-view.sh</code>, <code>bin/fm-bearings-snapshot.sh</code>, <code>bin/fm-home-summary-refresh.sh</code></td><td><code class="cite">bin/fm-fleet-snapshot.sh:4-10</code> <code class="cite">bin/fm-home-summary-refresh.sh:6-8</code> <code class="cite">bin/fm-fleet-snapshot.sh:1448</code> <code class="cite">docs/architecture.md:131-134</code></td></tr>
+</tbody></table></div>
+
+<h3 id="work-side">Toolbelt, backends, and workers</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Container</th><th>Responsibility</th><th>Runs as / owned by</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr id="c-toolbelt"><td><strong>Toolbelt</strong></td><td>The fleet's only mutation surface. It scaffolds briefs, spawns, steers (the data plane), and controls workers with <code>interrupt</code>, <code>exit</code>, and <code>relaunch</code> (the control plane). It also records PRs, merges behind live checks, holds decisions for the captain, and tears down fail-closed. Each script's header is its contract. The fleet-lifecycle entry points refuse to run inside a no-mistakes gate.</td><td>196 tracked files under <code>bin/</code>: 182 bash scripts plus Python, Node, Perl, and jq helpers; <code>docs/scripts.md</code> indexes them.</td><td><code class="cite">docs/scripts.md:3-4</code> <code class="cite">bin/fm-brief.sh:2-3</code> <code class="cite">bin/fm-spawn.sh:2-3</code> <code class="cite">bin/fm-control.sh:2-3</code> <code class="cite">bin/fm-teardown.sh:2-7</code> <code class="cite">docs/architecture.md:284</code></td></tr>
+<tr id="c-backend"><td><strong>Backend adapter layer</strong></td><td>One dispatch surface over the session providers. It covers selection (explicit flag, <code>FM_BACKEND</code>, <code>config/backend</code>, auto-detect, then tmux), task-metadata helpers, selector resolution, capture, send, kill, and agent-state probes. Each adapter is one sourced file.</td><td><code>bin/fm-backend.sh</code>, <code>bin/backends/{tmux,herdr,zellij,orca,cmux}.sh</code></td><td><code class="cite">bin/fm-backend.sh:2-3</code> <code class="cite">bin/fm-backend.sh:70</code> <code class="cite">docs/architecture.md:239-241</code> <code class="cite">docs/configuration.md:137</code></td></tr>
+<tr id="c-worker"><td><strong>Worker agent</strong></td><td>Does exactly one task in a disposable worktree. A <em>ship</em> changes a project through its delivery mode. A <em>scout</em> leaves <code>data/&lt;id&gt;/report.md</code> and never pushes. A worker gets its brief as a <code>launch-brief</code> operational input that opens with the current worker role contract. It checks isolation before branching. It communicates only through status lines, its inbox, and the forge.</td><td>A harness session in a Treehouse or Orca worktree, recorded in <code>state/&lt;id&gt;.meta</code> with <code>kind=ship|scout</code>. <code>FM_TASK_ID</code> is exported into its pane.</td><td><code class="cite">bin/fm-spawn.sh:196-198</code> <code class="cite">docs/architecture.md:290</code> <code class="cite">bin/fm-dod-lib.sh:49-51</code> <code class="cite">bin/fm-spawn.sh:4737</code> <code class="cite">AGENTS.md:38-39</code> <code class="cite">docs/architecture.md:277-278</code></td></tr>
+<tr id="c-secondmate"><td><strong>Persistent secondmate home</strong></td><td>A long-lived supervisor for one routed domain, idle by default. It is a complete Firstmate home of its own, with its own lock, backlog, projects, watcher, queue, and workers. To the parent it is still a direct report (<code>kind=secondmate</code>) and never a backlog item. Its outcomes reach the parent's <code>state/&lt;id&gt;.status</code> through the parent channel.</td><td>A leased Treehouse worktree of the Firstmate repo, seeded by <code>fm-home-seed.sh</code> with <code>data/charter.md</code>, <code>.fm-secondmate-home</code>, and <code>.fm-secondmate-parent</code>, and routed in <code>data/secondmates.md</code>.</td><td><code class="cite">AGENTS.md:55</code> <code class="cite">bin/fm-home-seed.sh:17-20</code> <code class="cite">bin/fm-parent-channel-lib.sh:34-38</code> <code class="cite">AGENTS.md:269-271</code> <code class="cite">AGENTS.md:535</code></td></tr>
+<tr id="c-remote"><td><strong>Remote secondmate home</strong></td><td>The same thing placed whole on an SSH host. It is always on Herdr, is driven by <code>fm-on.sh</code> through a per-account remote job worker, and has its replies mirrored into the parent's status log. An unreachable host is "unknown", never dead, and is never failed over locally.</td><td><code>bin/fm-remote-home-seed.sh</code>, <code>bin/fm-on.sh</code>, <code>bin/fm-remote-job-worker.sh</code>, <code>bin/fm-procevent-remote-reply.sh</code></td><td><code class="cite">docs/remote-secondmates.md:3-7</code> <code class="cite">bin/fm-on.sh:125</code> <code class="cite">bin/fm-remote-job-worker.sh:2</code> <code class="cite">bin/fm-procevent-remote-reply.sh:27-29</code> <code class="cite">docs/architecture.md:327</code></td></tr>
+</tbody></table></div>
+
+<h2 id="interactions">Interactions</h2>
+<p>One row per numbered arrow. "Mechanism" names the concrete script, file, or hook that carries it.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>#</th><th>From → to</th><th>What happens</th><th>Mechanism and evidence</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Captain → supervisor agent</td><td>Chat: requests, answers, merge approvals. Replies come back as outcomes, never as internal mechanics, and the final message of a turn must stand alone.</td><td><code class="cite">AGENTS.md:482-489</code></td></tr>
+<tr><td>2</td><td>Session start → supervisor agent</td><td>One ordered, read-once digest per session. The agent trusts it as that turn's startup and recovery input.</td><td><code class="cite">bin/fm-session-start.sh:29-59</code> <code class="cite">AGENTS.md:174</code></td></tr>
+<tr><td>3</td><td>Supervisor agent → toolbelt</td><td>Every fleet mutation: <code>fm-spawn</code>, <code>fm-send</code>, <code>fm-control</code>, <code>fm-pr-merge</code>, <code>fm-captain-hold</code>, <code>fm-teardown</code>, and the rest.</td><td><code class="cite">AGENTS.md:329</code> <code class="cite">AGENTS.md:335-339</code> <code class="cite">AGENTS.md:363</code> <code class="cite">AGENTS.md:537</code></td></tr>
+<tr><td>4</td><td>Hooks → watcher</td><td>The arm wrapper forks the watcher as a tracked child and reports <code>started</code>, <code>attached</code>, or <code>FAILED</code> after checking the fresh beacon.</td><td><code class="cite">bin/fm-watch-arm.sh:2</code> <code class="cite">bin/fm-watch-arm.sh:28-32</code> <code class="cite">docs/architecture.md:157</code></td></tr>
+<tr><td>5</td><td>Hooks → supervisor agent</td><td>The agent is woken on an actionable close (Claude: exit 2 from the Stop hook). A turn that would end blind while work is under way is blocked or followed up.</td><td><code class="cite">bin/fm-claude-stop-autoarm.sh:44-46</code> <code class="cite">bin/fm-turnend-guard.sh:11-13</code> <code class="cite">docs/architecture.md:172</code></td></tr>
+<tr><td>6</td><td>Watcher → status logs</td><td>Classifies the bytes appended since the last pass, never only the last line, and advances its markers once it has reported.</td><td><code class="cite">bin/fm-watch.sh:1718</code> <code class="cite">docs/architecture.md:186-187</code></td></tr>
+<tr><td>7</td><td>Watcher → wake queue</td><td>Appends an actionable <code>signal</code>, <code>stale</code>, <code>check</code>, or <code>heartbeat</code> row under the queue lock, then exits.</td><td><code class="cite">bin/fm-watch.sh:2556</code> <code class="cite">bin/fm-wake-lib.sh:1841</code> <code class="cite">bin/fm-wake-lib.sh:1862</code></td></tr>
+<tr><td>8</td><td>Toolbelt → wake queue</td><td><code>fm-wake-drain.sh</code> presents rows before any other action and acknowledges them only after handling.</td><td><code class="cite">bin/fm-wake-drain.sh:2-7</code> <code class="cite">bin/fm-wake-drain.sh:860</code> <code class="cite">AGENTS.md:428</code></td></tr>
+<tr><td>9</td><td>Toolbelt → steering inboxes</td><td><code>fm-send.sh</code> writes the durable record, then rings the doorbell. <code>--resolve-key</code> appends the closing <code>resolved</code> line to the worker's status log at answer time.</td><td><code class="cite">bin/fm-send.sh:1041</code> <code class="cite">AGENTS.md:335-337</code></td></tr>
+<tr><td>10</td><td>Watcher → steering inboxes</td><td>Re-rings unacknowledged records on the ladder schedule and escalates a stuck one as stale. A dead endpoint skips straight to escalation.</td><td><code class="cite">bin/fm-watch.sh:423-427</code> <code class="cite">bin/fm-task-inbox-lib.sh:47-53</code></td></tr>
+<tr><td>11</td><td>Watcher → checks and sources</td><td>Runs validated check files on the check interval. Their output becomes <code>check: &lt;script&gt;: &lt;line&gt;</code>. It also calls <code>fm-procevent.sh reconcile</code> each cycle when sources exist.</td><td><code class="cite">bin/fm-watch.sh:2371-2414</code> <code class="cite">bin/fm-watch.sh:2341</code></td></tr>
+<tr><td>12</td><td>Away sub-supervisor → watcher</td><td>Wraps the watcher as a child, then routes every wake itself: self-handle, buffer, or escalate.</td><td><code class="cite">bin/fm-supervise-daemon.sh:4-7</code></td></tr>
+<tr><td>13</td><td>Toolbelt → backend adapter layer</td><td>Creates task endpoints at spawn, submits typed-plane text, and kills endpoints at teardown.</td><td><code class="cite">bin/fm-spawn.sh:3244</code> <code class="cite">bin/fm-send.sh:1130</code></td></tr>
+<tr><td>14</td><td>Backend adapter layer → worker</td><td>Endpoint lifecycle, bounded pane capture (which the watcher also uses for staleness), text and keys, and agent-state probes.</td><td><code class="cite">bin/fm-watch.sh:471</code> <code class="cite">docs/architecture.md:239-240</code></td></tr>
+<tr><td>15</td><td>Worker → steering inbox</td><td>Lists, reads, and acts on messages in numeric order, then acknowledges each by moving it into <code>handled/</code>.</td><td><code class="cite">bin/fm-task-inbox-lib.sh:26-27</code> <code class="cite">bin/fm-task-inbox-lib.sh:268</code></td></tr>
+<tr><td>16</td><td>Worker → status logs</td><td>Appends one sparse status line per supervisor-actionable phase change.</td><td><code class="cite">bin/fm-brief.sh:515</code> <code class="cite">AGENTS.md:566</code></td></tr>
+<tr><td>17</td><td>Toolbelt → home records</td><td>Writes briefs, publishes task meta together with the backlog transition as one step, records holds, and removes meta at teardown.</td><td><code class="cite">bin/fm-brief.sh:230</code> <code class="cite">bin/fm-spawn.sh:4514</code> <code class="cite">bin/fm-captain-hold.sh:12-14</code> <code class="cite">bin/fm-teardown.sh:986</code></td></tr>
+<tr><td>18</td><td>Secondmate home → status logs</td><td>The parent channel: a local mate appends to the parent's <code>state/&lt;mate-id&gt;.status</code>. The home's own scripts publish terminal outcomes there without relying on the mate model.</td><td><code class="cite">bin/fm-parent-channel-lib.sh:34-38</code> <code class="cite">docs/architecture.md:97</code></td></tr>
+<tr><td>19</td><td>Secondmate home → steering inbox</td><td>Receives routed requests as marked <code>from-firstmate</code> inbox records and answers through status or a document pointer, never only in its own chat.</td><td><code class="cite">bin/fm-send.sh:96-103</code> <code class="cite">AGENTS.md:340</code></td></tr>
+<tr><td>20</td><td>Pi branch ↔ wake queue</td><td>Claims eligible task-local rows through per-actor claim files and acknowledges them. Main keeps the main-only rows.</td><td><code class="cite">AGENTS.md:126</code> <code class="cite">docs/architecture.md:137</code> <code class="cite">docs/scripts.md:112</code></td></tr>
+<tr><td>21</td><td>Side channels → checks and queue</td><td>Inbox notes and mail append <code>check</code> wakes directly. Relay mentions arrive through the <code>x-watch.check.sh</code> shim as <code>x-mention &lt;id&gt;</code>.</td><td><code class="cite">bin/fm-inbox.sh:356</code> <code class="cite">bin/fm-mail.sh:379</code> <code class="cite">bin/fm-x-poll.sh:182</code></td></tr>
+<tr><td>22</td><td>Fleet views → home records</td><td>Read-only. The snapshot writes only its own cache of remote summaries.</td><td><code class="cite">bin/fm-fleet-snapshot.sh:6-10</code></td></tr>
+<tr><td>23</td><td>tasks-axi → home records</td><td>The backlog file is written by <code>tasks-axi</code>, always invoked through <code>fm-tasks-axi.sh</code>, which pins <code>&lt;data&gt;/backlog.md</code>.</td><td><code class="cite">bin/fm-tasks-axi.sh:26-27</code> <code class="cite">bin/fm-backlog-transition-lib.sh:14</code></td></tr>
+<tr><td>24</td><td>Backend adapter layer → session backends</td><td>Adapter calls such as <code>tmux send-keys</code> and <code>herdr session list</code>.</td><td><code class="cite">bin/backends/tmux.sh:58</code> <code class="cite">bin/backends/herdr.sh:3627</code></td></tr>
+<tr><td>25</td><td>Worker → harness CLIs</td><td>Each worker is one harness process started from a verified launch template.</td><td><code class="cite">bin/fm-spawn.sh:1855</code> <code class="cite">bin/fm-spawn.sh:1950</code></td></tr>
+<tr><td>26</td><td>Worker worktree ← Treehouse</td><td>Spawn types <code>treehouse get</code> into the new pane, except for secondmates and Orca, and waits until the pane is in an isolated worktree.</td><td><code class="cite">bin/fm-spawn.sh:3842-3843</code></td></tr>
+<tr><td>27</td><td>Worker → forges and no-mistakes</td><td>Pushes its branch and opens a ready PR (<code>direct-PR</code>), or drives the no-mistakes pipeline (<code>no-mistakes</code>). Firstmate then arms the merge poll.</td><td><code class="cite">bin/fm-dod-lib.sh:256</code> <code class="cite">AGENTS.md:369-370</code> <code class="cite">AGENTS.md:395</code></td></tr>
+<tr><td>28</td><td>Remote secondmate home ↔ SSH host</td><td>Each command is an argv sent over <code>ssh</code> to the remote job worker. Exit 255 means completion is unknown, and the command is never blindly repeated.</td><td><code class="cite">bin/fm-on.sh:125</code> <code class="cite">bin/fm-on.sh:19-21</code></td></tr>
+</tbody></table></div>
+
+<h2 id="cross-cutting">Cross-cutting contracts every container relies on</h2>
+<dl class="defs">
+<dt>Operational input marker</dt>
+<dd>Machine-originated input to an agent is prefixed with U+2063 then <code>FIRSTMATE_OP: v1 &lt;kind&gt;:</code>. The kinds are session-start, watcher, turn-end-guard, away-supervisor, launch-brief, and branch-outcome, plus a separate <code>from-firstmate</code> carrier for routed secondmate requests. <code class="cite">bin/fm-operational-input.sh:9</code> <code class="cite">bin/fm-operational-input.sh:31</code> <code class="cite">bin/fm-operational-input.sh:39</code></dd>
+<dt>Semantic busy state</dt>
+<dd>Whether a worker is busy comes from its adapter's own lifecycle events, never from rendered text. The verdicts are busy, idle, unknown, and dead, each with its source. <code class="cite">bin/fm-busy-lib.sh:2</code> <code class="cite">bin/fm-busy-lib.sh:17</code> <code class="cite">bin/fm-busy-lib.sh:49</code> <code class="cite">docs/architecture.md:217-218</code></dd>
+<dt>Current state is derived, events are not state</dt>
+<dd>One deterministic line: <code>state: … · source: … · detail</code>. <code class="cite">bin/fm-crew-state.sh:2</code> <code class="cite">bin/fm-crew-state.sh:25</code></dd>
+<dt>Fail-closed teardown</dt>
+<dd>Unlanded work is never torn down, and a refusal is a finding, not an obstacle. <code class="cite">AGENTS.md:34-37</code> <code class="cite">bin/fm-teardown.sh:44</code></dd>
+<dt>Tangle guard</dt>
+<dd>A named non-default branch in the primary checkout is a tangle. The pull guard warns on the next mutation, and ship briefs refuse to start in the primary checkout. <code class="cite">docs/architecture.md:270-277</code> <code class="cite">bin/fm-guard.sh:41</code></dd>
+</dl>
+
+<div class="callout unclear"><span class="callout-title">Not settled by the source</span>
+<ul>
+<li>How OpenCode discovers <code>.opencode/plugins/</code>: no tracked config file registers the directory. It appears to be OpenCode's own convention, which this page could not confirm from Firstmate's source.</li>
+<li>Whether <code>fm-spawn.sh</code> creates <code>state/&lt;id&gt;.status</code> up front: spawn itself only appends <code>failed:</code> lines on launch failure, and the worker creates the file with its first append as the brief instructs.</li>
+</ul>
+</div>
+
+<h2 id="next">Where each container is covered next</h2>
+<ul class="cards">
+<li><a href="../components/supervision/index.html"><strong>Supervision</strong><span>watcher, wake queue, hooks, away mode, Pi branch</span></a></li>
+<li><a href="../components/communication/index.html"><strong>Communication</strong><span>inboxes, status logs, parent channel, side channels</span></a></li>
+<li><a href="../components/persistence/index.html"><strong>Persistence</strong><span>the operational home and its records</span></a></li>
+<li><a href="../components/crew/index.html"><strong>Crew</strong><span>workers, secondmates, harnesses, backends</span></a></li>
+<li><a href="../components/prompts-and-skills/index.html"><strong>Prompts and skills</strong><span>AGENTS.md, briefs, protocols, skills</span></a></li>
+<li><a href="../components/delivery/index.html"><strong>Delivery</strong><span>modes, PRs, merges, validation</span></a></li>
+<li><a href="../components/backlog-and-decisions/index.html"><strong>Backlog and decisions</strong><span>tasks-axi, holds, open decisions</span></a></li>
+<li><a href="../components/observability/index.html"><strong>Observability</strong><span>fleet views, logs, audits, tests</span></a></li>
+<li><a href="../components/remote/index.html"><strong>Remote</strong><span>remote secondmate homes over SSH</span></a></li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../assets/nav-data.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>
