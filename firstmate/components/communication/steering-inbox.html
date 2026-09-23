@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Steering inbox and doorbell · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Communication</p>
+<h1>Steering inbox and doorbell</h1>
+<p class="lede">How Firstmate gets text to a running worker: the message becomes a numbered file in a per-task inbox, and the terminal only gets a short fixed "doorbell" line telling the worker to look there. The worker's acknowledgement is moving the file.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Owner: <code class="cite">bin/fm-task-inbox-lib.sh</code>. Up: <a href="index.html">Communication</a>. See also: <a href="fm-send.html">fm-send</a>, which writes records.</p>
+
+<h2 id="problem">The problem it solves</h2>
+<p>Typing a whole message into an agent's terminal can fail in several ways. The message can be swallowed while the agent is busy, garbled by a completion popup, or pasted on top of text the operator is still typing. Before this design, "did the keystrokes land?" was the question every send had to answer, and there was often no reliable answer.</p>
+<p>The library header states the adopted design (<code class="cite">bin/fm-task-inbox-lib.sh:14-23</code>):</p>
+<ul>
+<li>The payload goes to the filesystem, which is reliable.</li>
+<li>The terminal carries only a short <strong>constant</strong> doorbell line. That line does not need to be reliable, because ringing it again costs nothing.</li>
+<li>A duplicated doorbell does nothing by construction: the worker finds the inbox empty or already handled.</li>
+<li>A swallowed doorbell is noticed because no acknowledgement arrives, and the watcher rings again on a bounded schedule.</li>
+<li>An endpoint that is positively dead or missing is not typed into at all. Its unhandled record surfaces through the ordinary <code>stale</code> wake into stuck-crewmate recovery.</li>
+</ul>
+<p>So the question a sender asks changes from "did the doorbell land?" to "was the message acted on?". The second question is answered later, and only by the worker's acknowledgement (<code class="cite">bin/fm-send.sh:47-50</code>).</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 760 660" role="img" aria-labelledby="si-seq-t si-seq-d">
+<title id="si-seq-t">Steering inbox sequence: record, ring, acknowledge, re-ring</title>
+<desc id="si-seq-d">fm-send writes a numbered record into the task inbox and rings a doorbell line into the worker's pane. The worker lists the inbox, acts, and moves the record to handled. If no acknowledgement arrives, the watcher rings again up to three times on an idle pane, then queues a stale wake to firstmate and writes the escalation marker.</desc>
+<defs><marker id="si-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="10" y="30">Steering inbox — one message over time</text>
+<g class="c4-container"><rect x="10" y="50" width="150" height="54" rx="8"/><text class="c4-label" x="85" y="74">Sender</text><text class="c4-tech" x="85" y="90">[bin/fm-send.sh]</text></g>
+<g class="c4-datastore"><rect x="210" y="50" width="150" height="54" rx="8"/><text class="c4-label" x="285" y="74">Task inbox</text><text class="c4-tech" x="285" y="90">[state/&lt;id&gt;.inbox/]</text></g>
+<g class="c4-external"><rect x="405" y="50" width="150" height="54" rx="8"/><text class="c4-label" x="480" y="74">Worker agent</text><text class="c4-tech" x="480" y="90">[pane, via backend]</text></g>
+<g class="c4-container"><rect x="595" y="50" width="150" height="54" rx="8"/><text class="c4-label" x="670" y="74">Watcher</text><text class="c4-tech" x="670" y="90">[bin/fm-watch.sh]</text></g>
+<g class="c4-rel c4-rel-async"><line x1="85" y1="104" x2="85" y2="640"/><line x1="285" y1="104" x2="285" y2="640"/><line x1="480" y1="104" x2="480" y2="640"/><line x1="670" y1="104" x2="670" y2="640"/></g>
+<g class="c4-rel"><path d="M85,140 L283,140" marker-end="url(#si-arrow)"/><text class="c4-rel-label" x="184" y="133">1 write NNN.msg atomically</text></g>
+<g class="c4-rel"><path d="M85,180 L478,180" marker-end="url(#si-arrow)"/><text class="c4-rel-label" x="282" y="173">2 type doorbell line + Enter (best-effort)</text></g>
+<g class="c4-legend"><text x="94" y="212">exit 0: the record exists</text></g>
+<g class="c4-rel"><path d="M480,250 L287,250" marker-end="url(#si-arrow)"/><text class="c4-rel-label" x="383" y="243">3 list *.msg, act in order</text></g>
+<g class="c4-rel"><path d="M480,290 L287,290" marker-end="url(#si-arrow)"/><text class="c4-rel-label" x="383" y="283">4 mv NNN.msg handled/ = ack</text></g>
+<g class="c4-boundary"><rect x="10" y="320" width="740" height="315" rx="8"/><text x="22" y="338">If no acknowledgement arrives (each watcher poll)</text></g>
+<g class="c4-rel"><path d="M670,370 L287,370" marker-end="url(#si-arrow)"/><text class="c4-rel-label" x="478" y="363">5 due action? (oldest unhandled, 90 s grace)</text></g>
+<g class="c4-rel"><path d="M670,420 L482,420" marker-end="url(#si-arrow)"/><text class="c4-rel-label" x="576" y="413">6 idle pane: ring again</text></g>
+<g class="c4-legend"><text x="490" y="444">busy pane: wait, no ring</text></g>
+<g class="c4-rel"><path d="M670,480 L287,480" marker-end="url(#si-arrow)"/><text class="c4-rel-label" x="478" y="473">7 count attempt in .ring-state</text></g>
+<g class="c4-rel c4-rel-async"><path d="M670,540 L87,540" marker-end="url(#si-arrow)"/><text class="c4-rel-label" x="378" y="533">8 after 3 attempts, or agent dead/missing: stale wake to firstmate</text></g>
+<g class="c4-rel"><path d="M670,600 L287,600" marker-end="url(#si-arrow)"/><text class="c4-rel-label" x="478" y="593">9 write .escalated (only after the wake is queued)</text></g>
+</svg>
+</div>
+<figcaption>Steps 1–4 are the healthy path. Steps 5–9 run on every watcher poll while the oldest record stays unhandled. Solid arrows are writes or keystrokes, the dashed arrow is a queued wake. Sources: <code class="cite">bin/fm-send.sh:1007-1093</code>, <code class="cite">bin/fm-watch.sh:434-507</code>.</figcaption>
+</figure>
+
+<h2 id="layout">What lives on disk</h2>
+<p>All paths are under the home's <code>state/</code> directory (<code class="cite">bin/fm-task-inbox-lib.sh:25-32</code>).</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Path</th><th>Meaning</th><th>Written by</th></tr></thead>
+<tbody>
+<tr><td><code>&lt;task&gt;.inbox/NNN.msg</code></td><td>One durable steer. The number is a sequence. The file appears by atomic rename, never half-written.</td><td><code>fm-send.sh</code>; on a remote host, <code>fm-remote-secondmate-control.sh send</code></td></tr>
+<tr><td><code>&lt;task&gt;.inbox/handled/</code></td><td>Where the worker moves a record once it has acted on it. The move <em>is</em> the acknowledgement.</td><td>The worker</td></tr>
+<tr><td><code>&lt;task&gt;.inbox/.seq.lock</code></td><td>Serialises sequence allocation, because the session and the away daemon can both write.</td><td>The library</td></tr>
+<tr><td><code>&lt;task&gt;.inbox/.ring-state</code></td><td>Re-ring bookkeeping, one line: <code>&lt;msg&gt;\t&lt;count&gt;\t&lt;epoch&gt;</code>.</td><td>The watcher</td></tr>
+<tr><td><code>&lt;task&gt;.inbox/.escalated</code></td><td>Name of the oldest record already surfaced as stale, so later polls do not surface it again.</td><td>The watcher</td></tr>
+</tbody></table></div>
+<p>The inbox is removed by teardown (<code class="cite">AGENTS.md:114</code>).</p>
+
+<h3 id="record-format">Record format</h3>
+<p>Written by <code>_fm_task_inbox_write_record_locked</code> (<code class="cite">bin/fm-task-inbox-lib.sh:146-160</code>) and read back by <code>fm_task_inbox_body</code>, which returns everything after the first <code>--</code> line (<code class="cite">bin/fm-task-inbox-lib.sh:241-251</code>):</p>
+<pre><code>schema=fm-task-inbox.v1
+at=2026-09-23T17:44:15Z
+delivery=fire-and-forget        (only when the re-ring ladder must ignore it)
+--
+&lt;exact message text; newlines are allowed; a marked secondmate request
+ keeps its from-firstmate marker and corr token verbatim here&gt;</code></pre>
+
+<h3 id="sequence">Sequence numbers are never reused</h3>
+<p><code>fm_task_inbox_next_seq</code> scans both the inbox root and <code>handled/</code> and takes the highest number plus one, zero-padded to three digits (<code class="cite">bin/fm-task-inbox-lib.sh:116-126</code>). Because acknowledged numbers are counted, a number is never issued twice in one worker's lifetime. The header's conclusion: a message is processed at most once even if every doorbell is duplicated, and two racing writers can only change the order, never lose a message (<code class="cite">bin/fm-task-inbox-lib.sh:42-45</code>).</p>
+<p>The lock is taken with a bounded wait, 5 seconds by default (<code class="cite">bin/fm-task-inbox-lib.sh:128-142</code>). A write that cannot get the lock fails, and <code>fm-send</code> then reports the steer as not sent.</p>
+
+<h2 id="doorbell">The doorbell line</h2>
+<p><code>fm_task_inbox_doorbell_line</code> builds this exact text (<code class="cite">bin/fm-task-inbox-lib.sh:260-270</code>):</p>
+<pre><code>: Firstmate instruction waiting: list '&lt;abs inbox&gt;'/*.msg and, in numeric order, read and act on each, then mv each handled file to '&lt;abs inbox&gt;'/handled/.</code></pre>
+<dl class="defs">
+<dt>It is constant per inbox</dt><dd>It never carries the message, so ringing twice is harmless.</dd>
+<dt>It explains itself</dt><dd>A worker whose brief is older than the inbox contract still gets the full instruction from the line alone (<code class="cite">bin/fm-task-inbox-lib.sh:253-256</code>).</dd>
+<dt>It starts with <code>: </code></dt><dd>That is the POSIX shell no-op. If the agent has exited and the pane is a bare shell, typing the line runs nothing.</dd>
+<dt>It refuses unsafe paths</dt><dd>An inbox path with bytes outside printable ASCII produces no line at all, so terminal control bytes never reach the pane (<code class="cite">bin/fm-task-inbox-lib.sh:61-62</code>).</dd>
+</dl>
+
+<h3 id="ring">Ringing, and what its result means</h3>
+<p><code>fm_task_inbox_ring</code> does one liveness check, one advisory composer check, then submits through the backend's shared submit core with a small retry budget (<code class="cite">bin/fm-task-inbox-lib.sh:286-309</code>). Its return code is advice for the log, never proof of delivery:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Return</th><th>Meaning</th><th>What happens next</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>Rang.</td><td>Nothing; wait for the acknowledgement.</td></tr>
+<tr><td>1</td><td>Skipped: the composer <em>provably</em> holds someone's unsent text (exact <code>pending</code> verdict).</td><td>The watcher rings later.</td></tr>
+<tr><td>2</td><td>The backend send failed.</td><td>The watcher rings later.</td></tr>
+<tr><td>3</td><td>Skipped: the agent is positively <code>dead</code> or the endpoint <code>missing</code>. Nothing typed.</td><td>Recovery owns the record; the watcher escalates without ringing.</td></tr>
+</tbody></table></div>
+<p>The skip is deliberately narrow. Only an exact <code>pending</code> verdict defers, because only then could the Enter submit someone's half-typed text. <code>pending-unproven</code> and <code>unknown</code> still ring: the worst outcome is a garbled constant line the worker can still understand, whereas skipping on vague verdicts would starve a harness whose idle screen the classifier cannot recognise (<code class="cite">bin/fm-task-inbox-lib.sh:280-285</code>).</p>
+<div class="callout"><span class="callout-title">Accepted race</span>
+<p>Typing the line and pressing Enter are separate steps. If the agent exits between the liveness check and the keystrokes, a bare shell could receive only part of the line, and the <code>: </code> prefix protects only complete lines. The code accepts this and says not to add process-bound atomic delivery unless an incident reopens it (<code class="cite">bin/fm-task-inbox-lib.sh:298-301</code>).</p></div>
+
+<h2 id="receive">The worker's side: read and acknowledge</h2>
+<p>Every brief, of every kind, carries the same receive-and-acknowledge section (<code class="cite">bin/fm-brief.sh:248-258</code>): when a terminal message says an instruction is waiting, and at any natural checkpoint, list <code>*.msg</code>, act on each in numeric order, and <code>mv</code> each one to <code>handled/</code>. The brief says plainly that without the move "firstmate rings again and eventually treats you as stuck". The brief's section is reinforcement; the doorbell alone already carries the instruction (<code class="cite">bin/fm-brief.sh:249-252</code>).</p>
+
+<h2 id="ladder">The re-ring ladder</h2>
+<p>The library owns the schedule; the watcher owns the checks of the pane (<code class="cite">bin/fm-task-inbox-lib.sh:47-59</code>). On each poll, for each recorded window, the watcher calls <code>inbox_steer_check</code> (<code class="cite">bin/fm-watch.sh:450</code>), which asks <code>fm_task_inbox_due_action</code> for one of three answers (<code class="cite">bin/fm-task-inbox-lib.sh:341-394</code>):</p>
+<dl class="defs">
+<dt><code>quiet</code></dt><dd>Nothing due: no unhandled record, the oldest is younger than the grace period, the last attempt was within the grace period, or this record was already escalated. An empty inbox also deletes <code>.ring-state</code> and <code>.escalated</code>, so the next message starts a fresh ladder.</dd>
+<dt><code>ring &lt;record&gt;</code></dt><dd>One delivery attempt is due.</dd>
+<dt><code>escalate &lt;record&gt; &lt;count&gt;</code></dt><dd>The attempt budget is spent.</dd>
+</dl>
+<p>The watcher then applies the pane checks (<code class="cite">bin/fm-watch.sh:434-507</code>):</p>
+<ol>
+<li>If the backend says the agent is <code>dead</code> or the endpoint <code>missing</code>, it skips the ladder entirely and queues one <code>stale</code> wake: "unread firstmate instruction … the worker's agent has exited or its endpoint is missing, so the doorbell was not typed; recover the worker" (<code class="cite">bin/fm-watch.sh:419-432</code>).</li>
+<li>If the pane is busy, it waits. The record is durable and the worker will reach a turn boundary.</li>
+<li>If it is idle and a ring is due, it rings and records the attempt. A failed ring and a composer-protected skip both count against the budget, so neither an unreadable pane nor a permanently full composer can retry silently forever (<code class="cite">bin/fm-task-inbox-lib.sh:396-402</code>).</li>
+<li>When the budget is spent it queues a <code>stale</code> wake: "unread firstmate instruction: &lt;record&gt; still unhandled after N doorbell delivery attempts with an idle pane; inspect the worker".</li>
+</ol>
+<p>Two ordering rules matter for failure:</p>
+<ul>
+<li><strong>Wake before marker.</strong> The stale wake is queued before <code>.escalated</code> is written. A crash in between can produce a rare duplicate wake, never a lost one (<code class="cite">bin/fm-task-inbox-lib.sh:56-59</code>, <code class="cite">bin/fm-task-inbox-lib.sh:421-424</code>).</li>
+<li><strong>Unwritable bookkeeping is loud.</strong> If <code>.ring-state</code> cannot be written while the record is still unhandled, the watcher raises its own stale wake ("steering-inbox ladder bookkeeping unwritable") instead of re-ringing forever (<code class="cite">bin/fm-watch.sh:483-492</code>). A record that disappeared meanwhile, because it was acknowledged or torn down, makes this a quiet no-op.</li>
+</ul>
+<p>Ordinary attempts are data-plane typing, not wakes, so they do not interrupt Firstmate. The check also runs for secondmates: their exemption from pane-staleness is about quiet panes being healthy, but an unacknowledged instruction is a stuck steer (<code class="cite">bin/fm-watch.sh:444-449</code>, <code class="cite">bin/fm-watch.sh:2621-2623</code>). How a <code>stale</code> wake is handled from there belongs to <a href="../supervision/index.html">Supervision</a>.</p>
+
+<h2 id="fire-and-forget">Fire-and-forget records</h2>
+<p>A record carrying <code>delivery=fire-and-forget</code> is skipped by <code>fm_task_inbox_oldest_unhandled</code>, so it never enters the ladder and never escalates (<code class="cite">bin/fm-task-inbox-lib.sh:311-339</code>). <code>fm-send</code> writes one only for a marked secondmate request sent with <code>--fire-and-forget &lt;16-hex-id&gt;</code>, which also creates no reply expectation (<code class="cite">bin/fm-send.sh:119-124</code>).</p>
+
+<h2 id="idempotent">Plain and idempotent writes</h2>
+<p>There are two write functions, and the choice is deliberate (<code class="cite">bin/fm-task-inbox-lib.sh:176-186</code>):</p>
+<dl class="defs">
+<dt><code>fm_task_inbox_write</code></dt><dd>Always a new record. Used for local sends, whose outcome is known immediately, so an identical second send is a deliberate new instruction.</dd>
+<dt><code>fm_task_inbox_write_idempotent</code></dt><dd>If a record with byte-identical body already exists, unhandled or in <code>handled/</code>, it returns that record's path instead of writing (<code class="cite">bin/fm-task-inbox-lib.sh:187-238</code>). This is for a transport that can fail with the outcome unknown, such as the ssh leg to a remote secondmate: re-running the same enqueue lands on the same record. Two different requests do not collapse in practice because a marked request carries a per-request correlation token in its body. Fire-and-forget and ordinary records are compared only with their own kind.</dd>
+</dl>
+<p>The remote leg's host-local side (<code class="cite">bin/fm-remote-secondmate-control.sh:256-297</code>) uses the idempotent write, and if the match is already in <code>handled/</code> it rings nothing: "this steer was already delivered and acknowledged". The remote host runs no re-ring ladder of its own; a swallowed remote doorbell is caught by the parent's <a href="pending-replies.html">pending-reply</a> recovery instead (<code class="cite">bin/fm-send.sh:145-148</code>). Cross-host transport itself is covered in <a href="../remote/index.html">Remote</a>.</p>
+
+<h2 id="config">Configuration</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Variable</th><th>Default</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>FM_TASK_INBOX_GRACE_SECS</code></td><td>90</td><td>Age before the first attempt, and spacing between attempts.</td></tr>
+<tr><td><code>FM_TASK_INBOX_RING_MAX</code></td><td>3</td><td>Attempts before escalation.</td></tr>
+<tr><td><code>FM_TASK_INBOX_LOCK_WAIT_SECS</code></td><td>5</td><td>Bounded wait for <code>.seq.lock</code> (undocumented in the header's tunables list, read at <code class="cite">bin/fm-task-inbox-lib.sh:129</code>).</td></tr>
+</tbody></table></div>
+<p>Non-numeric values fall back to the defaults (<code class="cite">bin/fm-task-inbox-lib.sh:86-96</code>).</p>
+
+<h2 id="failures">Failure behaviour at a glance</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Situation</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td>Inbox cannot be created or locked, or the record cannot be written</td><td>No partial record. <code>fm-send</code> exits nonzero: "steer not sent".</td></tr>
+<tr><td>Doorbell swallowed or garbled</td><td>Watcher rings again on an idle pane, up to the budget.</td></tr>
+<tr><td>Worker never acknowledges</td><td>Stale wake after the budget; stuck-crewmate recovery takes over.</td></tr>
+<tr><td>Agent exited or pane gone</td><td>Nothing typed; one stale wake straight away.</td></tr>
+<tr><td>Doorbell duplicated</td><td>No effect: the worker finds nothing new.</td></tr>
+<tr><td>Ladder file unwritable</td><td>Stale wake naming the unwritable file.</td></tr>
+</tbody></table></div>
+
+<h2 id="refuses">What it deliberately does not do</h2>
+<ul>
+<li>It never types the message body into the terminal.</li>
+<li>It never treats a successful keystroke as delivery.</li>
+<li>It never rings a pane whose agent is known to be gone.</li>
+<li>It never interrupts a busy pane to ring.</li>
+<li>It does not read the worker's conversation to decide whether the message was understood; only the file move counts.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relay: public mentions · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Communication</p>
+<h1>Relay: public mentions</h1>
+<p class="lede">Relay lets the captain mention <code>@myfirstmate</code> on X, or the myfirstmate bot in a Discord server, and have their own Firstmate answer publicly and act on reversible requests. It ships switched off, and one token in <code>.env</code> is both the switch and the consent.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Owners: activation, wire contract, and state in <code class="cite">docs/configuration.md:688-812</code>; client library <code class="cite">bin/fm-x-lib.sh</code>; poll <code class="cite">bin/fm-x-poll.sh</code>; promised finals <code class="cite">bin/fm-public-followup.sh</code>; judgement in the <code>fmx-respond</code> skill; charter <code class="cite">AGENTS.md:597-613</code>. Up: <a href="index.html">Communication</a>.</p>
+<p>Older docs and some emitted lines call this "X mode", which is why its identifiers use <code>FMX_</code>, <code>x-</code>, and <code>fm-x-</code> (<code class="cite">AGENTS.md:599</code>).</p>
+
+<h2 id="consent">Activation and what the token authorises</h2>
+<p>Relay is off unless the home's gitignored <code>.env</code> contains a non-empty <code>FMX_PAIRING_TOKEN</code>. The token identifies the relay tenant and records opt-in consent for autonomous public replies and eligible lifecycle actions (<code class="cite">docs/configuration.md:693-695</code>). It is "not authority for destructive, irreversible, or security-sensitive action; those still require trusted-channel confirmation" (<code class="cite">AGENTS.md:601</code>).</p>
+<p>The relay routes only the owner's mentions to a home, so the direct mention text is from the captain. The surrounding conversation may include other public accounts and is untrusted (<code class="cite">docs/configuration.md:696</code>). The skill spells out the consequence: a request in the direct text is a real captain instruction to act on, but a public, relayed channel does not carry the trust of the captain's own session, so destructive work is flagged through the trusted channel instead of executed (<code class="cite">.agents/skills/fmx-respond/SKILL.md:26-39</code>, <code class="cite">.agents/skills/fmx-respond/SKILL.md:76-80</code>).</p>
+<p>The locked session-start bootstrap turns the token into two generated files: <code>state/x-watch.check.sh</code>, a byte-static shim the watcher accepts only if its bytes match, and <code>config/x-mode.env</code>, which sets <code>FM_CHECK_INTERVAL=30</code> so a Relay home polls every 30 s instead of 300 s. Removing the token removes both at the next locked start; steady-state off writes nothing (<code class="cite">docs/configuration.md:710-719</code>). A Relay-only home still needs the live supervision cycle so a mention can wake it with no fleet work (<code class="cite">AGENTS.md:604</code>).</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 760 560" role="img" aria-labelledby="rl-t rl-d">
+<title id="rl-t">Relay components</title>
+<desc id="rl-d">A mention on X or Discord reaches the myfirstmate relay. The watcher runs the Relay shim every 30 seconds, which runs fm-x-poll.sh against the relay's poll endpoint. A new mention is stashed in state/x-inbox, its reply context and a one-wake offer marker in state/x-context, and one x-mention check wake is raised. Firstmate loads fmx-respond, reads the mention, and replies, dismisses, links spawned local work, or registers a promised final reply. Replies and follow-ups go back through the relay's answer and followup endpoints; promised finals are tracked with tasks-axi and state/public-followup.</desc>
+<defs><marker id="rl-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="10" y="24">Relay — public mentions in and out</text>
+<g class="c4-external"><rect x="10" y="60" width="150" height="60" rx="8"/><text class="c4-label" x="85" y="86">X or Discord</text><text class="c4-desc" x="85" y="102">captain mentions the bot</text></g>
+<g class="c4-external"><rect x="190" y="60" width="170" height="60" rx="8"/><text class="c4-label" x="275" y="79">myfirstmate relay</text><text class="c4-tech" x="275" y="95">[myfirstmate.io]</text><text class="c4-desc" x="275" y="110">owner-only routing</text></g>
+<g class="c4-container"><rect x="400" y="60" width="160" height="60" rx="8"/><text class="c4-label" x="480" y="79">Watcher</text><text class="c4-tech" x="480" y="95">[x-watch.check.sh]</text><text class="c4-desc" x="480" y="110">every 30 s</text></g>
+<g class="c4-container"><rect x="590" y="60" width="160" height="60" rx="8"/><text class="c4-label" x="670" y="79">fm-x-poll.sh</text><text class="c4-tech" x="670" y="95">[GET /connector/poll]</text><text class="c4-desc" x="670" y="110">silent on 204</text></g>
+<g class="c4-container"><rect x="190" y="190" width="170" height="70" rx="8"/><text class="c4-label" x="275" y="214">Firstmate</text><text class="c4-tech" x="275" y="230">[+ fmx-respond skill]</text><text class="c4-desc" x="275" y="245">classify, act, reply</text></g>
+<g class="c4-datastore"><rect x="400" y="190" width="160" height="60" rx="8"/><text class="c4-label" x="480" y="216">state/x-context/</text><text class="c4-tech" x="480" y="232">[context + offer marker]</text></g>
+<g class="c4-datastore"><rect x="590" y="190" width="160" height="60" rx="8"/><text class="c4-label" x="670" y="216">state/x-inbox/</text><text class="c4-tech" x="670" y="232">[&lt;request_id&gt;.json]</text></g>
+<g class="c4-container"><rect x="10" y="340" width="160" height="60" rx="8"/><text class="c4-label" x="90" y="359">fm-x-reply.sh</text><text class="c4-tech" x="90" y="375">[POST answer | followup]</text><text class="c4-desc" x="90" y="390">splits long replies</text></g>
+<g class="c4-container"><rect x="185" y="340" width="140" height="60" rx="8"/><text class="c4-label" x="255" y="359">fm-x-dismiss.sh</text><text class="c4-tech" x="255" y="375">[POST dismiss]</text><text class="c4-desc" x="255" y="390">no text posted</text></g>
+<g class="c4-container"><rect x="340" y="340" width="140" height="60" rx="8"/><text class="c4-label" x="410" y="359">fm-x-link.sh</text><text class="c4-tech" x="410" y="375">[state/&lt;id&gt;.meta]</text><text class="c4-desc" x="410" y="390">local task only</text></g>
+<g class="c4-container"><rect x="495" y="340" width="190" height="60" rx="8"/><text class="c4-label" x="590" y="359">fm-public-followup.sh</text><text class="c4-tech" x="590" y="375">[register · consume · deliver]</text><text class="c4-desc" x="590" y="390">promised final replies</text></g>
+<g class="c4-container"><rect x="10" y="470" width="160" height="60" rx="8"/><text class="c4-label" x="90" y="496">fm-x-followup.sh</text><text class="c4-tech" x="90" y="512">[≤3 per link, 7 days]</text></g>
+<g class="c4-datastore"><rect x="290" y="470" width="190" height="60" rx="8"/><text class="c4-label" x="385" y="496">state/public-followup/</text><text class="c4-tech" x="385" y="512">[registry, events, receipts]</text></g>
+<g class="c4-external"><rect x="510" y="470" width="190" height="60" rx="8"/><text class="c4-label" x="605" y="496">tasks-axi</text><text class="c4-tech" x="605" y="512">[public-followup obligation]</text></g>
+<g class="c4-rel"><path d="M160,90 L188,90" marker-end="url(#rl-arrow)"/></g>
+<g class="c4-rel"><path d="M560,90 L588,90" marker-end="url(#rl-arrow)"/></g>
+<g class="c4-rel"><path d="M670,60 L670,44 L275,44 L275,58" marker-end="url(#rl-arrow)"/><text class="c4-rel-label" x="470" y="40">poll with Bearer token</text></g>
+<g class="c4-rel"><path d="M670,120 L670,188" marker-end="url(#rl-arrow)"/><text class="c4-rel-label" x="700" y="158">stash</text></g>
+<g class="c4-rel"><path d="M630,120 L520,188" marker-end="url(#rl-arrow)"/><text class="c4-rel-label" x="560" y="146">claim offer</text></g>
+<g class="c4-rel c4-rel-async"><path d="M450,120 L340,188" marker-end="url(#rl-arrow)"/><text class="c4-rel-label" x="380" y="146">x-mention wake</text></g>
+<g class="c4-rel c4-rel-async"><path d="M670,250 L670,285 L320,285 L320,262" marker-end="url(#rl-arrow)"/><text class="c4-rel-label" x="520" y="279">reads the mention</text></g>
+<g class="c4-rel"><path d="M230,260 L110,338" marker-end="url(#rl-arrow)"/><text class="c4-rel-label" x="160" y="300">reply</text></g>
+<g class="c4-rel"><path d="M258,260 L255,338" marker-end="url(#rl-arrow)"/><text class="c4-rel-label" x="262" y="318">dismiss</text></g>
+<g class="c4-rel"><path d="M300,260 L400,338" marker-end="url(#rl-arrow)"/><text class="c4-rel-label" x="370" y="318">link</text></g>
+<g class="c4-rel"><path d="M360,245 L580,338" marker-end="url(#rl-arrow)"/><text class="c4-rel-label" x="520" y="318">promise</text></g>
+<g class="c4-rel"><path d="M90,338 L90,160 L220,160 L220,122" marker-end="url(#rl-arrow)"/><text class="c4-rel-label" x="150" y="154">POST to relay</text></g>
+<g class="c4-rel"><path d="M90,470 L90,402" marker-end="url(#rl-arrow)"/><text class="c4-rel-label" x="120" y="440">--followup</text></g>
+<g class="c4-rel"><path d="M620,400 L620,468" marker-end="url(#rl-arrow)"/><text class="c4-rel-label" x="650" y="440">state machine</text></g>
+<g class="c4-rel"><path d="M540,400 L430,468" marker-end="url(#rl-arrow)"/><text class="c4-rel-label" x="470" y="440">private transport</text></g>
+<g class="c4-rel"><path d="M510,400 L510,425 L150,425 L150,402" marker-end="url(#rl-arrow)"/><text class="c4-rel-label" x="330" y="419">deliver the final reply</text></g>
+</svg>
+</div>
+<figcaption>Nothing here is fetched from the mention's media on the polling path; URLs are preserved and the responding agent fetches them later with its own tools (<code class="cite">docs/configuration.md:730-732</code>).</figcaption>
+</figure>
+
+<h2 id="inbound">Inbound: one wake per mention</h2>
+<p><code>fm-x-poll.sh</code> is a hard no-op with no token: exit 0, no output, so the watcher behaves as if Relay did not exist. Its contract is "output =&gt; wake firstmate, silence =&gt; keep sleeping" (<code class="cite">bin/fm-x-poll.sh:4-9</code>). With a token (<code class="cite">bin/fm-x-poll.sh:11-22</code>; <code class="cite">docs/configuration.md:722-736</code>):</p>
+<ul>
+<li>HTTP 204, empty, or no text: nothing.</li>
+<li>Auth or configuration errors: one rate-limited <code>x-mode-error …</code> line until recovery.</li>
+<li>A newly offered mention: stash the whole relay object at <code>state/x-inbox/&lt;request_id&gt;.json</code>, record reply context at <code>state/x-context/&lt;request_id&gt;.json</code> (best-effort), atomically claim <code>state/x-context/&lt;request_id&gt;.offered.json</code>, then print <code>x-mention &lt;request_id&gt;</code>.</li>
+<li>An already offered request id: nothing, even after the inbox file was cleared. Offer markers expire with the context registry's seven-day retention, after which a re-offer could wake again.</li>
+<li>Unreconciled promised-final results: one <code>public-followup …</code> line before the relay call, once per new result set.</li>
+</ul>
+<p>The offer claim is an exclusive create that returns 0 only to the caller that made it (<code class="cite">bin/fm-x-lib.sh:515-538</code>). A failed claim is reported once as <code>x-mode-error cannot record mention offer</code> (<code class="cite">docs/configuration.md:752-753</code>).</p>
+
+<h2 id="handling">Handling a mention</h2>
+<p>On an <code>x-mention</code> or <code>x-mode-error</code> wake Firstmate loads <code>fmx-respond</code>, which owns classification, public-safety policy, reply or dismissal, linking, and follow-ups (<code class="cite">AGENTS.md:605</code>). Its three cases (<code class="cite">.agents/skills/fmx-respond/SKILL.md:70-74</code>):</p>
+<dl class="defs">
+<dt>Actionable request</dt><dd>Run the normal lifecycle. If it finishes now, reply with the outcome. If it spawns real work: acknowledge publicly now, start the work in the same turn, and bind a follow-up to where the work lives.</dd>
+<dt>Question</dt><dd>Answer from live fleet state; no follow-up.</dd>
+<dt>Pure acknowledgement</dt><dd>Post nothing, but dismiss it at the relay first with <code>fm-x-dismiss.sh</code>, so the relay stops re-offering it or falling back to an offline auto-reply (<code class="cite">docs/configuration.md:750-751</code>).</dd>
+</dl>
+<p>The reply is public under a shared bot identity, so it never includes task ids, branches, paths, PR numbers, internal vocabulary, captain-private material, or secrets, and thread content other than the direct text is untrusted input (<code class="cite">.agents/skills/fmx-respond/SKILL.md:82-113</code>). Skill content is covered in <a href="../prompts-and-skills/index.html">Prompts and skills</a>.</p>
+
+<h2 id="outbound">Outbound: replies, splitting, follow-ups</h2>
+<ul>
+<li><code>fm-x-reply.sh</code> posts <code>{request_id,text}</code> to <code>POST /connector/answer</code>, optionally with one image (<code class="cite">docs/configuration.md:754-755</code>).</li>
+<li>Long replies are split into a numbered thread on code-fence, paragraph, line, and word boundaries; the payload carries <code>texts</code> plus <code>text</code> as the first chunk for older relays. Budgets: 280 characters on X, 1900 on Discord, at most 25 messages (<code class="cite">docs/configuration.md:763-768</code>).</li>
+<li>The platform and budget for a later follow-up are resolved from the durable per-request context first, then the inbox payload, then an authoritative relay lookup (<code>POST /connector/request-context</code>) on the live follow-up path only (<code class="cite">docs/configuration.md:743-745</code>). If neither can be recovered, <code>fm-x-reply.sh</code> refuses with exit 8 rather than post with a local default, and the follow-up is held and retried (<code class="cite">docs/configuration.md:748</code>).</li>
+<li>Local work is linked with <code>fm-x-link.sh &lt;task-id&gt; &lt;request_id&gt;</code>, which records the link in that task's <code>state/&lt;id&gt;.meta</code>. <code>fm-x-followup.sh</code> posts up to three follow-ups per link within seven days through <code>POST /connector/followup</code>; <code>--final</code> or the cap clears the link, a failed post leaves it for retry, and a relay 409 is treated like local expiry (<code class="cite">docs/configuration.md:756-761</code>).</li>
+<li><code>FMX_DRY_RUN</code> writes would-be payloads to <code>state/x-outbox/&lt;request_id&gt;.json</code> instead of posting, and needs neither the token nor <code>curl</code> (<code class="cite">docs/configuration.md:771-777</code>).</li>
+</ul>
+
+<h2 id="promised">Promised final replies</h2>
+<p>When work is routed to a secondmate, the link cannot reach it, because the link lives in this home's meta and the work's record lives in another home; <code>fm-x-link.sh</code> refuses and points at the promised-final path (<code class="cite">docs/configuration.md:746</code>). The charter's rule: "A promised final public reply is durable state, never conversation memory", and only the home that holds the relay consent and thread binding ever posts it (<code class="cite">AGENTS.md:608-610</code>).</p>
+<p>The problem <code>fm-public-followup.sh</code> solves, in its own words: Firstmate promises a public final reply, routes the work out, and then the conversation compacts or the session restarts, so "the promise is only kept if reconciling it is a disk operation. Every command here reads durable state and nothing else" (<code class="cite">bin/fm-public-followup.sh:5-8</code>). The typed obligation and its state machine are owned by <code>tasks-axi public-followup</code>; private context stays in <code>state/x-context/</code>; posting reuses <code>fm-x-reply.sh --followup</code> (<code class="cite">bin/fm-public-followup.sh:10-19</code>).</p>
+<ul>
+<li><code>register</code> creates the private <code>state/public-followup/</code> tree (mode 700) and the bounded registration (<code class="cite">docs/configuration.md:787-789</code>).</li>
+<li><code>brief</code> prints the exact <code>fm-public-followup-emit.sh</code> command the routed worker runs to report a typed terminal result, including staging paths for a remote home.</li>
+<li><code>consume</code> drains typed results, deduplicated by an identity-derived event id, and collects staged results from remote homes over ssh, retiring the remote copy only after this home holds it.</li>
+<li><code>deliver</code> posts into the original thread with the stored binding; an obligation left mid-post by a crash is refused rather than posted twice. Delivery does not close the loop: only <code>retire</code> does.</li>
+<li><code>guard-work</code> exits 3 while a public promise is open for that work, and <code>fm-teardown.sh</code> refuses cleanup of such work without explicit discard approval.</li>
+</ul>
+<p>(<code class="cite">bin/fm-public-followup.sh:31-110</code>; <code class="cite">docs/configuration.md:779-812</code>.) A home without the token runs one file test and stops: no <code>tasks-axi</code> call, no scan, no directory (<code class="cite">bin/fm-public-followup.sh:21-29</code>).</p>
+
+<div class="callout unclear"><span class="callout-title">Minor header imprecision</span>
+<p>The <code>fm-x-lib.sh</code> function index describes <code>fmx_context_registry_prune</code> as removing "records older than seven days" (<code class="cite">bin/fm-x-lib.sh:28</code>). The implementation uses <code>FMX_FOLLOWUP_MAX_AGE_SECS</code>, capped at 604800 seconds, so a home that shortens its follow-up window also prunes sooner (<code class="cite">bin/fm-x-lib.sh:439-443</code>). The configuration doc states the precise rule (<code class="cite">docs/configuration.md:736</code>).</p></div>
+
+<h2 id="config">Configuration</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Key</th><th>Default</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>FMX_PAIRING_TOKEN</code></td><td>unset (off)</td><td>Opt-in, tenant identity, and consent.</td></tr>
+<tr><td><code>FMX_RELAY_URL</code></td><td><code>https://myfirstmate.io</code></td><td>Relay endpoint, mainly for local development.</td></tr>
+<tr><td><code>FMX_ENV_FILE</code></td><td>unset</td><td>Alternate <code>.env</code> for direct client calls; bootstrap still checks the home's <code>.env</code>.</td></tr>
+<tr><td><code>FMX_DRY_RUN</code></td><td>unset</td><td>Preview to <code>state/x-outbox/</code> instead of posting.</td></tr>
+<tr><td><code>FMX_X_REPLY_MAX_CHARS</code> / <code>FMX_DISCORD_REPLY_MAX_CHARS</code></td><td>280 / 1900</td><td>Split budgets.</td></tr>
+<tr><td><code>FMX_X_THREAD_MAX</code></td><td>25</td><td>Maximum messages per split reply.</td></tr>
+<tr><td><code>FMX_FOLLOWUP_MAX_AGE_SECS</code> / <code>FMX_FOLLOWUP_MAX_COUNT</code></td><td>604800 / 3</td><td>Local follow-up window and cap.</td></tr>
+<tr><td><code>FM_PF_RETRY_BACKOFF_SECS</code></td><td>900</td><td>Backoff after a retryable promised-final delivery error.</td></tr>
+</tbody></table></div>
+<p>(<code class="cite">docs/configuration.md:1154-1164</code>.)</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

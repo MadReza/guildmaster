@@ -34,7 +34,19 @@ window.FM_NAV = [
   // end c4
 
   // begin communication
-  { section: "communication", title: "Communication", href: "components/communication/index.html", stub: true },
+  { section: "communication", title: "Communication", href: "components/communication/index.html" },
+  { section: "communication", title: "End to end: a question to a secondmate", href: "components/communication/end-to-end.html" },
+  { section: "communication", title: "Data plane and control plane", href: "components/communication/data-and-control-planes.html" },
+  { section: "communication", title: "fm-send: steering a worker", href: "components/communication/fm-send.html" },
+  { section: "communication", title: "Steering inbox and doorbell", href: "components/communication/steering-inbox.html" },
+  { section: "communication", title: "Operational-input markers", href: "components/communication/operational-input.html" },
+  { section: "communication", title: "Status channel", href: "components/communication/status-channel.html" },
+  { section: "communication", title: "Keyed decisions and --resolve-key", href: "components/communication/decisions.html" },
+  { section: "communication", title: "Secondmate parent channel", href: "components/communication/parent-channel.html" },
+  { section: "communication", title: "Pending replies", href: "components/communication/pending-replies.html" },
+  { section: "communication", title: "Captain inbox and voice", href: "components/communication/captain-inbox.html" },
+  { section: "communication", title: "Mail plane", href: "components/communication/mail-plane.html" },
+  { section: "communication", title: "Relay: public mentions", href: "components/communication/relay.html" },
   // end communication
 
   // begin supervision

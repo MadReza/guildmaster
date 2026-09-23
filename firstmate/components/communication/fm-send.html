@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fm-send: steering a worker · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Communication</p>
+<h1>fm-send: steering a worker</h1>
+<p class="lede"><code>bin/fm-send.sh</code> is the one command Firstmate uses to give a running agent something to read. It picks between a durable inbox and direct typing, marks messages to secondmates, tracks replies it expects, and can close a decision in the same call.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Owner: <code class="cite">bin/fm-send.sh</code> (its header, lines 1–216, is the contract). Up: <a href="index.html">Communication</a>.</p>
+
+<h2 id="usage">How it is invoked</h2>
+<pre><code>fm-send.sh &lt;target&gt; [--resolve-key &lt;key&gt;]... [--fire-and-forget &lt;delivery-id&gt;] &lt;text...&gt;
+fm-send.sh &lt;target&gt; --key Enter|Escape|C-c</code></pre>
+<p>(<code class="cite">bin/fm-send.sh:4</code>, <code class="cite">bin/fm-send.sh:14-16</code>.) Flags must come before the text; everything after the last flag is the message, so ordinary sends are byte-identical to before the flags existed (<code class="cite">bin/fm-send.sh:463-465</code>). Real invocations from the source:</p>
+<ul>
+<li>The pending-reply recovery repost: <code>env FM_HOME="$parent_home" FM_PENDING_REPLY_EXISTING_CORR="$corr" fm-send.sh "$task_id" "$msg"</code> (<code class="cite">bin/fm-pending-reply-lib.sh:966-967</code>).</li>
+<li>The resend command fm-send itself prints after a lost remote transport, of the form <code>FM_HOME=… FM_PENDING_REPLY_EXISTING_CORR=&lt;corr&gt; …/fm-send.sh &lt;original args&gt;</code> (<code class="cite">bin/fm-send.sh:969-980</code>).</li>
+</ul>
+
+<h2 id="preconditions">Before anything is sent</h2>
+<ol>
+<li><strong>Gate agents are refused.</strong> A no-mistakes validation agent must never steer a crewmate, so the script fails closed first (<code class="cite">bin/fm-send.sh:223-227</code>).</li>
+<li><strong><code>FM_HOME</code> must be set explicitly</strong> and its <code>state/</code> must exist. fm-send is the one script that does not default the home to the repository root (<code class="cite">bin/fm-send.sh:229-242</code>; <code class="cite">docs/configuration.md:1085</code>).</li>
+<li><strong>A supervision guard runs</strong> (<code>bin/fm-guard.sh</code>) but only warns: "the requested message WILL still be sent" (<code class="cite">bin/fm-send.sh:263</code>).</li>
+<li><strong>The target is resolved, strictly</strong> (<code class="cite">bin/fm-send.sh:340-442</code>). Accepted: an exact task id or a legacy <code>fm-&lt;id&gt;</code> label resolved through <code>state/&lt;id&gt;.meta</code>; an explicit backend target that matches recorded meta; or a well-formed explicit target whose live endpoint can be verified (one colon assumes tmux, two or more assume Herdr). Anything else is refused with what was tried. The header's reason: "a 'successful' send to the wrong endpoint is worse than a loud failure" (<code class="cite">bin/fm-send.sh:5-9</code>).</li>
+<li><strong>The supervision lease is checked.</strong> If the other Pi supervision actor holds this task's lease, the steer is refused. A home without the Pi supervision branch has no lease files and passes (<code class="cite">bin/fm-send.sh:449-461</code>). The lease itself belongs to <a href="../supervision/index.html">Supervision</a>.</li>
+<li><strong>Empty text is refused</strong> before anything is marked, recorded, or typed, because an empty marked request would carry only marker and correlation bytes and leave the parent waiting on a reply to nothing (<code class="cite">bin/fm-send.sh:10-13</code>, <code class="cite">bin/fm-send.sh:795-798</code>).</li>
+</ol>
+
+<h2 id="planes">Choosing a plane</h2>
+<p>The header names two delivery paths, which it calls data planes (<code class="cite">bin/fm-send.sh:18-86</code>). Both carry text for the agent to read; neither is the <a href="data-and-control-planes.html">control plane</a>.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 760 730" role="img" aria-labelledby="fs-flow-t fs-flow-d">
+<title id="fs-flow-t">How fm-send chooses between the inbox plane and the typed plane</title>
+<desc id="fs-flow-d">After resolving the target, a key request sends one keystroke. A target that is not a task selector is typed. A remote target or a fire-and-forget request always uses the inbox. Otherwise text starting with a slash, or a dollar sign to a codex target, is typed and everything else uses the inbox. The inbox plane splits into the remote leg over fm-on.sh and the local inbox write.</desc>
+<defs><marker id="fs-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="10" y="30">fm-send — plane selection</text>
+<g class="c4-container"><rect x="240" y="48" width="280" height="48" rx="8"/><text class="c4-label" x="380" y="68">fm-send.sh &lt;target&gt; …</text><text class="c4-tech" x="380" y="84">[text, or --key K]</text></g>
+<g class="c4-component"><rect x="240" y="128" width="280" height="48" rx="8"/><text class="c4-label" x="380" y="148">Resolve the target</text><text class="c4-desc" x="380" y="164">exact id, fm-&lt;id&gt;, or verified endpoint</text></g>
+<g class="c4-external"><rect x="560" y="128" width="190" height="48" rx="8"/><text class="c4-label" x="655" y="148">Refuse, exit 1</text><text class="c4-desc" x="655" y="164">unresolved: never guess</text></g>
+<g class="c4-component"><rect x="240" y="208" width="280" height="48" rx="8"/><text class="c4-label" x="380" y="228">--key given?</text><text class="c4-desc" x="380" y="244">Escape, Enter, C-c</text></g>
+<g class="c4-container"><rect x="560" y="208" width="190" height="48" rx="8"/><text class="c4-label" x="655" y="228">Send one keystroke</text><text class="c4-desc" x="655" y="244">remote: through fm-on.sh</text></g>
+<g class="c4-component"><rect x="240" y="288" width="280" height="48" rx="8"/><text class="c4-label" x="380" y="308">Task selector?</text><text class="c4-desc" x="380" y="324">resolved through this home's meta</text></g>
+<g class="c4-component"><rect x="240" y="368" width="280" height="48" rx="8"/><text class="c4-label" x="380" y="388">Remote, or --fire-and-forget?</text><text class="c4-desc" x="380" y="404">both always ride the inbox</text></g>
+<g class="c4-component"><rect x="240" y="448" width="280" height="48" rx="8"/><text class="c4-label" x="380" y="468">Starts with / (or $ to codex)?</text><text class="c4-desc" x="380" y="484">must reach the harness's parser</text></g>
+<g class="c4-container"><rect x="10" y="448" width="190" height="64" rx="8"/><text class="c4-label" x="105" y="469">TYPED plane</text><text class="c4-tech" x="105" y="485">[backend submit core]</text><text class="c4-desc" x="105" y="500">type once, retry Enter</text></g>
+<g class="c4-container"><rect x="240" y="548" width="280" height="64" rx="8"/><text class="c4-label" x="380" y="569">INBOX plane</text><text class="c4-tech" x="380" y="585">[bin/fm-task-inbox-lib.sh]</text><text class="c4-desc" x="380" y="600">the durable record is the delivery</text></g>
+<g class="c4-container"><rect x="100" y="652" width="260" height="60" rx="8"/><text class="c4-label" x="230" y="671">Remote leg</text><text class="c4-desc" x="230" y="687">fm-on.sh → idempotent remote write</text><text class="c4-desc" x="230" y="702">ssh 255: one identical retry</text></g>
+<g class="c4-container"><rect x="400" y="652" width="260" height="60" rx="8"/><text class="c4-label" x="530" y="671">Local inbox write</text><text class="c4-desc" x="530" y="687">lock meta, revalidate endpoint</text><text class="c4-desc" x="530" y="702">write record, ring doorbell</text></g>
+<g class="c4-rel"><path d="M380,96 L380,126" marker-end="url(#fs-arrow)"/></g>
+<g class="c4-rel"><path d="M520,152 L558,152" marker-end="url(#fs-arrow)"/></g>
+<g class="c4-rel"><path d="M380,176 L380,206" marker-end="url(#fs-arrow)"/></g>
+<g class="c4-rel"><path d="M520,232 L558,232" marker-end="url(#fs-arrow)"/><text class="c4-rel-label" x="539" y="225">yes</text></g>
+<g class="c4-rel"><path d="M380,256 L380,286" marker-end="url(#fs-arrow)"/><text class="c4-rel-label" x="396" y="276">no</text></g>
+<g class="c4-rel"><path d="M240,312 L105,312 L105,446" marker-end="url(#fs-arrow)"/><text class="c4-rel-label" x="172" y="305">no: explicit target</text></g>
+<g class="c4-rel"><path d="M380,336 L380,366" marker-end="url(#fs-arrow)"/><text class="c4-rel-label" x="398" y="356">yes</text></g>
+<g class="c4-rel"><path d="M380,416 L380,446" marker-end="url(#fs-arrow)"/><text class="c4-rel-label" x="396" y="436">no</text></g>
+<g class="c4-rel"><path d="M240,472 L202,472" marker-end="url(#fs-arrow)"/><text class="c4-rel-label" x="221" y="465">yes</text></g>
+<g class="c4-rel"><path d="M380,496 L380,546" marker-end="url(#fs-arrow)"/><text class="c4-rel-label" x="396" y="526">no</text></g>
+<g class="c4-rel"><path d="M520,392 L545,392 L545,580 L522,580" marker-end="url(#fs-arrow)"/><text class="c4-rel-label" x="545" y="486">yes</text></g>
+<g class="c4-rel"><path d="M330,612 L250,650" marker-end="url(#fs-arrow)"/><text class="c4-rel-label" x="262" y="628">remote_host set</text></g>
+<g class="c4-rel"><path d="M430,612 L510,650" marker-end="url(#fs-arrow)"/><text class="c4-rel-label" x="500" y="628">local task</text></g>
+</svg>
+</div>
+<figcaption>Classification reads the text before any marker is added, so a marked secondmate request and a plain crewmate steer classify identically. Source: <code class="cite">bin/fm-send.sh:865-890</code>.</figcaption>
+</figure>
+
+<h3 id="inbox-plane">The inbox plane</h3>
+<p>This is the default for text to any task recorded in this home, local or remote (<code class="cite">bin/fm-send.sh:20-54</code>). The mechanics of the record and doorbell are on the <a href="steering-inbox.html">steering inbox</a> page. The local path (<code class="cite">bin/fm-send.sh:1007-1093</code>):</p>
+<ol>
+<li>Lock the task's meta file and re-read it. If the endpoint, backend, or (when a caller pinned it) spawn generation changed, or the task became remote, refuse: "the task retired or changed endpoint during target resolution" (<code class="cite">bin/fm-send.sh:1017-1036</code>).</li>
+<li>Write the record, idempotently only for fire-and-forget (<code class="cite">bin/fm-send.sh:1037-1043</code>). A write failure exits 1 and discards a freshly created reply expectation.</li>
+<li>Mark any pending-reply expectation delivered (not resolved).</li>
+<li>Close any <code>--resolve-key</code> decisions, now, at enqueue time.</li>
+<li>Ring the doorbell. No ring outcome changes the exit status; the three non-zero ring results each print a notice and still exit 0 (<code class="cite">bin/fm-send.sh:1082-1092</code>).</li>
+</ol>
+<p><strong>Exit contract:</strong> 0 means the steer is durably recorded. Nonzero means nothing was confirmed delivered and a resend is appropriate, with one exception: a decision close that failed <em>after</em> delivery exits nonzero and prints the exact manual close command with "do not resend the answer" (<code class="cite">bin/fm-send.sh:26-31</code>). There is no "delivered but unconfirmed" outcome on this plane (<code class="cite">bin/fm-send.sh:47-50</code>).</p>
+
+<h3 id="typed-plane">The typed plane</h3>
+<p>Some local text must reach the terminal itself (<code class="cite">bin/fm-send.sh:61-80</code>):</p>
+<ul>
+<li>A leading <code>/</code> is a harness slash command.</li>
+<li>A leading <code>$</code> to a codex target is a codex skill invocation. The <code>$</code> rule is limited to codex because ordinary text often starts with <code>$</code> ("$5/month") (<code class="cite">bin/fm-send.sh:1094-1108</code>).</li>
+<li>An explicit backend target names an endpoint, not a task, so it stays typed even if it happens to match local meta.</li>
+</ul>
+<p>The text is typed once, then Enter is retried, never the text, until the backend confirms or reports an inconclusive send. Slash commands and codex <code>$</code> invocations get a longer 1.2 s settle before Enter so a completion popup does not swallow it. agy targets get 20 retries instead of 3, because agy renders its busy footer late and the shorter budget reported real deliveries as failures (<code class="cite">bin/fm-send.sh:1109-1123</code>).</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Exit</th><th>Typed-plane meaning</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>Submit confirmed (verdict exactly <code>empty</code>). Then a 1 s pause (<code>FM_SEND_SETTLE</code>) so an immediate peek sees the agent working, not the stale idle screen (<code class="cite">bin/fm-send.sh:1194-1199</code>).</td></tr>
+<tr><td>3</td><td>Text typed and Enter sent, but the read-back stayed <code>pending</code>. Do not retype: check the pane with <code>fm-peek.sh</code> and send <code>--key Enter</code> only if the text is still there. A reply expectation stays armed (<code class="cite">bin/fm-send.sh:1150-1164</code>).</td></tr>
+<tr><td>other</td><td>Failed; per the header, nothing may be assumed delivered (<code class="cite">bin/fm-send.sh:69-76</code>).</td></tr>
+</tbody></table></div>
+<div class="callout unclear"><span class="callout-title">Header and implementation disagree</span>
+<p>The header says any typed-plane exit other than 0 or 3 means "the send failed and nothing may be assumed delivered" (<code class="cite">bin/fm-send.sh:73-76</code>). But after a confirmed submit, a failed pending-reply delivery commit exits 1 with the message "text was delivered … Do not resend" (<code class="cite">bin/fm-send.sh:1175-1186</code>), and a failed decision close after a confirmed submit also exits 1 (<code class="cite">bin/fm-send.sh:1190-1193</code>). So on the typed plane exit 1 can mean "delivered". The inbox plane made the opposite choice on purpose: bookkeeping trouble after a durable enqueue never exits nonzero, precisely so automated callers do not resend (<code class="cite">bin/fm-send.sh:42-47</code>, <code class="cite">bin/fm-send.sh:1064-1072</code>). Callers must read the message, not only the code.</p></div>
+
+<h3 id="key">The <code>--key</code> path</h3>
+<p><code>--key</code> sends one special key and cannot carry <code>--resolve-key</code> or <code>--fire-and-forget</code> (<code class="cite">bin/fm-send.sh:760-792</code>). Which keys work depends on the backend: tmux and Herdr take Escape, Enter, and C-c; Orca takes Enter and C-c only (<code class="cite">bin/fm-send.sh:14-16</code>). After an Escape, two follow-ups run:</p>
+<ul>
+<li>If the harness restores the cancelled prompt into its composer (muse does, and needs Ctrl+U), the composer is cleared, reading the clear key from the control plane's table rather than a second copy (<code class="cite">bin/fm-send.sh:271-293</code>). A failed clear is loud, because the next steer would otherwise be appended to the restored text.</li>
+<li>For Claude, the interrupt is recorded in the task's busy state as idle (<code class="cite">bin/fm-send.sh:302-320</code>).</li>
+</ul>
+<p>A remote <code>--key</code> crosses <code>fm-on.sh</code> to the remote leg's <code>key</code> subcommand (<code class="cite">bin/fm-send.sh:774-786</code>). Remote targets have no typed text plane at all (<code class="cite">bin/fm-send.sh:81-86</code>).</p>
+
+<h2 id="remote">The remote leg</h2>
+<p>For a secondmate whose meta records <code>remote_host</code>, text goes through <code>bin/fm-on.sh &lt;id&gt; fm-remote-secondmate-control.sh send &lt;id&gt; &lt;message&gt; [fire-and-forget]</code> (<code class="cite">bin/fm-send.sh:891-1006</code>):</p>
+<ul>
+<li>The parent meta is locked and revalidated first, as locally, and callers may pin <code>FM_SEND_EXPECTED_SPAWN_GEN</code> or <code>FM_SEND_EXPECTED_REMOTE_HOST</code> (<code class="cite">bin/fm-send.sh:149-152</code>).</li>
+<li>Each attempt is bounded by <code>FM_SEND_REMOTE_BUDGET</code>, 30 s by default; it must be a positive integer.</li>
+<li>ssh exit 255 means completion unknown, so the identical leg is retried once. This is safe because the remote write is idempotent.</li>
+<li>A timeout (124) is also completion unknown, but is not retried, since a retry would only wait out the same busy queue.</li>
+<li>If still unknown, a reply-bearing request's expectation moves to <code>delivery_unknown</code> and fm-send prints the exact <code>FM_PENDING_REPLY_EXISTING_CORR=&lt;corr&gt;</code> resend command, which reuses the correlation and lands on the same remote record. A fire-and-forget request exits 3 and says to retry only with the same delivery id.</li>
+<li>Remote exit 0 means the remote record exists, which counts as delivery exactly as a local enqueue does.</li>
+</ul>
+<p>The transport (ssh, <code>fm-on.sh</code>, the reply mirror) is covered in <a href="../remote/index.html">Remote</a>.</p>
+
+<h2 id="marking">Marking secondmate requests and tracking replies</h2>
+<p>When the resolved target's meta says <code>kind=secondmate</code>, the message gets the from-firstmate marker so the secondmate answers on its status channel rather than in a chat nobody reads (<code class="cite">bin/fm-send.sh:96-103</code>, <code class="cite">bin/fm-send.sh:526-546</code>). Crewmates, scouts, explicit backend targets, and <code>--key</code> are never marked. The marker is described on <a href="operational-input.html">Operational-input markers</a>.</p>
+<p>Every newly marked request, except fire-and-forget, also gets a correlation id and a durable parent record before delivery (<code class="cite">bin/fm-send.sh:105-118</code>, <code class="cite">bin/fm-send.sh:811-864</code>). Delivery and reply are separate facts: delivery never resolves the expectation. The full lifecycle is on <a href="pending-replies.html">Pending replies</a>. Two details belong here:</p>
+<ul>
+<li>A correlation id already in the text, or given by <code>FM_PENDING_REPLY_EXISTING_CORR</code>, is reused if it is still open for this task. An explicitly requested id that is not reusable is refused rather than replaced (<code class="cite">bin/fm-send.sh:819-844</code>).</li>
+<li>A local resend of a correlation whose previous delivery attempt is still unresolved is refused; a remote one is reset for an idempotent resend (<code class="cite">bin/fm-send.sh:846-857</code>).</li>
+</ul>
+
+<h2 id="resolve-key">Closing a decision in the same call</h2>
+<p><code>--resolve-key &lt;key&gt;</code> (repeatable) makes this send the answer to an open keyed <code>needs-decision:</code> or <code>blocked:</code>, and fm-send itself writes the closing line. That mechanism is on <a href="decisions.html">Keyed decisions and --resolve-key</a>.</p>
+
+<h2 id="config">Configuration</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Variable</th><th>Default</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>FM_HOME</code></td><td>none (required)</td><td>Home whose <code>state/</code> resolves targets.</td></tr>
+<tr><td><code>FM_SEND_RETRIES</code></td><td>3 (agy: 20)</td><td>Typed-plane Enter retries.</td></tr>
+<tr><td><code>FM_SEND_SLEEP</code></td><td>0.4</td><td>Seconds between typed-plane retries.</td></tr>
+<tr><td><code>FM_SEND_SETTLE</code></td><td>1</td><td>Pause after a confirmed typed submit; 0 disables.</td></tr>
+<tr><td><code>FM_SEND_REMOTE_BUDGET</code></td><td>30</td><td>Seconds per remote transport attempt.</td></tr>
+<tr><td><code>FM_PENDING_REPLY_EXISTING_CORR</code></td><td>unset</td><td>Reuse an open correlation for a resend.</td></tr>
+<tr><td><code>FM_SEND_EXPECTED_SPAWN_GEN</code>, <code>FM_SEND_EXPECTED_REMOTE_HOST</code></td><td>unset</td><td>Internal guards checked during final locked validation.</td></tr>
+</tbody></table></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

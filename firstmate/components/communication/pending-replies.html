@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pending replies · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Communication</p>
+<h1>Pending replies</h1>
+<p class="lede">When the main firstmate asks a secondmate something, it writes down that it expects an answer before sending, tags the request with a random correlation id, and waits for a status line carrying that id. If none comes, it asks exactly once more, then escalates exactly once. It never reads the secondmate's chat.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Owner: <code class="cite">bin/fm-pending-reply-lib.sh</code> (header lines 1–106 are the contract). Up: <a href="index.html">Communication</a>.</p>
+
+<h2 id="problem">The problem it solves</h2>
+<p>A secondmate may ignore the marker and answer only in its own visible conversation, which the parent never reads. The captain's direction, dated 2026-07-22 in the header, sets the safety property (<code class="cite">bin/fm-pending-reply-lib.sh:11-20</code>): the parent must notice the missing correlated report without scraping that conversation, send exactly one automatic recovery request asking for a repost on the parent channel, and escalate once if the recovery turn also ends without a report. "Never loop, never repeatedly inject, never silently expire unresolved records, and never treat wrong-home or structured-home heuristics as acknowledgement."</p>
+
+<h2 id="lifecycle">Lifecycle</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 760 560" role="img" aria-labelledby="pr-t pr-d">
+<title id="pr-t">Pending-reply record phases</title>
+<desc id="pr-d">fm-send creates the record before delivery; a failed send deletes it. The record waits in awaiting_report. Without delivery proof it moves to delivery_unknown, which escalates unless the owner resends the same correlation. A correlated report resolves it from any phase. After the request turn completes and the grace passes with no report, one recovery repost is sent through recovery_sending, which ends in recovery_sent, recovery_failed, or recovery_unknown. Each of those leads to escalated, and a late correlated report still resolves an escalated record.</desc>
+<defs><marker id="pr-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="10" y="30">One pending-reply record, phase by phase</text>
+<g class="c4-container"><rect x="300" y="46" width="160" height="40" rx="8"/><text class="c4-label" x="380" y="62">fm-send creates</text><text class="c4-tech" x="380" y="78">[before delivery]</text></g>
+<g class="c4-external"><rect x="10" y="46" width="160" height="40" rx="8"/><text class="c4-label" x="90" y="62">record deleted</text><text class="c4-tech" x="90" y="78">[known undelivered]</text></g>
+<g class="c4-component"><rect x="10" y="120" width="160" height="50" rx="8"/><text class="c4-label" x="90" y="150">delivery_unknown</text></g>
+<g class="c4-component"><rect x="300" y="120" width="160" height="50" rx="8"/><text class="c4-label" x="380" y="150">awaiting_report</text></g>
+<g class="c4-component"><rect x="590" y="120" width="160" height="50" rx="8"/><text class="c4-label" x="670" y="150">resolved</text></g>
+<g class="c4-component"><rect x="300" y="240" width="160" height="50" rx="8"/><text class="c4-label" x="380" y="270">recovery_sending</text></g>
+<g class="c4-component"><rect x="130" y="360" width="160" height="50" rx="8"/><text class="c4-label" x="210" y="390">recovery_failed</text></g>
+<g class="c4-component"><rect x="300" y="360" width="160" height="50" rx="8"/><text class="c4-label" x="380" y="390">recovery_sent</text></g>
+<g class="c4-component"><rect x="470" y="360" width="160" height="50" rx="8"/><text class="c4-label" x="550" y="390">recovery_unknown</text></g>
+<g class="c4-component"><rect x="300" y="480" width="160" height="50" rx="8"/><text class="c4-label" x="380" y="510">escalated</text></g>
+<g class="c4-rel"><path d="M300,66 L172,66" marker-end="url(#pr-arrow)"/><text class="c4-rel-label" x="236" y="59">send failed</text></g>
+<g class="c4-rel"><path d="M380,86 L380,118" marker-end="url(#pr-arrow)"/></g>
+<g class="c4-rel"><path d="M300,132 L172,132" marker-end="url(#pr-arrow)"/><text class="c4-rel-label" x="236" y="125">delivery unproven</text></g>
+<g class="c4-rel"><path d="M172,158 L298,158" marker-end="url(#pr-arrow)"/><text class="c4-rel-label" x="236" y="176">resend same corr</text></g>
+<g class="c4-rel"><path d="M460,145 L588,145" marker-end="url(#pr-arrow)"/><text class="c4-rel-label" x="524" y="138">correlated report</text></g>
+<g class="c4-legend"><text x="590" y="110">reachable from every phase</text></g>
+<g class="c4-rel"><path d="M380,170 L380,238" marker-end="url(#pr-arrow)"/><text class="c4-rel-label" x="380" y="208">turn done + grace, no report</text></g>
+<g class="c4-rel"><path d="M380,290 L380,358" marker-end="url(#pr-arrow)"/><text class="c4-rel-label" x="380" y="328">repost delivered</text></g>
+<g class="c4-rel"><path d="M335,290 L230,358" marker-end="url(#pr-arrow)"/><text class="c4-rel-label" x="262" y="318">send failed</text></g>
+<g class="c4-rel"><path d="M425,290 L530,358" marker-end="url(#pr-arrow)"/><text class="c4-rel-label" x="500" y="318">sender died</text></g>
+<g class="c4-rel"><path d="M380,410 L380,478" marker-end="url(#pr-arrow)"/><text class="c4-rel-label" x="380" y="448">recovery turn done, no report</text></g>
+<g class="c4-rel"><path d="M210,410 L330,478" marker-end="url(#pr-arrow)"/></g>
+<g class="c4-rel"><path d="M550,410 L430,478" marker-end="url(#pr-arrow)"/></g>
+<g class="c4-rel"><path d="M75,170 L75,512 L298,512" marker-end="url(#pr-arrow)"/><text class="c4-rel-label" x="75" y="340">escalate</text></g>
+<g class="c4-rel c4-rel-async"><path d="M460,500 L690,500 L690,172" marker-end="url(#pr-arrow)"/><text class="c4-rel-label" x="690" y="340">late report</text></g>
+</svg>
+</div>
+<figcaption>Every transition runs under a per-correlation lock so a resolution and an escalation cannot interleave (<code class="cite">bin/fm-pending-reply-lib.sh:632-650</code>). Sources: phase list <code class="cite">bin/fm-pending-reply-lib.sh:38-46</code>; the tick <code class="cite">bin/fm-pending-reply-lib.sh:1361-1432</code>.</figcaption>
+</figure>
+
+<h2 id="record">The record</h2>
+<p>One key=value file per request at <code>state/pending-replies/&lt;corr_id&gt;</code> in the <em>parent</em> home, directory mode 700 and file mode 600 (<code class="cite">bin/fm-pending-reply-lib.sh:296-357</code>). Notable fields from the schema (<code class="cite">bin/fm-pending-reply-lib.sh:27-67</code>):</p>
+<dl class="defs">
+<dt><code>corr_id</code></dt><dd>16 lowercase hex characters (64 bits), from <code>openssl rand -hex 8</code> or a hash fallback (<code class="cite">bin/fm-pending-reply-lib.sh:153-165</code>). Called "privacy-safe" because it carries nothing about the request.</dd>
+<dt><code>parent_status</code></dt><dd>Absolute path of the parent's <code>state/&lt;task_id&gt;.status</code>, the only place a reply counts.</dd>
+<dt><code>request_summary</code></dt><dd>One line, printable ASCII, at most 120 characters, marker and token stripped (<code class="cite">bin/fm-pending-reply-lib.sh:187-198</code>).</dd>
+<dt><code>delivered_epoch</code></dt><dd>Empty until delivery is confirmed. "Delivery never resolves."</dd>
+<dt><code>phase</code></dt><dd>One of the eight phases above.</dd>
+<dt><code>wrong_home_*</code></dt><dd>Sightings of the token in the secondmate's own home, recorded as evidence, never as acknowledgement.</dd>
+</dl>
+
+<h2 id="corr">The correlation token on the wire</h2>
+<p><code>fm_pending_reply_embed_corr</code> puts the token right after the from-firstmate marker, replacing a different leading token if one is there (<code class="cite">bin/fm-pending-reply-lib.sh:271-292</code>):</p>
+<pre><code>[fm-from-firstmate]&lt;U+2063&gt;corr=0123456789abcdef &lt;request text&gt;</code></pre>
+<p>The secondmate's brief tells it to include that exact token in its parent status reply, or in the status line pointing at a detailed document (<code class="cite">bin/fm-brief.sh:313-316</code>).</p>
+
+<h2 id="delivery">Delivery is not a reply</h2>
+<p>fm-send creates the record before delivery (<code class="cite">bin/fm-send.sh:811-864</code>) and writes a sidecar <code>.delivery-confirmed-&lt;corr&gt;</code> saying <code>attempted=&lt;epoch&gt;</code> (<code class="cite">bin/fm-pending-reply-lib.sh:395-405</code>). After a durable enqueue it confirms, which writes <code>confirmed=&lt;epoch&gt;</code>, sets <code>delivered_epoch</code>, then removes the sidecar (<code class="cite">bin/fm-pending-reply-lib.sh:407-432</code>). The sidecar exists so a crash between those steps is repairable: the watcher's reconcile finishes a <code>confirmed</code> sidecar, and turns an <code>attempted</code> one older than the grace into <code>delivery_unknown</code> (<code class="cite">bin/fm-pending-reply-lib.sh:448-486</code>). A known failed send deletes the record entirely, "so transport failure does not masquerade as a missed report later" (<code class="cite">bin/fm-pending-reply-lib.sh:552-563</code>).</p>
+
+<h2 id="resolve">What counts as a reply</h2>
+<p>Any line in the parent status file that contains the exact <code>corr=&lt;id&gt;</code> token resolves the record, except the parent's own <code>pending-reply-missed</code> escalation, which names the request with <code>pending-reply-id=</code> instead (<code class="cite">bin/fm-pending-reply-lib.sh:565-577</code>). The match is on the token anywhere in the line; the verb does not matter. The record also notes how it was resolved, by a loose text heuristic: a line mentioning <code>data/…report</code>, <code>report.md</code>, <code>document</code>, or <code>pointer</code> is <code>document</code>; one mentioning <code>via-helper</code> or <code>fm-secondmate-report</code> is <code>helper</code>; anything else is <code>status</code> (<code class="cite">bin/fm-pending-reply-lib.sh:614-628</code>). The scan is skipped when the status file's stat signature has not changed since the last miss (<code class="cite">bin/fm-pending-reply-lib.sh:672-684</code>).</p>
+
+<h2 id="turn">Knowing the turn ended, without reading chat</h2>
+<p>Recovery waits until the secondmate's turn on the request is over. The library prefers a busy-then-idle transition of the secondmate's endpoint, but also accepts a plain idle reading after delivery, for turns so fast the first observation missed the busy window (<code class="cite">bin/fm-pending-reply-lib.sh:700-747</code>). A consequence: a mate that never started its turn, for example because the doorbell was lost, still reads as "turn completed" once it is seen idle. The observation first asks the backend's native busy state, then falls back to matching the recorded harness's busy signature in the last few non-blank lines of the pane (<code class="cite">bin/fm-pending-reply-lib.sh:772-802</code>). This reads the pane's footer, not the conversation, and the comment is explicit that it is a delivery-confirmation signal, "never task state". A weak idle reading (<code>fallback-idle</code>) is accepted as idle only after the grace window (<code class="cite">bin/fm-pending-reply-lib.sh:749-817</code>). For a remote secondmate the observation runs on the remote host through <code>fm-on.sh … observe</code> (<code class="cite">bin/fm-pending-reply-lib.sh:1532-1535</code>).</p>
+
+<h2 id="recovery">The one recovery request</h2>
+<p>When the request turn completed, the grace (120 s by default) has passed since delivery, and no report arrived, <code>fm_pending_reply_send_recovery</code> sends exactly one repost through fm-send, reusing the same correlation so no second record is created (<code class="cite">bin/fm-pending-reply-lib.sh:920-977</code>):</p>
+<pre><code>REPOST REQUIRED: previous marked request had no correlated parent report. Reply on the parent status channel including corr=&lt;id&gt;. Original request: &lt;summary&gt;</code></pre>
+<p>(<code class="cite">bin/fm-pending-reply-lib.sh:909-918</code>.) The attempt is recorded before sending, with the sender's pid and a process identity string, so a sender that dies mid-send is detected later and the phase becomes <code>recovery_unknown</code> rather than hanging (<code class="cite">bin/fm-pending-reply-lib.sh:979-1039</code>). A second recovery is never sent: once <code>recovery_attempted_epoch</code> is set, the function only reconciles.</p>
+
+<h3 id="remote-freshness">Remote secondmates and the mirror watermark</h3>
+<p>A local mate writes straight into the parent file, so an absent line is evidence. A remote mate's lines arrive through an asynchronous mirror, so absence proves nothing until the mirror has read past the turn that should have produced the report. The mirror publishes <code>state/remote-replies/&lt;task&gt;.caught-up</code>, and recovery and escalation both wait until that watermark is at or after the turn's completion (<code class="cite">bin/fm-pending-reply-lib.sh:841-907</code>). Without this, the guard would nag for replies that were written but not yet mirrored, "the common case, because the mirror's poll window is comparable to the recovery grace". A mirror that is behind or broken simply never advances the watermark, so the request stays open and un-nagged, and the mirror escalates its own continuity failures.</p>
+
+<h2 id="escalation">Escalation</h2>
+<p>An escalation opens a durable keyed decision in the parent status log, under a per-request key in the reserved <code>pending-reply-</code> namespace (<code class="cite">bin/fm-pending-reply-lib.sh:69-83</code>, <code class="cite">bin/fm-pending-reply-lib.sh:1041-1046</code>):</p>
+<pre><code>blocked [key=pending-reply-&lt;corr&gt;] [at=…]: pending-reply-missed: task=&lt;id&gt; pending-reply-id=&lt;corr&gt; request=&lt;summary&gt;</code></pre>
+<p>The token after the colon is one of <code>pending-reply-missed</code>, <code>pending-reply-delivery-unknown</code>, <code>pending-reply-recovery-delivery-failed</code>, or <code>pending-reply-recovery-delivery-unknown</code> (<code class="cite">bin/fm-pending-reply-lib.sh:1073-1094</code>). A missed-report escalation also names where the token was seen in the wrong home, as a readable path and line (<code class="cite">bin/fm-pending-reply-lib.sh:1255-1260</code>). It is written once; <code>status_event_recorded</code> prevents a duplicate (<code class="cite">bin/fm-pending-reply-lib.sh:1263-1266</code>). Just before escalating, a late report still wins (<code class="cite">bin/fm-pending-reply-lib.sh:1244-1247</code>).</p>
+<p>Because the library opened the decision, it also closes it. When an escalated record later resolves, it appends <code>resolved [key=pending-reply-&lt;corr&gt;]: pending-reply-resolved: task=… pending-reply-id=… via=…</code> through the self-announced append, and only while that exact decision is still open (<code class="cite">bin/fm-pending-reply-lib.sh:1119-1185</code>). The watcher's tick retries this close on every poll until it lands (<code class="cite">bin/fm-pending-reply-lib.sh:1452-1456</code>). An operator can close it too with <a href="decisions.html#reserved">fm-send --resolve-key</a>, which writes the same vocabulary.</p>
+<p>A <code>delivery_unknown</code> escalation is different: the request may never have arrived, so the owner may resend under the same correlation. That resets the record to <code>awaiting_report</code> and leaves the published escalation open, because only a correlated report settles the request. A delivered record is never reset (<code class="cite">bin/fm-pending-reply-lib.sh:85-96</code>, <code class="cite">bin/fm-pending-reply-lib.sh:513-550</code>).</p>
+
+<h2 id="wrong-home">Replies written to the wrong home</h2>
+<p>A local secondmate is itself a firstmate, so it can append to its <em>own</em> home's <code>state/&lt;id&gt;.status</code> when it meant the parent's file with the same name. The library handles this narrowly (<code class="cite">bin/fm-pending-reply-lib.sh:1273-1359</code>):</p>
+<ul>
+<li>Every correlated line found in the mate home's status files is recorded as a sighting, never as acknowledgement. The remote route's <code>parent-replies.status</code> is skipped, because that <em>is</em> the channel.</li>
+<li>Only the file with the same base name as the task, <code>&lt;mate-home&gt;/state/&lt;task_id&gt;.status</code>, is copied: its correlated line is restated onto the parent channel, which then resolves normally. The header calls this "a repair of the FM_HOME-relative mixup, not acknowledgement of an arbitrary mate-home file" (<code class="cite">bin/fm-pending-reply-lib.sh:18-20</code>).</li>
+</ul>
+
+<h2 id="tick">Who drives it</h2>
+<p>The watcher calls <code>fm_pending_reply_tick "$STATE"</code> on every poll (<code class="cite">bin/fm-watch.sh:2322-2326</code>). The tick walks every record, caches one endpoint observation per task per tick, and runs the per-record step: reconcile delivery, try to resolve, reconcile recovery, check wrong-home, observe the turn, try to resolve again, send recovery if due, escalate if due (<code class="cite">bin/fm-pending-reply-lib.sh:1434-1548</code>). Resolved records are kept, not deleted; an escalated record is "retained; never auto-delete" (<code class="cite">bin/fm-pending-reply-lib.sh:1394-1395</code>).</p>
+
+<h2 id="config">Configuration</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Variable</th><th>Default</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>FM_PENDING_REPLY_GRACE_SECS</code></td><td>120</td><td>Grace before delivery is called unknown and before recovery is eligible. Stored per record at creation.</td></tr>
+<tr><td><code>FM_PENDING_REPLY_DIR_OVERRIDE</code></td><td>unset</td><td>Alternate record directory (tests).</td></tr>
+<tr><td><code>FM_PENDING_REPLY_SEND_HOOK</code></td><td>unset</td><td>Replaces fm-send for the recovery send (tests).</td></tr>
+<tr><td><code>FM_PENDING_REPLY_NOW</code></td><td>unset</td><td>Fixed clock (tests).</td></tr>
+</tbody></table></div>
+<p>(<code class="cite">bin/fm-pending-reply-lib.sh:101-106</code>.) Fire-and-forget requests (<code>fm-send --fire-and-forget</code>) create no record and arm none of this (<code class="cite">bin/fm-send.sh:145-148</code>).</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

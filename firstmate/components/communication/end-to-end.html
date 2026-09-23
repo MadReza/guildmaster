@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>End to end: a question to a secondmate · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">Components › Communication</p>
+<h1>End to end: a question to a secondmate</h1>
+<p class="lede">One realistic path through most of this area: the main firstmate asks a local secondmate for an audit, the secondmate answers on its parent channel, and the watcher matches the answer to the question. Then the two ways it goes wrong, and what catches each.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Every step cites the code that performs it. Up: <a href="index.html">Communication</a>.</p>
+
+<h2 id="setting">The setting</h2>
+<p>A main home has a secondmate recorded as task <code>sm-infra</code>, with <code>kind=secondmate</code> in <code>state/sm-infra.meta</code>, running in a local tmux pane. Its home's <code>.fm-secondmate-parent</code> says <code>route=local</code> and names the main home, so its parent channel is the main home's <code>state/sm-infra.status</code>. (The id is illustrative; the file shapes are those documented on the linked pages.)</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 980 640" role="img" aria-labelledby="e2e-t e2e-d">
+<title id="e2e-t">A marked request to a secondmate and its correlated answer</title>
+<desc id="e2e-d">Firstmate runs fm-send to the secondmate. fm-send marks the text, creates a pending-reply record with a correlation id, writes the inbox record, confirms delivery, rings the doorbell, and exits 0. The secondmate reads the record, acknowledges it by moving it to handled, does the work, and appends a done line carrying the correlation token to the parent status file. On its next poll the watcher's pending-reply tick finds the token and resolves the record, and the watcher raises a signal wake. Firstmate reads the line and reports to the captain.</desc>
+<defs><marker id="e2e-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">Question to answer, on the happy path</text>
+<g class="c4-container"><rect x="10" y="50" width="140" height="50" rx="8"/><text class="c4-label" x="80" y="72">Firstmate</text><text class="c4-tech" x="80" y="89">[main session]</text></g>
+<g class="c4-container"><rect x="170" y="50" width="140" height="50" rx="8"/><text class="c4-label" x="240" y="72">fm-send.sh</text><text class="c4-tech" x="240" y="89">[data plane]</text></g>
+<g class="c4-datastore"><rect x="330" y="50" width="140" height="50" rx="8"/><text class="c4-label" x="400" y="72">Pending record</text><text class="c4-tech" x="400" y="89">[state/pending-replies/]</text></g>
+<g class="c4-datastore"><rect x="490" y="50" width="140" height="50" rx="8"/><text class="c4-label" x="560" y="72">sm-infra inbox</text><text class="c4-tech" x="560" y="89">[state/sm-infra.inbox/]</text></g>
+<g class="c4-external"><rect x="650" y="50" width="140" height="50" rx="8"/><text class="c4-label" x="720" y="72">Secondmate</text><text class="c4-tech" x="720" y="89">[agent in its home]</text></g>
+<g class="c4-datastore"><rect x="810" y="50" width="160" height="50" rx="8"/><text class="c4-label" x="890" y="72">Parent channel</text><text class="c4-tech" x="890" y="89">[state/sm-infra.status]</text></g>
+<g class="c4-rel c4-rel-async"><line x1="80" y1="100" x2="80" y2="620"/><line x1="240" y1="100" x2="240" y2="620"/><line x1="400" y1="100" x2="400" y2="620"/><line x1="560" y1="100" x2="560" y2="620"/><line x1="720" y1="100" x2="720" y2="620"/><line x1="890" y1="100" x2="890" y2="620"/></g>
+<g class="c4-rel"><path d="M80,135 L238,135" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="160" y="128">1 fm-send sm-infra "…"</text></g>
+<text class="c4-rel-label" x="320" y="163">2 kind=secondmate: add marker</text>
+<g class="c4-rel"><path d="M240,190 L398,190" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="320" y="183">3 create, corr=&lt;id&gt;</text></g>
+<g class="c4-rel"><path d="M240,230 L558,230" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="400" y="223">4 write 001.msg (marker + corr)</text></g>
+<g class="c4-rel"><path d="M240,265 L398,265" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="320" y="258">5 mark delivered</text></g>
+<g class="c4-rel"><path d="M240,300 L718,300" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="480" y="293">6 doorbell line</text></g>
+<g class="c4-rel c4-rel-async"><path d="M240,330 L82,330" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="160" y="323">7 exit 0</text></g>
+<g class="c4-rel"><path d="M720,370 L562,370" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="640" y="363">8 read, mv handled/</text></g>
+<text class="c4-rel-label" x="805" y="400">9 does the work</text>
+<g class="c4-rel"><path d="M720,440 L888,440" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="805" y="433">10 done corr=&lt;id&gt;: …</text></g>
+<g class="c4-boundary"><rect x="20" y="470" width="950" height="150" rx="8"/><text x="32" y="488">Next watcher poll (bin/fm-watch.sh)</text></g>
+<g class="c4-rel c4-rel-async"><path d="M890,510 L402,510" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="646" y="503">11 tick: token found, record resolved (via document)</text></g>
+<g class="c4-rel c4-rel-async"><path d="M890,560 L82,560" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="486" y="553">12 signal wake: a captain-relevant done line</text></g>
+<text class="c4-rel-label" x="240" y="600">13 read the line and the report, tell the captain</text>
+</svg>
+</div>
+<figcaption>Numbers match the steps below. Step 11 and step 12 are separate mechanisms that happen to read the same file: the tick settles the reply expectation, the signal wake tells Firstmate there is news.</figcaption>
+</figure>
+
+<h2 id="steps">Step by step</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>#</th><th>What happens</th><th>Guarantee at this point</th><th>Source</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Firstmate runs <code>FM_HOME=&lt;home&gt; bin/fm-send.sh sm-infra "Audit the CI config and report"</code>. The target resolves through <code>state/sm-infra.meta</code>.</td><td>Wrong or unresolvable targets are refused before anything is written.</td><td><code class="cite">bin/fm-send.sh:340-382</code></td></tr>
+<tr><td>2</td><td>Meta says <code>kind=secondmate</code>, so the message will be marked from-firstmate.</td><td>Crewmates, scouts, and explicit endpoints are never marked.</td><td><code class="cite">bin/fm-send.sh:543-546</code></td></tr>
+<tr><td>3</td><td>A pending-reply record is created in <code>awaiting_report</code> with a fresh 16-hex correlation id, and a delivery sidecar says <code>attempted</code>. The id is embedded after the marker.</td><td>The expectation exists before delivery, so a crash cannot leave a delivered question with no one waiting for the answer.</td><td><code class="cite">bin/fm-send.sh:815-864</code>, <code class="cite">bin/fm-pending-reply-lib.sh:296-357</code></td></tr>
+<tr><td>4</td><td>Text is not <code>/…</code>, so it rides the inbox plane. Meta is locked and re-read; the record <code>001.msg</code> appears by atomic rename.</td><td>The steer is durable. Nothing typed yet.</td><td><code class="cite">bin/fm-send.sh:1007-1052</code></td></tr>
+<tr><td>5</td><td>The expectation is marked delivered (<code>delivered_epoch</code> set). It is not resolved.</td><td>"Delivery success and reply success are separate facts."</td><td><code class="cite">bin/fm-send.sh:1053-1075</code></td></tr>
+<tr><td>6</td><td>The constant doorbell line is typed into the pane, if the composer is not provably holding someone's text.</td><td>Best effort only; its result does not change the exit.</td><td><code class="cite">bin/fm-task-inbox-lib.sh:286-309</code></td></tr>
+<tr><td>7</td><td>fm-send exits 0.</td><td>0 means "recorded", not "read".</td><td><code class="cite">bin/fm-send.sh:1092</code></td></tr>
+<tr><td>8</td><td>The secondmate lists the inbox, reads the marked request, and moves <code>001.msg</code> to <code>handled/</code>.</td><td>The move is the acknowledgement; the re-ring ladder goes quiet.</td><td><code class="cite">bin/fm-brief.sh:248-258</code></td></tr>
+<tr><td>9</td><td>It does the work, typically through its own crewmates. Their outcomes reach the parent channel from the secondmate's own scripts, without the mate writing anything.</td><td>Facts are published by scripts.</td><td><a href="parent-channel.html#publishers">publishers</a></td></tr>
+<tr><td>10</td><td>It appends its judgement with the token, for example <code>bin/fm-secondmate-report.sh --doc done &lt;corr&gt; data/ci-audit/report.md "audit clean"</code>. The helper resolves the channel itself; the mate never passes a path.</td><td>The answer is on the only channel the parent reads.</td><td><code class="cite">bin/fm-secondmate-report.sh:10-23</code>, <code class="cite">bin/fm-brief.sh:313-316</code></td></tr>
+<tr><td>11</td><td>The watcher's <code>fm_pending_reply_tick</code> sees the file changed, finds <code>corr=&lt;id&gt;</code>, and sets the record to <code>resolved</code>, <code>resolved_via=document</code> because the line mentions <code>report.md</code>.</td><td>Only a correlated line on the parent channel counts. Chat never does.</td><td><code class="cite">bin/fm-watch.sh:2322-2326</code>, <code class="cite">bin/fm-pending-reply-lib.sh:652-698</code></td></tr>
+<tr><td>12</td><td>Independently, the new <code>done</code> line is captain-relevant, so the watcher queues a <code>signal:</code> wake.</td><td>Firstmate is woken by the event, not by polling the file.</td><td><code class="cite">bin/fm-watch.sh:21-23</code></td></tr>
+<tr><td>13</td><td>Firstmate reads the event line and the report, then tells the captain in outcome terms.</td><td>The line is an event; current state is reconciled separately if it matters.</td><td><code class="cite">AGENTS.md:434-439</code></td></tr>
+</tbody></table></div>
+
+<h2 id="swallowed">What if the doorbell is swallowed?</h2>
+<p>Say the secondmate's composer was mid-render and step 6 was lost. Nothing is typed again at once: the record exists and fm-send already exited 0.</p>
+<ol>
+<li>On each poll the watcher runs <code>inbox_steer_check</code>. After 90 s, with the pane idle, it rings again, and records the attempt in <code>.ring-state</code> (<code class="cite">bin/fm-watch.sh:450-494</code>).</li>
+<li>If three attempts go unacknowledged on an idle pane, it queues <code>stale: … (unread firstmate instruction: …/001.msg still unhandled after 3 doorbell delivery attempts with an idle pane; inspect the worker)</code> and writes <code>.escalated</code> (<code class="cite">bin/fm-watch.sh:495-506</code>).</li>
+<li>If the mate's agent had instead exited, nothing is typed at all and that stale wake is raised immediately (<code class="cite">bin/fm-watch.sh:419-432</code>).</li>
+</ol>
+<p>The pending-reply guard runs independently and does not know the doorbell was lost. An idle pane observed after delivery counts as a completed request turn even without a busy phase first, an allowance meant for turns too fast to catch (<code class="cite">bin/fm-pending-reply-lib.sh:729-737</code>). So if the pane stays idle, after 120 s the guard sends its one recovery repost through fm-send, which lands as a second inbox record, <code>002.msg</code>, and rings the doorbell again. The two mechanisms therefore overlap here: the worker can find both records when it finally looks. Neither loops: the ladder stops at its budget and the guard sends one recovery. See <a href="steering-inbox.html#ladder">the ladder</a> and <a href="pending-replies.html#recovery">recovery</a>.</p>
+
+<h2 id="chat-only">What if the secondmate answers only in chat?</h2>
+<p>This is the failure the parent channel and pending replies were built for (<code class="cite">docs/secondmate-parent-channel.md:9-14</code>). Steps 1–9 happen, but step 10 is missing: the mate wrote "Captain, the audit is clean" in its own conversation.</p>
+<ol>
+<li>The tick observes the secondmate's pane go busy after delivery, then idle, and records the request turn as completed (<code class="cite">bin/fm-pending-reply-lib.sh:700-747</code>). Only the pane's busy footer is read, never the conversation.</li>
+<li>Once 120 s have passed since delivery with no correlated line, it sends exactly one recovery through fm-send, reusing the same correlation: <code>REPOST REQUIRED: previous marked request had no correlated parent report. Reply on the parent status channel including corr=&lt;id&gt;. …</code> The phase goes <code>recovery_sending</code> → <code>recovery_sent</code> (<code class="cite">bin/fm-pending-reply-lib.sh:909-977</code>).</li>
+<li>If the mate now posts the line, the record resolves as in step 11.</li>
+<li>If the recovery turn also ends without it, the tick appends one escalation to the parent channel and the record becomes <code>escalated</code>: <code>blocked [key=pending-reply-&lt;corr&gt;]: pending-reply-missed: task=sm-infra pending-reply-id=&lt;corr&gt; request=Audit the CI config and report</code> (<code class="cite">bin/fm-pending-reply-lib.sh:1209-1271</code>). A <code>blocked</code> line is captain-relevant, so it wakes Firstmate and appears under OPEN DECISIONS.</li>
+<li>If the mate had appended its correlated line to its <em>own</em> home's <code>state/sm-infra.status</code> by mistake, the guard copies that one line onto the parent channel and resolves instead of escalating (<code class="cite">bin/fm-pending-reply-lib.sh:1339-1359</code>).</li>
+<li>A late correlated line still resolves an escalated record, and the library then closes its own escalation with <code>resolved [key=pending-reply-&lt;corr&gt;]: pending-reply-resolved: …</code>, written so it does not wake Firstmate again (<code class="cite">bin/fm-pending-reply-lib.sh:1143-1185</code>).</li>
+</ol>
+<p>At no point does anything read the secondmate's chat, loop, or silently drop the expectation.</p>
+
+<h2 id="other-paths">Other paths through this area</h2>
+<ul class="cards">
+<li><a href="decisions.html"><strong>A worker asks a human</strong><span>needs-decision, the watcher wake, and fm-send --resolve-key closing it in the same call</span></a></li>
+<li><a href="captain-inbox.html"><strong>The captain leaves a note</strong><span>fm-inbox note, one check wake, reply, drain --ack</span></a></li>
+<li><a href="relay.html"><strong>A public mention</strong><span>poll, one x-mention wake, reply or dismiss, follow-ups</span></a></li>
+<li><a href="fm-send.html#remote"><strong>The same question to a remote secondmate</strong><span>fm-on.sh leg, idempotent remote record, mirror watermark</span></a></li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

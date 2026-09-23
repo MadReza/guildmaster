@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Captain inbox and voice · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Communication</p>
+<h1>Captain inbox and voice</h1>
+<p class="lede">The captain's side door into Firstmate. A note left while Firstmate is busy is saved to disk and announced with one wake, and stays pending until Firstmate acknowledges it. A spoken front end uses the same note path to hand over real work.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Owners: <code class="cite">bin/fm-inbox.sh</code>; the spoken interface <code class="cite">docs/voice-relay.md</code>. Up: <a href="index.html">Communication</a>.</p>
+
+<h2 id="problem">Three problems, three mechanisms</h2>
+<p>The header insists these are different problems (<code class="cite">bin/fm-inbox.sh:4-20</code>):</p>
+<dl class="defs">
+<dt><code>note</code> (and <code>say</code>)</dt><dd>Queue an idea for Firstmate while it is mid-turn and cannot answer. Writes a durable record and appends <em>one</em> <code>check</code> wake, so the note survives a crash and is presented at the next drain. <code>say</code> is the same, with the body transcribed from audio: "Speech is an INPUT METHOD here, not an architecture."</dd>
+<dt><code>status</code></dt><dd>"What is happening", from records only. No network, no wake, safe to run in a loop. It ends by reminding the reader that "the last event line is history, not current state" (<code class="cite">bin/fm-inbox.sh:1041-1073</code>).</dd>
+<dt><code>ask</code></dt><dd>A side question answered by a one-shot model call that never touches Firstmate, the backlog, or the wake queue. "A side question is not fleet work and must not become fleet work."</dd>
+</dl>
+<p>Only <code>note</code> and <code>announce</code> touch the wake queue (<code class="cite">bin/fm-inbox.sh:10-11</code>).</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 760 560" role="img" aria-labelledby="ci-t ci-d">
+<title id="ci-t">Captain inbox and spoken interface</title>
+<desc id="ci-d">The captain writes a note with fm-inbox.sh directly, or speaks to the voice client on a laptop, which reaches the voice relay over ssh. The relay talks to a Bedrock speech model, reads Firstmate's records, and hands real work to fm-inbox.sh note. fm-inbox writes the note under state/inbox and appends one check wake. Firstmate drains the wake, acts, records a reply, and acknowledges the note, which moves it to handled.</desc>
+<defs><marker id="ci-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="10" y="30">Captain inbox — capture, announce, acknowledge</text>
+<g class="c4-person"><circle cx="85" cy="205" r="18"/><rect x="15" y="225" width="140" height="66" rx="14"/><text class="c4-label" x="85" y="252">Captain</text><text class="c4-desc" x="85" y="270">types or speaks</text></g>
+<g class="c4-external"><rect x="180" y="60" width="160" height="66" rx="8"/><text class="c4-label" x="260" y="82">Voice client</text><text class="c4-tech" x="260" y="98">[laptop, fm-voice-client.py]</text><text class="c4-desc" x="260" y="113">mic and speaker</text></g>
+<g class="c4-container"><rect x="380" y="60" width="170" height="66" rx="8"/><text class="c4-label" x="465" y="82">Voice relay</text><text class="c4-tech" x="465" y="98">[fm-voice-relay.py]</text><text class="c4-desc" x="465" y="113">answers from records</text></g>
+<g class="c4-external"><rect x="590" y="60" width="160" height="66" rx="8"/><text class="c4-label" x="670" y="82">Speech model</text><text class="c4-tech" x="670" y="98">[Bedrock, Nova Sonic]</text><text class="c4-desc" x="670" y="113">configured region</text></g>
+<g class="c4-container"><rect x="380" y="210" width="170" height="76" rx="8"/><text class="c4-label" x="465" y="237">fm-inbox.sh</text><text class="c4-tech" x="465" y="253">[bash]</text><text class="c4-desc" x="465" y="268">note · reply · drain --ack</text></g>
+<g class="c4-datastore"><rect x="590" y="190" width="160" height="66" rx="8"/><text class="c4-label" x="670" y="212">state/inbox/</text><text class="c4-tech" x="670" y="228">[&lt;id&gt;.note, handled/]</text><text class="c4-desc" x="670" y="243">.announced, .replies</text></g>
+<g class="c4-datastore"><rect x="590" y="300" width="160" height="60" rx="8"/><text class="c4-label" x="670" y="326">Wake queue</text><text class="c4-tech" x="670" y="342">[state/.wake-queue]</text></g>
+<g class="c4-container"><rect x="380" y="400" width="170" height="70" rx="8"/><text class="c4-label" x="465" y="424">Firstmate</text><text class="c4-tech" x="465" y="440">[supervisor session]</text><text class="c4-desc" x="465" y="455">acts, replies, acks</text></g>
+<g class="c4-rel"><path d="M130,220 L200,128" marker-end="url(#ci-arrow)"/><text class="c4-rel-label" x="150" y="165">speaks</text></g>
+<g class="c4-rel"><path d="M340,93 L378,93" marker-end="url(#ci-arrow)"/><text class="c4-rel-label" x="359" y="86">ssh</text></g>
+<g class="c4-rel"><path d="M550,93 L588,93" marker-end="url(#ci-arrow)"/><text class="c4-rel-label" x="569" y="86">audio</text></g>
+<g class="c4-rel"><path d="M465,126 L465,208" marker-end="url(#ci-arrow)"/><text class="c4-rel-label" x="465" y="170">note (real work)</text></g>
+<g class="c4-rel"><path d="M155,258 L378,248" marker-end="url(#ci-arrow)"/><text class="c4-rel-label" x="265" y="244">note · status · ask</text></g>
+<g class="c4-rel"><path d="M550,230 L588,225" marker-end="url(#ci-arrow)"/><text class="c4-rel-label" x="569" y="220">write</text></g>
+<g class="c4-rel"><path d="M550,270 L588,320" marker-end="url(#ci-arrow)"/><text class="c4-rel-label" x="560" y="308">1 wake</text></g>
+<g class="c4-rel c4-rel-async"><path d="M670,360 L670,435 L552,435" marker-end="url(#ci-arrow)"/><text class="c4-rel-label" x="670" y="400">drained</text></g>
+<g class="c4-rel"><path d="M420,400 L420,288" marker-end="url(#ci-arrow)"/><text class="c4-rel-label" x="420" y="344">reply, ack</text></g>
+<g class="c4-legend"><rect class="c4-legend-frame" x="10" y="490" width="740" height="56" rx="6"/><text class="c4-legend-heading" x="22" y="510">Legend</text><g class="c4-person"><rect x="90" y="500" width="22" height="14" rx="3"/></g><text x="118" y="512">Person</text><g class="c4-container"><rect x="180" y="500" width="22" height="14" rx="3"/></g><text x="208" y="512">Firstmate process</text><g class="c4-datastore"><rect x="330" y="500" width="22" height="14" rx="3"/></g><text x="358" y="512">File store</text><g class="c4-external"><rect x="440" y="500" width="22" height="14" rx="3"/></g><text x="468" y="512">Outside Firstmate</text><text x="90" y="536">Only fm-inbox.sh note and announce write the wake queue. status and ask never do.</text></g>
+</svg>
+</div>
+<figcaption>The spoken path never writes a queue of its own; it calls the same <code>note</code> subcommand (<code class="cite">docs/voice-relay.md:33-36</code>).</figcaption>
+</figure>
+
+<h2 id="note">Capturing a note</h2>
+<pre><code>fm-inbox.sh note [--request-id &lt;id&gt;] [--json] [--] &lt;text&gt;...
+fm-inbox.sh note [--request-id &lt;id&gt;] [--json] -        (body from stdin)</code></pre>
+<p>A note is written to a temp file and renamed into <code>state/inbox/&lt;epoch&gt;-&lt;random&gt;.note</code> (<code class="cite">bin/fm-inbox.sh:425-470</code>). Its format mirrors the steering-inbox record (<code class="cite">bin/fm-inbox.sh:287-303</code>):</p>
+<pre><code>id=&lt;id&gt;
+at=&lt;UTC time&gt;
+source=text                   (or the voice/say source)
+announce_marker=1
+request_id=&lt;id&gt;               (only with --request-id)
+--
+&lt;body&gt;</code></pre>
+<p>An empty body is refused. Only the listed flags are parsed; anything else starting with <code>--</code> begins the body (<code class="cite">bin/fm-inbox.sh:50-51</code>).</p>
+
+<h3 id="announce">Announcing exactly once</h3>
+<p><code>announce_note</code> appends one wake, <code>check: captain inbox note &lt;id&gt; - &lt;summary&gt;</code>, keyed <code>inbox:&lt;id&gt;</code>, and writes <code>.announced/&lt;id&gt;</code>. The marker test, the append, and the marker write all happen under the wake-queue lock, because two retries of the same request id can run at once and would otherwise both append (<code class="cite">bin/fm-inbox.sh:324-363</code>). A note already acknowledged gets no wake. If the wake cannot be appended the note is still on disk, and the command says so loudly: exit 1 normally, exit 3 with <code>--request-id</code> or <code>--json</code> so a caller can tell "saved but not announced" from "nothing saved" and repair with <code>announce</code> instead of queueing again (<code class="cite">bin/fm-inbox.sh:52-56</code>).</p>
+<p><code>announce</code> refuses a note whose announcement state is unknown. Notes from before the marker existed already woke Firstmate at creation, and nothing on disk can prove it, so announcing again would be the duplicate this contract removes. That is why new notes carry <code>announce_marker=1</code> (<code class="cite">bin/fm-inbox.sh:44-49</code>, <code class="cite">bin/fm-inbox.sh:259-277</code>).</p>
+
+<h3 id="idempotent">Idempotent capture with <code>--request-id</code></h3>
+<p>The request id is claimed with an exclusive create under <code>.requests/</code> before announcement, so a repeat returns the original note and prints <code>replay</code> (or <code>"outcome":"replay"</code>), even after a crash between save and wake (<code class="cite">bin/fm-inbox.sh:35-40</code>, <code class="cite">bin/fm-inbox.sh:400-423</code>).</p>
+
+<h2 id="ack">Handling, replying, and acknowledging</h2>
+<p>The charter tells Firstmate what to do on the wake: act on a captain inbox note like any <code>check:</code> result, acknowledge it with <code>bin/fm-inbox.sh drain --ack &lt;id&gt;</code> "or it stays counted as still waiting for firstmate", and, when the submitter needs a durable answer, publish it with <code>bin/fm-inbox.sh reply &lt;id&gt;</code> rather than leaving it in the transcript (<code class="cite">AGENTS.md:441-442</code>).</p>
+<ul>
+<li><code>drain --ack &lt;id&gt;...</code> moves each note to <code>handled/</code> and prints <code>acked</code> or <code>already-acked</code> (<code class="cite">bin/fm-inbox.sh:1116-1137</code>). As with the steering inbox, the move is the acknowledgement.</li>
+<li><code>reply &lt;id&gt; &lt;text&gt;</code> records one reply per note under <code>.replies/</code>, stamped with a per-home sequence under a lock, so the <code>receipts</code> cursor is a strict order even for two replies in the same second. A second reply is refused (<code class="cite">bin/fm-inbox.sh:61-64</code>, <code class="cite">bin/fm-inbox.sh:561-652</code>).</li>
+<li><code>receipts</code> is a bounded JSON view of pending and handled notes, their acknowledgement and announcement, and replies. Bounds omit rather than pretend the first page is everything, and <code>omitted[]</code> says how to see more (<code class="cite">bin/fm-inbox.sh:57-60</code>).</li>
+<li><code>ready</code> reports whether a primary session can receive: session lock, wake-consumer health, away posture. It never takes the lock and never infers liveness from a lock file, a session, or a pane (<code class="cite">bin/fm-inbox.sh:65-67</code>).</li>
+</ul>
+
+<h2 id="config">Configuration and privacy</h2>
+<p><code>note</code>, <code>announce</code>, <code>reply</code>, <code>receipts</code>, <code>ready</code>, <code>status</code>, <code>list</code>, and <code>drain</code> need no configuration and make no network call. <code>say</code> and <code>ask</code> send audio or a question to Bedrock and are off until the home configures a region and model; no default is shipped, because "a region, a model id and an AWS profile name somebody's account and somebody's choices" (<code class="cite">bin/fm-inbox.sh:69-95</code>; registry: <code class="cite">docs/configuration.md:1056-1078</code>).</p>
+<div class="table-wrap"><table>
+<thead><tr><th>File</th><th>Environment</th><th>Needed by</th></tr></thead>
+<tbody>
+<tr><td><code>config/inbox-region</code></td><td><code>FM_INBOX_REGION</code></td><td><code>say</code>, <code>ask</code></td></tr>
+<tr><td><code>config/inbox-stt-model</code></td><td><code>FM_INBOX_STT_MODEL</code></td><td><code>say</code></td></tr>
+<tr><td><code>config/inbox-ask-model</code></td><td><code>FM_INBOX_ASK_MODEL</code></td><td><code>ask</code></td></tr>
+<tr><td><code>config/inbox-profile</code></td><td><code>FM_INBOX_PROFILE</code></td><td>optional; empty means ambient credentials</td></tr>
+</tbody></table></div>
+
+<h2 id="voice">The spoken interface</h2>
+<p>A voice agent in front of Firstmate answers "what is happening" from Firstmate's own records, and when asked for real work "says so out loud and queues the request rather than pretending to do it" (<code class="cite">docs/voice-relay.md:3-6</code>). The laptop captures and plays audio; the desktop holds the model session; no AWS credentials sit on the laptop (<code class="cite">docs/voice-relay.md:13-27</code>). Both ends share one bidirectional byte stream over an ssh exec channel, framed by <code>bin/fm_voice_frame.py</code>, the one file both machines run.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Concern</th><th>Owner</th></tr></thead>
+<tbody>
+<tr><td>Wire format between the machines</td><td><code>bin/fm_voice_frame.py</code></td></tr>
+<tr><td>Relay, model session, tools</td><td><code>bin/fm-voice-relay.py</code></td></tr>
+<tr><td>Laptop capture and playback</td><td><code>bin/fm-voice-client.py</code></td></tr>
+<tr><td>What may be read; queueing real work</td><td><code>bin/fm_voice_records.py</code></td></tr>
+<tr><td>The queue the handover writes to</td><td><code>bin/fm-inbox.sh</code></td></tr>
+</tbody></table></div>
+<p>(<code class="cite">docs/voice-relay.md:287-296</code>.) Guarantees and limits stated in the doc:</p>
+<ul>
+<li><strong>What it may say is narrow by default.</strong> Without <code>config/voice-read-scope</code> it sends counts only, with no identifier, title, or link assembled. <code>full</code> adds names, titles, and PR links of open work. Finished work and free-form note bodies are excluded at every scope, by construction. <code>config/voice-read-deny</code> reduces matching items to a count. A misspelled scope refuses rather than widening (<code class="cite">docs/voice-relay.md:169-209</code>).</li>
+<li><strong>It never changes a project</strong>; real work goes through <code>note</code> (<code class="cite">docs/voice-relay.md:273-274</code>).</li>
+<li><strong>Push to talk only.</strong> <code>--listen open-mic</code> refuses at startup because there is no end-of-speech detection (<code class="cite">docs/voice-relay.md:211-221</code>).</li>
+<li><strong>One turn per model session</strong>, with no memory across questions, because a second question in a session is always treated as an interruption and a records-reading turn that is interrupted never answers (<code class="cite">docs/voice-relay.md:223-248</code>).</li>
+<li><strong>The laptop audio devices are unverified</strong>: no worker can reach the laptop, so the first live run is their test (<code class="cite">docs/voice-relay.md:124-128</code>).</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

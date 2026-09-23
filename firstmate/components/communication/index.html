@@ -11,12 +11,173 @@
 <div class="layout">
 <nav id="site-nav" aria-label="Site"></nav>
 <main id="main">
-<article>
+<article class="wide">
 <p class="breadcrumb">Components</p>
 <h1>Communication</h1>
-<p class="lede">Will cover how Firstmate, its workers, secondmates, and the captain exchange messages: the durable steering inbox and doorbell, the <code>fm-send</code> data plane versus the <code>fm-control</code> control plane, append-only status events, operational-input markers, the secondmate parent channel and pending replies, the captain inbox, voice, mail, and Relay.</p>
-<div class="callout unclear"><span class="callout-title">Stub</span>
-<p>This section is reserved and not yet written. A follow-up task fills it in under <a href="../../AUTHORING.md">the authoring contract</a>. Until then, the <a href="../../c4/containers.html">Level 2 containers page</a> is the entry point for this area.</p></div>
+<p class="lede">Every path along which Firstmate's parts talk to each other and to the captain: what each one carries, what it promises, and how it fails. The common design is that the durable record on disk is the message, and anything typed into a terminal is only a nudge to go and read it.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Level: C4 Level 3 (components) inside the Firstmate system. Up: <a href="../../c4/containers.html">Level 2 containers</a>.</p>
+
+<h2 id="principles">Four ideas that run through every channel</h2>
+<dl class="defs">
+<dt>The record is the delivery</dt>
+<dd>A steer is a numbered file in the task's inbox; a captain note is a file in <code>state/inbox/</code>; a mail or mention is a wake row plus a journal entry. The terminal gets at most a fixed "look in your inbox" line, and ringing it twice is harmless (<code class="cite">bin/fm-task-inbox-lib.sh:14-23</code>).</dd>
+<dt>Acknowledgement is a move</dt>
+<dd>A worker acknowledges a steer by moving it to <code>handled/</code>; Firstmate acknowledges a captain note the same way with <code>fm-inbox.sh drain --ack</code> (<code class="cite">bin/fm-brief.sh:254-257</code>, <code class="cite">AGENTS.md:441</code>). Without the move, the sender rings again and eventually escalates.</dd>
+<dt>A status line is an event, not the truth</dt>
+<dd>Workers talk back by appending one line to <code>state/&lt;id&gt;.status</code>. That line wakes Firstmate, but current state is always reconciled separately, and open decisions come from a fold over the whole log, never from the last line (<code class="cite">AGENTS.md:163</code>, <code class="cite">bin/fm-classify-lib.sh:413-421</code>).</dd>
+<dt>Text and lifecycle never share a channel</dt>
+<dd>What an agent should read goes through <code>fm-send</code>; stopping or replacing an agent goes through <code>fm-control</code>'s three allowlisted verbs. A lifecycle command sent as a message is reasoned about, not obeyed (<code class="cite">docs/agent-control.md:10-12</code>).</dd>
+</dl>
+
+<h2 id="worker-channels">Channels between Firstmate and its workers</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 960 520" role="img" aria-labelledby="cw-t cw-d">
+<title id="cw-t">Communication components serving the worker channels (C4 level 3)</title>
+<desc id="cw-d">Firstmate steers through fm-send and drives lifecycle through fm-control. fm-send marks secondmate text with the operational-input library, creates reply expectations in the pending-reply library, and writes records through the task inbox library, which rings the worker. fm-control delivers keys and exit commands to the worker. Workers append to their status log, parsed by the status grammar and folds. Secondmates publish through the parent channel library into the same kind of log. The watcher reads status logs, runs the pending-reply tick, and runs the inbox re-ring ladder. Numbered arrows are explained in the table below.</desc>
+<defs><marker id="cw-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">Worker channels — components</text>
+<g class="c4-container"><rect x="20" y="200" width="170" height="76" rx="8"/><text class="c4-label" x="105" y="226">Firstmate</text><text class="c4-tech" x="105" y="242">[supervisor session]</text><text class="c4-desc" x="105" y="260">steers and answers</text></g>
+<g class="c4-container"><rect x="20" y="380" width="170" height="76" rx="8"/><text class="c4-label" x="105" y="406">Watcher</text><text class="c4-tech" x="105" y="422">[bin/fm-watch.sh]</text><text class="c4-desc" x="105" y="440">polls, re-rings, wakes</text></g>
+<g class="c4-boundary"><rect x="220" y="50" width="500" height="450" rx="8"/><text x="232" y="68">Communication (this area)</text></g>
+<g class="c4-component"><rect x="240" y="80" width="200" height="60" rx="8"/><text class="c4-label" x="340" y="104">fm-send.sh</text><text class="c4-tech" x="340" y="120">[data plane]</text><text class="c4-desc" x="340" y="134">text to read</text></g>
+<g class="c4-component"><rect x="500" y="80" width="200" height="60" rx="8"/><text class="c4-label" x="600" y="104">fm-control.sh</text><text class="c4-tech" x="600" y="120">[control plane + lib]</text><text class="c4-desc" x="600" y="134">interrupt · exit · relaunch</text></g>
+<g class="c4-component"><rect x="240" y="190" width="200" height="60" rx="8"/><text class="c4-label" x="340" y="214">Task inbox</text><text class="c4-tech" x="340" y="230">[fm-task-inbox-lib.sh]</text><text class="c4-desc" x="340" y="244">record, doorbell, ladder</text></g>
+<g class="c4-component"><rect x="500" y="190" width="200" height="60" rx="8"/><text class="c4-label" x="600" y="214">Operational input</text><text class="c4-tech" x="600" y="230">[fm-operational-input.sh]</text><text class="c4-desc" x="600" y="244">machine-sent markers</text></g>
+<g class="c4-component"><rect x="240" y="300" width="200" height="60" rx="8"/><text class="c4-label" x="340" y="324">Pending replies</text><text class="c4-tech" x="340" y="340">[fm-pending-reply-lib.sh]</text><text class="c4-desc" x="340" y="354">correlate, recover, escalate</text></g>
+<g class="c4-component"><rect x="500" y="300" width="200" height="60" rx="8"/><text class="c4-label" x="600" y="324">Status grammar + folds</text><text class="c4-tech" x="600" y="340">[fm-classify-lib.sh]</text><text class="c4-desc" x="600" y="354">events, open decisions</text></g>
+<g class="c4-component"><rect x="500" y="410" width="200" height="60" rx="8"/><text class="c4-label" x="600" y="434">Parent channel</text><text class="c4-tech" x="600" y="450">[fm-parent-channel-lib.sh]</text><text class="c4-desc" x="600" y="464">mate outcomes upward</text></g>
+<g class="c4-container"><rect x="770" y="130" width="170" height="70" rx="8"/><text class="c4-label" x="855" y="156">Crewmate / scout</text><text class="c4-tech" x="855" y="172">[agent in worktree]</text><text class="c4-desc" x="855" y="188">reads inbox, appends status</text></g>
+<g class="c4-container"><rect x="770" y="330" width="170" height="76" rx="8"/><text class="c4-label" x="855" y="356">Secondmate home</text><text class="c4-tech" x="855" y="372">[a firstmate itself]</text><text class="c4-desc" x="855" y="390">same inbox; parent channel</text></g>
+<g class="c4-rel"><path d="M190,220 L215,220 L215,110 L238,110" marker-end="url(#cw-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="215" cy="165" r="10"/><text x="215" y="169">1</text></g>
+<g class="c4-rel"><path d="M105,200 L105,40 L600,40 L600,78" marker-end="url(#cw-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="350" cy="40" r="10"/><text x="350" y="44">2</text></g>
+<g class="c4-rel"><path d="M340,140 L340,188" marker-end="url(#cw-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="340" cy="164" r="10"/><text x="340" y="168">3</text></g>
+<g class="c4-rel"><path d="M440,110 L470,110 L470,220 L498,220" marker-end="url(#cw-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="470" cy="150" r="10"/><text x="470" y="154">4</text></g>
+<g class="c4-rel"><path d="M240,125 L228,125 L228,330 L238,330" marker-end="url(#cw-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="228" cy="290" r="10"/><text x="228" y="294">5</text></g>
+<g class="c4-rel"><path d="M390,190 L390,165 L768,165" marker-end="url(#cw-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="740" cy="165" r="10"/><text x="740" y="169">6</text></g>
+<g class="c4-rel"><path d="M700,112 L768,148" marker-end="url(#cw-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="734" cy="128" r="10"/><text x="734" y="132">7</text></g>
+<g class="c4-rel"><path d="M770,190 L735,190 L735,330 L702,330" marker-end="url(#cw-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="735" cy="265" r="10"/><text x="735" y="269">8</text></g>
+<g class="c4-rel"><path d="M770,390 L745,390 L745,440 L702,440" marker-end="url(#cw-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="745" cy="418" r="10"/><text x="745" y="422">9</text></g>
+<g class="c4-rel"><path d="M600,410 L600,362" marker-end="url(#cw-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="600" cy="386" r="10"/><text x="600" y="390">10</text></g>
+<g class="c4-rel c4-rel-async"><path d="M190,445 L480,445 L480,340 L498,340" marker-end="url(#cw-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="330" cy="445" r="10"/><text x="330" y="449">11</text></g>
+<g class="c4-rel c4-rel-async"><path d="M190,410 L340,410 L340,362" marker-end="url(#cw-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="270" cy="410" r="10"/><text x="270" y="414">12</text></g>
+<g class="c4-rel c4-rel-async"><path d="M190,392 L205,392 L205,240 L238,240" marker-end="url(#cw-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="205" cy="330" r="10"/><text x="205" y="334">13</text></g>
+</svg>
+</div>
+<figcaption>Solid arrows carry writes or keystrokes; dashed arrows are the watcher's polling reads and follow-up actions. The status logs, inbox directories, and pending-reply records themselves are drawn on each topic page.</figcaption>
+</figure>
+<div class="table-wrap"><table>
+<thead><tr><th>#</th><th>From → to</th><th>What travels</th><th>Details</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Firstmate → fm-send</td><td>A steer, an answer, optionally <code>--resolve-key</code></td><td><a href="fm-send.html">fm-send</a></td></tr>
+<tr><td>2</td><td>Firstmate → fm-control</td><td>One allowlisted lifecycle verb</td><td><a href="data-and-control-planes.html">planes</a></td></tr>
+<tr><td>3</td><td>fm-send → task inbox</td><td>A durable record, then a doorbell</td><td><a href="steering-inbox.html">steering inbox</a></td></tr>
+<tr><td>4</td><td>fm-send → operational input</td><td>From-firstmate marker for secondmate targets</td><td><a href="operational-input.html">markers</a></td></tr>
+<tr><td>5</td><td>fm-send → pending replies</td><td>A reply expectation and correlation id, created before delivery</td><td><a href="pending-replies.html">pending replies</a></td></tr>
+<tr><td>6</td><td>Task inbox → worker</td><td><code>NNN.msg</code> plus the constant doorbell line (secondmates too)</td><td><a href="steering-inbox.html#doorbell">doorbell</a></td></tr>
+<tr><td>7</td><td>fm-control → worker</td><td>Interrupt key or exit command, then a proven postcondition</td><td><a href="data-and-control-planes.html#control">control plane</a></td></tr>
+<tr><td>8</td><td>Worker → status log</td><td>One appended event line</td><td><a href="status-channel.html">status channel</a></td></tr>
+<tr><td>9</td><td>Secondmate → parent channel</td><td>Fact lines from its scripts, judgement lines from the mate</td><td><a href="parent-channel.html">parent channel</a></td></tr>
+<tr><td>10</td><td>Parent channel → status log</td><td>Appends into the parent's <code>state/&lt;mate&gt;.status</code>, read like any log</td><td><a href="parent-channel.html#where">routes</a></td></tr>
+<tr><td>11</td><td>Watcher → status grammar</td><td>Classify new spans; fold open decisions</td><td><a href="decisions.html">decisions</a>; wake handling in <a href="../supervision/index.html">Supervision</a></td></tr>
+<tr><td>12</td><td>Watcher → pending replies</td><td>Tick: resolve, recover once, escalate once</td><td><a href="pending-replies.html#tick">tick</a></td></tr>
+<tr><td>13</td><td>Watcher → task inbox</td><td>Re-ring an unacknowledged record; escalate as <code>stale</code></td><td><a href="steering-inbox.html#ladder">ladder</a></td></tr>
+</tbody></table></div>
+
+<h2 id="captain-channels">Channels between the captain, the outside world, and Firstmate</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 960 440" role="img" aria-labelledby="cc-t cc-d">
+<title id="cc-t">Captain-facing and external channels (C4 level 3)</title>
+<desc id="cc-d">The captain leaves notes with fm-inbox.sh directly or through the voice relay. A mail server feeds fm-mail.sh, and the myfirstmate relay feeds the Relay client scripts. All three write durable records and append check wakes to the wake queue, which Firstmate drains. Firstmate answers mentions back through the Relay client.</desc>
+<defs><marker id="cc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">Captain and external channels — components</text>
+<g class="c4-person"><circle cx="95" cy="62" r="16"/><rect x="20" y="78" width="150" height="56" rx="14"/><text class="c4-label" x="95" y="102">Captain</text><text class="c4-desc" x="95" y="120">notes, voice, mentions</text></g>
+<g class="c4-external"><rect x="20" y="170" width="170" height="56" rx="8"/><text class="c4-label" x="105" y="194">Mail server</text><text class="c4-tech" x="105" y="210">[IMAP 993 · SMTP 465]</text></g>
+<g class="c4-external"><rect x="20" y="270" width="170" height="56" rx="8"/><text class="c4-label" x="105" y="294">myfirstmate relay</text><text class="c4-tech" x="105" y="310">[X and Discord]</text></g>
+<g class="c4-boundary"><rect x="230" y="40" width="460" height="310" rx="8"/><text x="242" y="58">Communication (this area)</text></g>
+<g class="c4-component"><rect x="250" y="70" width="200" height="56" rx="8"/><text class="c4-label" x="350" y="94">Captain inbox</text><text class="c4-tech" x="350" y="110">[bin/fm-inbox.sh]</text></g>
+<g class="c4-component"><rect x="470" y="70" width="200" height="56" rx="8"/><text class="c4-label" x="570" y="94">Voice relay</text><text class="c4-tech" x="570" y="110">[bin/fm-voice-relay.py]</text></g>
+<g class="c4-component"><rect x="250" y="170" width="200" height="56" rx="8"/><text class="c4-label" x="350" y="194">Mail plane</text><text class="c4-tech" x="350" y="210">[bin/fm-mail.sh]</text></g>
+<g class="c4-component"><rect x="250" y="270" width="200" height="56" rx="8"/><text class="c4-label" x="350" y="294">Relay client</text><text class="c4-tech" x="350" y="310">[bin/fm-x-*.sh]</text></g>
+<g class="c4-datastore"><rect x="740" y="150" width="190" height="60" rx="8"/><text class="c4-label" x="835" y="176">Wake queue</text><text class="c4-tech" x="835" y="192">[state/.wake-queue]</text></g>
+<g class="c4-container"><rect x="740" y="270" width="190" height="70" rx="8"/><text class="c4-label" x="835" y="296">Firstmate</text><text class="c4-tech" x="835" y="312">[supervisor session]</text><text class="c4-desc" x="835" y="328">drains, acts, answers</text></g>
+<g class="c4-rel"><path d="M170,100 L248,100" marker-end="url(#cc-arrow)"/><text class="c4-rel-label" x="209" y="93">note</text></g>
+<g class="c4-rel"><path d="M150,78 L150,36 L570,36 L570,68" marker-end="url(#cc-arrow)"/><text class="c4-rel-label" x="510" y="31">speaks (ssh)</text></g>
+<g class="c4-rel"><path d="M470,98 L452,98" marker-end="url(#cc-arrow)"/></g>
+<g class="c4-rel"><path d="M190,198 L248,198" marker-end="url(#cc-arrow)"/><text class="c4-rel-label" x="219" y="191">poll</text></g>
+<g class="c4-rel"><path d="M190,298 L248,298" marker-end="url(#cc-arrow)"/><text class="c4-rel-label" x="219" y="291">poll</text></g>
+<g class="c4-rel"><path d="M350,126 L350,145 L710,145 L710,170 L738,170" marker-end="url(#cc-arrow)"/><text class="c4-rel-label" x="560" y="139">1 check wake per note</text></g>
+<g class="c4-rel"><path d="M450,190 L738,190" marker-end="url(#cc-arrow)"/><text class="c4-rel-label" x="590" y="184">1 check wake per mail</text></g>
+<g class="c4-rel"><path d="M450,285 L700,285 L700,200 L738,200" marker-end="url(#cc-arrow)"/><text class="c4-rel-label" x="575" y="279">1 wake per mention</text></g>
+<g class="c4-rel c4-rel-async"><path d="M835,210 L835,268" marker-end="url(#cc-arrow)"/><text class="c4-rel-label" x="870" y="243">drained</text></g>
+<g class="c4-rel"><path d="M740,318 L452,318" marker-end="url(#cc-arrow)"/><text class="c4-rel-label" x="600" y="312">reply, dismiss, follow up</text></g>
+<g class="c4-legend"><rect class="c4-legend-frame" x="20" y="365" width="910" height="60" rx="6"/><text class="c4-legend-heading" x="32" y="385">Legend</text>
+<g class="c4-person"><rect x="100" y="375" width="22" height="14" rx="3"/></g><text x="128" y="387">Person</text>
+<g class="c4-component"><rect x="200" y="375" width="22" height="14" rx="3"/></g><text x="228" y="387">Communication component</text>
+<g class="c4-datastore"><rect x="420" y="375" width="22" height="14" rx="3"/></g><text x="448" y="387">File store</text>
+<g class="c4-container"><rect x="540" y="375" width="22" height="14" rx="3"/></g><text x="568" y="387">Firstmate process</text>
+<g class="c4-external"><rect x="700" y="375" width="22" height="14" rx="3"/></g><text x="728" y="387">Outside Firstmate</text>
+<text x="100" y="411">Each component writes its own durable record before its wake; see each topic page for the records.</text></g>
+</svg>
+</div>
+<figcaption>The wake queue itself, its drain, and its lock are owned by <a href="../supervision/index.html">Supervision</a>; this area only publishes into it.</figcaption>
+</figure>
+
+<h2 id="guarantees">Every channel and what it promises</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Channel</th><th>Direction</th><th>Carrier</th><th>Delivery signal</th><th>If it is lost</th></tr></thead>
+<tbody>
+<tr><td><a href="steering-inbox.html">Steering inbox</a></td><td>Firstmate → worker</td><td><code>state/&lt;id&gt;.inbox/NNN.msg</code> + doorbell</td><td>Worker moves the file to <code>handled/</code></td><td>Re-rung every 90 s on an idle pane, 3 times, then a <code>stale</code> wake; a dead pane escalates at once</td></tr>
+<tr><td><a href="fm-send.html#typed-plane">Typed plane</a></td><td>Firstmate → local harness parser</td><td>Keystrokes</td><td>Backend submit read-back</td><td>Exit 3 on an unconfirmed submit: verify, never retype</td></tr>
+<tr><td><a href="data-and-control-planes.html">Control plane</a></td><td>Firstmate → agent process</td><td>Allowlisted verb</td><td>A proven postcondition</td><td>Refuses rather than act blind</td></tr>
+<tr><td><a href="status-channel.html">Status channel</a></td><td>Worker → Firstmate</td><td><code>state/&lt;id&gt;.status</code>, append-only</td><td>Watcher classifies the new span</td><td>Nothing is lost; decisions stay open until a keyed <code>resolved</code></td></tr>
+<tr><td><a href="decisions.html">Keyed decisions</a></td><td>Both</td><td>Status lines with <code>[key=…]</code></td><td>The fold</td><td><code>--resolve-key</code> re-folds and prints a manual close if needed</td></tr>
+<tr><td><a href="parent-channel.html">Parent channel</a></td><td>Secondmate → parent</td><td>Parent <code>state/&lt;mate&gt;.status</code> (local) or mirrored <code>parent-replies.status</code> (remote)</td><td>Append-once by the recording script</td><td>Teardown refuses to remove undelivered outcomes</td></tr>
+<tr><td><a href="pending-replies.html">Pending replies</a></td><td>Parent's bookkeeping</td><td><code>state/pending-replies/&lt;corr&gt;</code></td><td>A line carrying <code>corr=&lt;id&gt;</code></td><td>One repost, then one <code>blocked [key=pending-reply-…]</code></td></tr>
+<tr><td><a href="captain-inbox.html">Captain inbox</a></td><td>Captain → Firstmate</td><td><code>state/inbox/&lt;id&gt;.note</code> + one wake</td><td><code>drain --ack</code></td><td><code>announce</code> repairs a missing wake; request ids dedupe retries</td></tr>
+<tr><td><a href="mail-plane.html">Mail plane</a></td><td>Mail → Firstmate, and out</td><td>IMAP/SMTP, wake + journal</td><td>Wake drained</td><td>Healed next poll; a duplicate is possible, a loss is not</td></tr>
+<tr><td><a href="relay.html">Relay</a></td><td>Public mention ↔ Firstmate</td><td>Relay HTTP, <code>state/x-inbox/</code></td><td>Reply, dismiss, or promised final</td><td>Offer marker prevents re-waking; promises survive restarts on disk</td></tr>
+</tbody></table></div>
+
+<h2 id="pages">Pages in this area</h2>
+<ul class="cards">
+<li><a href="end-to-end.html"><strong>End to end</strong><span>A question to a secondmate, traced step by step, and its two failure paths</span></a></li>
+<li><a href="data-and-control-planes.html"><strong>Data plane and control plane</strong><span>Why text and lifecycle are separate channels</span></a></li>
+<li><a href="fm-send.html"><strong>fm-send</strong><span>Target resolution, plane choice, exit codes, the remote leg</span></a></li>
+<li><a href="steering-inbox.html"><strong>Steering inbox and doorbell</strong><span>Records, acknowledgement, the re-ring ladder</span></a></li>
+<li><a href="operational-input.html"><strong>Operational-input markers</strong><span>How machine-sent text is told apart from a human typing</span></a></li>
+<li><a href="status-channel.html"><strong>Status channel</strong><span>Line grammar, events versus truth, self-announced appends</span></a></li>
+<li><a href="decisions.html"><strong>Keyed decisions and --resolve-key</strong><span>Open and close rules; the answerer closes</span></a></li>
+<li><a href="parent-channel.html"><strong>Secondmate parent channel</strong><span>Facts from scripts, judgement from the mate</span></a></li>
+<li><a href="pending-replies.html"><strong>Pending replies</strong><span>Correlation, one recovery, one escalation</span></a></li>
+<li><a href="captain-inbox.html"><strong>Captain inbox and voice</strong><span>Notes, replies, acknowledgement, the spoken front end</span></a></li>
+<li><a href="mail-plane.html"><strong>Mail plane</strong><span>IMAP poll to wake, exactly-once recovering</span></a></li>
+<li><a href="relay.html"><strong>Relay</strong><span>Public mentions, replies, follow-ups, promised finals</span></a></li>
+</ul>
+
+<h2 id="neighbours">Where this area stops</h2>
+<ul>
+<li>Cross-host transport, <code>fm-on.sh</code>, and the remote reply mirror: <a href="../remote/index.html">Remote</a>. This area only states what the remote legs promise.</li>
+<li>The wake queue, the watcher's classification and absorb rules, and the drain: <a href="../supervision/index.html">Supervision</a>.</li>
+<li>Where status logs, inboxes, and records sit among the home's durable files: <a href="../persistence/index.html">Persistence</a>.</li>
+<li>Worker kinds, spawning, and the relaunch transaction behind <code>fm-control</code>: <a href="../crew/index.html">Crew</a>.</li>
+<li>Captain holds and the backlog that decisions can move into: <a href="../backlog-and-decisions/index.html">Backlog and decisions</a>.</li>
+<li>The briefs that teach workers these channels, and the <code>fmx-respond</code> skill: <a href="../prompts-and-skills/index.html">Prompts and skills</a>.</li>
+</ul>
 </article>
 </main>
 </div>
