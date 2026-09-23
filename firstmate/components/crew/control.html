@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Control plane · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Crew</p>
+<h1>Control plane</h1>
+<p class="lede"><code>bin/fm-control.sh</code> drives a running worker's lifecycle with a closed set of verbs (interrupt, exit, relaunch) addressed to an exact task id, with per-harness mechanics taken from a table and a verified postcondition for every action. It never tears anything down.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Crew</a>. The data plane (<code>fm-send.sh</code>, the steering inbox) belongs to <a href="../communication/index.html">Communication</a>.</p>
+
+<h2 id="why">Why a separate control plane</h2>
+<p>Firstmate talks to a running agent over two channels. The data plane, <code>bin/fm-send.sh</code>, carries text for the agent to read. For a secondmate that text always carries the from-firstmate routing marker. "The split exists because the data plane's marking is exactly right for a message and exactly wrong for a lifecycle command. A routing-marked <code>/quit</code> arrives as ordinary chat - <code>[fm-from-firstmate] /quit</code> - which the agent reasons about instead of executing." Before the split, the workaround "lived only in agent prose, so it failed again every time a session did not happen to recall it" <code class="cite">docs/agent-control.md:3-12</code>. The supervisor contract forbids using <code>fm-send</code> for lifecycle control <code class="cite">AGENTS.md:338-339</code>.</p>
+
+<h2 id="owners">What it owns</h2>
+<p><code>bin/fm-control-lib.sh</code> is "the single executable owner of three capability tables, which have no side effects, so they can be read as a contract" <code class="cite">docs/agent-control.md:14-28</code>:</p>
+<ul>
+<li><strong>The verb allowlist</strong>: <code>interrupt</code>, <code>exit</code>, <code>relaunch</code>. There is "no arbitrary-text and no generic raw-key entry point" <code class="cite">bin/fm-control-lib.sh:49-62</code>.</li>
+<li><strong>Per-harness mechanics</strong>: the interrupt key (Escape everywhere except grok's Ctrl+C), the repeat count (opencode needs two), the composer clear (only muse restores the cancelled prompt and needs Ctrl+U), the acknowledgement source (only muse's session log confirms a cancel), the exit command (<code>/exit</code> or <code>/quit</code>), and the task kinds each adapter supports <code class="cite">bin/fm-control-lib.sh:113-193</code>.</li>
+<li><strong>Per-backend capability</strong>: which keys a backend can deliver (Orca has no Escape or Ctrl+U), and whether it has a recovery-grade agent-state classifier (tmux and herdr only) <code class="cite">bin/fm-control-lib.sh:195-261</code>.</li>
+</ul>
+<p>It also owns one non-table function, the endpoint-absence proof <code>fm_control_endpoint_absence_verdict</code>, so that "<code>exit</code> and <code>relaunch</code> cannot reach two different answers about one endpoint" <code class="cite">bin/fm-control-lib.sh:262-292</code> <code class="cite">docs/agent-control.md:105-108</code>.</p>
+
+<h2 id="verbs">The verbs</h2>
+<pre><code>fm-control.sh &lt;task-id&gt; interrupt
+fm-control.sh &lt;task-id&gt; exit
+fm-control.sh &lt;task-id&gt; relaunch [--harness &lt;name&gt;] [--model &lt;name&gt;] [--effort &lt;level&gt;] (--note &lt;text&gt; | --note-file &lt;path&gt;)</code></pre>
+<div class="table-wrap"><table>
+<thead><tr><th>Verb</th><th>Effect</th><th>Postcondition</th></tr></thead>
+<tbody>
+<tr><td><code>interrupt</code></td><td>Delivers the verified interrupt sequence; the agent keeps running.</td><td>Delivery succeeded, the endpoint exists, and the agent is alive where classifiable. A cancel is confirmed only by an adapter acknowledgement, otherwise <code>cancel=unconfirmed</code>.</td></tr>
+<tr><td><code>exit</code></td><td>Interrupts if busy, requires an empty composer, then types the exit command. Endpoint, worktree, and every uncommitted change are preserved.</td><td>The recovery-grade classifier reports the agent gone. Already stopped is idempotent success. Unproven is <code>exit=unconfirmed</code>.</td></tr>
+<tr><td><code>relaunch</code></td><td>Replaces the agent in the same worktree, and the same endpoint when it still exists, on the same or a new harness, model, or effort.</td><td>The new agent is alive on the endpoint the record names, and the record names the harness actually running.</td></tr>
+</tbody></table></div>
+<p class="evidence">Sources: <code class="cite">bin/fm-control.sh:5-79</code>, <code class="cite">docs/agent-control.md:31-52</code>.</p>
+<p><strong>Deliberately absent.</strong> "Teardown and discard are NOT verbs here and never will be" <code class="cite">bin/fm-control.sh:80-83</code>. <code>resume</code> is not a verb either: it "is not deterministic across the verified adapters", and relaunch covers the need "because the brief on disk, not a harness-private session, is the durable instruction" <code class="cite">bin/fm-control.sh:85-88</code> <code class="cite">docs/agent-control.md:54-56</code>.</p>
+
+<h2 id="relaunch">Relaunch is a transaction</h2>
+<p>Relaunch is the only verb that changes durable records. It keeps a journal at <code>state/&lt;id&gt;.control-relaunch</code>, with the prior record and brief preserved beside it (<code>.meta-prior</code>, <code>.brief-prior</code>, <code>.note</code>) <code class="cite">bin/fm-control.sh:569-581</code>.</p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 980 420" role="img" aria-labelledby="rl-t rl-d">
+<title id="rl-t">Transactional relaunch sequence</title>
+<desc id="rl-d">fm-control resolves the profile, checkpoints the worktree, appends the progress note to the brief, stops the old agent through the exit verb, then calls fm-spawn --relaunch, which adopts or re-creates the endpoint, republishes the record, and launches the new agent. A failure after the stop restores the prior record and marks the journal failed:launching.</desc>
+<defs><marker id="rl-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">relaunch, in time</text>
+<g class="c4-component"><rect x="40" y="50" width="180" height="44" rx="8"/><text class="c4-label" x="130" y="69">fm-control.sh</text><text class="c4-tech" x="130" y="85">[control lock held]</text></g>
+<g class="c4-datastore"><path d="M290,52 a80,8 0 0,0 160,0 a80,8 0 0,0 -160,0 v32 a80,8 0 0,0 160,0 v-32"/><text class="c4-label" x="370" y="78">state/ · data/</text></g>
+<g class="c4-container"><rect x="520" y="50" width="170" height="44" rx="8"/><text class="c4-label" x="605" y="69">Old agent</text><text class="c4-tech" x="605" y="85">[in the pane]</text></g>
+<g class="c4-component"><rect x="760" y="50" width="200" height="44" rx="8"/><text class="c4-label" x="860" y="69">fm-spawn.sh --relaunch</text><text class="c4-tech" x="860" y="85">[launch owner]</text></g>
+<path class="crew-lifeline" d="M130,94 L130,375"/>
+<path class="crew-lifeline" d="M370,94 L370,375"/>
+<path class="crew-lifeline" d="M605,94 L605,375"/>
+<path class="crew-lifeline" d="M860,94 L860,375"/>
+<text class="crew-note" x="140" y="122">1 resolve profile: explicit flags, else secondmate pin, else recorded harness</text>
+<g class="c4-rel"><path d="M130,150 L368,150" marker-end="url(#rl-arrow)"/><text class="c4-rel-label" x="250" y="143">2 checkpoint: worktree root, head, dirty</text></g>
+<g class="c4-rel"><path d="M130,185 L368,185" marker-end="url(#rl-arrow)"/><text class="c4-rel-label" x="250" y="178">3 append "## Progress note"</text></g>
+<g class="c4-rel"><path d="M130,220 L603,220" marker-end="url(#rl-arrow)"/><text class="c4-rel-label" x="370" y="213">4 exit verb: interrupt, empty composer, /exit or /quit</text></g>
+<g class="c4-rel c4-rel-async"><path d="M603,245 L132,245" marker-end="url(#rl-arrow)"/><text class="c4-rel-label" x="370" y="258">classifier: agent gone</text></g>
+<g class="c4-rel"><path d="M130,285 L858,285" marker-end="url(#rl-arrow)"/><text class="c4-rel-label" x="495" y="278">5 launch: fm-spawn.sh &lt;id&gt; --relaunch [--harness …]</text></g>
+<g class="c4-rel"><path d="M860,315 L372,315" marker-end="url(#rl-arrow)"/><text class="c4-rel-label" x="615" y="308">republish meta: new spawn_gen, harness, endpoint</text></g>
+<text class="crew-note" x="620" y="345">adopt a dead endpoint, or (Herdr only) re-create</text>
+<text class="crew-note" x="620" y="361">a proven-gone one in the recorded worktree</text>
+<text class="crew-note-strong" x="20" y="395">On failure after step 4: prior record restored, note kept, journal "failed:launching", "no agent is running".</text>
+</svg>
+</div>
+<figcaption>Steps from <code class="cite">docs/agent-control.md:58-79</code>; rollback from <code class="cite">docs/agent-control.md:133-139</code>.</figcaption>
+</figure>
+<ul>
+<li><strong>Profile.</strong> A ship or scout keeps its recorded harness "because that harness comes from firstmate's dispatch-profile judgment at intake and must not be silently re-read from configuration". A secondmate re-resolves its <code>config/secondmate-harness</code> pin, so "setting the pin and relaunching is the ordinary way to move a secondmate's runtime". A harness change resets model and effort unless they are named too <code class="cite">docs/agent-control.md:62-67</code>.</li>
+<li><strong>The note.</strong> A ship or scout relaunch requires <code>--note</code>, "because the replacement inherits the local copy but none of the conversation". It is appended to <code>data/&lt;id&gt;/brief.md</code> under <code>## Progress note (&lt;timestamp&gt;)</code>, and a retried relaunch leaves one block per attempt <code class="cite">docs/agent-control.md:73-74</code> <code class="cite">docs/agent-control.md:114</code>.</li>
+<li><strong>A harness switch is not special.</strong> "Switching harness is therefore one ordinary relaunch rather than a separate mechanism" <code class="cite">docs/agent-control.md:79</code>.</li>
+<li><strong>Launch owner checks.</strong> <code>fm-spawn --relaunch</code> independently refuses unless the endpoint is positively agent-free, and requires the shell to be in the recorded worktree. On tmux a drifted shell refuses at once; on Herdr it is sent one <code>cd</code> and must confirm the move <code class="cite">bin/fm-spawn.sh:3809-3841</code>. It clears the previous harness's per-task wiring before arming the new one <code class="cite">bin/fm-spawn.sh:44-46</code>.</li>
+</ul>
+
+<h2 id="reclaim">Reclaiming a task whose endpoint is gone</h2>
+<p>A Herdr pane can be destroyed by churn or a server restart while the worktree and all its work survive. Two endpoint verdicts license a relaunch: <code>dead</code> (it exists and holds no agent), which is adopted, and gone, <em>proven</em>, where one fresh endpoint is created in the recorded worktree and the record is rebound to it <code class="cite">docs/agent-control.md:81-93</code>.</p>
+<p>A backend's <code>missing</code> "conflates <em>the endpoint was destroyed</em> with <em>the endpoint is unreachable from here right now</em>", so absence has to be proven:</p>
+<ul>
+<li><strong>Herdr can prove it.</strong> Reads are scoped to the session the record names. The proof starts that session's server if needed and re-reads the recorded pane; only a second <code>missing</code> proves it gone. Starting a server is a real side effect, which can leave an idle Herdr server behind <code class="cite">docs/agent-control.md:96-100</code>.</li>
+<li><strong>tmux cannot.</strong> <code>list-windows -a</code> sees only the server the current process addresses, and a record carries no socket identity. "There is no read available that closes that gap, so tmux always refuses" <code class="cite">docs/agent-control.md:101-103</code>.</li>
+</ul>
+<p>A reclaim is "not a teardown", does "not change the task's identity", is "not a peer seat's operation", and does "not cover a secondmate" <code class="cite">docs/agent-control.md:110-117</code>. The new tab goes into the session the record names, but the <em>workspace</em> follows the reclaiming seat, so <code>herdr_workspace_id</code> can move <code class="cite">docs/agent-control.md:119-124</code>.</p>
+<div class="callout"><span class="callout-title">Known limitation, documented</span>
+<p>"a refusal before the record is republished leaves a stray husk pane". It holds a bare shell and self-heals on the next reclaim only if that reclaim resolves the same workspace <code class="cite">docs/agent-control.md:127-131</code> <code class="cite">bin/fm-spawn.sh:3180-3184</code>.</p></div>
+
+<h2 id="boundaries">Fail-closed boundaries</h2>
+<ul>
+<li><strong>Exact targeting.</strong> Only a bare task id with a <code>state/&lt;id&gt;.meta</code> in this home that passes endpoint-identity validation. Legacy <code>fm-&lt;id&gt;</code> labels and raw <code>session:window</code> targets refuse, since "a lifecycle command delivered to the wrong endpoint is far worse than a loud refusal" <code class="cite">bin/fm-control.sh:90-95</code>.</li>
+<li><strong>Remote secondmates</strong> refuse by name. Their relaunch runs on their own host through <code>bin/fm-on.sh &lt;id&gt; fm-remote-secondmate-control.sh relaunch …</code> <code class="cite">docs/agent-control.md:145-148</code>.</li>
+<li><strong>Kind checks before the stop.</strong> An adapter not verified for the task's kind refuses "while its agent is still up", not after <code class="cite">docs/agent-control.md:151-152</code>.</li>
+<li><strong>Classifier required.</strong> <code>exit</code> and <code>relaunch</code> need tmux or herdr; Zellij, Orca and cmux refuse "rather than reported as successful blind" <code class="cite">docs/agent-control.md:155-156</code>.</li>
+<li><strong>Composer.</strong> <code>exit</code> requires an exact <code>empty</code> verdict; <code>pending</code> refuses by naming the text <code class="cite">docs/agent-control.md:48</code>.</li>
+<li><strong>One lifecycle action at a time</strong>, through <code>state/.control-&lt;id&gt;.lock</code>, which <code>fm-promote.sh</code> also takes <code class="cite">bin/fm-promote.sh:102-133</code>.</li>
+</ul>
+
+<h2 id="knobs">Knobs</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Variable</th><th>Default (s)</th><th>Bounds</th></tr></thead>
+<tbody>
+<tr><td><code>FM_CONTROL_POLL</code></td><td>0.5</td><td>poll interval for postcondition waits</td></tr>
+<tr><td><code>FM_CONTROL_SETTLE_WAIT</code></td><td>5</td><td>acknowledgement wait after interrupt</td></tr>
+<tr><td><code>FM_CONTROL_EXIT_WAIT</code></td><td>30</td><td>alive-to-dead wait after the exit command</td></tr>
+<tr><td><code>FM_CONTROL_LAUNCH_WAIT</code></td><td>90</td><td>dead-to-alive wait after a relaunch</td></tr>
+<tr><td><code>FM_CONTROL_EXIT_RETRIES</code></td><td>3</td><td>Enter retries for the exit command</td></tr>
+</tbody></table></div>
+<p class="evidence">Source: <code class="cite">bin/fm-control.sh:114-119</code>. Tests: <code>tests/fm-control.test.sh</code>, <code>tests/fm-control-relaunch.test.sh</code>, <code>tests/fm-control-herdr-smoke.test.sh</code> <code class="cite">docs/agent-control.md:179-183</code>.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

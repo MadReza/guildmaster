@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Worktrees and slot claims · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Crew</p>
+<h1>Worktrees and slot claims</h1>
+<p class="lede">Every ship and scout works in a git worktree nobody else touches, leased from a Treehouse pool, proven isolated, reset to a fresh base, and marked with an owner claim so a recycled slot can never be torn down out from under its next worker.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Crew</a>.</p>
+
+<h2 id="providers">Who provides the worktree</h2>
+<p>Treehouse is the worktree provider for the four session-provider backends (tmux, herdr, zellij, cmux). The Orca app provides both the worktree and the terminal <code class="cite">docs/configuration.md:136</code>. That split shows in each backend's tool requirements: <code>treehouse</code> is required for tmux, herdr, zellij and cmux, and not for orca <code class="cite">bin/fm-backend.sh:294-316</code>. Firstmate installs a pinned Treehouse for CI through <code>bin/fm-install-treehouse.sh</code> <code class="cite">docs/herdr-backend.md:32-34</code>.</p>
+<p>A Treehouse slot has a fixed <code>&lt;pool&gt;/&lt;slot&gt;/&lt;repo&gt;</code> layout. Firstmate treats a path as a pool slot only when <code>&lt;pool&gt;/treehouse-state.json</code> exists and the slot shares the project's git common directory: "an ordinary linked worktree is not evidence that Treehouse owns it" <code class="cite">bin/fm-wake-lib.sh:1253-1268</code>.</p>
+
+<h2 id="allocation">Allocation: pane-driven <code>treehouse get</code></h2>
+<p>Firstmate never calls Treehouse from its own process to allocate a crew slot. It types the text <code>treehouse get</code> into the new task pane, which leaves the pane's shell sitting in the leased slot, and then reads the pane's current directory to learn which slot it got <code class="cite">bin/fm-spawn.sh:3842-3845</code>. This has two consequences the code works around:</p>
+<ul>
+<li><strong>A cwd read is only a snapshot.</strong> While <code>treehouse get</code> is still fetching, the pane reports the repository's primary checkout as its cwd. Some tmux and WSL setups briefly report an unrelated stale path. So a candidate is accepted only after two consecutive reads agree, and every read is screened by the isolation predicate first <code class="cite">bin/fm-spawn.sh:3845-3876</code>.</li>
+<li><strong>The lease is a process lease.</strong> The interactive get records only a live process lease (owner pid plus start time). That "answers 'is anything running here', never 'which task owns this'", and it lapses the moment the worker exits <code class="cite">bin/fm-wake-lib.sh:1270-1286</code>. Hence the <a href="#claims">owner claim</a> below.</li>
+</ul>
+<p>The poll runs for up to 60 seconds. At the deadline it refuses and names the last path seen and why it was rejected: "treehouse get did not enter an isolated worktree within 60s (last seen '…': …)" <code class="cite">bin/fm-spawn.sh:3877-3900</code>.</p>
+
+<h2 id="isolation">The isolation assertion</h2>
+<p>The contract: "Ship/scout spawns refuse to launch unless the resolved task path is a real git worktree root distinct from both the spawning project and its repository's primary checkout, including when the spawning project is a linked worktree" <code class="cite">bin/fm-spawn.sh:202-211</code>. The supervisor contract makes a failed assertion stop the task <code class="cite">AGENTS.md:330</code>. <code>spawn_worktree_isolated</code> applies four tests in order, each with a named reason <code class="cite">bin/fm-spawn.sh:2855-2904</code>:</p>
+<ol>
+<li>The path is a readable directory.</li>
+<li>It is inside a git worktree, and it is that worktree's root, not a subdirectory.</li>
+<li>It is not the spawning project itself.</li>
+<li>Its git dir is not the project's common git dir, which is what the primary checkout uses. "A linked spawning home has a different top-level, but the same common dir, so comparing only the two working directories cannot protect primary."</li>
+</ol>
+<p>Every comparison uses physically resolved paths, because a backend's cwd read can report <code>/private/tmp</code> where the project path says <code>/tmp</code>. Without that, the guard could misfire in both directions <code class="cite">bin/fm-spawn.sh:2809-2819</code>. An empty toplevel is never passed to <code>cd</code>, because bash before 5.3 treats <code>cd ""</code> as success and "would resolve to fm-spawn's OWN cwd" <code class="cite">bin/fm-spawn.sh:2869-2873</code>.</p>
+<p>The assertion is proven only at launch, so the pane also gets <code>export FM_TASK_ID=&lt;id&gt;</code>. <code>bin/fm-test-run.sh</code> then refuses to execute the behaviour suite from the primary checkout inside a worker <code class="cite">bin/fm-spawn.sh:212-217</code> <code class="cite">bin/fm-test-run.sh:98-105</code>. Worker briefs repeat the check as their first setup step ("Verify isolation before anything else"), which is also the first step of a <a href="promotion.html">promoted scout's</a> instructions <code class="cite">bin/fm-promote.sh:183</code>.</p>
+
+<h2 id="fresh-base">A fresh base, never a stale one</h2>
+<p>"Only after this isolation check, every fresh ship or scout requires a clean task worktree" <code class="cite">bin/fm-spawn.sh:218-225</code>. <code>freshen_spawn_worktree_base</code> <code class="cite">bin/fm-spawn.sh:2969-3016</code>:</p>
+<ul>
+<li>refuses a dirty slot, "refusing to discard uncommitted work";</li>
+<li>when an <code>origin</code> is configured, fetches it, runs <code>remote set-head origin --auto</code>, fetches the default branch, hard-resets to <code>origin/&lt;default&gt;</code>, and verifies <code>HEAD</code> equals that commit;</li>
+<li>when no origin is configured, skips the remote check and launches from the clean current <code>HEAD</code>, which is how origin-less <code>local-only</code> projects work;</li>
+<li>refuses on any fetch, head-resolution, or reset failure "rather than risking a PR based on stale history".</li>
+</ul>
+<p>A relaunch reuses the recorded worktree "without fetching or resetting its base" <code class="cite">bin/fm-spawn.sh:223-224</code>.</p>
+<p><strong>Stale submodules.</strong> A pooled slot whose only change is a submodule sitting on an older pin is still refused, but is reported as a stale checkout naming each submodule and both pins. That diagnosis is given only when the checked-out submodule commit is contained in one of its remotes, and no remedy command is printed, because the containment test reads local refs only and "a stale remote-tracking ref can therefore make an unpushed commit look contained" <code class="cite">bin/fm-spawn.sh:226-234</code> <code class="cite">bin/fm-spawn.sh:2914-2953</code>.</p>
+
+<h2 id="lock">The project-identity lock</h2>
+<p>Allocation and return must not interleave, or a slot could be handed to a new task before the old owner's record is gone. One lock per project serializes them across every Firstmate home on the machine <code class="cite">bin/fm-wake-lib.sh:1223-1251</code>:</p>
+<ul>
+<li>It lives in the <em>local root</em> home's <code>state/</code> as <code>.treehouse-project-&lt;hash&gt;.lock</code>. The root is found by walking <code>.fm-secondmate-parent</code> bindings upward; a remote parent ends the walk, because a lock on this filesystem cannot be observed across machines <code class="cite">bin/fm-wake-lib.sh:1184-1221</code>.</li>
+<li>Its identity is the project's resolved <code>origin</code> URL, so separate clones of one origin share it. An origin-less project falls back to its worktree top.</li>
+<li>A fresh spawn takes it before allocation and holds it through record publication. Teardown holds it while proving and returning a slot. Contention refuses on both sides <code class="cite">bin/fm-spawn.sh:130-145</code> <code class="cite">bin/fm-teardown.sh:122-130</code>.</li>
+</ul>
+
+<h2 id="claims">Slot-owner claims</h2>
+<p>The claim is Firstmate's own answer to "whose slot is this?". It is a small file at <code>&lt;pool&gt;/&lt;slot&gt;/.fm-slot-owner</code>, beside the checkout rather than inside it, "so claiming a slot can never dirty the copy teardown's landed-work checks inspect" <code class="cite">bin/fm-wake-lib.sh:1288-1298</code>. It holds two lines, <code>task=&lt;id&gt;</code> and <code>home=&lt;path&gt;</code>, and it is written atomically by rename <code class="cite">bin/fm-wake-lib.sh:1300-1317</code>.</p>
+<figure class="diagram">
+<svg class="c4" viewBox="0 0 940 440" role="img" aria-labelledby="slot-t slot-d">
+<title id="slot-t">Lifecycle of a pooled slot and its owner claim</title>
+<desc id="slot-d">A free slot is leased by a pane's treehouse get and claimed by the spawn. When the worker exits, Treehouse sees the slot free while the claim still names task A. If task A is torn down first, the claim reads mine, the slot is returned, and the claim is released. If the pool hands the slot to task B first, B's spawn replaces the claim and A's teardown reads other and leaves the slot alone.</desc>
+<defs><marker id="slot-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">A pooled slot and its claim</text>
+<g class="c4-component"><rect x="30" y="60" width="190" height="64" rx="8"/><text class="c4-label" x="125" y="86">Free in pool</text><text class="c4-desc" x="125" y="106">no process, no claim</text></g>
+<g class="c4-component"><rect x="290" y="60" width="190" height="64" rx="8"/><text class="c4-label" x="385" y="86">Leased, claimed</text><text class="c4-desc" x="385" y="106">worker A runs · task=A</text></g>
+<g class="c4-component"><rect x="560" y="60" width="200" height="64" rx="8"/><text class="c4-label" x="660" y="86">Lease lapsed</text><text class="c4-desc" x="660" y="106">A exited · claim still task=A</text></g>
+<g class="c4-component"><rect x="560" y="250" width="200" height="64" rx="8"/><text class="c4-label" x="660" y="276">Reassigned</text><text class="c4-desc" x="660" y="296">B's spawn wrote task=B</text></g>
+<g class="c4-component"><rect x="290" y="250" width="190" height="64" rx="8"/><text class="c4-label" x="385" y="276">A's teardown reads mine</text><text class="c4-desc" x="385" y="296">inspect, return, release</text></g>
+<g class="c4-component"><rect x="560" y="355" width="200" height="64" rx="8"/><text class="c4-label" x="660" y="381">A's teardown reads other</text><text class="c4-desc" x="660" y="401">slot skipped, B untouched</text></g>
+<g class="c4-rel"><path d="M220,92 L288,92" marker-end="url(#slot-arrow)"/><text class="c4-rel-label" x="254" y="84">get + claim</text></g>
+<g class="c4-rel"><path d="M480,92 L558,92" marker-end="url(#slot-arrow)"/><text class="c4-rel-label" x="519" y="84">worker exits</text></g>
+<g class="c4-rel"><path d="M620,124 L620,248" marker-end="url(#slot-arrow)"/><text class="c4-rel-label" x="620" y="186">pool hands slot to B</text></g>
+<g class="c4-rel"><path d="M600,124 L420,248" marker-end="url(#slot-arrow)"/><text class="c4-rel-label" x="495" y="170">teardown A first</text></g>
+<g class="c4-rel"><path d="M290,282 L125,282 L125,126" marker-end="url(#slot-arrow)"/><text class="c4-rel-label" x="205" y="275">treehouse return</text></g>
+<g class="c4-rel"><path d="M660,314 L660,353" marker-end="url(#slot-arrow)"/><text class="c4-rel-label" x="720" y="338">teardown A later</text></g>
+<text class="crew-note" x="790" y="86">Treehouse alone</text>
+<text class="crew-note" x="790" y="102">cannot tell these</text>
+<text class="crew-note" x="790" y="118">two apart</text>
+</svg>
+<figcaption>Why the claim exists: once worker A exits, Treehouse's own state reads the same whether the slot is still A's or has gone to B. Evidence: <code class="cite">bin/fm-wake-lib.sh:1270-1286</code>, <code class="cite">bin/fm-teardown.sh:95-130</code>.</figcaption>
+</figure>
+<div class="table-wrap"><table>
+<thead><tr><th>Claim state</th><th>Meaning</th><th>Teardown does</th></tr></thead>
+<tbody>
+<tr><td><code>mine</code></td><td>claim names this task</td><td>full cleanup of the slot, then drops the claim</td></tr>
+<tr><td><code>other</code></td><td>slot was reassigned</td><td>warns, names the claimant, finishes only this task's own records; no kill, inspection, branch removal, or return in that slot</td></tr>
+<tr><td><code>absent</code></td><td>taken before claims existed, or already returned</td><td>keeps the older record-scan protection only</td></tr>
+<tr><td><code>unsafe</code></td><td>claim file exists but cannot be read</td><td>refuses; "never remove it, since an absent claim proceeds"</td></tr>
+</tbody></table></div>
+<p class="evidence">Sources: <code class="cite">bin/fm-wake-lib.sh:1319-1356</code>, <code class="cite">bin/fm-teardown.sh:2326-2366</code>, <code class="cite">bin/fm-teardown.sh:95-117</code>.</p>
+<p>The spawn writes the claim under the project lock, straight after the isolation check, and a slot it cannot claim refuses the spawn "rather than launching a worker whose slot teardown could later release out from under its successor" <code class="cite">bin/fm-spawn.sh:3904-3922</code>. An abort before publication drops its own claim; an abort after it leaves the claim for the next spawn to replace <code class="cite">bin/fm-spawn.sh:137-145</code>. The release never removes another task's claim <code class="cite">bin/fm-wake-lib.sh:1357-1366</code>.</p>
+<p>Claims are the second of two protections. Before any cleanup, teardown also requires <em>record exclusivity</em>: no other task record in this home or any locally registered home may name the same live path in <code>worktree=</code> or <code>home=</code> <code class="cite">bin/fm-teardown.sh:81-94</code> <code class="cite">bin/fm-teardown.sh:2272-2324</code>. The record scan cannot prove this task is still the owner, because the next owner may have left no reachable record. The claim can.</p>
+
+<h2 id="secondmate-lease">Secondmate homes use the durable lease</h2>
+<p>A secondmate home can itself be a Treehouse worktree of the Firstmate repository. <code>bin/fm-home-seed.sh &lt;id&gt; -</code> acquires it with <code>treehouse get --lease --lease-holder &lt;id&gt;</code>, which "durably leases the worktree under the secondmate &lt;id&gt; so the home survives with no live process and is never recycled until the lease is released with 'treehouse return'" <code class="cite">bin/fm-home-seed.sh:5-10</code> <code class="cite">bin/fm-home-seed.sh:390-400</code>. Retiring such a secondmate releases that lease; if the return fails, teardown leaves the home and state in place "instead of hiding a still-held lease" <code class="cite">bin/fm-teardown.sh:160-163</code>.</p>
+<div class="callout unclear"><span class="callout-title">Open item in the source</span>
+<p>Crewmate slots do not use the durable lease, and the claim file exists to cover that gap. The code records moving crewmate spawns onto the durable lease as "separate follow-up work" <code class="cite">bin/fm-wake-lib.sh:1285-1286</code>. The source does not say whether the claim would then be retired.</p></div>
+
+<h2 id="return">Return at teardown</h2>
+<p>Teardown returns a slot with <code>treehouse return --force</code>, run from the project directory because "treehouse resolves the pool from the working directory". A <code>index.lock ... File exists</code> failure is retried, and a lock is removed only when it is provably stale: no <code>lsof</code> holder and older than <code>FM_STALE_WORKTREE_LOCK_AGE_SECS</code>, 30 seconds by default. "the fix is patience, not rm" <code class="cite">bin/fm-teardown.sh:195-224</code> <code class="cite">bin/fm-teardown.sh:1704-1778</code>. See <a href="teardown.html">Teardown</a>.</p>
+
+<h2 id="knobs">Knobs</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Variable</th><th>Default</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>FM_TREEHOUSE_RETURN_LOCK_RETRIES</code></td><td>3</td><td>retries of a return blocked by a git index lock</td></tr>
+<tr><td><code>FM_TREEHOUSE_RETURN_LOCK_RETRY_WAIT_SECS</code></td><td>1</td><td>wait between those retries</td></tr>
+<tr><td><code>FM_STALE_WORKTREE_LOCK_AGE_SECS</code></td><td>30</td><td>minimum age before a lock can be proven stale</td></tr>
+</tbody></table></div>
+<p class="evidence">Source: <code class="cite">bin/fm-teardown.sh:202-218</code>.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

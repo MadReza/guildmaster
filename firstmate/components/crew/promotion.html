@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scout promotion · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Crew</p>
+<h1>Scout promotion</h1>
+<p class="lede"><code>bin/fm-promote.sh</code> turns a finished scout into a ship task without replacing the worker. The window, worktree, and loaded context stay; only the contract changes, and teardown's full ship protection comes back.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Crew</a>. Related: <a href="kinds.html#scout">Scout</a>, <a href="teardown.html">Teardown</a>.</p>
+
+<h2 id="why">Why promote rather than spawn again</h2>
+<p>A scout that reproduced a bug already holds the context needed to fix it. The supervisor contract says: "When implementation is separately authorized, promote the existing scout through <code>bin/fm-promote.sh</code> rather than creating a duplicate task" <code class="cite">AGENTS.md:415</code>. The scout brief tells the worker up front that "firstmate may promote this task in place" <code class="cite">bin/fm-brief.sh:468</code>. A report on its own authorizes nothing: "A report may recommend implementation but does not authorize it" <code class="cite">AGENTS.md:412</code>.</p>
+
+<h2 id="contract">The contract</h2>
+<pre><code>fm-promote.sh &lt;task-id&gt; --mode &lt;no-mistakes|direct-PR|local-only&gt; --yolo &lt;on|off&gt;</code></pre>
+<p>"Promote a scout task to a ship task in place: the crewmate keeps its window, worktree, and loaded context; only the contract changes. Flips kind= to ship in state/&lt;task-id&gt;.meta so fm-teardown.sh applies the full ship-task teardown protection again" <code class="cite">bin/fm-promote.sh:2-5</code>. Because a scout records no delivery posture, "promotion is where this task's delivery contract is decided: --mode and --yolo are REQUIRED". The script never looks up the project's standing mode, and it refuses <code>no-mistakes-prod-only</code> <code class="cite">bin/fm-promote.sh:21-27</code> <code class="cite">bin/fm-promote.sh:80-99</code>.</p>
+
+<h2 id="steps">What it does, in order</h2>
+<figure class="diagram">
+<svg class="c4" viewBox="0 0 900 360" role="img" aria-labelledby="pr-t pr-d">
+<title id="pr-t">fm-promote.sh steps</title>
+<desc id="pr-d">Take the control lock, check the record is a scout, validate the scout brief, render ship-instructions.md, append the ship contract to brief.md, rewrite kind, mode and yolo in the record atomically, then print the fm-send command that delivers the instructions to the live worker.</desc>
+<defs><marker id="pr-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">fm-promote.sh</text>
+<g class="c4-component"><rect x="20" y="55" width="200" height="60" rx="8"/><text class="c4-label" x="120" y="80">1 · Lock and check</text><text class="c4-desc" x="120" y="98">control lock · kind=scout</text></g>
+<g class="c4-component"><rect x="240" y="55" width="200" height="60" rx="8"/><text class="c4-label" x="340" y="80">2 · Validate brief</text><text class="c4-desc" x="340" y="98">intent present, no placeholders</text></g>
+<g class="c4-component"><rect x="460" y="55" width="200" height="60" rx="8"/><text class="c4-label" x="560" y="80">3 · Ship instructions</text><text class="c4-desc" x="560" y="98">data/&lt;id&gt;/ship-instructions.md</text></g>
+<g class="c4-component"><rect x="680" y="55" width="200" height="60" rx="8"/><text class="c4-label" x="780" y="80">4 · Append to brief.md</text><text class="c4-desc" x="780" y="98">for any later relaunch</text></g>
+<g class="c4-component"><rect x="460" y="175" width="200" height="60" rx="8"/><text class="c4-label" x="560" y="200">5 · Rewrite the record</text><text class="c4-desc" x="560" y="218">kind=ship mode= yolo=</text></g>
+<g class="c4-component"><rect x="240" y="175" width="200" height="60" rx="8"/><text class="c4-label" x="340" y="200">6 · Print next step</text><text class="c4-desc" x="340" y="218">fm-send command, rechain hint</text></g>
+<g class="c4-container"><rect x="20" y="175" width="200" height="60" rx="8"/><text class="c4-label" x="120" y="200">Live scout worker</text><text class="c4-desc" x="120" y="218">receives it via fm-send</text></g>
+<g class="c4-rel"><path d="M220,85 L238,85" marker-end="url(#pr-arrow)"/></g>
+<g class="c4-rel"><path d="M440,85 L458,85" marker-end="url(#pr-arrow)"/></g>
+<g class="c4-rel"><path d="M660,85 L678,85" marker-end="url(#pr-arrow)"/></g>
+<g class="c4-rel"><path d="M780,115 L780,205 L662,205" marker-end="url(#pr-arrow)"/></g>
+<g class="c4-rel"><path d="M460,205 L442,205" marker-end="url(#pr-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M240,205 L222,205" marker-end="url(#pr-arrow)"/></g>
+<text class="crew-note" x="20" y="275">Every failure before step 5 restores the original brief.md from its staged copy and releases both locks (EXIT trap).</text>
+<text class="crew-note" x="20" y="295">Step 6 does not deliver anything: Firstmate runs the printed fm-send command itself.</text>
+<text class="crew-note" x="20" y="315">The worktree is not touched; the worker does its own clean-up under the new instructions.</text>
+</svg>
+<figcaption>Sources: <code class="cite">bin/fm-promote.sh:102-284</code>.</figcaption>
+</figure>
+<ol>
+<li><strong>Lock and check.</strong> It takes <code>state/.control-&lt;id&gt;.lock</code>, the same lifecycle lock <code>fm-control.sh</code> uses, and refuses with "another lifecycle action is already running". The record must be safe and contain <code>kind=scout</code> exactly <code class="cite">bin/fm-promote.sh:102-145</code>.</li>
+<li><strong>Validate the scout brief.</strong> It refuses leftover <code>{TASK}</code>/<code>{FIRSTMATE_SPEC}</code>, an empty Task, a Captain-addressed intent line, or a legacy brief with no provenance-marked captain words <code class="cite">bin/fm-promote.sh:147-168</code>.</li>
+<li><strong>Render the ship instructions</strong> to <code>data/&lt;id&gt;/ship-instructions.md</code>: the captain's intent preserved from the scout brief; a new ship-time <code>## Firstmate spec</code>; and a delivery contract rendered by <code>bin/fm-dod-lib.sh</code>, "the single owner an ordinary ship brief also uses" <code class="cite">bin/fm-promote.sh:176-231</code> <code class="cite">bin/fm-promote.sh:6-14</code>.</li>
+<li><strong>Append the same contract to <code>brief.md</code>.</strong> "a replacement worker is launched from brief.md. Publish the same explicit precedence contract there so a later relaunch cannot revive the original scout delivery rules" <code class="cite">bin/fm-promote.sh:233-258</code>.</li>
+<li><strong>Rewrite the record</strong> under the meta lock: drop the old <code>kind=</code>, <code>mode=</code> and <code>yolo=</code> lines, append <code>kind=ship</code>, <code>mode=</code> and <code>yolo=</code>, and publish atomically <code class="cite">bin/fm-promote.sh:259-273</code>.</li>
+<li><strong>Print the next step</strong>, for example <code>next: FM_HOME=… bin/fm-send.sh fm-&lt;id&gt; "$(cat …/ship-instructions.md)"</code>. When the Relay public-follow-up plane is active, it also prints a <code>fm-public-followup.sh rechain</code> hint <code class="cite">bin/fm-promote.sh:281-385</code>.</li>
+</ol>
+
+<h2 id="worker">What the promoted worker is told to do</h2>
+<p>The ship-time spec is fixed text <code class="cite">bin/fm-promote.sh:181-190</code>:</p>
+<ol>
+<li>Verify isolation before anything else.</li>
+<li>Inventory scratch state with <code>git status</code> and <code>git log</code>.</li>
+<li>Return to a clean default-branch base, then <code>git checkout -b fm/&lt;id&gt;</code>.</li>
+<li>Carry over only the intended fix, leaving scratch commits, debug edits, and experiment files behind.</li>
+<li>Turn a reproduced bug into a regression test.</li>
+<li>Treat the scout-time spec as context, not intent.</li>
+<li>Keep the status protocol, inbox, escalation, and safety rules.</li>
+</ol>
+<p>It opens with an idempotence rule: "If these promotion steps were already completed before a relaunch, preserve the existing <code>fm/&lt;id&gt;</code> branch and continue from its current state". The supervisor contract states the same obligations <code class="cite">AGENTS.md:416</code>.</p>
+<p>The delivery section says it supersedes the scout rules explicitly: "Any earlier 'Never push' or scout-only delivery language in this file is superseded" <code class="cite">bin/fm-promote.sh:191-207</code>. For no-mistakes it also includes the ask-user escalation block, closing what a code comment calls "the delivery hole this file used to leave open" <code class="cite">bin/fm-promote.sh:170-175</code>.</p>
+
+<h2 id="effects">Effects on other parts</h2>
+<ul>
+<li><strong>Teardown.</strong> <code>kind=ship</code> brings back the dirty and landed-work checks, and the backlog close records a PR or local-main note instead of a report <code class="cite">bin/fm-teardown.sh:1521-1537</code>.</li>
+<li><strong>Relaunch.</strong> A later relaunch reads <code>brief.md</code>, which now carries the ship contract; the worker role contract is still rendered first at launch (<a href="launch.html#launch-brief">Launch</a>).</li>
+</ul>
+<div class="callout unclear"><span class="callout-title">Not settled by the source</span>
+<p><code>fm-promote.sh</code> rewrites the task record and the brief, but it makes no backlog call beyond the record publication helper <code class="cite">bin/fm-promote.sh:42-45</code> <code class="cite">bin/fm-promote.sh:267</code>. The backlog row was created with <code>--kind scout</code> <code class="cite">bin/fm-spawn.sh:3111</code>. The "Recently Landed" selector counts a merged completion as a delivery only when the row's kind is not <code>scout</code> <code class="cite">bin/fm-landed-lib.sh:57-69</code>. The source does not show whether anything later updates the row's kind, so it does not settle whether a promoted scout's merged PR appears in "Recently Landed".</p></div>
+<div class="callout"><span class="callout-title">Observation</span>
+<p>The printed command addresses the worker by its legacy label <code>fm-&lt;id&gt;</code>. Selector resolution checks an exact task id before falling back to that label, so it still reaches the right task <code class="cite">docs/configuration.md:158-161</code>.</p></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

@@ -368,3 +368,9 @@ svg.c4 .ps-lifeline { fill: none; stroke: var(--c4-boundary); stroke-width: 1; s
   code.cite.ps-wrap, a.cite code.cite.ps-wrap { white-space: normal; overflow-wrap: anywhere; }
 }
 /* Long citation paths wrap on a phone instead of widening the page (appended by backlog-and-decisions). */ @media (max-width: 30rem) { code.cite, a.cite code { white-space: normal; overflow-wrap: anywhere; } }
+/* crew area (components/crew): left-aligned diagram annotations and sequence lifelines */
+svg.c4 .crew-note { fill: var(--c4-rel-label); font-size: 11.5px; text-anchor: start; }
+svg.c4 .crew-note-strong { fill: var(--fg); font-size: 12px; font-weight: 700; text-anchor: start; }
+svg.c4 .crew-lifeline { fill: none; stroke: var(--c4-boundary); stroke-width: 1; stroke-dasharray: 3 4; }
+/* crew area: opt-in wrapping for long citation paths that would otherwise widen a phone viewport */
+code.cite.crew-wrap { white-space: normal; overflow-wrap: anywhere; }

@@ -11,12 +11,274 @@
 <div class="layout">
 <nav id="site-nav" aria-label="Site"></nav>
 <main id="main">
-<article>
-<p class="breadcrumb">Components</p>
+<article class="wide">
+<p class="breadcrumb">Components › Crew</p>
 <h1>Crew</h1>
-<p class="lede">Will cover the different kinds of worker (ship crewmate, scout, local and remote secondmate), harness adapters, runtime session backends, worktree isolation, and the spawn, steer, control, promote, and teardown lifecycle.</p>
-<div class="callout unclear"><span class="callout-title">Stub</span>
-<p>This section is reserved and not yet written. A follow-up task fills it in under <a href="../../AUTHORING.md">the authoring contract</a>. Until then, the <a href="../../c4/containers.html">Level 2 containers page</a> is the entry point for this area.</p></div>
+<p class="lede">Every worker Firstmate commands, and the scripts that create, steer the lifecycle of, inspect, promote, and retire one. The first mate never edits a project itself, so this area is how any project work gets done at all.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="../../c4/containers.html">Level 2: Containers</a> (the "Workers" and "Secondmate homes" containers).</p>
+
+<h2 id="why">What problem this area solves</h2>
+<p>Firstmate's supervisor contract forbids the first mate from editing projects: it delegates "coding, investigation, planning, bug reproduction, and audits to a crewmate you spawn and supervise, or to a secondmate whose registered scope fits" <code class="cite">AGENTS.md:22</code>, and it does "not edit, commit, or run state-changing commands under <code>projects/</code> or in any project worktree" <code class="cite">AGENTS.md:28</code>. The crew area is therefore the only way work reaches a project. It has to give each worker a copy of the project nobody else touches, a terminal the captain can watch, a written contract it cannot misread, and a clean exit that never throws away unlanded work.</p>
+<p>The design splits judgement from mechanics. The agent decides <em>what</em> to dispatch, with which profile and delivery contract. Guarded bash scripts do the dispatch, the lifecycle actions, and the cleanup, and each one refuses rather than guesses when an input it consumes is missing <code class="cite">AGENTS.md:316</code>.</p>
+
+<h2 id="kinds">The three kinds at a glance</h2>
+<p>A worker's kind is recorded as <code>kind=</code> in <code>state/&lt;id&gt;.meta</code>, and almost every lifecycle script branches on it. The full comparison is on <a href="kinds.html">Kinds of worker</a>.</p>
+<div class="table-wrap"><table>
+<thead><tr><th></th><th>Ship (crewmate)</th><th>Scout</th><th>Secondmate</th></tr></thead>
+<tbody>
+<tr><td>Deliverable</td><td>A project change through the task's delivery mode</td><td>Knowledge: <code>data/&lt;id&gt;/report.md</code>, never a PR</td><td>Nothing of its own; it supervises routed work in its own home</td></tr>
+<tr><td>Where it runs</td><td>A disposable Treehouse (or Orca) worktree</td><td>The same, declared scratch</td><td>A persistent, isolated Firstmate home</td></tr>
+<tr><td>Spawn flag</td><td>default, needs <code>--mode</code> and <code>--yolo</code></td><td><code>--scout</code></td><td><code>--secondmate</code></td></tr>
+<tr><td>Backlog item</td><td>Yes, moved to In flight by the spawn</td><td>Yes</td><td>Never</td></tr>
+<tr><td>Teardown gate</td><td>Work must have landed</td><td>Report must exist and pass the captain-call gate</td><td>Home must hold no work under way</td></tr>
+<tr><td>Instructions</td><td>Launch brief with the worker role contract first</td><td>Same</td><td>Its charter and the home's own <code>AGENTS.md</code></td></tr>
+</tbody></table></div>
+<p class="evidence">Sources: <code class="cite">AGENTS.md:307-308</code>, <code class="cite">AGENTS.md:333</code>, <code class="cite">bin/fm-spawn.sh:2-6</code>, <code class="cite">bin/fm-spawn.sh:196-198</code>, <code class="cite">bin/fm-teardown.sh:44-80</code>, <code class="cite">bin/fm-teardown.sh:147-151</code>.</p>
+
+<h2 id="components">Components (Level 3)</h2>
+<p>Inside the Level 2 "toolbelt", the crew lifecycle is a handful of scripts that share three things: the task record, the backend adapter, and the backlog pairing rule.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1210 900" role="img" aria-labelledby="crewc-title crewc-desc">
+<title id="crewc-title">Crew area components (C4 level 3)</title>
+<desc id="crewc-desc">The supervisor agent invokes the crew toolbelt. Inside it: profile resolution, dispatch, the control plane, slot claims, current-state reconciliation, backlog pairing, teardown, and promotion, all reaching terminals through the backend adapter layer. Externals: Treehouse, the forge and no-mistakes, and the session backend, which runs the worker agent. All scripts read and write the home records.</desc>
+<defs><marker id="crewc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="32">Crew — Components (Level 3)</text>
+
+<g class="c4-container">
+<rect x="470" y="50" width="260" height="80" rx="8"/>
+<text class="c4-label" x="600" y="78">Supervisor agent</text>
+<text class="c4-tech" x="600" y="94">[harness session reading AGENTS.md]</text>
+<text class="c4-desc" x="600" y="112">Decides; runs every script by task id</text>
+</g>
+
+<g class="c4-boundary"><rect x="20" y="170" width="910" height="430" rx="10"/><text x="32" y="592">Crew lifecycle toolbelt · bin/ (this area's Level 3 scope)</text></g>
+
+<g class="c4-component">
+<rect x="40" y="200" width="180" height="80" rx="8"/>
+<text class="c4-label" x="130" y="228">Profile resolution</text>
+<text class="c4-tech" x="130" y="244">[fm-harness · dispatch-resolve]</text>
+<text class="c4-desc" x="130" y="262">Static or typed profile</text>
+</g>
+<g class="c4-component">
+<rect x="270" y="200" width="180" height="80" rx="8"/>
+<text class="c4-label" x="360" y="228">Dispatch</text>
+<text class="c4-tech" x="360" y="244">[bin/fm-spawn.sh]</text>
+<text class="c4-desc" x="360" y="262">Gate, place, record, launch</text>
+</g>
+<g class="c4-component">
+<rect x="500" y="200" width="180" height="80" rx="8"/>
+<text class="c4-label" x="590" y="228">Control plane</text>
+<text class="c4-tech" x="590" y="244">[bin/fm-control.sh + lib]</text>
+<text class="c4-desc" x="590" y="262">interrupt · exit · relaunch</text>
+</g>
+<g class="c4-component">
+<rect x="730" y="200" width="180" height="80" rx="8"/>
+<text class="c4-label" x="820" y="228">Slot claims</text>
+<text class="c4-tech" x="820" y="244">[bin/fm-wake-lib.sh]</text>
+<text class="c4-desc" x="820" y="262">Project lock, owner claim</text>
+</g>
+
+<g class="c4-component">
+<rect x="40" y="330" width="180" height="80" rx="8"/>
+<text class="c4-label" x="130" y="358">Current state</text>
+<text class="c4-tech" x="130" y="374">[bin/fm-crew-state.sh]</text>
+<text class="c4-desc" x="130" y="392">run-step › pane › status log</text>
+</g>
+<g class="c4-component">
+<rect x="270" y="330" width="180" height="80" rx="8"/>
+<text class="c4-label" x="360" y="358">Backlog pairing</text>
+<text class="c4-tech" x="360" y="374">[fm-backlog-transition-lib]</text>
+<text class="c4-desc" x="360" y="392">meta exists ⇔ In flight</text>
+</g>
+<g class="c4-component">
+<rect x="500" y="330" width="180" height="80" rx="8"/>
+<text class="c4-label" x="590" y="358">Teardown</text>
+<text class="c4-tech" x="590" y="374">[bin/fm-teardown.sh]</text>
+<text class="c4-desc" x="590" y="392">Landed test, return, close</text>
+</g>
+<g class="c4-component">
+<rect x="730" y="330" width="180" height="80" rx="8"/>
+<text class="c4-label" x="820" y="358">Promotion</text>
+<text class="c4-tech" x="820" y="374">[bin/fm-promote.sh]</text>
+<text class="c4-desc" x="820" y="392">Scout → ship, in place</text>
+</g>
+
+<g class="c4-component">
+<rect x="40" y="460" width="870" height="70" rx="8"/>
+<text class="c4-label" x="475" y="486">Backend adapter layer</text>
+<text class="c4-tech" x="475" y="502">[bin/fm-backend.sh → bin/backends/{tmux,herdr,zellij,orca,cmux}.sh]</text>
+<text class="c4-desc" x="475" y="519">One opaque target per task: create, send, capture, busy and agent state, kill</text>
+</g>
+
+<g class="c4-boundary"><rect x="20" y="630" width="910" height="120" rx="10"/><text x="32" y="742">Home records · state/ and data/ under FM_HOME</text></g>
+<g class="c4-datastore">
+<path d="M40,655 a90,10 0 0,0 180,0 a90,10 0 0,0 -180,0 v52 a90,10 0 0,0 180,0 v-52"/>
+<text class="c4-label" x="130" y="686">state/&lt;id&gt;.meta</text>
+<text class="c4-desc" x="130" y="703">the task record</text>
+</g>
+<g class="c4-datastore">
+<path d="M270,655 a90,10 0 0,0 180,0 a90,10 0 0,0 -180,0 v52 a90,10 0 0,0 180,0 v-52"/>
+<text class="c4-label" x="360" y="686">data/&lt;id&gt;/</text>
+<text class="c4-desc" x="360" y="703">brief · launch-brief · report</text>
+</g>
+<g class="c4-datastore">
+<path d="M500,655 a90,10 0 0,0 180,0 a90,10 0 0,0 -180,0 v52 a90,10 0 0,0 180,0 v-52"/>
+<text class="c4-label" x="590" y="686">Backlog</text>
+<text class="c4-desc" x="590" y="703">one tasks-axi row per task</text>
+</g>
+<g class="c4-datastore">
+<path d="M730,655 a90,10 0 0,0 180,0 a90,10 0 0,0 -180,0 v52 a90,10 0 0,0 180,0 v-52"/>
+<text class="c4-label" x="820" y="686">status · inbox</text>
+<text class="c4-desc" x="820" y="703">state/&lt;id&gt;.status, .inbox/</text>
+</g>
+
+<g class="c4-external">
+<rect x="970" y="200" width="200" height="80" rx="8"/>
+<text class="c4-label" x="1070" y="228">Treehouse</text>
+<text class="c4-tech" x="1070" y="244">[worktree pool CLI]</text>
+<text class="c4-desc" x="1070" y="262">Pooled git worktrees</text>
+</g>
+<g class="c4-external">
+<rect x="970" y="330" width="200" height="80" rx="8"/>
+<text class="c4-label" x="1070" y="358">Forge · no-mistakes</text>
+<text class="c4-tech" x="1070" y="374">[gh · no-mistakes axi]</text>
+<text class="c4-desc" x="1070" y="392">PR state, pipeline runs</text>
+</g>
+<g class="c4-external">
+<rect x="970" y="455" width="200" height="80" rx="8"/>
+<text class="c4-label" x="1070" y="483">Session backend</text>
+<text class="c4-tech" x="1070" y="499">[tmux, herdr, zellij, orca, cmux]</text>
+<text class="c4-desc" x="1070" y="517">Terminal endpoints</text>
+</g>
+<g class="c4-container">
+<rect x="970" y="600" width="200" height="80" rx="8"/>
+<text class="c4-label" x="1070" y="628">Worker agent</text>
+<text class="c4-tech" x="1070" y="644">[harness CLI in the pane]</text>
+<text class="c4-desc" x="1070" y="662">Crewmate, scout, secondmate</text>
+</g>
+
+<g class="c4-rel"><path d="M600,130 L600,168" marker-end="url(#crewc-arrow)"/></g>
+<g class="c4-rel"><path d="M220,240 L268,240" marker-end="url(#crewc-arrow)"/></g>
+<g class="c4-rel"><path d="M500,240 L452,240" marker-end="url(#crewc-arrow)"/></g>
+<g class="c4-rel"><path d="M360,280 L360,328" marker-end="url(#crewc-arrow)"/></g>
+<g class="c4-rel"><path d="M500,370 L452,370" marker-end="url(#crewc-arrow)"/></g>
+<g class="c4-rel"><path d="M360,200 L360,186 L820,186 L820,198" marker-end="url(#crewc-arrow)"/></g>
+<g class="c4-rel"><path d="M660,330 L758,283" marker-end="url(#crewc-arrow)"/></g>
+<g class="c4-rel"><path d="M270,262 L245,262 L245,458" marker-end="url(#crewc-arrow)"/></g>
+<g class="c4-rel"><path d="M130,410 L130,458" marker-end="url(#crewc-arrow)"/></g>
+<g class="c4-rel"><path d="M590,410 L590,458" marker-end="url(#crewc-arrow)"/></g>
+<g class="c4-rel"><path d="M930,370 L968,370" marker-end="url(#crewc-arrow)"/></g>
+<g class="c4-rel"><path d="M910,495 L968,495" marker-end="url(#crewc-arrow)"/></g>
+<g class="c4-rel"><path d="M1070,535 L1070,598" marker-end="url(#crewc-arrow)"/></g>
+<g class="c4-rel"><path d="M1170,470 L1190,470 L1190,250 L1172,250" marker-end="url(#crewc-arrow)"/></g>
+<g class="c4-rel"><path d="M475,600 L475,628" marker-end="url(#crewc-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M970,650 L950,650 L950,690 L932,690" marker-end="url(#crewc-arrow)"/></g>
+<g class="c4-rel"><path d="M910,240 L968,240" marker-end="url(#crewc-arrow)"/></g>
+
+<g class="c4-rel-num"><circle cx="616" cy="150" r="9"/><text x="616" y="154">1</text></g>
+<g class="c4-rel-num"><circle cx="245" cy="226" r="9"/><text x="245" y="230">2</text></g>
+<g class="c4-rel-num"><circle cx="475" cy="226" r="9"/><text x="475" y="230">3</text></g>
+<g class="c4-rel-num"><circle cx="376" cy="305" r="9"/><text x="376" y="309">4</text></g>
+<g class="c4-rel-num"><circle cx="475" cy="356" r="9"/><text x="475" y="360">5</text></g>
+<g class="c4-rel-num"><circle cx="590" cy="186" r="9"/><text x="590" y="190">6</text></g>
+<g class="c4-rel-num"><circle cx="710" cy="306" r="9"/><text x="710" y="310">7</text></g>
+<g class="c4-rel-num"><circle cx="245" cy="430" r="9"/><text x="245" y="434">8</text></g>
+<g class="c4-rel-num"><circle cx="146" cy="435" r="9"/><text x="146" y="439">9</text></g>
+<g class="c4-rel-num"><circle cx="606" cy="435" r="9"/><text x="606" y="439">10</text></g>
+<g class="c4-rel-num"><circle cx="949" cy="356" r="9"/><text x="949" y="360">11</text></g>
+<g class="c4-rel-num"><circle cx="939" cy="481" r="9"/><text x="939" y="485">12</text></g>
+<g class="c4-rel-num"><circle cx="1086" cy="566" r="9"/><text x="1086" y="570">13</text></g>
+<g class="c4-rel-num"><circle cx="1190" cy="420" r="9"/><text x="1190" y="424">14</text></g>
+<g class="c4-rel-num"><circle cx="491" cy="614" r="9"/><text x="491" y="618">15</text></g>
+<g class="c4-rel-num"><circle cx="950" cy="668" r="9"/><text x="950" y="672">16</text></g>
+<g class="c4-rel-num"><circle cx="939" cy="226" r="9"/><text x="939" y="230">17</text></g>
+
+<g class="c4-legend">
+<rect class="c4-legend-frame" x="970" y="700" width="200" height="186" rx="6"/>
+<text class="c4-legend-heading" x="982" y="720">Legend</text>
+<g class="c4-container"><rect x="982" y="732" width="32" height="16" rx="3"/></g>
+<text x="1024" y="744">Container</text>
+<g class="c4-component"><rect x="982" y="756" width="32" height="16" rx="3"/></g>
+<text x="1024" y="768">Component</text>
+<g class="c4-datastore"><path d="M982,783 a16,3 0 0,0 32,0 a16,3 0 0,0 -32,0 v11 a16,3 0 0,0 32,0 v-11"/></g>
+<text x="1024" y="792">Data store</text>
+<g class="c4-external"><rect x="982" y="804" width="32" height="16" rx="3"/></g>
+<text x="1024" y="816">External system</text>
+<g class="c4-boundary"><rect x="982" y="828" width="32" height="16" rx="3"/></g>
+<text x="1024" y="840">Scope boundary</text>
+<g class="c4-rel"><path d="M982,856 L1014,856"/></g>
+<text x="1024" y="860">Calls / writes</text>
+<g class="c4-rel c4-rel-async"><path d="M982,874 L1014,874"/></g>
+<text x="1024" y="878">Appends (event)</text>
+</g>
+</svg>
+</div>
+<figcaption>Level 3 inside the toolbelt. Numbers key into the <a href="#interactions">interactions table</a>. Arrows 1, 11 and 15 start at a boundary because several components share them.</figcaption>
+</figure>
+
+<h3 id="interactions">Interactions</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>#</th><th>From → to</th><th>What happens</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Supervisor → toolbelt</td><td>The first mate spawns only through <code>fm-spawn.sh</code>, drives lifecycle only through <code>fm-control.sh</code>, and tears down only after landing is confirmed.</td><td><code class="cite">AGENTS.md:329</code> <code class="cite">AGENTS.md:339</code> <code class="cite">AGENTS.md:401</code></td></tr>
+<tr><td>2</td><td>Profile resolution → Dispatch</td><td>Concrete <code>--harness</code>, <code>--model</code>, <code>--effort</code>; scripts never parse the natural-language rules.</td><td><code class="cite crew-wrap">.agents/skills/harness-adapters/references/common/model-and-effort.md:8</code></td></tr>
+<tr><td>3</td><td>Control → Dispatch</td><td><code>fm-control.sh relaunch</code> launches the replacement through <code>fm-spawn.sh --relaunch</code>.</td><td><code class="cite">bin/fm-spawn.sh:31-38</code></td></tr>
+<tr><td>4</td><td>Dispatch → Backlog pairing</td><td>Publishing the record and moving the backlog row to In flight are one step.</td><td><code class="cite">bin/fm-spawn.sh:366-380</code></td></tr>
+<tr><td>5</td><td>Teardown → Backlog pairing</td><td>Removing the record and closing (or retaining) the row are one step, crash-recoverable.</td><td><code class="cite">bin/fm-teardown.sh:15-29</code></td></tr>
+<tr><td>6</td><td>Dispatch → Slot claims</td><td>Takes the per-project Treehouse lock before allocation and writes the slot's owner claim.</td><td><code class="cite">bin/fm-spawn.sh:130-145</code> <code class="cite">bin/fm-spawn.sh:3904-3922</code></td></tr>
+<tr><td>7</td><td>Teardown → Slot claims</td><td>Checks the claim before touching a slot; leaves a reassigned slot alone; releases its own claim after return.</td><td><code class="cite">bin/fm-teardown.sh:81-130</code></td></tr>
+<tr><td>8</td><td>Dispatch → Backend</td><td>Creates the endpoint, types <code>treehouse get</code>, reads the pane cwd, sends the launch source line.</td><td><code class="cite">bin/fm-spawn.sh:3842-3902</code> <code class="cite">bin/fm-spawn.sh:4837</code></td></tr>
+<tr><td>9</td><td>Current state → Backend</td><td>Busy verdict and recovery-grade agent state, only when no pipeline run is attributed.</td><td><code class="cite">bin/fm-crew-state.sh:1145-1234</code></td></tr>
+<tr><td>10</td><td>Teardown → Backend</td><td>Closes the exact recorded endpoint; a close that cannot be proven refuses before records are removed.</td><td><code class="cite">bin/fm-teardown.sh:8-14</code></td></tr>
+<tr><td>11</td><td>Toolbelt → forge and no-mistakes</td><td>Teardown's merged-PR test (<code>gh pr view</code>) and parked-run abort; crew-state's run-step read.</td><td><code class="cite">bin/fm-teardown.sh:1446-1486</code> <code class="cite">bin/fm-crew-state.sh:36-44</code></td></tr>
+<tr><td>12</td><td>Backend adapter → session backend</td><td>Per-backend CLI calls behind one dispatcher.</td><td><code class="cite">bin/fm-backend.sh:1-40</code></td></tr>
+<tr><td>13</td><td>Session backend → worker</td><td>The pane sources the staged launch file, which starts the harness.</td><td><code class="cite">bin/fm-spawn.sh:245-253</code></td></tr>
+<tr><td>14</td><td>Session backend → Treehouse</td><td>On tmux, herdr, zellij and cmux the pane itself runs <code>treehouse get</code>; Orca owns its own worktree instead.</td><td><code class="cite">bin/fm-spawn.sh:3842-3843</code> <code class="cite">docs/configuration.md:136</code></td></tr>
+<tr><td>15</td><td>Toolbelt → records</td><td>Every script reads and writes <code>state/</code> and <code>data/</code> under per-task locks.</td><td><code class="cite">bin/fm-spawn.sh:125-130</code></td></tr>
+<tr><td>16</td><td>Worker → records</td><td>Appends status lines, acknowledges inbox messages, writes a scout report.</td><td><code class="cite">bin/fm-brief.sh:59-69</code></td></tr>
+<tr><td>17</td><td>Slot claims → Treehouse</td><td>The claim file sits beside the pool slot, and teardown returns the slot with <code>treehouse return</code>.</td><td><code class="cite">bin/fm-wake-lib.sh:1270-1291</code></td></tr>
+</tbody></table></div>
+
+<h2 id="lifecycle">The lifecycle in one paragraph</h2>
+<p>A task starts as a backlog item and a written brief. Firstmate resolves its profile and delivery contract, then calls <code>fm-spawn.sh</code>, which refuses unless every gate passes. The spawn gets an endpoint from the session backend and a clean, isolated worktree from Treehouse, publishes <code>state/&lt;id&gt;.meta</code>, moves the backlog row to In flight, and launches the harness on a launch brief whose first section is the worker role contract. The worker then reports only by appending to its status log. Firstmate reads current state through <code>fm-crew-state.sh</code>, steers through the inbox, and drives lifecycle through <code>fm-control.sh</code>. A scout can be promoted in place with <code>fm-promote.sh</code>. When a ship's work has landed, or a scout's report exists, <code>fm-teardown.sh</code> returns the worktree, closes the endpoint, removes the record, and closes the row. <a href="lifecycle.html">End-to-end trace</a> walks one worker through all of it.</p>
+
+<h2 id="pages">Pages in this section</h2>
+<ul class="cards">
+<li><a href="kinds.html"><strong>Kinds of worker</strong><span>Ship, scout, secondmate: records and behaviour</span></a></li>
+<li><a href="dispatch.html"><strong>Dispatch</strong><span>fm-spawn.sh gates, locks, refusals, and order</span></a></li>
+<li><a href="launch.html"><strong>Launch and the injected prompt</strong><span>Launch brief, role contract, staged command, environment</span></a></li>
+<li><a href="worktrees.html"><strong>Worktrees and slot claims</strong><span>Treehouse pooling, isolation, freshness, ownership</span></a></li>
+<li><a href="harnesses.html"><strong>Harness adapters</strong><span>The 13 verified CLIs and what verification means</span></a></li>
+<li><a href="backends.html"><strong>Session backends</strong><span>tmux, herdr, zellij, orca, cmux, and codex-app</span></a></li>
+<li><a href="dispatch-profiles.html"><strong>Dispatch profiles</strong><span>How the harness, model, and effort are chosen</span></a></li>
+<li><a href="crew-state.html"><strong>Current state vs events</strong><span>fm-crew-state.sh reconciliation</span></a></li>
+<li><a href="control.html"><strong>Control plane</strong><span>interrupt, exit, relaunch, and endpoint reclaim</span></a></li>
+<li><a href="promotion.html"><strong>Scout promotion</strong><span>fm-promote.sh: scout becomes ship, in place</span></a></li>
+<li><a href="teardown.html"><strong>Teardown</strong><span>The landed-work test and every refusal</span></a></li>
+<li><a href="lifecycle.html"><strong>End-to-end trace</strong><span>One worker from backlog item to Done</span></a></li>
+</ul>
+
+<h2 id="neighbours">Where this area meets the others</h2>
+<ul>
+<li>The steering inbox, the status log format, and <code>fm-send.sh</code> belong to <a href="../communication/index.html">Communication</a>. This area only names where they are created and destroyed.</li>
+<li>The watcher, busy-state sources, stale detection, and away mode belong to <a href="../supervision/index.html">Supervision</a>.</li>
+<li>The operational home, lock primitives, and restart model belong to <a href="../persistence/index.html">Persistence</a>.</li>
+<li>Brief templates, <code>AGENTS.md</code>, and the skills that crew operations load (<code>harness-adapters</code>, <code>stuck-crewmate-recovery</code>, <code>secondmate-provisioning</code>) belong to <a href="../prompts-and-skills/index.html">Prompts and skills</a>.</li>
+<li>Delivery modes, PR readiness, merges, and clone refresh belong to <a href="../delivery/index.html">Delivery</a>.</li>
+<li><code>tasks-axi</code>, captain holds, and backlog handoff belong to <a href="../backlog-and-decisions/index.html">Backlog and decisions</a>.</li>
+<li>Remote secondmates on SSH hosts belong to <a href="../remote/index.html">Remote</a>.</li>
+</ul>
+
+<h2 id="findings">Findings worth carrying forward</h2>
+<ul>
+<li><strong>Names that mislead.</strong> <code>bin/fm-lease.sh</code> manages per-task <em>supervision</em> leases between the main and branch actors, not worktree leases <code class="cite">bin/fm-lease.sh:2-9</code>. <code>bin/fm-landed-lib.sh</code> decides what appears in "Recently Landed", not whether teardown may proceed <code class="cite">bin/fm-landed-lib.sh:2-11</code>. The real landed-work test lives inside <code>bin/fm-teardown.sh</code>.</li>
+<li><strong>Two worktree lease models.</strong> Secondmate homes use Treehouse's durable <code>get --lease</code>; crewmate slots use the interactive pane-driven <code>treehouse get</code>, whose lease lapses when the worker exits. Firstmate layers its own owner-claim file on top, and says moving crewmates onto the durable lease is "separate follow-up work" <code class="cite">bin/fm-wake-lib.sh:1270-1286</code>. See <a href="worktrees.html">Worktrees</a>.</li>
+<li><strong>Reclaim is Herdr-only by necessity.</strong> A tmux task record carries no socket identity, so a <code>missing</code> tmux window can never be proven gone and every lifecycle verb refuses it <code class="cite">docs/agent-control.md:86-103</code>.</li>
+<li><strong>A known leak is documented, not fixed.</strong> A refused Herdr rebind can leave a stray husk pane <code class="cite">docs/agent-control.md:127-131</code>.</li>
+<li><strong>Link bases disagree inside one skill.</strong> <code>harness-adapters</code> says nested reference links resolve against the skill directory <code class="cite crew-wrap">.agents/skills/harness-adapters/SKILL.md:22</code>. Most harness references follow that, but <code>gemini.md</code> and <code>agy.md</code> link relative to their own file and <code>claude.md</code> and <code>muse.md</code> mix both (<a href="harnesses.html">details</a>).</li>
+</ul>
 </article>
 </main>
 </div>

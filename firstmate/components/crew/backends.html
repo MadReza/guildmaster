@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session backends · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Crew</p>
+<h1>Session backends</h1>
+<p class="lede">A session backend is the terminal system that holds a worker's endpoint: tmux, Herdr, Zellij, Orca, or cmux. <code>bin/fm-backend.sh</code> hides them behind one opaque target per task, and the differences that remain are about what each backend can prove: whether an agent is alive, whether a pane is gone, which keys it can deliver.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Crew</a>. How the watcher polls or subscribes to these backends belongs to <a href="../supervision/index.html">Supervision</a>.</p>
+
+<h2 id="abstraction">The abstraction</h2>
+<p><code>bin/fm-backend.sh</code> is "runtime-backend selection, meta helpers, selector resolution, and dispatch for firstmate's session-provider abstraction". It was built in phases: P1 extracted the original tmux command sequences into <code>bin/backends/tmux.sh</code> "with those SAME command sequences", then Herdr (P2), Zellij (P3), Orca (P4) and cmux (P5) were added <code class="cite">bin/fm-backend.sh:1-31</code>. Every script above it uses the same verbs: capture, visible capture, send key, verified text submit, kill, busy state, composer state, target existence, agent state, and push-event transitions <code class="cite">bin/fm-backend.sh:716-1037</code>.</p>
+<p>A backend is framed as an <em>event source</em>. tmux has no native push, so "fm-watch.sh's poll loop over the pull primitives … IS the default event-source implementation" <code class="cite">bin/fm-backend.sh:40-48</code>. Every spawn writes the opaque target into <code>window=</code>. Every downstream operation treats it as routing data through <code>fm_backend_resolve_selector</code>, and every non-tmux backend adds its own identity fields <code class="cite">docs/configuration.md:152-157</code>.</p>
+<p><strong>Compatibility contract.</strong> A default tmux spawn writes no <code>backend=</code> line, and every reader treats an absent line as tmux, "so existing and newly spawned default-path metas stay byte-identical" <code class="cite">bin/fm-backend.sh:33-38</code>.</p>
+
+<h2 id="selection">How a backend is chosen</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1000 330" role="img" aria-labelledby="bsel-t bsel-d">
+<title id="bsel-t">Runtime backend selection for a new spawn</title>
+<desc id="bsel-d">The first set source wins: an explicit per-task backend flag, then FM_BACKEND, then the first non-empty line of config/backend, then runtime detection innermost first, then tmux. The result must pass the spawn-capable validation, and a refusal is terminal.</desc>
+<defs><marker id="bsel-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">Backend selection (first set source wins)</text>
+<g class="c4-component"><rect x="20" y="60" width="170" height="74" rx="8"/><text class="c4-label" x="105" y="86">--backend</text><text class="c4-desc" x="105" y="104">this task's own authority</text><text class="c4-desc" x="105" y="119">only</text></g>
+<g class="c4-component"><rect x="215" y="60" width="170" height="74" rx="8"/><text class="c4-label" x="300" y="86">FM_BACKEND</text><text class="c4-desc" x="300" y="104">environment, one launch</text></g>
+<g class="c4-component"><rect x="410" y="60" width="170" height="74" rx="8"/><text class="c4-label" x="495" y="86">config/backend</text><text class="c4-desc" x="495" y="104">first non-empty line</text><text class="c4-desc" x="495" y="119">inherited by secondmates</text></g>
+<g class="c4-component"><rect x="605" y="60" width="185" height="74" rx="8"/><text class="c4-label" x="697" y="86">Runtime detection</text><text class="c4-desc" x="697" y="104">$TMUX › HERDR_ENV=1 › cmux</text><text class="c4-desc" x="697" y="119">innermost wins</text></g>
+<g class="c4-component"><rect x="815" y="60" width="165" height="74" rx="8"/><text class="c4-label" x="897" y="86">tmux</text><text class="c4-desc" x="897" y="104">hard default</text></g>
+<g class="c4-rel"><path d="M190,97 L213,97" marker-end="url(#bsel-arrow)"/></g>
+<g class="c4-rel"><path d="M385,97 L408,97" marker-end="url(#bsel-arrow)"/></g>
+<g class="c4-rel"><path d="M580,97 L603,97" marker-end="url(#bsel-arrow)"/></g>
+<g class="c4-rel"><path d="M790,97 L813,97" marker-end="url(#bsel-arrow)"/></g>
+<text class="crew-note" x="420" y="48">each rightward arrow means "not set, try the next"</text>
+<g class="c4-component"><rect x="20" y="200" width="960" height="54" rx="8"/><text class="c4-label" x="500" y="222">fm_backend_validate_spawn</text><text class="c4-desc" x="500" y="240">known: tmux herdr zellij orca cmux · spawn-capable: the same five · orca and cmux refuse --secondmate</text></g>
+<g class="c4-rel"><path d="M105,134 L105,198" marker-end="url(#bsel-arrow)"/></g>
+<g class="c4-rel"><path d="M300,134 L300,198" marker-end="url(#bsel-arrow)"/></g>
+<g class="c4-rel"><path d="M495,134 L495,198" marker-end="url(#bsel-arrow)"/></g>
+<g class="c4-rel"><path d="M697,134 L697,198" marker-end="url(#bsel-arrow)"/></g>
+<g class="c4-rel"><path d="M897,134 L897,198" marker-end="url(#bsel-arrow)"/></g>
+<text class="crew-note" x="20" y="282">Unknown or refused (missing dependency, version gate, unauthenticated socket, unsupported secondmate mode):</text>
+<text class="crew-note" x="20" y="300">terminal for that backend; surfaced as a blocker, never silently retried on another backend.</text>
+<text class="crew-note" x="20" y="318">Detected cmux prints a loud notice; Zellij and Orca are never detected. A relaunch never reselects: it reuses the recorded backend.</text>
+</svg>
+</div>
+<figcaption>Sources: <code class="cite">docs/configuration.md:137-143</code>, <code class="cite">bin/fm-backend.sh:141-173</code>, <code class="cite">bin/fm-backend.sh:243-292</code>, <code class="cite">bin/fm-spawn.sh:1518-1543</code>, <code class="cite">bin/fm-spawn.sh:87-89</code>, <code class="cite">bin/fm-spawn.sh:736-738</code>.</figcaption>
+</figure>
+<p>The flag is narrow on purpose. An explicit <code>--backend</code> requires "current authority for that exact task alone … never later-task precedent by analogy" <code class="cite">docs/configuration.md:137</code>, and the supervisor contract repeats it <code class="cite">AGENTS.md:240-241</code>. Detection checks <code>$TMUX</code> first because tmux sets it in every process inside it, even a tmux started inside Herdr. cmux comes last because "it is a terminal application (the outermost layer…), not a session multiplexer" <code class="cite">bin/fm-backend.sh:94-116</code>.</p>
+
+<h2 id="compare">The five backends compared</h2>
+<div class="table-wrap"><table>
+<thead><tr><th></th><th>tmux</th><th>herdr</th><th>zellij</th><th>orca</th><th>cmux</th></tr></thead>
+<tbody>
+<tr><td>Status</td><td>verified reference</td><td>verified, required CI lane</td><td>experimental</td><td>experimental, macOS</td><td>experimental, macOS GUI</td></tr>
+<tr><td>Auto-detected</td><td>yes (<code>$TMUX</code>), and the default</td><td>yes (<code>HERDR_ENV=1</code>), silently</td><td>never</td><td>never</td><td>yes, with a loud notice</td></tr>
+<tr><td>Worktree provider</td><td>Treehouse</td><td>Treehouse</td><td>Treehouse</td><td>Orca itself</td><td>Treehouse</td></tr>
+<tr><td>Secondmate spawns</td><td>yes</td><td>yes (remote secondmates always Herdr)</td><td>yes</td><td>refused</td><td>refused</td></tr>
+<tr><td>Endpoint shape</td><td>window <code>fm-&lt;id&gt;</code> in the ambient session or a detached <code>firstmate</code> session</td><td>tab per task in the launcher's exact workspace, or a disposable one-task workspace</td><td>tab per task in one shared session, title <code>fm-&lt;home-label&gt;-&lt;id&gt;</code></td><td>Orca worktree plus terminal</td><td>workspace per task, scoped title</td></tr>
+<tr><td>Record fields</td><td><code>window=</code> only</td><td><code>herdr_session</code>, <code>_workspace_id</code>, <code>_tab_id</code>, <code>_pane_id</code></td><td><code>zellij_session</code>, <code>_tab_id</code>, <code>_pane_id</code></td><td><code>terminal=</code>, <code>orca_worktree_id=</code></td><td><code>cmux_workspace_id</code>, <code>cmux_surface_id</code></td></tr>
+<tr><td>Native busy and push</td><td>no (semantic per-harness busy)</td><td>native agent state; protocol-16 push events</td><td>no</td><td>no</td><td>no</td></tr>
+<tr><td>Recovery-grade agent state</td><td>yes</td><td>yes (process-level proof)</td><td>no</td><td>no</td><td>no</td></tr>
+<tr><td>Keys</td><td>all</td><td>all</td><td>all</td><td>Enter, Ctrl+C only</td><td>all</td></tr>
+<tr><td>Compatibility gate</td><td>—</td><td>protocol ≥ 14, <code>jq</code></td><td>version ≥ 0.44, <code>jq</code></td><td><code>orca status</code> ready</td><td>version, <code>jq</code>, socket access</td></tr>
+</tbody></table></div>
+<p class="evidence">Sources: <code class="cite">docs/configuration.md:135-157</code>, <code class="cite">docs/tmux-backend.md:17-43</code>, <code class="cite">docs/herdr-backend.md:1-35</code>, <code class="cite">docs/zellij-backend.md:34-60</code>, <code class="cite">docs/orca-backend.md:1-46</code>, <code class="cite">docs/cmux-backend.md:66-83</code>, <code class="cite">docs/agent-control.md:164-174</code>, <code class="cite">bin/fm-spawn.sh:1533-1540</code>.</p>
+
+<h2 id="liveness">Why "recovery-grade agent state" is the key difference</h2>
+<p>Recovery must never start a second agent on a live worktree. The tmux probe checks exact window membership, then reads process names from two independent sources to tell a running harness from a bare shell. It returns <code>alive</code>, <code>dead</code>, <code>missing</code>, <code>unreadable</code>, or <code>ambiguous</code>, and "Only <code>dead</code> and <code>missing</code> authorize recovery because a false dead result could launch a duplicate agent" <code class="cite">docs/tmux-backend.md:47-60</code>. Herdr's registered agent state is not trusted alone: a registration can outlive the process, so the adapter verifies it against the real process table with the same shared classifier <code class="cite">docs/herdr-backend.md:280-303</code>.</p>
+<p>Backends without that classifier (Zellij, Orca, cmux) cannot prove an agent stopped. So <code>fm-control.sh exit</code> and <code>relaunch</code> refuse on them <code class="cite">docs/agent-control.md:155-156</code>, <code>fm-crew-state.sh</code> keeps reading a failed capture as gone <code class="cite">bin/fm-crew-state.sh:1179-1180</code>, and a dead Zellij secondmate "is reported inconclusive rather than auto-respawned" <code class="cite">docs/zellij-backend.md:98-100</code>.</p>
+<p>Only Herdr can prove that an endpoint is <em>gone</em> rather than unreachable, because every Herdr read is scoped to the session the record names. That is why endpoint reclaim is Herdr-only (<a href="control.html#reclaim">Control plane</a>).</p>
+
+<h2 id="per-backend">Per-backend notes</h2>
+<dl class="defs">
+<dt>tmux</dt>
+<dd>If the first mate runs inside tmux, tasks become windows in its session. Otherwise Firstmate creates or reuses a detached session named <code>firstmate</code>. Each window is named <code>fm-&lt;id&gt;</code>, and typing into it is "authoritative direct intervention" <code class="cite">docs/tmux-backend.md:17-38</code>. Spawn pins the name and captures a stable window id, so a captain's tmux config cannot rename the window away mid-spawn <code class="cite">bin/fm-spawn.sh:3238-3243</code>.</dd>
+<dt>herdr</dt>
+<dd>Every call carries an explicit <code>--session &lt;name&gt;</code>, because "An environment variable alone is not reliable when another Herdr server is running" <code class="cite">docs/herdr-backend.md:219-225</code>. Workers go into the launcher's exact workspace, never a label match, since Herdr "does not enforce workspace or tab label uniqueness" <code class="cite">docs/herdr-backend.md:46-64</code>. From Herdr 0.8.0, each crewmate or scout also gets a disposable one-task "presentation space" by default. It is presentation only and "never endpoint or ownership authority" <code class="cite">docs/herdr-backend.md:81-86</code> <code class="cite">docs/agent-control.md:125</code>. Destructive lab work is confined to <code>bin/fm-herdr-lab.sh</code> with <code>fm-lab-</code> session names <code class="cite">docs/herdr-backend.md:334-345</code>.</dd>
+<dt>zellij</dt>
+<dd>One shared session for all homes, with home-scoped titles to prevent id collisions. It has no native busy signal, no push events, and no agent-process liveness <code class="cite">docs/zellij-backend.md:34-47</code> <code class="cite">docs/zellij-backend.md:94-104</code>.</dd>
+<dt>orca</dt>
+<dd>The app owns both worktree and terminal, so spawn never runs Treehouse. The composite <code>orca_worktree_id=&lt;repo id&gt;::&lt;path&gt;</code> is the cleanup authority. Escape is unsupported. The Claude trust check may refuse an Orca worktree if Orca clones instead of linking <code class="cite">docs/orca-backend.md:29-45</code> <code class="cite">docs/orca-backend.md:70-78</code>.</dd>
+<dt>cmux</dt>
+<dd>A fresh surface's <code>read-screen</code> errors until something is written, so readiness uses the structural <code>list-panes</code>. Worktree discovery wraps <code>pwd</code> in markers, because <code>current_directory</code> does not follow <code>treehouse get</code>'s subshell. Workspace ids do not survive an app relaunch <code class="cite">docs/cmux-backend.md:84-95</code> <code class="cite">docs/cmux-backend.md:115-124</code>.</dd>
+</dl>
+
+<h2 id="codex-app">Codex App: a documented non-backend</h2>
+<p>Codex App is "not a selectable Firstmate runtime backend". Its host tools can create and supervise visible threads, but "Firstmate has no supported shell-callable bridge to those host tools. A manual thread ledger is not a backend" <code class="cite">docs/codex-app-backend.md:1-5</code>. The acceptance contract lists what any future backend must do: create an endpoint with a durable id, send instructions and later messages, read live state, stop the exact endpoint, and let the thread append Firstmate's lifecycle lines to <code>state/&lt;id&gt;.status</code>. "The status return channel is mandatory" <code class="cite">docs/codex-app-backend.md:7-18</code>. That list is the best statement in the source of what a backend fundamentally is.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>
