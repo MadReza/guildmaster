@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scout reports · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Observability</p>
+<h1>Scout reports</h1>
+<p class="lede">A scout task's only product is <code>data/&lt;id&gt;/report.md</code>: a standalone document that lives in the home's private records, is required before teardown, and stays readable after the scout's workspace and task state are gone.</p>
+
+<h2>Why the report, not the workspace, is the deliverable</h2>
+<p>A scout "produces knowledge in <code>data/&lt;id&gt;/report.md</code>, never a PR" (<code class="cite">AGENTS.md:308</code>). Its worktree is scratch: the scout brief states "the deliverable is a report at data/&lt;task-id&gt;/report.md (no branch, no push, no PR) and the worktree is scratch" (<code class="cite">bin/fm-brief.sh:20-21</code>). The home layout records the difference in lifetime: <code>&lt;id&gt;/report.md</code> is the "scout task deliverable, written by the crewmate; survives teardown" (<code class="cite">AGENTS.md:100</code>), while <code>state/</code> is removed with the task. Knowledge routing sends investigation findings to exactly this place: "investigation findings belong in the scout report" (<code class="cite">AGENTS.md:278</code>).</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 880 330" role="img" aria-labelledby="sr-t">
+<title id="sr-t">Life of a scout report from brief to Bearings</title>
+<defs>
+<marker id="sr-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs>
+<text class="c4-diagram-title" x="20" y="28">A report outlives its workspace</text>
+<g class="c4-component"><rect x="20" y="60" width="170" height="70" rx="8"/><text class="c4-label" x="105" y="88">fm-brief.sh --scout</text><text class="c4-desc" x="105" y="108">report contract</text></g>
+<g class="c4-container"><rect x="240" y="60" width="180" height="70" rx="8"/><text class="c4-label" x="330" y="88">Scout worker</text><text class="c4-desc" x="330" y="108">scratch worktree</text></g>
+<g class="c4-datastore"><path d="M470,66 a95,8 0 0,0 190,0 a95,8 0 0,0 -190,0 v54 a95,8 0 0,0 190,0 v-54"/><text class="c4-label" x="565" y="94">report.md</text><text class="c4-desc" x="565" y="112">data/&lt;id&gt;/, survives</text></g>
+<g class="c4-component"><rect x="700" y="60" width="160" height="70" rx="8"/><text class="c4-label" x="780" y="88">Fleet snapshot</text><text class="c4-desc" x="780" y="108">scout_reports[]</text></g>
+<g class="c4-rel"><path d="M190,95 L238,95" marker-end="url(#sr-arrow)"/></g>
+<g class="c4-rel"><path d="M420,95 L468,95" marker-end="url(#sr-arrow)"/><text class="c4-rel-label" x="444" y="83">writes</text></g>
+<g class="c4-rel c4-rel-async"><path d="M660,95 L698,95" marker-end="url(#sr-arrow)"/><text class="c4-rel-label" x="679" y="83">finds</text></g>
+<g class="c4-component"><rect x="240" y="220" width="180" height="70" rx="8"/><text class="c4-label" x="330" y="248">Completion gate</text><text class="c4-desc" x="330" y="268">captain-hold complete</text></g>
+<g class="c4-component"><rect x="470" y="220" width="190" height="70" rx="8"/><text class="c4-label" x="565" y="248">fm-teardown.sh</text><text class="c4-desc" x="565" y="268">removes worktree, state</text></g>
+<g class="c4-datastore"><path d="M700,226 a80,8 0 0,0 160,0 a80,8 0 0,0 -160,0 v54 a80,8 0 0,0 160,0 v-54"/><text class="c4-label" x="780" y="254">Backlog Done row</text><text class="c4-desc" x="780" y="272">links the report</text></g>
+<g class="c4-rel"><path d="M330,130 L330,218" marker-end="url(#sr-arrow)"/><text class="c4-rel-label" x="330" y="178">inventory calls</text></g>
+<g class="c4-rel"><path d="M420,255 L468,255" marker-end="url(#sr-arrow)"/><text class="c4-rel-label" x="444" y="243">verify</text></g>
+<g class="c4-rel c4-rel-async"><path d="M565,218 L565,138" marker-end="url(#sr-arrow)"/><text class="c4-rel-label" x="565" y="178">must exist</text></g>
+<g class="c4-rel"><path d="M660,255 L698,255" marker-end="url(#sr-arrow)"/><text class="c4-rel-label" x="679" y="243">--report</text></g>
+</svg>
+</div>
+<figcaption>Teardown refuses a scout until the report exists and the captain-call completion gate verifies; it then removes the workspace and task state, and records the report path on the backlog's Done row. The fleet snapshot finds every report by path. Sources: <code class="cite">bin/fm-teardown.sh:3280-3292</code>, <code class="cite">bin/fm-teardown.sh:1520-1528</code>, <code class="cite">bin/fm-fleet-snapshot.sh:1957-1970</code>.</figcaption>
+</figure>
+
+<h2>What the scout is told to write</h2>
+<p>The scout brief's definition of done: "Write your findings to <code>$DATA/$ID/report.md</code>. The report must stand alone: what you did, what you found, the evidence (commands run, output, file:line references), and what you recommend" (<code class="cite">bin/fm-brief.sh:463-464</code>). Before reporting done it must follow the captain-hold lifecycle and "pass its shared completion gate for the report and any visual review", then append <code>done [at=&lt;epoch&gt;]: {one-line conclusion}</code> (<code class="cite">bin/fm-brief.sh:466-467</code>). If the findings show work that should ship, the scout says so in the report, and firstmate may promote the task in place (<code class="cite">bin/fm-brief.sh:468</code>).</p>
+<p>When the Lavish review loop is available the brief also offers it; otherwise it asks for a text report (<code class="cite">bin/fm-brief.sh:22-23</code>).</p>
+
+<h2>The completion gate</h2>
+<p>A report is where unresolved captain questions tend to be discovered, so it cannot be treated as complete while one is untracked. "Every unresolved question that belongs to the captain and is discovered while producing, reading, presenting, or ending an investigation or visual review must be carried by a captain-held task ... before that work or review may be treated as complete" (<code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:19</code>). The scripts never read the report to find those questions: "scripts must not infer captain calls from report prose" (<code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:15</code>). The agent inventories the report, then runs <code>bin/fm-captain-hold.sh complete &lt;origin&gt;</code> with every held task id, or <code>--none</code> (<code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:23</code>). Finishing or archiving the report never closes a held task (<code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:26</code>). The lifecycle is documented under <a href="../backlog-and-decisions/index.html">Backlog and decisions</a>.</p>
+
+<h2>Teardown refuses without it</h2>
+<p>For an ordinary ship task, teardown refuses unless the work has landed. Scouts are carved out: "their worktree is declared scratch and the report at data/&lt;task-id&gt;/report.md is the work product. Teardown proceeds only once the report exists and the shared unresolved-decision completion gate verifies its captain-held inventory" (<code class="cite">bin/fm-teardown.sh:72-75</code>). The refusals are explicit (<code class="cite">bin/fm-teardown.sh:3280-3292</code>):</p>
+<pre><code>REFUSED: scout task &lt;id&gt; has no report at &lt;path&gt;.
+The report is the work product. Have the crewmate write it, or use --force after explicit discard approval.
+
+REFUSED: scout task &lt;id&gt; has not passed the captain-call completion gate.</code></pre>
+<p>On success the backlog's Done transition carries <code>--report &lt;data-relative&gt;/&lt;id&gt;/report.md</code>, so the closed row points at the deliverable (<code class="cite">bin/fm-teardown.sh:1520-1528</code>). Teardown mechanics belong to <a href="../delivery/index.html">Delivery</a>.</p>
+
+<h2>How reports are found later</h2>
+<p><code>bin/fm-fleet-snapshot.sh</code> lists every regular file matching <code>data/*/report.md</code>, two levels deep, sorted by id, as <code>scout_reports[]</code> with <code>{id, path}</code> (<code class="cite">bin/fm-fleet-snapshot.sh:1957-1970</code>, <code class="cite">bin/fm-fleet-snapshot.sh:71</code>). Each entry is tagged with a <code>kind</code> taken from the live task or backlog row, defaulting to <code>scout</code> when neither exists (<code class="cite">bin/fm-fleet-snapshot.sh:2059</code>, <code class="cite">bin/fm-fleet-snapshot.sh:2069</code>). Discovery is by path, not by task record, which is what lets a report be found after its task's meta is deleted.</p>
+<p>Bearings shows only the reports of live and recently landed tasks by default, with <code>--all-reports</code> for the full inventory (<code class="cite">bin/fm-bearings-snapshot.sh:450</code>, <code class="cite">bin/fm-bearings-snapshot.sh:578-581</code>). The digest places report pointers under Underway as "pickup pointers worth reopening", and a completed scout's report pointer never belongs in Captain's Call (<code class="cite">.agents/skills/bearings/SKILL.md:89</code>, <code class="cite">.agents/skills/bearings/SKILL.md:171</code>). See <a href="bearings.html">Bearings</a>.</p>
+
+<div class="callout unclear"><span class="callout-title">Open question: retention</span>
+<p>The source defines no retention or pruning for <code>data/&lt;id&gt;/report.md</code>. The only related statements are that <code>data/</code> as a whole is local and gitignored (<code class="cite">AGENTS.md:92</code>) and that reports survive teardown. Whether reports are ever cleaned up, and by whom, is not settled by the code read for this page.</p></div>
+
+<h2>The same pattern elsewhere</h2>
+<ul>
+<li>A secondmate is told to put a detailed answer "in a doc under your home's <code>data/</code> and append a status line that points to that doc - the scout-report pattern" (<code class="cite">bin/fm-brief.sh:318</code>).</li>
+<li>Promotion turns a scout into a ship task without losing its context: <code>bin/fm-promote.sh</code> flips <code>kind=</code> to ship, requires <code>--mode</code> and <code>--yolo</code>, and firstmate decides those "having just read the scout's report" (<code class="cite">bin/fm-promote.sh:2-25</code>). The report stays where it was.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

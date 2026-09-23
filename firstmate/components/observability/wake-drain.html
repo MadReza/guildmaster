@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wake-drain surfaces · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Observability</p>
+<h1>Wake-drain surfaces</h1>
+<p class="lede">Beside the queued wake rows, every run of <code>bin/fm-wake-drain.sh</code> prints up to four fleet-wide sections, each built so that one specific kind of fact cannot be lost between wakes.</p>
+
+<h2>Where this runs</h2>
+<p>Firstmate must "drain the durable wake queue before peeking, reading beyond the reason line, steering, or starting work" at the start of every wake-handling turn (<code class="cite">AGENTS.md:428</code>). The drain has two forms: a plain presentation, and <code>--ack-through &lt;sequence&gt; --recovery-generation &lt;generation&gt;</code>, which consumes rows after they were handled (<code class="cite">bin/fm-wake-drain.sh:196-208</code>). The queue, its rows, the per-actor split between the main session and a Pi supervision branch, and the acknowledgement protocol are <a href="../supervision/index.html">Supervision</a> material. This page covers what a drain <em>prints about status</em>, which is the observability half.</p>
+<p>The header lists the job in order: present wake records, retire unusable rows, optionally acknowledge, "annotate every unread line for validated signal status keys, surface unread informational status lines, latest captain-facing statuses not covered by a newer branch outcome, OPEN DECISIONS, and captain-call record divergence, then assert liveness" (<code class="cite">bin/fm-wake-drain.sh:1-7</code>).</p>
+
+<h2>One locked presentation, committed only after it is printed</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 900 570" role="img" aria-labelledby="wd-flow-t">
+<title id="wd-flow-t">How print_status_presentation builds and commits the status sections</title>
+<defs>
+<marker id="wd-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs>
+<text class="c4-diagram-title" x="20" y="28">Status presentation inside one drain</text>
+<g class="c4-component"><rect x="30" y="70" width="190" height="80" rx="8"/><text class="c4-label" x="125" y="98">1 Lock and snapshot</text><text class="c4-desc" x="125" y="118">task · size · device:inode</text><text class="c4-desc" x="125" y="134">for every status log</text></g>
+<g class="c4-component"><rect x="30" y="200" width="190" height="80" rx="8"/><text class="c4-label" x="125" y="228">2 Row annotations</text><text class="c4-desc" x="125" y="248">unread lines for each</text><text class="c4-desc" x="125" y="264">queued signal row</text></g>
+<g class="c4-boundary"><rect x="270" y="50" width="380" height="330" rx="6"/><text x="282" y="70">3 Prepared into a temp file, not yet printed</text></g>
+<g class="c4-component"><rect x="300" y="84" width="320" height="56" rx="8"/><text class="c4-label" x="460" y="108">UNREAD STATUS</text><text class="c4-desc" x="460" y="126">note: lines and pending-reply closes</text></g>
+<g class="c4-component"><rect x="300" y="152" width="320" height="56" rx="8"/><text class="c4-label" x="460" y="176">STATUS OUTCOME BACKSTOP</text><text class="c4-desc" x="460" y="194">captain-facing event with no outcome</text></g>
+<g class="c4-component"><rect x="300" y="220" width="320" height="56" rx="8"/><text class="c4-label" x="460" y="244">OPEN DECISIONS</text><text class="c4-desc" x="460" y="262">every key the fold still holds open</text></g>
+<g class="c4-component"><rect x="300" y="288" width="320" height="56" rx="8"/><text class="c4-label" x="460" y="312">RECORD DIVERGENCE</text><text class="c4-desc" x="460" y="330">resolved in log, still held in backlog</text></g>
+<g class="c4-component"><rect x="700" y="70" width="170" height="64" rx="8"/><text class="c4-label" x="785" y="98">4 Print</text><text class="c4-desc" x="785" y="118">cat to stdout</text></g>
+<g class="c4-component"><rect x="700" y="170" width="170" height="64" rx="8"/><text class="c4-label" x="785" y="198">5 Commit receipt</text><text class="c4-desc" x="785" y="218">advance offsets</text></g>
+<g class="c4-rel"><path d="M125,150 L125,198" marker-end="url(#wd-arrow)"/></g>
+<g class="c4-rel"><path d="M220,240 L268,240" marker-end="url(#wd-arrow)"/></g>
+<g class="c4-rel"><path d="M650,102 L698,102" marker-end="url(#wd-arrow)"/></g>
+<g class="c4-rel"><path d="M785,134 L785,168" marker-end="url(#wd-arrow)"/><text class="c4-rel-label" x="838" y="155">only if printed</text></g>
+<g class="c4-datastore"><path d="M15,440 a85,8 0 0,0 170,0 a85,8 0 0,0 -170,0 v64 a85,8 0 0,0 170,0 v-64"/><text class="c4-label" x="100" y="468">Status logs</text><text class="c4-desc" x="100" y="486">state/&lt;id&gt;.status</text></g>
+<g class="c4-datastore"><path d="M190,440 a85,8 0 0,0 170,0 a85,8 0 0,0 -170,0 v64 a85,8 0 0,0 170,0 v-64"/><text class="c4-label" x="275" y="468">Fold cursors</text><text class="c4-desc" x="275" y="486">.&lt;id&gt;.open-decisions-</text><text class="c4-desc" x="275" y="500">cursor</text></g>
+<g class="c4-datastore"><path d="M365,440 a85,8 0 0,0 170,0 a85,8 0 0,0 -170,0 v64 a85,8 0 0,0 170,0 v-64"/><text class="c4-label" x="450" y="468">Outcome store</text><text class="c4-desc" x="450" y="486">branch-outcomes.jsonl</text><text class="c4-desc" x="450" y="500">+ per-task index</text></g>
+<g class="c4-external"><rect x="540" y="436" width="170" height="72" rx="8"/><text class="c4-label" x="625" y="462">Backlog</text><text class="c4-desc" x="625" y="482">read via tasks-axi</text></g>
+<g class="c4-datastore"><path d="M715,440 a85,8 0 0,0 170,0 a85,8 0 0,0 -170,0 v64 a85,8 0 0,0 170,0 v-64"/><text class="c4-label" x="800" y="468">Receipt manifest</text><text class="c4-desc" x="800" y="486">.status-presentation-</text><text class="c4-desc" x="800" y="500">cursor</text></g>
+<g class="c4-rel c4-rel-async"><path d="M310,380 L110,432" marker-end="url(#wd-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M400,380 L285,432" marker-end="url(#wd-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M470,380 L455,432" marker-end="url(#wd-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M560,380 L620,432" marker-end="url(#wd-arrow)"/></g>
+<g class="c4-rel"><path d="M800,234 L800,430" marker-end="url(#wd-arrow)"/><text class="c4-rel-label" x="800" y="330">writes</text></g>
+<g class="c4-legend">
+<rect class="c4-legend-frame" x="15" y="522" width="870" height="36" rx="6"/>
+<text class="c4-legend-heading" x="27" y="545">Legend</text>
+<g class="c4-component"><rect x="90" y="532" width="28" height="16" rx="3"/></g><text x="126" y="545">Step or section</text>
+<g class="c4-datastore"><path d="M240,535 a14,3 0 0,0 28,0 a14,3 0 0,0 -28,0 v10 a14,3 0 0,0 28,0 v-10"/></g><text x="276" y="545">File in state/</text>
+<g class="c4-external"><rect x="380" y="532" width="28" height="16" rx="3"/></g><text x="416" y="545">Outside the drain</text>
+<g class="c4-rel c4-rel-async"><path d="M540,540 L570,540"/></g><text x="578" y="545">Section reads</text>
+<g class="c4-rel"><path d="M690,540 L720,540"/></g><text x="728" y="545">Control flow or write</text>
+</g>
+</svg>
+</div>
+<figcaption>Every section is rendered into a temp file first; the receipt that stops a line reappearing is committed only after the bytes reached stdout. Dashed arrows are reads: UNREAD STATUS reads status logs, OPEN DECISIONS its fold cursors, the backstop the outcome index, divergence the backlog. Source: <code class="cite">bin/fm-wake-drain.sh:551-611</code>.</figcaption>
+</figure>
+<ol>
+<li><strong>Lock.</strong> <code>state/.status-presentation-lock</code> is taken with a bounded wait, <code>FM_STATUS_PRESENTATION_LOCK_TIMEOUT</code> seconds (default 10). If a live process still holds it, the drain prints <code>STATUS PRESENTATION SKIPPED: lock remains held by live pid ...; retry on the next drain.</code> and presents nothing else about status (<code class="cite">bin/fm-wake-drain.sh:11-12</code>, <code class="cite">bin/fm-wake-drain.sh:580-595</code>).</li>
+<li><strong>Snapshot.</strong> <code>status_presentation_snapshot</code> records <code>task TAB size TAB identity</code> for every readable, non-symlink status file. Every later read in this presentation stops at that captured size, so an append that lands mid-drain is left for the next one (<code class="cite">bin/fm-classify-lib.sh:1206-1219</code>).</li>
+<li><strong>Annotate queued rows.</strong> For each queued signal row, <code>fm_wake_print_annotations</code> prints the status lines still unread since the last presentation, each prefixed <code>wake annotation: unread wake-EVENT since last drain, not current state</code> (<code class="cite">bin/fm-wake-lib.sh:2364</code>, <code class="cite">bin/fm-wake-lib.sh:2432-2434</code>). A turn-ended-only row whose status bytes were already surfaced or deliberately absorbed is not re-annotated, because replaying it "makes a bare turn-end look like fresh progress".</li>
+<li><strong>Prepare, print, commit.</strong> The four sections below are written to a temp file. Only after <code>cat</code> succeeds does <code>status_commit_presentation_snapshot</code> advance the offsets: "If the consumer closes or fails, leave the receipt behind so the next drain can recover the presentation" (<code class="cite">bin/fm-wake-drain.sh:551-578</code>).</li>
+</ol>
+<p>The receipt is one manifest, <code>state/.status-presentation-cursor</code>, one row per task: task, file identity, presented offset, and outcome-backstop offset (<code class="cite">bin/fm-classify-lib.sh:1294-1370</code>). A changed identity or an offset past the end reads that file from 0. <code>docs/architecture.md</code> summarises it as a manifest that "records each status file's identity plus independent annotation and outcome-backstop byte offsets" (<code class="cite">docs/architecture.md:104</code>).</p>
+
+<h2>The four sections</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Section</th><th>What it lists</th><th>Loss it prevents</th><th>Reprinted?</th><th>Bound</th></tr></thead>
+<tbody>
+<tr><td>UNREAD STATUS</td><td><code>note:</code> lines and reserved-key pending-reply resolutions, new since the last drain</td><td>An answer that never folds into a decision and would otherwise be swallowed when the cursor moves on</td><td>No, once only</td><td>None beyond the snapshot</td></tr>
+<tr><td>STATUS OUTCOME BACKSTOP</td><td>A task's newest captain-facing event that no supervision-branch outcome covers</td><td>A terminal event whose wake row was acknowledged but never handled</td><td>No, once per event</td><td>220 bytes per line, 4000 total</td></tr>
+<tr><td>OPEN DECISIONS</td><td>Every <code>needs-decision</code> or <code>blocked</code> the fold still holds open, fleet-wide</td><td>A decision buried under later unrelated events</td><td>Yes, every drain until closed</td><td>220 bytes per line, 4000 total</td></tr>
+<tr><td>RECORD DIVERGENCE</td><td>Captain calls resolved in a status log but still held open in the backlog</td><td>Two records of one call silently disagreeing</td><td>Yes, until reconciled</td><td>220 bytes per line, 2000 total, 20 s</td></tr>
+</tbody>
+</table>
+</div>
+<p>All four are silent when empty, "which is the common case". A section cut by its byte budget ends with a <code>... N more omitted (byte cap)</code> line, so an omission is visible (<code class="cite">bin/fm-wake-drain.sh:442-489</code>).</p>
+
+<h3>UNREAD STATUS</h3>
+<p><code>status_line_is_unread_surface</code> admits exactly two kinds of line: a <code>note:</code>, and a <code>resolved</code> or <code>captain-held</code> line on a reserved <code>pending-reply-</code> key whose note speaks that namespace. "Those lines never fold into OPEN DECISIONS, so the drain's unread-status surface is their only guaranteed presentation" (<code class="cite">bin/fm-classify-lib.sh:1784-1808</code>). The section runs on every drain, "including the empty-queue fast path - so a buried answer cannot be swallowed when the fold later advances the cursor" (<code class="cite">bin/fm-wake-drain.sh:397-427</code>). Its heading promises the lines are "not re-printed after this presentation", and the agent contract repeats that they "must be read this turn" (<code class="cite">AGENTS.md:431</code>).</p>
+
+<h3>STATUS OUTCOME BACKSTOP</h3>
+<p>This section exists for the Pi supervision branch, which handles fleet events on the main session's behalf and records each outcome in <code>state/branch-outcomes.jsonl</code> before delivering it (<code class="cite">bin/fm-branch-outcome.sh:1-60</code>). If a wake row is acknowledged but the branch never produced a covering outcome, the event could vanish. The drain therefore compares each task's newest non-blank event with the latest outcome that causally covers that task's log (<code class="cite">docs/pi-supervision-branch.md:86-96</code>).</p>
+<ul>
+<li>It runs only for the main actor (<code class="cite">bin/fm-wake-drain.sh:307</code>).</li>
+<li>It reads at most the final 64 KiB of each log through the captured endpoint, and defers a file that changes during the read. A latest line longer than that window is "intentionally unclassifiable and omitted" (<code class="cite">bin/fm-classify-lib.sh:1221-1232</code>).</li>
+<li>Only a captain-relevant event qualifies. A parseable keyed <code>needs-decision</code> or <code>blocked</code> is skipped because it "belong[s] exclusively to the durable fold"; resurfacing a rejected reserved-key transition here "would let a foreign writer bypass the namespace guard". A line with malformed key syntax has no fold representation, so the backstop is its only presentation (<code class="cite">bin/fm-wake-drain.sh:343-350</code>).</li>
+<li>Coverage is read from a fixed-size per-task index, <code>state/.&lt;task&gt;.branch-outcome-index</code> (at most 512 bytes), not by scanning outcome history. If the ready marker is missing the drain rebuilds the indexes with <code>fm-branch-outcome.sh processed-init --held-lock</code> under the outcome lock (<code class="cite">bin/fm-wake-drain.sh:252-330</code>).</li>
+<li>Failures are named, never silent: <code>STATUS OUTCOME BACKSTOP SKIPPED: branch outcome history could not be read safely</code>, <code>... is busy; retry on the next drain</code>, <code>... indexes could not be rebuilt</code>, <code>... a bounded task outcome index could not be read safely</code> (<code class="cite">bin/fm-wake-drain.sh:313-325</code>, <code class="cite">bin/fm-wake-drain.sh:385</code>).</li>
+</ul>
+<p>Legacy outcome rows carry no status provenance, so when an event and an outcome share a timestamp second the drain "deliberately favors surfacing a plausibly later event; this can rarely duplicate an already handled legacy event" (<code class="cite">docs/pi-supervision-branch.md:93</code>).</p>
+
+<h3>OPEN DECISIONS</h3>
+<p>Built from the cursor-backed fold described on <a href="status-events.html">Status events and the keyed fold</a>, and deliberately "rather than from the annotations above, so a decision buried under later unrelated appends cannot be silently missed" (<code class="cite">bin/fm-wake-drain.sh:429-443</code>). Each line is <code>&lt;task&gt; [key=&lt;key&gt;] &lt;verb&gt;: &lt;note&gt;</code>, with the key omitted when it is <code>default</code>. The section ends with the one action that closes an item, printed "at exactly the moment an answer gets written" (<code class="cite">bin/fm-wake-drain.sh:484-488</code>):</p>
+<pre><code>OPEN DECISIONS: close one by answering it: bin/fm-send.sh &lt;task&gt; --resolve-key &lt;key&gt; '&lt;answer&gt;'</code></pre>
+<p><code>fm-send.sh</code> then appends the closing <code>resolved</code> line itself, so closure "never depends on the busy worker writing a matching resolved line", and after a delivered close it re-folds and fails loudly if the key is still open (<code class="cite">bin/fm-send.sh:154-176</code>). The agent contract treats this section as "actionable reconciliation input even when no wake record was queued" (<code class="cite">AGENTS.md:430</code>).</p>
+
+<h3>RECORD DIVERGENCE</h3>
+<p>A captain call has two records: the keyed decision in a status log, and a backlog task held for the captain. They are closed by separate acts. "Closing only on the status side therefore looks complete there while the durable record still says the captain owes an answer and keeps resurfacing it. The defect was never the separation; it was the silence" (<code class="cite">bin/fm-captain-hold.sh:1736-1739</code>).</p>
+<p>The drain runs <code>bin/fm-captain-hold.sh diverged</code> under <code>FM_DIVERGENCE_TIMEOUT</code> (default 20 seconds) and prints one line per pair (<code class="cite">bin/fm-wake-drain.sh:491-549</code>). The command flags only a task that is still open and still carries captain-hold annotations whose key the status side closed with <code>resolved</code>. A <code>captain-held</code> close is not a divergence, because that verb is written only after verifying the transfer to that very task (<code class="cite">bin/fm-captain-hold.sh:1748-1754</code>). It compares status logs and backlog only when both belong to the same home, and stays silent if <code>tasks-axi</code> is missing or its listing cannot be parsed (<code class="cite">bin/fm-captain-hold.sh:1802-1817</code>).</p>
+<p>It closes nothing: "A captain call closed wrongly disappears without review, which is strictly worse than the noise this prints" (<code class="cite">bin/fm-captain-hold.sh:1741-1747</code>). The drain's closing line names both directions of repair, recording the captain's words with <code>answer</code> or re-opening the status decision, and the agent contract says to treat it "never as proof the captain ruled" (<code class="cite">AGENTS.md:432</code>). The captain-hold lifecycle itself is documented under <a href="../backlog-and-decisions/index.html">Backlog and decisions</a>.</p>
+
+<h3>The liveness assertion</h3>
+<p>After presenting, the drain runs <code>bin/fm-guard.sh</code> so that "a lapsed supervision chain then surfaces on a plain drain-and-handle turn". A guard hiccup never changes the drain's exit status (<code class="cite">bin/fm-wake-drain.sh:212-225</code>). What the guard checks is <a href="../supervision/index.html">Supervision</a> material.</p>
+
+<h2>Failure behaviour</h2>
+<ul>
+<li>A presentation that cannot snapshot prints <code>STATUS PRESENTATION INCOMPLETE: status snapshot could not be read.</code> and commits nothing (<code class="cite">bin/fm-wake-drain.sh:596-598</code>).</li>
+<li>If printing or committing fails, the prepared file is discarded and the receipt stays where it was, so the same lines are presented again next time (<code class="cite">bin/fm-wake-drain.sh:565-576</code>).</li>
+<li>A divergence guard that times out or errors prints nothing and does not fail the drain, because "a supervision turn must still present its wakes when the backlog tool is having a bad day" (<code class="cite">bin/fm-wake-drain.sh:499-503</code>).</li>
+<li>The incremental fold returns its last trusted set on an I/O error rather than an empty one (<a href="status-events.html">Status events</a>).</li>
+</ul>
+
+<h2>Configuration</h2>
+<dl class="defs">
+<dt><code>FM_STATUS_PRESENTATION_LOCK_TIMEOUT</code></dt><dd>Positive whole seconds to wait for the presentation and outcome locks; default 10, and a non-positive value falls back to 10 (<code class="cite">bin/fm-wake-drain.sh:41-42</code>).</dd>
+<dt><code>FM_DIVERGENCE_TIMEOUT</code></dt><dd>Bound on the divergence guard; default 20 seconds (<code class="cite">bin/fm-wake-drain.sh:510-512</code>).</dd>
+<dt><code>FM_CAPTAIN_RE</code>, <code>FM_CLASSIFY_RESOLVE_VERB</code>, <code>FM_CLASSIFY_CAPTAIN_HELD_VERB</code>, <code>FM_CLASSIFY_RESERVED_KEY_PREFIXES</code></dt><dd>Vocabulary overrides read by the classifier that every section uses.</dd>
+</dl>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learnings and captain preferences · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Observability</p>
+<h1>Learnings and captain preferences</h1>
+<p class="lede">Three curated files hold what a home has learned and how the captain likes to work; they are printed into every session start, kept under a token budget, and may only be changed by reading the whole file first and replacing what a new fact supersedes.</p>
+
+<h2>The three files</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>File</th><th>Holds</th><th>Owner and scope</th><th>Default tier</th></tr></thead>
+<tbody>
+<tr><td><code>data/captain.md</code></td><td>"this home's domain-local captain preferences and working style"</td><td>The home itself; "canonical even if harness memory mirrors it" (<code class="cite">AGENTS.md:94</code>)</td><td>pinned</td></tr>
+<tr><td><code>data/captain-shared.md</code></td><td>"main-authoritative shared captain preferences propagated read-only to secondmate homes"</td><td>The primary home, under <code>secondmate-provisioning</code> (<code class="cite">AGENTS.md:95</code>)</td><td>pinned</td></tr>
+<tr><td><code>data/learnings.md</code></td><td>"fleet-local operational facts and gotchas"</td><td>The home itself; "dated, evidence-backed, curated ... rewrite and prune rather than append forever"; created lazily (<code class="cite">AGENTS.md:96</code>)</td><td>aging</td></tr>
+</tbody>
+</table>
+</div>
+<p>All three are local and gitignored with the rest of <code>data/</code> (<code class="cite">AGENTS.md:92</code>). The rule that makes them authoritative regardless of any harness-level memory feature: "Treat <code>data/captain.md</code> as the domain-local record of captain preferences, optional <code>data/captain-shared.md</code> as the main-authoritative shared captain-preference file for secondmate inheritance, and <code>data/learnings.md</code> as curated home-local knowledge, regardless of harness memory" (<code class="cite">AGENTS.md:164</code>). Terminology note for Guildmaster readers: these are what <code>TERMINOLOGY.md</code> calls the Lorebook and Standing Orders.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 860 380" role="img" aria-labelledby="kf-t">
+<title id="kf-t">Who reads and who writes the curated knowledge files</title>
+<defs>
+<marker id="kf-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs>
+<text class="c4-diagram-title" x="20" y="28">Curated memory: read at every start, curated by /stow</text>
+<g class="c4-component"><rect x="140" y="44" width="260" height="62" rx="8"/><text class="c4-label" x="270" y="70">fm-session-start.sh</text><text class="c4-desc" x="270" y="90">context digest, read-only</text></g>
+<g class="c4-component"><rect x="600" y="44" width="230" height="62" rx="8"/><text class="c4-label" x="715" y="70">fm-startup-memory-budget.sh</text><text class="c4-desc" x="715" y="90">estimates tokens per file</text></g>
+<g class="c4-datastore"><path d="M40,156 a80,8 0 0,0 160,0 a80,8 0 0,0 -160,0 v50 a80,8 0 0,0 160,0 v-50"/><text class="c4-label" x="120" y="184">captain.md</text><text class="c4-desc" x="120" y="202">pinned by default</text></g>
+<g class="c4-datastore"><path d="M240,156 a90,8 0 0,0 180,0 a90,8 0 0,0 -180,0 v50 a90,8 0 0,0 180,0 v-50"/><text class="c4-label" x="330" y="184">captain-shared.md</text><text class="c4-desc" x="330" y="202">read-only in secondmates</text></g>
+<g class="c4-datastore"><path d="M460,156 a80,8 0 0,0 160,0 a80,8 0 0,0 -160,0 v50 a80,8 0 0,0 160,0 v-50"/><text class="c4-label" x="540" y="184">learnings.md</text><text class="c4-desc" x="540" y="202">aging by default</text></g>
+<g class="c4-datastore"><path d="M670,156 a80,8 0 0,0 160,0 a80,8 0 0,0 -160,0 v50 a80,8 0 0,0 160,0 v-50"/><text class="c4-label" x="750" y="184">memory-archive.md</text><text class="c4-desc" x="750" y="202">cold, never injected</text></g>
+<g class="c4-rel c4-rel-async"><path d="M200,106 L135,146" marker-end="url(#kf-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M290,106 L325,146" marker-end="url(#kf-arrow)"/><text class="c4-rel-label" x="330" y="128">prints</text></g>
+<g class="c4-rel c4-rel-async"><path d="M370,106 L520,146" marker-end="url(#kf-arrow)"/></g>
+<g class="c4-component"><rect x="240" y="286" width="300" height="70" rx="8"/><text class="c4-label" x="390" y="312">/stow pass</text><text class="c4-tech" x="390" y="328">[stow skill]</text><text class="c4-desc" x="390" y="344">inspect-then-update, decay, archive</text></g>
+<g class="c4-rel"><path d="M300,286 L140,218" marker-end="url(#kf-arrow)"/></g>
+<g class="c4-rel"><path d="M370,286 L340,218" marker-end="url(#kf-arrow)"/><text class="c4-rel-label" x="330" y="252">primary only</text></g>
+<g class="c4-rel"><path d="M450,286 L530,218" marker-end="url(#kf-arrow)"/><text class="c4-rel-label" x="500" y="252">curates</text></g>
+<g class="c4-rel"><path d="M540,320 L740,218" marker-end="url(#kf-arrow)"/><text class="c4-rel-label" x="660" y="276">archives, never deletes</text></g>
+<g class="c4-rel c4-rel-async"><path d="M645,106 L645,240 L544,296" marker-end="url(#kf-arrow)"/><text class="c4-rel-label" x="645" y="150">budget</text></g>
+</svg>
+</div>
+<figcaption>The session-start digest prints all three files; the cold archive is never printed and never counted. Only a <code>/stow</code> pass curates them, and a secondmate home treats the shared file as read-only input. Sources: <code class="cite">bin/fm-session-start.sh:54-55</code>, <code class="cite">.agents/skills/stow/SKILL.md:76-131</code>, <code class="cite">.agents/skills/stow/SKILL.md:132-135</code>.</figcaption>
+</figure>
+
+<h2>How they are read</h2>
+<p>The locked session start prints them in its context digest, "the full contents of <code>data/projects.md</code>, <code>data/secondmates.md</code>, <code>data/captain.md</code>, <code>data/captain-shared.md</code>, and <code>data/learnings.md</code>, each clearly delimited" (<code class="cite">AGENTS.md:205</code>, <code class="cite">bin/fm-session-start.sh:949-951</code>). A missing file prints as <code>ABSENT</code>, meaning built-in defaults, no shared preferences, or "no captured learnings" (<code class="cite">AGENTS.md:177</code>). The agent is told to trust that digest and not re-read those inputs "unless a source was reported absent or corrupt, older history is specifically needed, or a targeted workflow must inspect before writing" (<code class="cite">AGENTS.md:176</code>). That last exception is inspect-then-update.</p>
+<p>Because they are loaded every session, their size is bounded. <code>config/startup-memory-budget</code> is a per-home budget, "materialized as 7,500 estimated tokens by locked primary bootstrap and inherited into secondmate homes" (<code class="cite">AGENTS.md:80</code>). <code>bin/fm-startup-memory-budget.sh report</code> gives the estimate, which the stow skill calls "the documented conservative local approximation, not provider-exact accounting" (<code class="cite">.agents/skills/stow/SKILL.md:80-83</code>).</p>
+
+<h2>Where a fact belongs</h2>
+<p>Before anything is written, it is routed to "its most specific owner" (<code class="cite">AGENTS.md:273-280</code>):</p>
+<ul>
+<li>Home-domain captain preferences go to <code>data/captain.md</code> "after inspect-then-update".</li>
+<li>Preferences shared across secondmate domains go to the primary's <code>data/captain-shared.md</code>.</li>
+<li>Fleet-local operational facts go to <code>data/learnings.md</code>.</li>
+<li>Task notes go with the backlog item; investigation findings go in the <a href="scout-reports.html">scout report</a>.</li>
+<li>Knowledge for almost every contributor to one project goes in that project's committed <code>AGENTS.md</code>, written only by a crewmate through the delivery path.</li>
+<li>Knowledge for every Firstmate user goes in the Firstmate repository itself.</li>
+</ul>
+<p>A secondmate that discovers a shared preference does not edit the inherited file; it routes the finding to the main firstmate through marked status or a document pointer (<code class="cite">.agents/skills/stow/SKILL.md:222</code>).</p>
+
+<h2>The inspect-then-update discipline</h2>
+<p><code>docs/architecture.md</code> states it in one line: "Memory writes use inspect-then-update rather than blind append" (<code class="cite">docs/architecture.md:448</code>). The stow skill defines what that means for every retained fact: "ask which current statement it supersedes, whether it can be a one-sentence rewrite, and whether a stale entry should be refreshed, archived, or routed to an existing stronger owner" (<code class="cite">.agents/skills/stow/SKILL.md:230-231</code>). Concretely:</p>
+<ol>
+<li><strong>Measure first.</strong> Run the budget report before any write (<code class="cite">.agents/skills/stow/SKILL.md:80</code>).</li>
+<li><strong>Read every file completely</strong>, treating an absent file as absent "not as an invitation to manufacture content" (<code class="cite">.agents/skills/stow/SKILL.md:86-87</code>).</li>
+<li><strong>Plan the whole file before editing</strong>, ordered by how likely each entry is to inform a future session (<code class="cite">.agents/skills/stow/SKILL.md:92-95</code>).</li>
+<li><strong>Reinforce only on evidence.</strong> An entry's date is refreshed only when this session exercised or confirmed it; "plausibility, importance, prior knowledge, and the entry's own text are not evidence" (<code class="cite">.agents/skills/stow/SKILL.md:96-99</code>).</li>
+<li><strong>Consolidate</strong> every editable file, preferring "one concise current rule or authoritative pointer over duplicate prose" (<code class="cite">.agents/skills/stow/SKILL.md:108-109</code>).</li>
+<li><strong>Measure again</strong> and finish at or below budget, or open a concrete captain decision (<code class="cite">.agents/skills/stow/SKILL.md:118-119</code>).</li>
+</ol>
+<p>The same rule reaches beyond memory files. A task-scoped note is updated by showing the item in full, classifying the change as "new, duplicate, superseding, or obsolete", and replacing the body; "Never append" (<code class="cite">.agents/skills/stow/SKILL.md:226-228</code>).</p>
+<div class="callout"><span class="callout-title">What inspect-then-update protects against</span>
+<p>An always-loaded file that only grows fills the startup budget with stale and contradictory lines, and a new line that silently contradicts an old one leaves the next session two rules to choose from. Reading first turns every write into a supersession decision. The allowed exits are fixed: promotion to shared tracked material by PR, folding a learning into captain preferences, archiving, offload to an existing owner, or deleting a true duplicate. "A stale unique fact is never deleted, only archived" (<code class="cite">.agents/skills/stow/SKILL.md:232-233</code>).</p></div>
+
+<h2>Tiers, markers and decay</h2>
+<p>Entries carry compact trailing HTML comments whose bytes count against the budget (<code class="cite">.agents/skills/stow/SKILL.md:17-47</code>):</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Marker</th><th>Tier</th><th>Rule</th></tr></thead>
+<tbody>
+<tr><td>none in a pinned-default file, or <code>&lt;!--P--&gt;</code></td><td>pinned</td><td>No clock; changed only through inspect-then-update "when the captain or reality changes it"</td></tr>
+<tr><td><code>&lt;!--a:YYYY-MM-DD--&gt;</code></td><td>aging</td><td>Stale at 30 days since last reinforced; re-validated or archived</td></tr>
+<tr><td><code>&lt;!--p:YYYY-MM-DD--&gt;</code></td><td>perishable</td><td>Stale at 7 days; must name a checkable expiry condition in its prose</td></tr>
+<tr><td><code>&lt;!--g--&gt;</code></td><td>legacy grace</td><td>An unmarked learning that has used its one grace cycle</td></tr>
+</tbody>
+</table>
+</div>
+<p>Captain files default to pinned "because preferences and authority boundaries do not age", learnings to aging "because operational facts must re-prove themselves" (<code class="cite">.agents/skills/stow/SKILL.md:45</code>). Decay only advances when a pass runs (<code class="cite">.agents/skills/stow/SKILL.md:55</code>). Pruned entries move to <code>data/memory-archive.md</code>, "this home's append-only, never-injected cold tier", with their provenance under a dated heading (<code class="cite">.agents/skills/stow/SKILL.md:132-135</code>). The skill text is "the single owner of tier semantics, marker spellings, and clocks", and a memory file header may carry at most a one-line pointer to it (<code class="cite">.agents/skills/stow/SKILL.md:48-49</code>). The memory mechanics as a persistent store are covered under <a href="../persistence/index.html">Persistence</a>, and the skill as a prompt artefact under <a href="../prompts-and-skills/index.html">Prompts and skills</a>.</p>
+
+<h2>Failure behaviour</h2>
+<ul>
+<li>If the budget helper rejects the setting or a file, the pass must "not infer a default or silently continue" and must not declare the session reset-safe (<code class="cite">.agents/skills/stow/SKILL.md:84-85</code>).</li>
+<li>A pass may not end over budget "as an accepted exception"; it must open a captain decision naming the shortfall (<code class="cite">.agents/skills/stow/SKILL.md:126</code>).</li>
+<li>A secondmate whose inherited shared file alone exceeds its allowance reports <code>primary-owned-shared-file-alone-exceeds-budget</code> and routes it to the primary (<code class="cite">.agents/skills/stow/SKILL.md:120</code>).</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>
