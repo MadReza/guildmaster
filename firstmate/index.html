@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Firstmate C4 research</title>
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Start here</p>
+<h1>Firstmate, as a C4 model</h1>
+<p class="lede">A navigable study of how Firstmate works, written as the foundation for designing its successor. It describes Firstmate as it is, with every claim tied to the file that proves it.</p>
+
+<h2 id="what">What Firstmate is</h2>
+<p>Firstmate is an "agent distro". It is not an app, a model, a harness, or a CLI. It is a cloned directory of instructions, skills, scripts, and state conventions, and any supported terminal coding agent can follow it <code class="cite">README.md:36-39</code>. Launching a harness inside the clone makes that session <em>the first mate</em> and makes the user <em>the captain</em> <code class="cite">README.md:40</code>.</p>
+<p>The captain talks to that one agent only. The first mate turns requests into tasks. It spawns an autonomous worker for each one in its own git worktree, inside a visible terminal session. It supervises the workers with a bash watcher that costs no tokens while idle, and it hands back finished pull requests, approved local merges, or investigation reports <code class="cite">README.md:32-33</code> <code class="cite">docs/architecture.md:11</code>.</p>
+<p>It never edits a project itself <code class="cite">AGENTS.md:27-28</code>. It never merges without the captain's word or a standing per-project grant <code class="cite">AGENTS.md:32-33</code>. It never tears down unlanded work <code class="cite">AGENTS.md:34-35</code>. It keeps every obligation on disk, so a restart loses nothing <code class="cite">VISION.md:43-45</code>. Larger fleets can add persistent <em>secondmates</em>: full Firstmate homes of their own, local or on an SSH host, that still report to the primary <code class="cite">README.md:34</code>.</p>
+
+<h3 id="scale">Scale at the studied commit</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Surface</th><th>At <code>ada21f5b</code></th></tr></thead>
+<tbody>
+<tr><td>Tracked files</td><td>599</td></tr>
+<tr><td><code>bin/</code></td><td>196 tracked files: 182 bash scripts (about 99,000 lines), plus Python, Node, Perl, and jq helpers</td></tr>
+<tr><td><code>AGENTS.md</code>, the always-loaded supervisor contract</td><td>626 lines</td></tr>
+<tr><td>Internal skills, <code>.agents/skills/</code></td><td>22 tracked entries: 21 with a <code>SKILL.md</code>, plus <code>firstmate-calm</code>, a symlink to a Claude Code mod</td></tr>
+<tr><td>Public skills, <code>skills/</code></td><td>1 (<code>stow</code>)</td></tr>
+<tr><td><code>docs/</code></td><td>59 tracked files, 30 of them top-level Markdown documents</td></tr>
+<tr><td>Behaviour tests, <code>tests/*.test.sh</code></td><td>220</td></tr>
+</tbody></table></div>
+<p class="evidence">Counts are from <code>git ls-files</code> on the studied commit. An operator's checkout can also hold untracked, home-local skills, which are not part of Firstmate.</p>
+
+<h2 id="levels">The C4 levels used here</h2>
+<dl class="defs">
+<dt><a href="c4/context.html">Level 1, System context</a></dt>
+<dd>Firstmate as one box: the captain, and every external system it touches. That covers agent harnesses, session backends, Treehouse, forges, no-mistakes, tasks-axi, Relay, mail, voice, notifications, and remote hosts.</dd>
+<dt><a href="c4/containers.html">Level 2, Containers</a></dt>
+<dd>The running pieces and stores inside one instance, with a numbered table of every interaction. The pieces are the supervisor agent, session start, hooks, watcher, wake queue, steering inboxes, status logs, operational home, toolbelt, backend adapters, workers, and secondmate homes.</dd>
+<dt>Level 3, Components</dt>
+<dd>Inside each area section below: the scripts and records that make up one container, and how each is used.</dd>
+<dt>Level 4, Code</dt>
+<dd>Only where a record format or protocol needs it, for example a status line, a wake-queue row, or an inbox record.</dd>
+</dl>
+
+<h2 id="index">Section index</h2>
+<ul class="cards">
+<li><a href="c4/context.html"><strong>System context</strong><span>Level 1: people and external systems</span></a></li>
+<li><a href="c4/containers.html"><strong>Containers</strong><span>Level 2: running pieces and their interactions</span></a></li>
+<li><a href="components/communication/index.html"><strong>Communication</strong><span>Inboxes, status events, markers, parent channel, captain channels</span></a></li>
+<li><a href="components/supervision/index.html"><strong>Supervision</strong><span>Watcher, wake queue, hooks, busy state, away mode, Pi branch</span></a></li>
+<li><a href="components/persistence/index.html"><strong>Persistence</strong><span>The operational home, records, locks, memory, restart model</span></a></li>
+<li><a href="components/crew/index.html"><strong>Crew</strong><span>Ship, scout, secondmate; harnesses, backends, worktrees, lifecycle</span></a></li>
+<li><a href="components/prompts-and-skills/index.html"><strong>Prompts and skills</strong><span>AGENTS.md, briefs, charters, protocols, skills, rules</span></a></li>
+<li><a href="components/delivery/index.html"><strong>Delivery</strong><span>Modes, merge authority, validation, PRs, clone refresh, self-update</span></a></li>
+<li><a href="components/backlog-and-decisions/index.html"><strong>Backlog and decisions</strong><span>tasks-axi, captain holds, open decisions, handoff</span></a></li>
+<li><a href="components/observability/index.html"><strong>Observability</strong><span>Fleet views, logs, audits, tracking, tests and CI</span></a></li>
+<li><a href="components/remote/index.html"><strong>Remote</strong><span>Whole-home remote secondmates over SSH</span></a></li>
+<li><a href="issues/index.html"><strong>GitHub tickets</strong><span>Snapshot of open bugs and feature requests</span></a></li>
+</ul>
+
+<h2 id="reading">How to read these pages</h2>
+<ul>
+<li>A citation such as <code class="cite">bin/fm-watch.sh:3-4</code> links to that line range at the studied commit. Script headers are treated as each script's contract, and the implementation as confirmation.</li>
+<li>Boxes headed "Not settled by the source" mark behaviour the code does not decide. They are not guesses.</li>
+<li>These pages use Firstmate's own words: captain, first mate, crewmate or worker, scout, secondmate, brief, backlog. Guildmaster's vocabulary lives in the repository's <code>TERMINOLOGY.md</code>, which maps each Firstmate term to its successor.</li>
+<li>Authors adding pages follow <a href="AUTHORING.md">AUTHORING.md</a>.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="assets/nav-data.js"></script>
+<script src="assets/site.js"></script>
+</body>
+</html>

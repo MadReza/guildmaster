@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>System context · Firstmate C4</title>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">C4 model › Level 1</p>
+<h1>System context</h1>
+<p class="lede">Firstmate as one system: the one person it serves and every external system it touches. The next level, <a href="containers.html">Containers</a>, opens the box.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code> (2026-09-22). Every citation links to that commit.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1240 960" role="img" aria-labelledby="ctx-title ctx-desc">
+<title id="ctx-title">Firstmate system context (C4 level 1)</title>
+<desc id="ctx-desc">The captain talks to Firstmate. Firstmate drives agent harness CLIs inside runtime session backends, leases worktrees from Treehouse, delivers through GitHub, GitLab and no-mistakes, keeps its queue in tasks-axi, and optionally reaches Relay, mail, Bedrock voice, notification surfaces, remote SSH hosts and a Lavish review server.</desc>
+<defs><marker id="ctx-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="32">Firstmate — System Context (Level 1)</text>
+<g class="c4-person">
+<circle cx="620" cy="86" r="20"/>
+<rect x="520" y="100" width="200" height="80" rx="16"/>
+<text class="c4-label" x="620" y="130.5">Captain</text>
+<text class="c4-desc" x="620" y="147.5">The one human user: asks, decides,</text>
+<text class="c4-desc" x="620" y="161.5">approves merges and discards</text>
+</g>
+<g class="c4-system">
+<rect x="470" y="380" width="300" height="150" rx="8"/>
+<text class="c4-label" x="620" y="424">Firstmate</text>
+<text class="c4-tech" x="620" y="439">[agent distro: instructions, skills, scripts]</text>
+<text class="c4-desc" x="620" y="456">One supervising agent runs a crew of</text>
+<text class="c4-desc" x="620" y="470">coding agents in isolated worktrees,</text>
+<text class="c4-desc" x="620" y="484">watches them with a zero-token watcher,</text>
+<text class="c4-desc" x="620" y="498">and keeps every obligation on disk</text>
+</g>
+<g class="c4-rel">
+<path d="M620,180 L620,380" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="690" y="262">chats: requests, answers,</text>
+<text class="c4-rel-label" x="690" y="275">“merge it”</text>
+</g>
+<g class="c4-external">
+<rect x="20" y="150" width="270" height="88" rx="8"/>
+<text class="c4-label" x="155" y="177">Agent harness CLIs</text>
+<text class="c4-tech" x="155" y="192">[claude · codex · pi · grok · cursor · omp …]</text>
+<text class="c4-desc" x="155" y="209">Host the first mate and every worker;</text>
+<text class="c4-desc" x="155" y="223">13 verified adapters</text>
+</g>
+<g class="c4-rel">
+<path d="M470,400 L290,194" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="380" y="289">runs agents in</text>
+</g>
+<g class="c4-external">
+<rect x="20" y="262" width="270" height="88" rx="8"/>
+<text class="c4-label" x="155" y="289">Runtime session backends</text>
+<text class="c4-tech" x="155" y="304">[tmux · Herdr · Zellij · Orca · cmux]</text>
+<text class="c4-desc" x="155" y="321">Own each worker&#x27;s visible terminal</text>
+<text class="c4-desc" x="155" y="335">endpoint: create, capture, send, kill</text>
+</g>
+<g class="c4-rel">
+<path d="M470,427 L290,306" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="380" y="358.5">drives endpoints</text>
+</g>
+<g class="c4-external">
+<rect x="20" y="374" width="270" height="88" rx="8"/>
+<text class="c4-label" x="155" y="401">Treehouse</text>
+<text class="c4-tech" x="155" y="416">[worktree pool CLI]</text>
+<text class="c4-desc" x="155" y="433">Leases clean git worktrees for</text>
+<text class="c4-desc" x="155" y="447">workers and secondmate homes</text>
+</g>
+<g class="c4-rel">
+<path d="M470,454 L290,418" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="380" y="424">leases worktrees</text>
+</g>
+<g class="c4-external">
+<rect x="20" y="486" width="270" height="88" rx="8"/>
+<text class="c4-label" x="155" y="513">quota-axi</text>
+<text class="c4-tech" x="155" y="528">[provider quota CLI]</text>
+<text class="c4-desc" x="155" y="545">Quota and runway snapshots for</text>
+<text class="c4-desc" x="155" y="559">dispatch and quota wakes</text>
+</g>
+<g class="c4-rel">
+<path d="M470,481 L290,530" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="380" y="497.5">reads quota</text>
+</g>
+<g class="c4-external">
+<rect x="20" y="598" width="270" height="88" rx="8"/>
+<text class="c4-label" x="155" y="625">typesafe.ai</text>
+<text class="c4-tech" x="155" y="640">[HTTPS API · opt-in]</text>
+<text class="c4-desc" x="155" y="657">Typed dispatch-profile resolution</text>
+<text class="c4-desc" x="155" y="671">when TYPESAFE_API_KEY is set</text>
+</g>
+<g class="c4-rel">
+<path d="M470,508 L290,642" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="380" y="567">resolves profile</text>
+</g>
+<g class="c4-external">
+<rect x="950" y="150" width="270" height="88" rx="8"/>
+<text class="c4-label" x="1085" y="177">GitHub</text>
+<text class="c4-tech" x="1085" y="192">[gh · gh-axi]</text>
+<text class="c4-desc" x="1085" y="209">Pull requests, checks, merges,</text>
+<text class="c4-desc" x="1085" y="223">issues and contribution signals</text>
+</g>
+<g class="c4-rel">
+<path d="M770,400 L950,194" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="860" y="289">PRs, polls, merges</text>
+</g>
+<g class="c4-external">
+<rect x="950" y="262" width="270" height="88" rx="8"/>
+<text class="c4-label" x="1085" y="289">GitLab</text>
+<text class="c4-tech" x="1085" y="304">[glab]</text>
+<text class="c4-desc" x="1085" y="321">Merge requests on any instance</text>
+<text class="c4-desc" x="1085" y="335">named by the MR URL</text>
+</g>
+<g class="c4-rel">
+<path d="M770,427 L950,306" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="860" y="358.5">MR polls, merges</text>
+</g>
+<g class="c4-external">
+<rect x="950" y="374" width="270" height="88" rx="8"/>
+<text class="c4-label" x="1085" y="401">no-mistakes</text>
+<text class="c4-tech" x="1085" y="416">[local validation daemon]</text>
+<text class="c4-desc" x="1085" y="433">Review, test, lint, push, PR and</text>
+<text class="c4-desc" x="1085" y="447">CI pipeline for no-mistakes mode</text>
+</g>
+<g class="c4-rel">
+<path d="M770,454 L950,418" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="860" y="424">reads runs, aborts</text>
+</g>
+<g class="c4-external">
+<rect x="950" y="486" width="270" height="88" rx="8"/>
+<text class="c4-label" x="1085" y="513">tasks-axi</text>
+<text class="c4-tech" x="1085" y="528">[backlog CLI · markdown or Beads]</text>
+<text class="c4-desc" x="1085" y="545">Durable work queue behind</text>
+<text class="c4-desc" x="1085" y="559">data/backlog.md by default</text>
+</g>
+<g class="c4-rel">
+<path d="M770,481 L950,530" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="860" y="497.5">queues and holds work</text>
+</g>
+<g class="c4-external">
+<rect x="950" y="598" width="270" height="88" rx="8"/>
+<text class="c4-label" x="1085" y="625">Git origins</text>
+<text class="c4-tech" x="1085" y="640">[git remotes]</text>
+<text class="c4-desc" x="1085" y="657">Project clones and Firstmate&#x27;s own</text>
+<text class="c4-desc" x="1085" y="671">upstream for self-update</text>
+</g>
+<g class="c4-rel">
+<path d="M770,508 L950,642" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="860" y="567">fetches, fast-forwards</text>
+</g>
+<g class="c4-external">
+<rect x="20" y="800" width="190" height="96" rx="8"/>
+<text class="c4-label" x="115" y="831">Relay</text>
+<text class="c4-tech" x="115" y="846">[myfirstmate.io · opt-in]</text>
+<text class="c4-desc" x="115" y="863">Public mentions and replies</text>
+<text class="c4-desc" x="115" y="877">on X and Discord</text>
+</g>
+<g class="c4-rel c4-rel-async">
+<path d="M495,530 L115,800" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="305" y="745">polls mentions,</text>
+<text class="c4-rel-label" x="305" y="758">posts replies</text>
+</g>
+<g class="c4-external">
+<rect x="225" y="800" width="190" height="96" rx="8"/>
+<text class="c4-label" x="320" y="831">Mail server</text>
+<text class="c4-tech" x="320" y="846">[IMAP / SMTP · opt-in]</text>
+<text class="c4-desc" x="320" y="863">Unseen mail becomes a wake;</text>
+<text class="c4-desc" x="320" y="877">sends one message on demand</text>
+</g>
+<g class="c4-rel c4-rel-async">
+<path d="M545,530 L320,800" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="432.5" y="771">reads and</text>
+<text class="c4-rel-label" x="432.5" y="784">sends mail</text>
+</g>
+<g class="c4-external">
+<rect x="430" y="800" width="190" height="96" rx="8"/>
+<text class="c4-label" x="525" y="831">AWS Bedrock</text>
+<text class="c4-tech" x="525" y="846">[Nova Sonic · opt-in]</text>
+<text class="c4-desc" x="525" y="863">Spoken interface session held</text>
+<text class="c4-desc" x="525" y="877">for a laptop client over SSH</text>
+</g>
+<g class="c4-rel">
+<path d="M595,530 L525,800" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="560" y="745">voice session</text>
+</g>
+<g class="c4-external">
+<rect x="635" y="800" width="190" height="96" rx="8"/>
+<text class="c4-label" x="730" y="831">Notification surfaces</text>
+<text class="c4-tech" x="730" y="846">[osascript · Herdr · command]</text>
+<text class="c4-desc" x="730" y="863">Away-mode wedge alarm when</text>
+<text class="c4-desc" x="730" y="877">escalation delivery sticks</text>
+</g>
+<g class="c4-rel">
+<path d="M645,530 L730,800" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="687.5" y="771">raises alarm</text>
+</g>
+<g class="c4-external">
+<rect x="840" y="800" width="190" height="96" rx="8"/>
+<text class="c4-label" x="935" y="831">Remote SSH hosts</text>
+<text class="c4-tech" x="935" y="846">[ssh · launchd LaunchAgent]</text>
+<text class="c4-desc" x="935" y="863">Run whole remote secondmate</text>
+<text class="c4-desc" x="935" y="877">homes and their job worker</text>
+</g>
+<g class="c4-rel">
+<path d="M695,530 L935,800" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="815" y="745">runs fm-* jobs</text>
+<text class="c4-rel-label" x="815" y="758">over SSH</text>
+</g>
+<g class="c4-external">
+<rect x="1045" y="800" width="190" height="96" rx="8"/>
+<text class="c4-label" x="1140" y="831">lavish-axi server</text>
+<text class="c4-tech" x="1140" y="846">[review board server]</text>
+<text class="c4-desc" x="1140" y="863">Visual review artifacts the</text>
+<text class="c4-desc" x="1140" y="877">captain annotates</text>
+</g>
+<g class="c4-rel c4-rel-async">
+<path d="M745,530 L1140,800" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="942.5" y="771">arms and polls</text>
+<text class="c4-rel-label" x="942.5" y="784">boards</text>
+</g>
+<g class="c4-rel c4-rel-async">
+<path d="M520,150 C 400,150 300,190 230,262" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="400" y="150">may watch or type into a</text>
+<text class="c4-rel-label" x="400" y="163">worker pane directly</text>
+</g>
+<g class="c4-legend">
+<rect class="c4-legend-frame" x="732" y="30" width="200" height="150" rx="6"/>
+<text class="c4-legend-heading" x="744" y="50">Legend</text>
+<g class="c4-person"><rect x="744" y="62" width="32" height="16" rx="7"/></g>
+<text x="786" y="74">Person</text>
+<g class="c4-system"><rect x="744" y="86" width="32" height="16" rx="3"/></g>
+<text x="786" y="98">System in scope</text>
+<g class="c4-external"><rect x="744" y="110" width="32" height="16" rx="3"/></g>
+<text x="786" y="122">External system</text>
+<g class="c4-rel"><path d="M744,142 L776,142"/></g>
+<text x="786" y="146">Uses (synchronous)</text>
+<g class="c4-rel c4-rel-async"><path d="M744,166 L776,166"/></g>
+<text x="786" y="170">Polled, event or opt-in</text>
+</g>
+</svg>
+</div>
+<figcaption>Level 1. Arrows point from the user of a relationship to the thing used. Dashed arrows are polled, event-driven, or opt-in. Everything marked opt-in is inert until the home enables it.</figcaption>
+</figure>
+
+<h2 id="system">The system in scope</h2>
+<p>Firstmate describes itself as "an agent distro for running a crew of agents": a directory of instructions, skills, tooling, policies, and state conventions that turns a general-purpose coding agent into a supervisor <code class="cite">README.md:36-40</code>. There is no app to install. Launching a supported harness inside the clone makes that session the first mate, and makes the user the captain <code class="cite">README.md:39-40</code>.</p>
+<p>Two parts make up one running instance:</p>
+<ul>
+<li>The <strong>tracked code root</strong>: <code>AGENTS.md</code>, <code>bin/</code>, <code>.agents/skills/</code>, docs, and hooks. It is shared template material <code class="cite">AGENTS.md:44-48</code>. Only <code>AGENTS.md</code>, <code>bin/</code>, and <code>.agents/skills/</code> are loaded by a running first mate <code class="cite">AGENTS.md:572</code>.</li>
+<li>The <strong>operational home</strong> selected by <code>FM_HOME</code>. It holds the private <code>data/</code>, <code>state/</code>, <code>config/</code>, and <code>projects/</code> directories, while the scripts still come from the code root <code class="cite">AGENTS.md:54</code>, <code class="cite">docs/configuration.md:11-15</code>. All of them are gitignored <code class="cite">AGENTS.md:47</code>.</li>
+</ul>
+<p>Its stated scope is narrow: "the command layer, not the workshop". Validation belongs to no-mistakes, CI belongs to the forge, and merge policy belongs to the configured authority <code class="cite">VISION.md:71</code>. It "owns exactly one thing: the layer between the captain's intent and the agents that carry it out" <code class="cite">VISION.md:8</code>.</p>
+<p>At this level Firstmate is drawn as one box, but it can contain several copies of itself. Persistent secondmates are full Firstmate homes of their own, local or on an SSH host. They are still direct reports of the primary, not a second architecture <code class="cite">AGENTS.md:23</code>. They appear as containers on <a href="containers.html">Level 2</a>.</p>
+
+<h2 id="people">People</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Person</th><th>Role toward Firstmate</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><strong>Captain</strong></td><td>The single human user and the default authority for every gate. The captain talks only to the first mate, and every worker reports through it. Merging, discarding work, and anything destructive, irreversible, or security-sensitive need the captain's explicit word. The system "empowers exactly one individual".</td><td><code class="cite">AGENTS.md:7-9</code> <code class="cite">AGENTS.md:20-22</code> <code class="cite">AGENTS.md:32</code> <code class="cite">VISION.md:7</code> <code class="cite">VISION.md:14</code> <code class="cite">VISION.md:23-26</code></td></tr>
+<tr><td>Captain, typing directly into a worker pane</td><td>The same person, bypassing the first mate. Workers never address the captain, but direct captain intervention in a worker window is authoritative and is reconciled at the next supervision review.</td><td><code class="cite">AGENTS.md:38-40</code></td></tr>
+<tr><td>Captain, reached from a secondmate home</td><td>In a secondmate home, "reaching the captain" means appending the outcome to the parent channel. A captain-facing sentence in that home's own chat has not been sent.</td><td><code class="cite">AGENTS.md:14</code> <code class="cite">AGENTS.md:522</code></td></tr>
+<tr><td>Other public accounts (Relay only)</td><td>Not users. Relay routes a mention to a home only when it comes from that home's owner, but the surrounding public conversation can include other accounts as context.</td><td><code class="cite">docs/architecture.md:398</code></td></tr>
+</tbody></table></div>
+
+<h2 id="external">External systems</h2>
+<p>This list comes from the commands and URLs the scripts actually invoke. A scan of every HTTPS host named under <code>bin/</code> finds only GitHub, <code>myfirstmate.io</code>, <code>api.typesafe.ai</code>, Bedrock runtime, and tool-install or documentation URLs. Firstmate never calls a model provider's API itself: models are reached through the harness CLIs, typesafe.ai, and Bedrock.</p>
+
+<h3 id="ext-agents">Agents and where they run</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>System</th><th>What Firstmate uses it for</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><strong>Agent harness CLIs</strong><br><span class="evidence">claude, codex, opencode, pi, pi-signed, grok, kimi, cursor-agent, omp, gemini, muse, rovo, agy</span></td><td>Every agent is a vendor CLI session. The primary first mate runs in Claude Code, Grok, Pi, pi-signed, omp, Codex, OpenCode, or Cursor. Workers can use any of the 13 verified adapters, but muse, gemini, rovo, and agy are crewmate and scout only. <code>fm-spawn.sh</code> holds one launch template per harness, and each template passes the brief as an encoded <code>launch-brief</code> operational input.</td><td><code class="cite">README.md:61</code> <code class="cite">AGENTS.md:219</code> <code class="cite">bin/fm-harness.sh:3</code> <code class="cite">bin/fm-spawn.sh:329</code> <code class="cite">bin/fm-spawn.sh:1855</code> <code class="cite">bin/fm-spawn.sh:1885</code> <code class="cite">bin/fm-spawn.sh:1950</code></td></tr>
+<tr><td><strong>Runtime session backends</strong><br><span class="evidence">tmux, Herdr, Zellij, Orca, cmux</span></td><td>These own each worker's visible terminal endpoint: create, capture, send text or keys, check liveness, and kill. tmux is the verified reference and the hard default. Herdr has its own CI lane. Zellij, Orca, and cmux are experimental. For new spawns, auto-detection picks <code>$TMUX</code> first, then <code>HERDR_ENV=1</code>, then cmux; Zellij and Orca must be selected explicitly.</td><td><code class="cite">bin/fm-backend.sh:70</code> <code class="cite">bin/fm-backend.sh:141-160</code> <code class="cite">docs/configuration.md:137</code> <code class="cite">docs/architecture.md:241-244</code> <code class="cite">bin/backends/tmux.sh:58</code></td></tr>
+<tr><td><strong>Treehouse</strong></td><td>Pools clean git worktrees, so workers never touch the project clone. Spawn runs <code>treehouse get</code> in the new pane. Secondmate homes are durable <code>treehouse get --lease</code> worktrees. Teardown returns the slot. Orca creates its own worktrees instead.</td><td><code class="cite">docs/architecture.md:265</code> <code class="cite">bin/fm-spawn.sh:3842-3843</code> <code class="cite">bin/fm-home-seed.sh:396</code> <code class="cite">bin/fm-teardown.sh:1710</code> <code class="cite">bin/backends/orca.sh:134</code></td></tr>
+<tr><td><strong>Remote SSH hosts</strong></td><td>A remote secondmate places a whole Firstmate home on another host. It is always on Herdr in the <code>fm-remote</code> session. Every primary-to-remote command runs through <code>fm-on.sh</code> over <code>ssh</code> into a per-account job worker, which on macOS runs as a <code>launchd</code> LaunchAgent.</td><td><code class="cite">docs/remote-secondmates.md:3-7</code> <code class="cite">bin/fm-on.sh:106</code> <code class="cite">bin/fm-on.sh:125</code> <code class="cite">bin/fm-remote-job-lib.sh:69</code> <code class="cite">bin/fm-remote-job-lib.sh:1139</code> <code class="cite">bin/fm-remote-job-worker.sh:8</code></td></tr>
+</tbody></table></div>
+
+<h3 id="ext-delivery">Delivery and work tracking</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>System</th><th>What Firstmate uses it for</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><strong>GitHub</strong><br><span class="evidence">through <code>gh</code> and <code>gh-axi</code></span></td><td>Pull-request state and merges, and polls for merged PRs. It also observes published contributions and maintainer signals. <code>gh auth</code> is a session-start precondition for dispatch. Workers are told to use <code>gh-axi</code>. A merge happens only after one live read proves the PR is open, not a draft, mergeable, and green. It then binds the head with <code>--match-head-commit</code>.</td><td><code class="cite">bin/fm-pr-merge.sh:579</code> <code class="cite">bin/fm-pr-merge.sh:1150</code> <code class="cite">bin/fm-pr-poll.sh:65</code> <code class="cite">bin/fm-contributions.sh:191</code> <code class="cite">bin/fm-bootstrap.sh:131</code> <code class="cite">bin/fm-brief.sh:425</code> <code class="cite">AGENTS.md:210</code></td></tr>
+<tr><td><strong>GitLab</strong><br><span class="evidence">through <code>glab</code></span></td><td>Merge-request polling and merging on any instance. The host is taken from the MR URL.</td><td><code class="cite">bin/fm-pr-poll.sh:104</code> <code class="cite">bin/fm-pr-merge.sh:403</code> <code class="cite">docs/architecture.md:372-373</code></td></tr>
+<tr><td><strong>no-mistakes</strong></td><td>The validation pipeline for <code>no-mistakes</code>-mode ships. The worker drives it; Firstmate reads run attribution and aborts a parked run before cleanup. Seeding initializes newly cloned projects. Firstmate never answers a crew-owned gate itself.</td><td><code class="cite">AGENTS.md:347</code> <code class="cite">AGENTS.md:369-370</code> <code class="cite">bin/fm-nm-run-lib.sh:40</code> <code class="cite">bin/fm-teardown.sh:1956</code> <code class="cite">bin/fm-home-seed.sh:725</code></td></tr>
+<tr><td><strong>tasks-axi</strong></td><td>The durable backlog. By default it uses the markdown backend at <code>data/backlog.md</code>, keeping 10 Done items and archiving to <code>data/done-archive.md</code>. Beads is an alternative adapter. It is always called through <code>fm-tasks-axi.sh</code>, so every call reaches this home's queue.</td><td><code class="cite">.tasks.toml:1-6</code> <code class="cite">bin/fm-tasks-axi.sh:2</code> <code class="cite">bin/fm-tasks-axi.sh:127</code> <code class="cite">bin/fm-tasks-axi-lib.sh:45</code> <code class="cite">AGENTS.md:534</code></td></tr>
+<tr><td><strong>quota-axi</strong></td><td>Quota and runway data. The first mate reads it when choosing among dispatch-profile candidates. A registered process-event source also turns low or exhausted quota into a wake.</td><td><code class="cite">AGENTS.md:225</code> <code class="cite">bin/fm-procevent-quota.sh:110</code> <code class="cite">bin/fm-quota-axi-lib.sh:20</code></td></tr>
+<tr><td><strong>typesafe.ai</strong> <span class="evidence">(opt-in)</span></td><td>Typed dispatch resolution. When <code>TYPESAFE_API_KEY</code> is in <code>.env</code>, the brief is POSTed to the System One endpoint to propose a profile.</td><td><code class="cite">bin/fm-dispatch-resolve.sh:3</code> <code class="cite">bin/fm-dispatch-resolve.sh:78</code> <code class="cite">bin/fm-dispatch-resolve.sh:245</code> <code class="cite">AGENTS.md:235</code></td></tr>
+<tr><td><strong>Git origins</strong></td><td>Project clones fetch and fast-forward from <code>origin</code> at session start, after teardown, and on merged-PR wakes. <code>/updatefirstmate</code> fast-forwards Firstmate itself and its secondmate homes from Firstmate's own <code>origin</code>.</td><td><code class="cite">bin/fm-fleet-sync.sh:172</code> <code class="cite">docs/architecture.md:457-460</code> <code class="cite">bin/fm-update.sh:91</code> <code class="cite">bin/fm-ff-lib.sh:218</code></td></tr>
+</tbody></table></div>
+
+<h3 id="ext-reach">Reaching the captain</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>System</th><th>What Firstmate uses it for</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><strong>Relay</strong> <span class="evidence">(opt-in; <code>myfirstmate.io</code>, X and Discord)</span></td><td>Public-mention presence for the shared bot. A bounded poll stores offered mentions as wakes, and replies, follow-ups, and dismissals are POSTed back. Firstmate talks only to the relay, never to X or Discord directly. Nothing happens until <code>FMX_PAIRING_TOKEN</code> is in <code>.env</code>.</td><td><code class="cite">docs/architecture.md:394-397</code> <code class="cite">bin/fm-x-lib.sh:250</code> <code class="cite">bin/fm-x-poll.sh:118</code> <code class="cite">bin/fm-x-reply.sh:27</code> <code class="cite">bin/fm-x-dismiss.sh:103</code></td></tr>
+<tr><td><strong>Mail server</strong> <span class="evidence">(opt-in; IMAP/SMTP)</span></td><td>A general mail plane. Unseen mail can raise a <code>check</code> wake, and one message can be sent on demand. Credentials live in the home's <code>.env</code>.</td><td><code class="cite">bin/fm-mail.sh:4</code> <code class="cite">bin/fm-mail.py:74</code> <code class="cite">bin/fm-mail.py:156</code></td></tr>
+<tr><td><strong>AWS Bedrock</strong> <span class="evidence">(opt-in; Nova Sonic)</span></td><td>The spoken interface. A relay on the Firstmate host holds the Bedrock bidirectional session for a laptop client that connects over SSH. Real work is handed to the captain inbox rather than done by the voice session.</td><td><code class="cite">bin/fm-voice-relay.py:2-6</code> <code class="cite">bin/fm-voice-relay.py:535</code> <code class="cite">bin/fm-voice-client.py:178</code></td></tr>
+<tr><td><strong>Notification surfaces</strong><br><span class="evidence">macOS Notification Center, Herdr notifications, a custom command</span></td><td>The away-mode wedge alarm. If escalation delivery to the first mate's pane stalls past <code>FM_MAX_DEFER_SECS</code>, the sub-supervisor fires every configured channel. It defaults to <code>osascript</code> on macOS.</td><td><code class="cite">bin/fm-supervise-daemon.sh:737-740</code> <code class="cite">bin/fm-supervise-daemon.sh:861</code> <code class="cite">bin/fm-supervise-daemon.sh:879</code> <code class="cite">bin/fm-supervise-daemon.sh:895</code></td></tr>
+<tr><td><strong>lavish-axi server</strong></td><td>Visual review boards for decisions and reports the captain annotates. A worker hosts the board, and a process-event source polls it for captain feedback.</td><td><code class="cite">AGENTS.md:84</code> <code class="cite">AGENTS.md:414</code> <code class="cite">bin/fm-procevent-lavish.sh:185</code> <code class="cite">bin/fm-procevent-lavish.sh:398</code></td></tr>
+</tbody></table></div>
+
+<h3 id="ext-tooling">Tooling at the edge</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>System</th><th>What Firstmate uses it for</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>Package installers<br><span class="evidence">Homebrew, npm, vendor install scripts</span></td><td>Bootstrap detects missing tools and installs only after the captain approves in the current session. The install map uses <code>brew</code> for tmux, git, gh, jq, and zellij; npm for the <code>*-axi</code> CLIs; and a vendor script for Treehouse and no-mistakes. Herdr and cursor-agent install manually.</td><td><code class="cite">AGENTS.md:209</code> <code class="cite">bin/fm-bootstrap.sh:875-890</code> <code class="cite">bin/fm-bootstrap.sh:909</code></td></tr>
+<tr><td>chrome-devtools-axi</td><td>Browser automation, but for workers only. It appears in the generated brief and the bootstrap tool list, and Firstmate's own scripts never call it.</td><td><code class="cite">bin/fm-brief.sh:425</code> <code class="cite">bin/fm-bootstrap.sh:909</code></td></tr>
+<tr><td>Trusted extension packages</td><td>Operator-bound local packages that provide process-event adapters. They are discovered only from <code>config/extensions.d/*.json</code> and spawned with <code>shell=false</code>.</td><td><code class="cite">bin/fm-extension.mjs:2</code> <code class="cite">bin/fm-extension.mjs:43-45</code> <code class="cite">docs/extension-bindings.md</code></td></tr>
+</tbody></table></div>
+
+<h2 id="not-external">Deliberately not external systems</h2>
+<ul>
+<li><strong>Codex App</strong> is not a runtime backend: "Codex App is not a selectable Firstmate runtime backend" <code class="cite">docs/codex-app-backend.md:3</code>, and <code>fm-backend.sh</code> leaves it out on purpose <code class="cite">bin/fm-backend.sh:69</code>.</li>
+<li><strong>Trace context</strong> reaches no collector. It only injects <code>TRACEPARENT</code> into a spawned agent's shell, and "firstmate emits no spans itself" <code class="cite">bin/fm-trace-context-lib.sh:5</code> <code class="cite">bin/fm-trace-context-lib.sh:71</code>.</li>
+<li><strong>Project repositories</strong> are cloned under <code>projects/</code>, but they are the objects of the work, not collaborators. Firstmate is read-only over them except for narrow guarded paths <code class="cite">AGENTS.md:27-31</code>.</li>
+</ul>
+
+<div class="callout unclear"><span class="callout-title">Not settled by the source</span>
+<p><code>bin/fm-tool-update-check.sh</code> compares watched tools against "the update source" <code class="cite">bin/fm-tool-update-check.sh:21</code>. Which registry that is depends on the home's <code>config/watched-tools.json</code>, which is private and was not read. <code>bin/fm-vendor-auth-probe.sh</code> probes "a named vendor CLI", and this page did not trace which vendors it is called with.</p>
+</div>
+</article>
+</main>
+</div>
+<script src="../assets/nav-data.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

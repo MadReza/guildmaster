@@ -1,0 +1,340 @@
+/*
+ * Firstmate C4 research site: all presentation lives here.
+ * Pages carry no inline styles. Diagram vocabulary is at the bottom ("C4 diagram vocabulary").
+ * See ../AUTHORING.md before adding or changing a class.
+ */
+
+/* ---------- Tokens ---------- */
+:root {
+  color-scheme: light dark;
+
+  --bg: #fbfbfa;
+  --bg-raised: #ffffff;
+  --bg-sunken: #f1f2f0;
+  --fg: #1d2125;
+  --fg-muted: #5a636b;
+  --border: #d9dcd8;
+  --accent: #1f5fa8;
+  --accent-soft: #e4eef9;
+  --warn-bg: #fff6df;
+  --warn-border: #d9a51f;
+  --note-bg: #eef5ee;
+  --note-border: #4d8a55;
+  --code-bg: #eef0ee;
+
+  /* C4 diagram palette (light) */
+  --c4-person: #0b3d73;
+  --c4-person-stroke: #072a51;
+  --c4-system: #1565b8;
+  --c4-system-stroke: #0e4a88;
+  --c4-container: #3f86cf;
+  --c4-container-stroke: #2c6aa8;
+  --c4-component: #8dbdea;
+  --c4-component-stroke: #5e97cc;
+  --c4-component-fg: #0c2440;
+  --c4-datastore: #2f7d6d;
+  --c4-datastore-stroke: #205a4e;
+  --c4-external: #7a7f86;
+  --c4-external-stroke: #5d6167;
+  --c4-node-fg: #ffffff;
+  --c4-rel: #4f575f;
+  --c4-rel-label: #3a4148;
+  --c4-boundary: #6d747b;
+  --c4-canvas: #ffffff;
+
+  --radius: 6px;
+  --measure: 46rem;
+  --nav-width: 17rem;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15181b;
+    --bg-raised: #1c2024;
+    --bg-sunken: #111316;
+    --fg: #e3e6e8;
+    --fg-muted: #9aa3ab;
+    --border: #30363c;
+    --accent: #7fb3ee;
+    --accent-soft: #1d2b3b;
+    --warn-bg: #2d2615;
+    --warn-border: #b98d1c;
+    --note-bg: #182619;
+    --note-border: #5e9f67;
+    --code-bg: #23282d;
+
+    --c4-person: #1e5694;
+    --c4-person-stroke: #6fa3dc;
+    --c4-system: #1f6fc2;
+    --c4-system-stroke: #7fb3ee;
+    --c4-container: #2f6fae;
+    --c4-container-stroke: #8fbdea;
+    --c4-component: #264a6e;
+    --c4-component-stroke: #8dbdea;
+    --c4-component-fg: #e3eefa;
+    --c4-datastore: #2a6b5e;
+    --c4-datastore-stroke: #7cc4b3;
+    --c4-external: #4a4f55;
+    --c4-external-stroke: #9aa1a8;
+    --c4-node-fg: #f4f7fa;
+    --c4-rel: #aab3bb;
+    --c4-rel-label: #c9d0d6;
+    --c4-boundary: #8e969e;
+    --c4-canvas: #1a1e22;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #15181b;
+  --bg-raised: #1c2024;
+  --bg-sunken: #111316;
+  --fg: #e3e6e8;
+  --fg-muted: #9aa3ab;
+  --border: #30363c;
+  --accent: #7fb3ee;
+  --accent-soft: #1d2b3b;
+  --warn-bg: #2d2615;
+  --warn-border: #b98d1c;
+  --note-bg: #182619;
+  --note-border: #5e9f67;
+  --code-bg: #23282d;
+
+  --c4-person: #1e5694;
+  --c4-person-stroke: #6fa3dc;
+  --c4-system: #1f6fc2;
+  --c4-system-stroke: #7fb3ee;
+  --c4-container: #2f6fae;
+  --c4-container-stroke: #8fbdea;
+  --c4-component: #264a6e;
+  --c4-component-stroke: #8dbdea;
+  --c4-component-fg: #e3eefa;
+  --c4-datastore: #2a6b5e;
+  --c4-datastore-stroke: #7cc4b3;
+  --c4-external: #4a4f55;
+  --c4-external-stroke: #9aa1a8;
+  --c4-node-fg: #f4f7fa;
+  --c4-rel: #aab3bb;
+  --c4-rel-label: #c9d0d6;
+  --c4-boundary: #8e969e;
+  --c4-canvas: #1a1e22;
+}
+
+/* ---------- Base ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}
+
+a { color: var(--accent); text-underline-offset: 0.15em; }
+a:hover { text-decoration-thickness: 2px; }
+
+h1, h2, h3, h4 { line-height: 1.25; margin: 2rem 0 0.75rem; }
+h1 { font-size: 1.9rem; margin-top: 0.5rem; }
+h2 { font-size: 1.4rem; padding-top: 0.5rem; border-top: 1px solid var(--border); }
+h3 { font-size: 1.12rem; }
+h4 { font-size: 1rem; }
+
+p, ul, ol, dl, table, figure, pre, .callout { margin: 0 0 1rem; }
+ul, ol { padding-left: 1.4rem; }
+li + li { margin-top: 0.25rem; }
+
+code, kbd, pre { font-family: var(--font-mono); font-size: 0.88em; }
+code { background: var(--code-bg); padding: 0.08em 0.3em; border-radius: 4px; overflow-wrap: anywhere; }
+pre {
+  background: var(--code-bg);
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  overflow-x: auto;
+  max-width: 100%;
+}
+pre code { background: none; padding: 0; overflow-wrap: normal; }
+
+hr { border: 0; border-top: 1px solid var(--border); margin: 2rem 0; }
+
+img, svg { max-width: 100%; }
+
+.skip {
+  position: absolute; left: -999px; top: 0;
+  background: var(--bg-raised); padding: 0.5rem 1rem; z-index: 10;
+}
+.skip:focus { left: 0.5rem; top: 0.5rem; }
+
+/* ---------- Layout ---------- */
+.site-header {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.6rem 1rem;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+}
+.site-header .brand { font-weight: 700; color: var(--fg); text-decoration: none; }
+.site-header .brand small { font-weight: 400; color: var(--fg-muted); }
+.site-header .spacer { flex: 1; }
+.site-header button {
+  font: inherit; font-size: 0.9rem;
+  background: var(--bg-sunken); color: var(--fg);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0.3rem 0.65rem; cursor: pointer;
+}
+.nav-toggle { display: none; }
+
+.layout {
+  display: grid;
+  grid-template-columns: var(--nav-width) minmax(0, 1fr);
+  min-height: calc(100vh - 3rem);
+}
+
+#site-nav {
+  position: sticky; top: 3rem;
+  align-self: start;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+  padding: 1rem 0.75rem 2rem 1rem;
+  border-right: 1px solid var(--border);
+  background: var(--bg-sunken);
+  font-size: 0.92rem;
+}
+#site-nav h2 {
+  font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--fg-muted); border: 0; padding: 0; margin: 1.1rem 0 0.35rem;
+}
+#site-nav h2:first-child { margin-top: 0; }
+#site-nav ul { list-style: none; margin: 0; padding: 0; }
+#site-nav li + li { margin-top: 0; }
+#site-nav a {
+  display: block; padding: 0.2rem 0.5rem; border-radius: 4px;
+  color: var(--fg); text-decoration: none;
+}
+#site-nav a:hover { background: var(--accent-soft); }
+#site-nav a[aria-current="page"] {
+  background: var(--accent-soft); color: var(--accent); font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+#site-nav .stub::after { content: " · stub"; color: var(--fg-muted); font-size: 0.8em; }
+
+main {
+  min-width: 0;
+  padding: 1.5rem 2rem 4rem;
+}
+main > article { max-width: var(--measure); }
+main > article.wide { max-width: 64rem; }
+
+.breadcrumb { font-size: 0.85rem; color: var(--fg-muted); margin-bottom: 0.25rem; }
+.lede { font-size: 1.08rem; color: var(--fg-muted); }
+.meta-line { font-size: 0.85rem; color: var(--fg-muted); }
+
+.pager {
+  display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+  margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border);
+  font-size: 0.92rem;
+}
+
+@media (max-width: 52rem) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  .nav-toggle { display: inline-block; }
+  #site-nav {
+    display: none;
+    position: static; max-height: none;
+    border-right: 0; border-bottom: 1px solid var(--border);
+  }
+  body.nav-open #site-nav { display: block; }
+  main { padding: 1rem 16px 3rem; }
+  h1 { font-size: 1.55rem; }
+}
+
+/* ---------- Content blocks ---------- */
+.table-wrap { overflow-x: auto; max-width: 100%; margin: 0 0 1rem; }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+.table-wrap table { margin: 0; }
+th, td { text-align: left; vertical-align: top; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border); }
+th { background: var(--bg-sunken); font-weight: 600; }
+
+.callout { padding: 0.75rem 1rem; border-left: 4px solid var(--note-border); background: var(--note-bg); border-radius: 0 var(--radius) var(--radius) 0; }
+.callout.unclear { border-left-color: var(--warn-border); background: var(--warn-bg); }
+.callout > :last-child { margin-bottom: 0; }
+.callout-title { font-weight: 700; display: block; margin-bottom: 0.25rem; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 0.75rem; margin: 0 0 1rem; padding: 0; list-style: none; }
+.cards li { margin: 0; }
+.cards a, .cards .card {
+  display: block; height: 100%;
+  padding: 0.75rem 0.9rem; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-raised); color: var(--fg); text-decoration: none;
+}
+.cards a:hover { border-color: var(--accent); }
+.cards strong { display: block; color: var(--accent); }
+.cards span { font-size: 0.9rem; color: var(--fg-muted); }
+
+/* Evidence citation: <code class="cite">bin/fm-watch.sh:12</code>. site.js links it to the pinned source commit. */
+code.cite, a.cite code { font-size: 0.8em; white-space: nowrap; }
+a.cite { text-decoration: none; }
+a.cite:hover code { outline: 1px solid var(--accent); }
+.evidence { font-size: 0.88rem; color: var(--fg-muted); }
+
+dl.defs dt { font-weight: 600; margin-top: 0.6rem; }
+dl.defs dd { margin: 0 0 0 1rem; }
+
+/* ---------- C4 diagram vocabulary ----------
+ * Wrap every diagram as <figure class="diagram"> containing one inline <svg class="c4" viewBox=...>
+ * with a <title>, and a <figcaption>. Node kinds are classes on a <g> around the shape and its labels:
+ *   .c4-person .c4-system .c4-container .c4-component .c4-datastore .c4-external
+ * Scope/boundary box: .c4-boundary. Relationship: <g class="c4-rel"> with a <path> plus .c4-rel-label text.
+ * Text: .c4-label (name), .c4-tech ([technology]), .c4-desc (one-line description), .c4-diagram-title.
+ * Legend: <g class="c4-legend">. Snippets for every shape are in ../AUTHORING.md.
+ */
+figure.diagram {
+  margin: 1.25rem 0 1.5rem;
+  padding: 0.75rem;
+  background: var(--c4-canvas);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+figure.diagram figcaption { font-size: 0.88rem; color: var(--fg-muted); margin-top: 0.5rem; }
+svg.c4 { display: block; width: 100%; height: auto; font-family: var(--font-sans); }
+
+svg.c4 .c4-diagram-title { fill: var(--fg); font-size: 18px; font-weight: 700; }
+svg.c4 text { fill: var(--c4-node-fg); }
+svg.c4 .c4-label { font-size: 14px; font-weight: 700; }
+svg.c4 .c4-tech { font-size: 11px; font-style: italic; opacity: 0.9; }
+svg.c4 .c4-desc { font-size: 11.5px; }
+svg.c4 text.c4-label, svg.c4 text.c4-tech, svg.c4 text.c4-desc { text-anchor: middle; }
+
+svg.c4 .c4-person > rect, svg.c4 .c4-person > circle, svg.c4 .c4-person > path { fill: var(--c4-person); stroke: var(--c4-person-stroke); stroke-width: 1.5; }
+svg.c4 .c4-system > rect, svg.c4 .c4-system > path { fill: var(--c4-system); stroke: var(--c4-system-stroke); stroke-width: 1.5; }
+svg.c4 .c4-container > rect, svg.c4 .c4-container > path { fill: var(--c4-container); stroke: var(--c4-container-stroke); stroke-width: 1.5; }
+svg.c4 .c4-component > rect, svg.c4 .c4-component > path { fill: var(--c4-component); stroke: var(--c4-component-stroke); stroke-width: 1.5; }
+svg.c4 .c4-component text { fill: var(--c4-component-fg); }
+svg.c4 .c4-datastore > rect, svg.c4 .c4-datastore > path, svg.c4 .c4-datastore > ellipse { fill: var(--c4-datastore); stroke: var(--c4-datastore-stroke); stroke-width: 1.5; }
+svg.c4 .c4-external > rect, svg.c4 .c4-external > path, svg.c4 .c4-external > circle { fill: var(--c4-external); stroke: var(--c4-external-stroke); stroke-width: 1.5; }
+
+svg.c4 .c4-boundary > rect { fill: none; stroke: var(--c4-boundary); stroke-width: 1.5; stroke-dasharray: 7 5; }
+svg.c4 .c4-boundary > text { fill: var(--c4-boundary); font-size: 12.5px; font-weight: 700; text-anchor: start; }
+
+svg.c4 .c4-rel > path, svg.c4 .c4-rel > line { fill: none; stroke: var(--c4-rel); stroke-width: 1.4; }
+svg.c4 .c4-rel.c4-rel-async > path, svg.c4 .c4-rel.c4-rel-async > line { stroke-dasharray: 5 4; }
+svg.c4 .c4-rel-label { fill: var(--c4-rel-label); font-size: 11px; text-anchor: middle; paint-order: stroke; stroke: var(--c4-canvas); stroke-width: 4px; stroke-linejoin: round; }
+svg.c4 .c4-arrowhead { fill: var(--c4-rel); stroke: none; }
+/* Numbered relationship badge: <g class="c4-rel-num"><circle/><text/></g>, keyed to an interactions table. */
+svg.c4 .c4-rel-num circle { fill: var(--c4-canvas); stroke: var(--c4-rel); stroke-width: 1.4; }
+svg.c4 .c4-rel-num text { fill: var(--fg); font-size: 10.5px; font-weight: 700; text-anchor: middle; }
+
+svg.c4 .c4-legend > rect.c4-legend-frame { fill: var(--c4-canvas); stroke: var(--border); stroke-width: 1; }
+svg.c4 .c4-legend text { fill: var(--fg); font-size: 11.5px; text-anchor: start; }
+svg.c4 .c4-legend .c4-legend-heading { font-weight: 700; }
+
+/* A dense diagram keeps a readable minimum width and scrolls inside its own frame on a phone; the page never scrolls sideways. */
+figure.diagram .diagram-scroll { overflow-x: auto; max-width: 100%; }
+@media (max-width: 52rem) {
+  figure.diagram svg.c4.c4-dense { min-width: 760px; }
+}
