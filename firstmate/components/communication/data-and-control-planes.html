@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data plane and control plane · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Communication</p>
+<h1>Data plane and control plane</h1>
+<p class="lede">Firstmate reaches a running agent in two separate ways: text the agent reads and thinks about, and a short fixed list of lifecycle actions that stop or replace the agent. They use different commands on purpose, because a lifecycle command sent as a message is read as chat and not obeyed.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Owners: <code class="cite">bin/fm-send.sh</code> (data), <code class="cite">bin/fm-control.sh</code> and <code class="cite">bin/fm-control-lib.sh</code> (control), with the design note <code class="cite">docs/agent-control.md</code>. Up: <a href="index.html">Communication</a>.</p>
+
+<h2 id="split">The two planes</h2>
+<dl class="defs">
+<dt>Data plane: <code>bin/fm-send.sh</code></dt>
+<dd>Conversational text for the agent to read. For a <code>kind=secondmate</code> target it always adds the from-firstmate routing marker, because a secondmate is itself a firstmate and its reply must come back through its status channel (<code class="cite">docs/agent-control.md:5-6</code>). See <a href="fm-send.html">fm-send</a>.</dd>
+<dt>Control plane: <code>bin/fm-control.sh</code></dt>
+<dd>Allowlisted lifecycle verbs, <code>interrupt</code>, <code>exit</code>, <code>relaunch</code>, addressed to an exact task id, each with a checked postcondition (<code class="cite">docs/agent-control.md:8</code>, <code class="cite">bin/fm-control.sh:1-21</code>).</dd>
+</dl>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 760 520" role="img" aria-labelledby="dcp-t dcp-d">
+<title id="dcp-t">Data plane and control plane side by side</title>
+<desc id="dcp-d">The supervisor sends text through fm-send into the steering inbox, which the worker agent reads and reasons about. Separately it drives lifecycle through fm-control, which reads per-harness and per-backend tables in fm-control-lib and delivers keys or exit commands to the agent process, then reads the recovery-grade agent state to prove the result. fm-send's key path reads the composer-clear entry from the same table.</desc>
+<defs><marker id="dcp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="10" y="30">Two ways to reach one agent</text>
+<g class="c4-container"><rect x="10" y="190" width="150" height="80" rx="8"/><text class="c4-label" x="85" y="219">Firstmate</text><text class="c4-tech" x="85" y="235">[supervisor session]</text><text class="c4-desc" x="85" y="250">decides what to send</text></g>
+<g class="c4-boundary"><rect x="185" y="50" width="565" height="160" rx="8"/><text x="197" y="68">Data plane: text to read</text></g>
+<g class="c4-container"><rect x="200" y="90" width="150" height="76" rx="8"/><text class="c4-label" x="275" y="117">fm-send.sh</text><text class="c4-tech" x="275" y="133">[bash]</text><text class="c4-desc" x="275" y="148">marks secondmate text</text></g>
+<g class="c4-datastore"><rect x="395" y="90" width="150" height="76" rx="8"/><text class="c4-label" x="470" y="117">Steering inbox</text><text class="c4-tech" x="470" y="133">[state/&lt;id&gt;.inbox/]</text><text class="c4-desc" x="470" y="148">or typed text</text></g>
+<g class="c4-external"><rect x="595" y="90" width="145" height="76" rx="8"/><text class="c4-label" x="667.5" y="117">Worker agent</text><text class="c4-tech" x="667.5" y="133">[harness session]</text><text class="c4-desc" x="667.5" y="148">reads and reasons</text></g>
+<g class="c4-boundary"><rect x="185" y="240" width="565" height="190" rx="8"/><text x="197" y="258">Control plane: lifecycle verbs</text></g>
+<g class="c4-container"><rect x="200" y="280" width="150" height="76" rx="8"/><text class="c4-label" x="275" y="307">fm-control.sh</text><text class="c4-tech" x="275" y="323">[bash]</text><text class="c4-desc" x="275" y="338">3 lifecycle verbs</text></g>
+<g class="c4-component"><rect x="395" y="280" width="150" height="76" rx="8"/><text class="c4-label" x="470" y="307">Capability tables</text><text class="c4-tech" x="470" y="323">[bin/fm-control-lib.sh]</text><text class="c4-desc" x="470" y="338">keys, exit cmd, caps</text></g>
+<g class="c4-external"><rect x="595" y="280" width="145" height="76" rx="8"/><text class="c4-label" x="667.5" y="307">Agent process</text><text class="c4-tech" x="667.5" y="323">[same endpoint]</text><text class="c4-desc" x="667.5" y="338">stopped or replaced</text></g>
+<g class="c4-rel"><path d="M160,215 L175,215 L175,128 L198,128" marker-end="url(#dcp-arrow)"/></g>
+<g class="c4-rel"><path d="M160,245 L175,245 L175,318 L198,318" marker-end="url(#dcp-arrow)"/></g>
+<g class="c4-rel"><path d="M350,128 L393,128" marker-end="url(#dcp-arrow)"/><text class="c4-rel-label" x="372" y="120">record</text></g>
+<g class="c4-rel c4-rel-async"><path d="M545,128 L593,128" marker-end="url(#dcp-arrow)"/><text class="c4-rel-label" x="569" y="120">reads</text></g>
+<g class="c4-rel"><path d="M350,318 L393,318" marker-end="url(#dcp-arrow)"/><text class="c4-rel-label" x="372" y="310">reads</text></g>
+<g class="c4-rel"><path d="M545,318 L593,318" marker-end="url(#dcp-arrow)"/><text class="c4-rel-label" x="569" y="310">key/cmd</text></g>
+<g class="c4-rel c4-rel-async"><path d="M667,356 L667,400 L275,400 L275,358" marker-end="url(#dcp-arrow)"/><text class="c4-rel-label" x="470" y="394">agent-state read proves the postcondition (tmux, herdr only)</text></g>
+<g class="c4-rel c4-rel-async"><path d="M320,166 L440,278" marker-end="url(#dcp-arrow)"/><text class="c4-rel-label" x="405" y="226">--key reads clear key</text></g>
+<g class="c4-legend"><rect class="c4-legend-frame" x="10" y="448" width="740" height="56" rx="6"/><text class="c4-legend-heading" x="22" y="468">Legend</text><g class="c4-container"><rect x="90" y="458" width="22" height="14" rx="3"/></g><text x="118" y="470">Script</text><g class="c4-component"><rect x="180" y="458" width="22" height="14" rx="3"/></g><text x="208" y="470">Library table</text><g class="c4-datastore"><rect x="310" y="458" width="22" height="14" rx="3"/></g><text x="338" y="470">File store</text><g class="c4-external"><rect x="420" y="458" width="22" height="14" rx="3"/></g><text x="448" y="470">Running agent</text><text x="90" y="494">Solid arrow: a write or keystroke. Dashed arrow: a read or later effect. Dashed box: one plane.</text></g>
+</svg>
+</div>
+<figcaption>The two lanes never exchange payloads. The one shared piece is the composer-clear table, which fm-send's <code>--key</code> path reads from the control plane's owner instead of keeping its own copy (<code class="cite">bin/fm-send.sh:279-281</code>).</figcaption>
+</figure>
+
+<h2 id="why">Why mixing them is unsafe</h2>
+<p>The data plane's marking is right for a message and wrong for a lifecycle command. A routing-marked <code>/quit</code> reaches a secondmate as <code>[fm-from-firstmate] /quit</code>, which the agent reasons about instead of executing (<code class="cite">docs/agent-control.md:10-12</code>; <code class="cite">bin/fm-control-lib.sh:5-13</code>). The design note records that this failure repeated across harnesses and homes, and that the workaround, "remember to use an unmarked send and improvise the right key per harness", lived only in agent prose and so failed again whenever a session forgot it.</p>
+<p>The risk runs in both directions:</p>
+<ul>
+<li><strong>Lifecycle over the data plane</strong> is not obeyed when marked, and when unmarked it depends on the agent guessing the right key or command for its harness, with no proof that anything stopped.</li>
+<li><strong>Text over the control plane</strong> is impossible by construction: there is "deliberately NO arbitrary-text and NO generic raw-key entry point" in <code>fm-control.sh</code>; "fm-send remains the only way to send an agent something to read" (<code class="cite">bin/fm-control.sh:19-21</code>).</li>
+</ul>
+<p>The data plane's own <a href="fm-send.html#typed-plane">typed path</a> exists for the narrow case where text <em>must</em> reach the harness's parser, such as a slash command to a crewmate. Its classification reads the text before marking, but for a secondmate the marker still comes first, so a marked parser command still arrives as chat. fm-send keeps that behaviour for byte compatibility and names a follow-up that owns it (<code class="cite">bin/fm-send.sh:88-94</code>).</p>
+
+<h2 id="control">What the control plane guarantees</h2>
+<p><code>bin/fm-control-lib.sh</code> is the one executable owner of three tables, which have no side effects and can be tested as a contract (<code class="cite">bin/fm-control-lib.sh:15-37</code>):</p>
+<ol>
+<li><strong>Verb allowlist</strong>: <code>interrupt</code>, <code>exit</code>, <code>relaunch</code> (<code class="cite">bin/fm-control-lib.sh:49-62</code>).</li>
+<li><strong>Per-harness mechanics</strong>: the interrupt key (Escape for most, C-c for grok), how many times (twice for opencode), the composer clear (Ctrl+U for muse only), whether cancellation can be acknowledged, and the exit command (<code>/exit</code> or <code>/quit</code>) (<code class="cite">bin/fm-control-lib.sh:132-193</code>).</li>
+<li><strong>Per-backend capability</strong>: which keys a backend can deliver (Orca: Enter and C-c only) and whether it has a recovery-grade agent-state reader (tmux and Herdr only) (<code class="cite">bin/fm-control-lib.sh:195-221</code>).</li>
+</ol>
+<div class="table-wrap"><table>
+<thead><tr><th>Verb</th><th>Effect</th><th>Proven by</th></tr></thead>
+<tbody>
+<tr><td><code>interrupt</code></td><td>Delivers the harness's interrupt sequence; the agent keeps running.</td><td>Delivery, endpoint present, agent alive where classifiable. Cancellation is <code>confirmed</code> only from an adapter acknowledgement (muse's session log), otherwise <code>unconfirmed</code>.</td></tr>
+<tr><td><code>exit</code></td><td>Stops the agent, keeping endpoint, worktree, and uncommitted work.</td><td>The backend's agent-state reader says the agent is gone. Already stopped is success.</td></tr>
+<tr><td><code>relaunch</code></td><td>Replaces the agent in the same worktree, same endpoint where it survives, on the recorded or a chosen harness.</td><td>The new agent is alive on the endpoint the record names.</td></tr>
+</tbody></table></div>
+<p>(<code class="cite">docs/agent-control.md:31-48</code>.) Things that are deliberately <em>not</em> verbs: teardown and discard stay with <code>bin/fm-teardown.sh</code>; <code>resume</code> is not deterministic across adapters, and <code>relaunch</code> covers the need because "the brief on disk - not a harness-private session - is the durable instruction" (<code class="cite">docs/agent-control.md:50-56</code>). That last point ties the planes together: the durable text a relaunched agent reads is the brief, not anything the control plane types.</p>
+<p>Targeting is exact: a bare task id with a <code>state/&lt;id&gt;.meta</code> record in this home, passing endpoint-identity validation. A legacy <code>fm-&lt;id&gt;</code> label, a <code>session:window</code> target, and a remotely placed secondmate are refused (<code class="cite">bin/fm-control.sh:90-100</code>). The control plane fails closed on unverified harnesses, backends that cannot deliver the key, backends without a state reader, ambiguous states, and a composer holding text (<code class="cite">bin/fm-control.sh:101-114</code>). The full transactional relaunch and endpoint reclaim are part of the worker lifecycle and belong to <a href="../crew/index.html">Crew</a>.</p>
+
+<div class="callout unclear"><span class="callout-title">Header and design note disagree on <code>resume</code></span>
+<p>The library header lists which adapters cannot resume deterministically as codex and grok (session id at exit), opencode (<code>--continue</code>), and claude, pi, pi-signed, omp, kimi (no contract) (<code class="cite">bin/fm-control-lib.sh:39-46</code>). The design note adds gemini to the session-id group and agy to the no-contract group (<code class="cite">docs/agent-control.md:55</code>). The conclusion is the same, but the header's list is stale against the verified-harness list, which includes both gemini and agy (<code class="cite">bin/fm-control-lib.sh:67-69</code>).</p></div>
+
+<h2 id="summary">Rule of thumb, from the source</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>You want the agent to…</th><th>Use</th></tr></thead>
+<tbody>
+<tr><td>read an instruction, answer, or a decision</td><td><code>fm-send.sh &lt;task&gt; "…"</code> (inbox plane)</td></tr>
+<tr><td>run a harness slash command, locally</td><td><code>fm-send.sh &lt;task&gt; "/…"</code> (typed plane; not for secondmates, see above)</td></tr>
+<tr><td>stop its current turn</td><td><code>fm-control.sh &lt;task&gt; interrupt</code></td></tr>
+<tr><td>stop entirely, keeping its work</td><td><code>fm-control.sh &lt;task&gt; exit</code></td></tr>
+<tr><td>be replaced, or switch harness</td><td><code>fm-control.sh &lt;task&gt; relaunch --note "…"</code></td></tr>
+<tr><td>be removed with its worktree</td><td><code>fm-teardown.sh</code> (neither plane)</td></tr>
+</tbody></table></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

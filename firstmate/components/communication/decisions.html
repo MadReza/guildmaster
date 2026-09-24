@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keyed decisions and --resolve-key · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Communication</p>
+<h1>Keyed decisions and <code>--resolve-key</code></h1>
+<p class="lede">A worker's question to a human is a <code>needs-decision</code> or <code>blocked</code> line with a key. It stays open until a <code>resolved</code> line with the same key appears, and the one who answers writes that line, so closing never depends on the busy worker remembering.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Fold owner: <code class="cite">bin/fm-classify-lib.sh:413-754</code>. Answer-and-close: <code class="cite">bin/fm-send.sh:154-208</code>. Up: <a href="index.html">Communication</a>.</p>
+
+<h2 id="rules">The open/close rule</h2>
+<p>One function, <code>_fm_decision_fold_line</code>, states the per-line rule, and both the whole-file fold and the incremental cursor-backed fold call it, so the two cannot drift (<code class="cite">bin/fm-classify-lib.sh:615-621</code>, <code class="cite">bin/fm-classify-lib.sh:678-723</code>):</p>
+<ul>
+<li><code>needs-decision</code> or <code>blocked</code> <strong>opens</strong> the key, replacing any older record for that key.</li>
+<li><code>resolved</code> or <code>captain-held</code> <strong>closes</strong> it.</li>
+<li>A <code>done</code> or <code>failed</code> line from a ship or scout task <strong>clears everything</strong>; from a secondmate it does nothing, because its terminal line may be about other work.</li>
+<li>Any other line, including continuation prose, leaves the set alone.</li>
+</ul>
+<p>Key grammar (<code class="cite">bin/fm-classify-lib.sh:429-446</code>):</p>
+<pre><code>needs-decision [key=api-shape]: &lt;summary&gt;     documented position
+needs-decision: [key=api-shape] &lt;summary&gt;     accepted equivalent (issue #2109)
+resolved       [key=api-shape]: &lt;how it was decided&gt;
+needs-decision: &lt;summary&gt;                     no key: uses "default"</code></pre>
+<p>The misplaced form is accepted because it is common real worker output, and silently folding it into the shared <code>default</code> bucket would lose the stated key. A key with characters outside <code>A-Z a-z 0-9 . _ -</code> makes the line ignored, not rewritten to <code>default</code>. A keyless line keeps the historical rule of one open decision per task, and a bare <code>resolved:</code> closes <code>default</code>.</p>
+<p>Unbracketed <code>corr=&lt;16 hex&gt;</code> tokens between the verb and the key are skipped, because secondmates echo them when answering a marked request. Recognition is deliberately narrow: exactly the token Firstmate writes, nothing else, so a prose word with an equals sign cannot turn a line into a transition (<code class="cite">bin/fm-classify-lib.sh:451-500</code>).</p>
+
+<h2 id="who-closes">Who writes the closing line</h2>
+<p>"Who WRITES the closing line is owned elsewhere: the answering firstmate closes at answer time through fm-send's --resolve-key, and a worker self-closes only a blocker that cleared without an answer" (<code class="cite">bin/fm-classify-lib.sh:424-427</code>). The worker-facing half is in every brief: a decision "stays open until a <code>resolved</code> line carrying its exact key lands; a later <code>done:</code> or <code>working:</code> line never closes it", and the worker appends <code>resolved</code> itself only when a blocker cleared without a reply (<code class="cite">bin/fm-brief.sh:444-446</code>).</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 760 540" role="img" aria-labelledby="dec-t dec-d">
+<title id="dec-t">A keyed decision from question to closed</title>
+<desc id="dec-d">The worker appends a keyed needs-decision line. The watcher surfaces it and the wake digest lists it under OPEN DECISIONS. Firstmate decides or asks the captain, then runs fm-send with --resolve-key. fm-send validates the key, writes the answer into the worker's inbox, appends the resolved line to the status file as a self-announced append, and re-folds to prove the key closed. The worker reads the answer and acknowledges it.</desc>
+<defs><marker id="dec-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="10" y="30">One decision, from question to closed</text>
+<g class="c4-external"><rect x="10" y="50" width="130" height="50" rx="8"/><text class="c4-label" x="75" y="72">Worker</text><text class="c4-tech" x="75" y="88">[agent in worktree]</text></g>
+<g class="c4-datastore"><rect x="160" y="50" width="130" height="50" rx="8"/><text class="c4-label" x="225" y="72">Status log</text><text class="c4-tech" x="225" y="88">[state/&lt;id&gt;.status]</text></g>
+<g class="c4-container"><rect x="315" y="50" width="130" height="50" rx="8"/><text class="c4-label" x="380" y="72">Watcher</text><text class="c4-tech" x="380" y="88">[fm-watch + drain]</text></g>
+<g class="c4-container"><rect x="470" y="50" width="130" height="50" rx="8"/><text class="c4-label" x="535" y="72">Firstmate</text><text class="c4-tech" x="535" y="88">[runs fm-send]</text></g>
+<g class="c4-datastore"><rect x="625" y="50" width="130" height="50" rx="8"/><text class="c4-label" x="690" y="72">Inbox</text><text class="c4-tech" x="690" y="88">[state/&lt;id&gt;.inbox/]</text></g>
+<g class="c4-rel c4-rel-async"><line x1="75" y1="100" x2="75" y2="520"/><line x1="225" y1="100" x2="225" y2="520"/><line x1="380" y1="100" x2="380" y2="520"/><line x1="535" y1="100" x2="535" y2="520"/><line x1="690" y1="100" x2="690" y2="520"/></g>
+<g class="c4-rel"><path d="M75,140 L223,140" marker-end="url(#dec-arrow)"/><text class="c4-rel-label" x="150" y="133">1 needs-decision [key=api]</text></g>
+<g class="c4-rel c4-rel-async"><path d="M380,180 L227,180" marker-end="url(#dec-arrow)"/><text class="c4-rel-label" x="303" y="173">2 read new span</text></g>
+<g class="c4-rel c4-rel-async"><path d="M380,220 L533,220" marker-end="url(#dec-arrow)"/><text class="c4-rel-label" x="457" y="213">3 signal wake</text></g>
+<text class="c4-rel-label" x="612" y="258">4 decide, or ask the captain</text><text class="c4-rel-label" x="612" y="296">5 validate: key open here?</text><text class="c4-rel-label" x="612" y="312">reserved key? fits the cap?</text>
+<g class="c4-rel"><path d="M535,350 L688,350" marker-end="url(#dec-arrow)"/><text class="c4-rel-label" x="612" y="343">6 answer record + doorbell</text></g>
+<g class="c4-rel"><path d="M535,390 L227,390" marker-end="url(#dec-arrow)"/><text class="c4-rel-label" x="381" y="383">7 resolved [key=api]: answered: … (self-announced)</text></g>
+<text class="c4-rel-label" x="612" y="428">8 re-fold: is api closed?</text>
+<g class="c4-rel"><path d="M75,480 L688,480" marker-end="url(#dec-arrow)"/><text class="c4-rel-label" x="381" y="473">9 read the answer, mv to handled/</text></g>
+</svg>
+</div>
+<figcaption>Steps 6 and 7 happen in one fm-send call: on the inbox plane the close is written at enqueue time, because the record is already durable delivery. Sources: <code class="cite">bin/fm-send.sh:616-728</code>, <code class="cite">bin/fm-send.sh:1076-1081</code>.</figcaption>
+</figure>
+
+<h2 id="resolve-key">What <code>--resolve-key</code> checks, and in what order</h2>
+<p>Everything below happens <em>before</em> anything is sent; any failure prints the reason and "nothing was sent" (<code class="cite">bin/fm-send.sh:616-687</code>).</p>
+<ol>
+<li>The key uses only <code>A-Z a-z 0-9 . _ -</code> and is not repeated (<code class="cite">bin/fm-send.sh:468-483</code>).</li>
+<li>The target is a task selector with meta in this home. An explicit backend target has no decision ledger here. <code>--key</code>, an empty message, and <code>--fire-and-forget</code> are all refused alongside it.</li>
+<li>Each key is open right now, either in this task's status log (per <code>status_open_decisions</code>) or as a still-open captain-held task, looked up by the key as a task id or by the legacy <code>&lt;task&gt;-decision-&lt;key&gt;</code> id (<code class="cite">bin/fm-send.sh:565-584</code>). A key in neither is refused, so a typo cannot deliver an answer while leaving the decision silently open (<code class="cite">bin/fm-send.sh:198-202</code>).</li>
+<li>If any key is a <code>needs-decision</code> or a captain-held task, this is a decision answer, which is reserved for the main session while the captain is present. The Pi supervision branch is refused; under the away posture the rule moves to the branch (<code class="cite">bin/fm-send.sh:180-186</code>, <code class="cite">bin/fm-send.sh:649-663</code>). A <code>blocked</code> key is ordinary steering and takes no such guard.</li>
+<li>For each status-log key, the close note the send would write must be accepted by the fold. A reserved key (see below) with a plain <code>answered:</code> note would be a silent no-op, so it is refused (<code class="cite">bin/fm-send.sh:664-678</code>).</li>
+<li>The close line must fit the 220-character cap after its time stamp, without truncation eating the <code>[key=…]</code> delimiter (<code class="cite">bin/fm-send.sh:679-686</code>).</li>
+</ol>
+<p>After the answer is durably delivered, all closes go through one self-announced append (<code class="cite">bin/fm-send.sh:689-728</code>). The line is <code>resolved [key=&lt;key&gt;]: answered: &lt;excerpt&gt;</code>, with the excerpt flattened to one line. Then fm-send re-folds the log: if the key is somehow still open, for example reopened concurrently, it exits nonzero and prints the exact <code>printf … &gt;&gt; status</code> command to close it by hand, adding "do not resend the answer". Keys that belong to captain-held tasks are fed as <code>&lt;task-id&gt;\t&lt;answer&gt;\t</code> lines to <code>fm-captain-hold.sh answers</code>, the one keyed-answer intake every channel uses (<code class="cite">bin/fm-send.sh:730-746</code>).</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Plane</th><th>When the close is written</th></tr></thead>
+<tbody>
+<tr><td>Local inbox</td><td>At enqueue; a slow reader is covered by the re-ring ladder.</td></tr>
+<tr><td>Remote inbox</td><td>When the remote leg confirms the record exists.</td></tr>
+<tr><td>Typed</td><td>Only after a confirmed submit.</td></tr>
+</tbody></table></div>
+<p>The close is always a <em>local</em> append, for every kind of target including a remote secondmate, because the open-decision ledger lives in this home's <code>state/</code>. A remote mate's escalations reach this ledger through the parent-replies mirror (<code class="cite">bin/fm-send.sh:170-178</code>). A failed or unconfirmed send never closes a key, and a send without the flag never closes anything: a routine steer, <code>working:</code>, or <code>done:</code> cannot clear a captain decision (<code class="cite">bin/fm-send.sh:202-208</code>).</p>
+
+<h2 id="reserved">Reserved keys</h2>
+<p>A key like <code>pending-reply-&lt;id&gt;</code> is raised by one library and only that library may close it. Every writer can reach the same status stream, local mates directly and remote mates through a verbatim mirror, so without a rule any writer could take over a reserved key or clear it with a bare <code>resolved</code>. The rule is generic: a reserved key opens or closes only on a line whose note begins with that namespace's own <code>&lt;prefix&gt;…:</code> token; otherwise the line is ordinary status (<code class="cite">bin/fm-classify-lib.sh:622-656</code>). Today the only reserved prefix is <code>pending-reply-</code>. For such a key, <code>--resolve-key</code> writes the owning library's note, <code>pending-reply-resolved: task=… pending-reply-id=… via=operator-resolve-key</code> (<code class="cite">bin/fm-send.sh:586-596</code>, <code class="cite">bin/fm-pending-reply-lib.sh:1053-1071</code>).</p>
+
+<h2 id="where-seen">Where open decisions are shown</h2>
+<p>The wake digest prints "OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line)", byte-capped with an "N more omitted" line (<code class="cite">bin/fm-wake-drain.sh:429-482</code>). A <code>needs-decision</code> key of the shape <code>nm-&lt;run-id&gt;-&lt;step&gt;</code> is how a worker tells Firstmate about a validation gate awaiting a human, and <code>status_has_open_needs_decision</code> looks for exactly that shape (<code class="cite">bin/fm-classify-lib.sh:773-801</code>).</p>
+<p>A decision can move out of the status log into a durable captain-held backlog task. <code>fm-captain-hold.sh complete</code> writes the <code>captain-held</code> closing verb only after verifying that task exists, so "still open in status" and "already held" are two sides of one transfer (<code class="cite">bin/fm-send.sh:555-560</code>, <code class="cite">bin/fm-classify-lib.sh:824-835</code>). The hold lifecycle belongs to <a href="../backlog-and-decisions/index.html">Backlog and decisions</a>.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

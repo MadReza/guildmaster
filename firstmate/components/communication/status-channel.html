@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Status channel · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Communication</p>
+<h1>Status channel</h1>
+<p class="lede">The only way a worker talks back: it appends one line to <code>state/&lt;id&gt;.status</code> in its supervisor's home. Each line is an event that wakes Firstmate, not a statement of what is true now.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Owner of the grammar and folds: <code class="cite">bin/fm-classify-lib.sh</code>. Worker-facing rules: <code class="cite">bin/fm-brief.sh:426-446</code>. Up: <a href="index.html">Communication</a>.</p>
+
+<h2 id="what">What it is</h2>
+<p>Every brief tells the worker to report by appending exactly one line (<code class="cite">bin/fm-brief.sh:426-431</code>):</p>
+<pre><code>echo "{state} [at=&lt;epoch&gt;]: {one short line}" &gt;&gt; '&lt;home&gt;/state/&lt;id&gt;.status'</code></pre>
+<p>The file lives in the <em>supervisor's</em> home, outside the worker's worktree, and is only ever appended to. The brief warns that "each append wakes firstmate, so report sparingly" and lists the states <code>working</code>, <code>needs-decision</code>, <code>blocked</code>, <code>paused</code>, <code>done</code>, <code>failed</code> (<code class="cite">bin/fm-brief.sh:428-434</code>). How an append becomes a <code>signal:</code> wake and how the watcher decides whether to absorb it belongs to <a href="../supervision/index.html">Supervision</a>.</p>
+<p>The same file is written by more than the worker: Firstmate closes answered decisions there (<a href="decisions.html">decisions</a>), the pending-reply guard opens and closes escalations there (<a href="pending-replies.html">pending replies</a>), and for a secondmate this same file in the parent home is its <a href="parent-channel.html">parent channel</a>.</p>
+
+<h2 id="grammar">Line grammar</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 760 290" role="img" aria-labelledby="st-an-t st-an-d">
+<title id="st-an-t">Anatomy of one status line</title>
+<desc id="st-an-d">A status line is a leading verb, an optional unbracketed correlation token, any number of bracketed tags such as the decision key and the emission time, a colon, and a free-text note.</desc>
+<text class="c4-diagram-title" x="10" y="30">One status line, piece by piece</text>
+<g class="c4-component"><rect x="10" y="60" width="130" height="44" rx="6"/><text class="c4-label" x="75" y="87">needs-decision</text></g>
+<g class="c4-component"><rect x="148" y="60" width="140" height="44" rx="6"/><text class="c4-label" x="218" y="87">corr=0123…cdef</text></g>
+<g class="c4-component"><rect x="296" y="60" width="130" height="44" rx="6"/><text class="c4-label" x="361" y="87">[key=api-shape]</text></g>
+<g class="c4-component"><rect x="434" y="60" width="140" height="44" rx="6"/><text class="c4-label" x="504" y="87">[at=1788576000]</text></g>
+<g class="c4-component"><rect x="582" y="60" width="26" height="44" rx="6"/><text class="c4-label" x="595" y="87">:</text></g>
+<g class="c4-component"><rect x="616" y="60" width="140" height="44" rx="6"/><text class="c4-label" x="686" y="87">REST or GraphQL?</text></g>
+<g class="c4-rel-num"><circle cx="75" cy="124" r="10"/><text x="75" y="128">1</text></g>
+<g class="c4-rel-num"><circle cx="218" cy="124" r="10"/><text x="218" y="128">2</text></g>
+<g class="c4-rel-num"><circle cx="361" cy="124" r="10"/><text x="361" y="128">3</text></g>
+<g class="c4-rel-num"><circle cx="504" cy="124" r="10"/><text x="504" y="128">4</text></g>
+<g class="c4-rel-num"><circle cx="595" cy="124" r="10"/><text x="595" y="128">5</text></g>
+<g class="c4-rel-num"><circle cx="686" cy="124" r="10"/><text x="686" y="128">6</text></g>
+<g class="c4-legend"><text x="10" y="160">1  Verb: working, needs-decision, blocked, paused, done, failed, resolved, captain-held, note.</text><text x="10" y="180">2  Correlation token, optional: corr= plus 16 hex, echoed when answering a marked request.</text><text x="10" y="200">3  Decision key, optional: [key=slug]; also accepted right after the colon. Absent means default.</text><text x="10" y="220">4  Emission time, optional: [at=epoch], at most 12 digits. History only; never decides state.</text><text x="10" y="240">5  The first colon ends the head; tags may come in any order before it.</text><text x="10" y="260">6  Note: free text. A [key=…] deeper in the note is prose, never a key.</text></g>
+</svg>
+</div>
+<figcaption>Sources: verb parsing <code class="cite">bin/fm-classify-lib.sh:502-533</code>; correlation tokens <code class="cite">bin/fm-classify-lib.sh:451-500</code>; key positions <code class="cite">bin/fm-classify-lib.sh:429-446</code>; time tag <code class="cite">bin/fm-classify-lib.sh:284-309</code>.</figcaption>
+</figure>
+
+<h3 id="verbs">What each verb means to Firstmate</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Verb</th><th>Meaning</th><th>Captain-relevant?</th></tr></thead>
+<tbody>
+<tr><td><code>done</code>, <code>failed</code></td><td>Terminal outcome.</td><td>Yes</td></tr>
+<tr><td><code>needs-decision</code></td><td>A human must decide. Opens a keyed decision.</td><td>Yes</td></tr>
+<tr><td><code>blocked</code></td><td>Stuck, needs Firstmate's help. Opens a keyed decision.</td><td>Yes</td></tr>
+<tr><td><code>working</code></td><td>A material phase change. Absorbed only with positive evidence the worker is really working.</td><td>No</td></tr>
+<tr><td><code>paused</code></td><td>Deliberately idle on a known external wait; may name <code>until &lt;UTC time&gt;</code>. Rechecked on a long cadence, 4 hours by default, instead of being treated as a wedge.</td><td>No</td></tr>
+<tr><td><code>resolved</code></td><td>Closes a keyed decision or blocker.</td><td>No</td></tr>
+<tr><td><code>captain-held</code></td><td>Verified transfer of a decision to a durable captain-held task.</td><td>No</td></tr>
+</tbody></table></div>
+<p>The captain-relevant set is <code>done:|needs-decision:|blocked:|failed:</code> plus legacy free-text tokens <code>PR ready</code>, <code>checks green</code>, <code>ready in branch</code>, <code>merged</code> for old lines without a verb; <code>FM_CAPTAIN_RE</code> replaces the whole set for a home (<code class="cite">bin/fm-classify-lib.sh:66-78</code>). The check is verb-aware: <code>working: rebased onto merged #76</code> is not captain-relevant just because it contains "merged" (<code class="cite">bin/fm-classify-lib.sh:204-229</code>). The pause verb, its cadence, and the <code>until</code> parser are at <code class="cite">bin/fm-classify-lib.sh:80-100</code> and <code class="cite">bin/fm-classify-lib.sh:267-282</code>.</p>
+
+<h3 id="time">The emission-time tag</h3>
+<p>New writers may put <code>[at=&lt;epoch&gt;]</code> before the colon. The grammar rules are strict and one-sided (<code class="cite">bin/fm-classify-lib.sh:285-293</code>):</p>
+<ul>
+<li>A missing, malformed, or duplicated tag means the time is <em>unknown</em>.</li>
+<li>Time is never inferred from file mtime, a wake, or when the line was read.</li>
+<li>Time describes history only and "must never decide current state or decision closure".</li>
+<li>Relays preserve the source's tags and leave legacy source events unstamped; <code>status_stamp_line</code> stamps only newly emitted lines and keeps an existing tag even if malformed (<code class="cite">bin/fm-classify-lib.sh:317-332</code>).</li>
+</ul>
+<p>A worker-written tag can never move the head/note boundary. A readable time such as <code>[at=10:30]</code> contains colons, so every reader that asks where the head ends first strips anything shaped like a time tag (<code class="cite">bin/fm-classify-lib.sh:372-396</code>). That protects the case where a worker leaves the brief's <code>&lt;epoch&gt;</code> placeholder unsubstituted, which the brief itself warns against: "a stamp that is not plain digits records no time at all" (<code class="cite">bin/fm-brief.sh:429</code>).</p>
+
+<h2 id="event">An event, not current truth</h2>
+<p>Firstmate's charter states it twice: "A <code>state/&lt;id&gt;.status</code> line is a wake event, not current-state truth; <code>bin/fm-crew-state.sh</code> owns current-state reconciliation" (<code class="cite">AGENTS.md:163</code>, <code class="cite">AGENTS.md:434</code>). Two concrete reasons come from the code:</p>
+<ol>
+<li><strong>A later line can hide an earlier open question.</strong> Reading "last line wins" cannot represent "an earlier decision is still open after a later, unrelated event": a subsequent <code>done</code>, <code>paused</code>, or <code>working</code> line silently masks a still-open <code>needs-decision</code> (<code class="cite">bin/fm-classify-lib.sh:413-421</code>).</li>
+<li><strong>The worker stops writing when others take over.</strong> Once a worker's change is in a no-mistakes validation run, its own log gets no new entries, so an active run step or busy pane outranks even a captain-relevant log line (<code class="cite">bin/fm-watch.sh:22-27</code>).</li>
+</ol>
+<p>So the library offers two different reads, and names them differently:</p>
+<dl class="defs">
+<dt><code>last_status_line</code>: an event read</dt><dd>The last recognised event, ignoring continuation prose and blank lines. Reads the last 200 lines first and widens to the whole file only if that window holds no event (<code class="cite">bin/fm-classify-lib.sh:131-153</code>). Decision-closing events are kept, because skipping a <code>resolved</code> line would revive its opener (<code class="cite">bin/fm-classify-lib.sh:159</code>).</dd>
+<dt><code>status_open_decisions</code>: a fold</dt><dd>Walks the whole log and returns every decision still open, as <code>key\tverb\tsummary</code> lines (<code class="cite">bin/fm-classify-lib.sh:725-754</code>). This is "the durable open-set the fleet snapshot and any point-in-time consumer must use instead of trusting the last status line".</dd>
+<dt><code>status_current_line</code>: the combination</dt><dd>If any decision is open, the most recently opened one wins; otherwise the last event. Actual run and pane evidence is still reconciled separately by <code>fm-crew-state.sh</code> (<code class="cite">bin/fm-classify-lib.sh:756-771</code>).</dd>
+</dl>
+<div class="table-wrap"><table>
+<thead><tr><th>Log (oldest first)</th><th>Last event says</th><th>Fold says</th></tr></thead>
+<tbody>
+<tr><td><code>needs-decision [key=api]: REST or GraphQL?</code><br><code>working: writing tests meanwhile</code></td><td>working</td><td><code>api</code> open</td></tr>
+<tr><td>…then <code>resolved [key=api]: answered: REST</code></td><td>resolved</td><td>nothing open</td></tr>
+<tr><td>A ship task: <code>blocked: CI flaky</code> then <code>done: PR ready</code></td><td>done</td><td>nothing open: a ship or scout terminal line supersedes stale decisions (<code class="cite">bin/fm-classify-lib.sh:700-702</code>)</td></tr>
+<tr><td>A secondmate: <code>blocked [key=x]: …</code> then <code>done: other work landed</code></td><td>done</td><td><code>x</code> still open: a secondmate's terminal line may be about other work (<code class="cite">bin/fm-classify-lib.sh:422-423</code>)</td></tr>
+</tbody></table></div>
+<p>The decision rules themselves are on <a href="decisions.html">Keyed decisions and --resolve-key</a>.</p>
+
+<h2 id="dedup">Retries and duplicates</h2>
+<p><code>status_event_recorded</code> answers "is this line already in the file?" ignoring only one well-formed time tag; every other byte, correlation token included, still identifies the event (<code class="cite">bin/fm-classify-lib.sh:398-411</code>). So a stamped retry of a recorded event is never counted as new. Writers that publish on someone else's behalf, like the parent channel, use it before appending (<code class="cite">bin/fm-parent-channel-lib.sh:132-145</code>).</p>
+
+<h2 id="self-announced">Firstmate's own lines that must not wake Firstmate</h2>
+<p>When Firstmate itself writes bookkeeping into a status file in the same turn that already handled it (a <code>resolved</code> close after answering, a pending-reply escalation close, a captain-held transfer), waking itself again would waste a turn. <code>fm_wake_status_append_self_announced</code> appends and then advances the watcher's seen-marker across exactly those bytes, but only if it can prove no one else's bytes are in the way (<code class="cite">bin/fm-wake-lib.sh:2178-2212</code>):</p>
+<ul>
+<li>This home had already read every byte before the append, or the only unread bytes are keyed <code>needs-decision</code>/<code>blocked</code> lines that the OPEN DECISIONS digest already listed.</li>
+<li>The file grew by exactly the appended bytes: no other writer interleaved.</li>
+<li>The watcher's own classifier finds nothing actionable in the span.</li>
+</ul>
+<p>Under any other condition the lines are still appended but the marker is left alone, so the watcher surfaces the file normally. Return codes: 0 appended and self-announced, 1 appended but left for the watcher (the safe direction), 2 the append failed (<code class="cite">bin/fm-wake-lib.sh:2210-2253</code>).</p>
+
+<h2 id="limits">Limits and refusals</h2>
+<ul>
+<li>A status file that is a symlink is not read by the folds (<code class="cite">bin/fm-classify-lib.sh:733-741</code>).</li>
+<li>Rendered status lines are capped at 220 characters in the digests (<code class="cite">bin/fm-line-cap-lib.sh:25</code>); a writer that stamps after capping must reserve the stamp's width (<code class="cite">bin/fm-classify-lib.sh:334-346</code>).</li>
+<li>Routine internal chatter does not belong here: the secondmate brief says "Routine internal supervision, heartbeats, retries, and crewmate churn stay inside your own home and must not touch that status file" (<code class="cite">bin/fm-brief.sh:342</code>).</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

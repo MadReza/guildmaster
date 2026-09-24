@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operational-input markers · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Communication</p>
+<h1>Operational-input markers</h1>
+<p class="lede">Firstmate's own machinery types text into agent sessions too: launch briefs, watcher wakes, turn-end warnings, relayed requests. A fixed invisible prefix lets an agent, and Firstmate's own code, tell that machine-sent text apart from a human typing.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Owner: <code class="cite">bin/fm-operational-input.sh</code>; compatibility entry point <code class="cite">bin/fm-marker-lib.sh</code>. Up: <a href="index.html">Communication</a>.</p>
+
+<h2 id="why">What problem it solves</h2>
+<p>Everything that arrives in an agent's chat looks the same to the agent: a line of text. Some lines come from the captain typing into the pane, and some come from Firstmate scripts. A secondmate in particular must answer the two differently: a request from the main firstmate is answered on the status channel, while an unmarked message is the captain intervening directly and gets a conversational reply (<code class="cite">bin/fm-brief.sh:309-320</code>). The marker is how the difference is carried, without inferring provenance from the wording of the body (<code class="cite">bin/fm-operational-input.sh:11-15</code>).</p>
+
+<h2 id="wire">Wire forms</h2>
+<p>The library defines two current forms (<code class="cite">bin/fm-operational-input.sh:8-15</code>, <code class="cite">bin/fm-operational-input.sh:27-41</code>). <code>U+2063</code> is the invisible separator character, bytes <code>E2 81 A3</code>.</p>
+<pre><code>Generic, typed:     U+2063 "FIRSTMATE_OP: v1 " &lt;kind&gt; ": " &lt;body&gt;
+From-firstmate:     "[fm-from-firstmate]" U+2063 &lt;body&gt;</code></pre>
+<dl class="defs">
+<dt>Kinds</dt><dd><code>session-start</code>, <code>watcher</code>, <code>turn-end-guard</code>, <code>away-supervisor</code>, <code>launch-brief</code>, <code>branch-outcome</code> (<code class="cite">bin/fm-operational-input.sh:31</code>), plus <code>from-firstmate</code>, which uses its own carrier. An unknown kind is refused at encode time and not recognised at parse time (<code class="cite">bin/fm-operational-input.sh:43-81</code>).</dd>
+<dt>Why the from-firstmate form is different</dt><dd>Secondmates already running have the <code>[fm-from-firstmate]</code> label in their charter, so the carrier stays byte-compatible with them (<code class="cite">bin/fm-operational-input.sh:37-41</code>). The brief tells a secondmate the marker is "untypable, so a human never produces it" (<code class="cite">bin/fm-brief.sh:311-312</code>).</dd>
+<dt>Idempotent marking</dt><dd><code>fm_message_mark_from_firstmate</code> adds the carrier only if it is not already there (<code class="cite">bin/fm-operational-input.sh:178-187</code>).</dd>
+</dl>
+<p>A live example is the first line of every crewmate launch prompt: <code>fm-spawn.sh</code> builds each harness command with <code>"$(… encode launch-brief &lt; brief)"</code> (<code class="cite">bin/fm-spawn.sh:1859</code>), so the brief arrives prefixed <code>FIRSTMATE_OP: v1 launch-brief: </code>.</p>
+
+<h2 id="producers">Who produces which kind</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Kind</th><th>Producer found in the source</th></tr></thead>
+<tbody>
+<tr><td><code>launch-brief</code></td><td><code class="cite">bin/fm-spawn.sh:1859</code> and the per-harness variants after it</td></tr>
+<tr><td><code>session-start</code></td><td><code class="cite">bin/fm-sessionstart-nudge.sh:50</code></td></tr>
+<tr><td><code>turn-end-guard</code></td><td><code class="cite">bin/fm-turnend-guard-grok.sh:79</code>, <code class="cite">bin/fm-turnend-guard-cursor.sh:200</code></td></tr>
+<tr><td><code>away-supervisor</code></td><td><code class="cite">bin/fm-supervise-daemon.sh:1257</code></td></tr>
+<tr><td><code>from-firstmate</code></td><td><code>fm-send.sh</code> for <code>kind=secondmate</code> targets (<code class="cite">bin/fm-send.sh:543-546</code>); the pending-reply library when embedding a correlation (<code class="cite">bin/fm-pending-reply-lib.sh:276-292</code>)</td></tr>
+<tr><td><code>watcher</code>, <code>branch-outcome</code></td><td>Pi extensions call the same encoder through the TypeScript mirror <code class="cite">.pi/extensions/lib/fm-operational-input.ts</code>; the exact call sites are in the Pi extension files and belong to <a href="../supervision/index.html">Supervision</a>.</td></tr>
+</tbody></table></div>
+
+<h2 id="cli">Cross-language use</h2>
+<p>The file is both a sourceable library and a CLI for JavaScript and TypeScript integrations (<code class="cite">bin/fm-operational-input.sh:4-25</code>):</p>
+<pre><code>fm-operational-input.sh encode &lt;kind&gt;   # body on stdin
+fm-operational-input.sh kind            # which current kind, if any
+fm-operational-input.sh classify        # current or legacy kind
+fm-operational-input.sh body            # strip the header</code></pre>
+<p>Success prints exactly one value; a non-match exits 1 silently; misuse exits 2.</p>
+
+<h2 id="legacy">Legacy transcripts</h2>
+<p>Older persisted transcripts carry pre-protocol text: a bare session-start instruction, a <code>FIRSTMATE WATCHER WAKE:</code> prefix, a "TURN WOULD END BLIND" prefix, an away-supervisor escalate prefix, and an untyped <code>FIRSTMATE_OP: </code> prefix from an earlier change. <code>classify</code> recognises them so old transcripts still parse, and the source says these literals "must never be used by current producers" (<code class="cite">bin/fm-operational-input.sh:117-160</code>).</p>
+
+<h2 id="boundary">What the marker does not do</h2>
+<ul>
+<li>It is not authentication. It tells an honest agent where text came from; it does not stop another process from writing the same bytes.</li>
+<li>It does not make text executable. A marked <code>/quit</code> is chat, which is exactly why lifecycle moved to the <a href="data-and-control-planes.html">control plane</a>.</li>
+<li>It is not added to crewmate or scout steers, explicit backend targets, or <code>--key</code> sends (<code class="cite">bin/fm-send.sh:100-103</code>).</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

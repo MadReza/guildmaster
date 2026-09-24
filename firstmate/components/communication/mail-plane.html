@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mail plane · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Communication</p>
+<h1>Mail plane</h1>
+<p class="lede">An ordinary mail client for Firstmate: it reads unseen mail over IMAP and sends over SMTP. Each new message becomes exactly one durable <code>check</code> wake, and a mail is never lost even if the poll is interrupted, at the cost of a rare duplicate.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Owners: <code class="cite">bin/fm-mail.sh</code> (with <code>bin/fm-mail.py</code> for IMAP and SMTP), the standing check <code class="cite">bin/fm-mail-check.sh</code>, and the schema in <code class="cite">docs/configuration.md:656-686</code>. Up: <a href="index.html">Communication</a>.</p>
+
+<h2 id="authority">Not a source of authority</h2>
+<p>"This is an ordinary mail client surface, not an escalation of authority: every surfaced message is a notification firstmate reads before deciding, and firstmate still applies its own judgment exactly as it would for a TUI message" (<code class="cite">bin/fm-mail.sh:5-8</code>). The plane is off unless the home's gitignored <code>.env</code> supplies the connection values (<code class="cite">docs/configuration.md:664</code>).</p>
+
+<h2 id="commands">Commands</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Command</th><th>Effect</th><th>Wakes?</th></tr></thead>
+<tbody>
+<tr><td><code>fm-mail.sh read</code></td><td>Digest of unseen INBOX mail: From, Date, Subject, first line.</td><td>No</td></tr>
+<tr><td><code>fm-mail.sh send &lt;to&gt; &lt;subject&gt; &lt;body | -&gt;</code></td><td>Sends one message; <code>-</code> reads the body from stdin.</td><td>No</td></tr>
+<tr><td><code>fm-mail.sh poll</code></td><td>Surfaces each unseen mail not yet woken as <code>check: mail &lt;uid&gt; - &lt;summary&gt;</code>.</td><td>Yes, once per mail</td></tr>
+<tr><td><code>fm-mail.sh status</code></td><td>Configuration and last cursor. No network.</td><td>No</td></tr>
+</tbody></table></div>
+<p>(<code class="cite">bin/fm-mail.sh:10-32</code>.) Reads use <code>BODY.PEEK</code>, so no message is ever marked read before Firstmate actually answers it, and mail already marked seen in IMAP never wakes a poll.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 760 470" role="img" aria-labelledby="mp-t mp-d">
+<title id="mp-t">Mail poll sequence</title>
+<desc id="mp-d">The watcher runs the standing mail check on its slow-check cadence. The check runs fm-mail.sh poll, which asks the IMAP server for unseen uids and headers without marking them read. For each new uid, under the wake-queue lock, it appends one check wake and then records the uid in the journal and cursor. The check prints a line unless the poll was a proven no-op, which the watcher turns into its own check wake so firstmate drains the queued mail rows.</desc>
+<defs><marker id="mp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="10" y="30">One poll, from watcher to wake</text>
+<g class="c4-container"><rect x="10" y="50" width="130" height="50" rx="8"/><text class="c4-label" x="75" y="72">Watcher</text><text class="c4-tech" x="75" y="88">[slow-check cadence]</text></g>
+<g class="c4-container"><rect x="160" y="50" width="130" height="50" rx="8"/><text class="c4-label" x="225" y="72">Mail check</text><text class="c4-tech" x="225" y="88">[fm-mail-check.sh]</text></g>
+<g class="c4-container"><rect x="315" y="50" width="130" height="50" rx="8"/><text class="c4-label" x="380" y="72">fm-mail.sh poll</text><text class="c4-tech" x="380" y="88">[+ fm-mail.py]</text></g>
+<g class="c4-external"><rect x="470" y="50" width="130" height="50" rx="8"/><text class="c4-label" x="535" y="72">IMAP server</text><text class="c4-tech" x="535" y="88">[implicit TLS, 993]</text></g>
+<g class="c4-datastore"><rect x="625" y="50" width="130" height="50" rx="8"/><text class="c4-label" x="690" y="72">state/</text><text class="c4-tech" x="690" y="88">[queue, journal]</text></g>
+<g class="c4-rel c4-rel-async"><line x1="75" y1="100" x2="75" y2="450"/><line x1="225" y1="100" x2="225" y2="450"/><line x1="380" y1="100" x2="380" y2="450"/><line x1="535" y1="100" x2="535" y2="450"/><line x1="690" y1="100" x2="690" y2="450"/></g>
+<g class="c4-rel"><path d="M75,140 L223,140" marker-end="url(#mp-arrow)"/><text class="c4-rel-label" x="150" y="133">1 run mail.check.sh</text></g>
+<g class="c4-rel"><path d="M225,180 L378,180" marker-end="url(#mp-arrow)"/><text class="c4-rel-label" x="302" y="173">2 poll, within budget</text></g>
+<g class="c4-rel"><path d="M380,220 L533,220" marker-end="url(#mp-arrow)"/><text class="c4-rel-label" x="457" y="213">3 UNSEEN + BODY.PEEK</text></g>
+<g class="c4-boundary"><rect x="305" y="245" width="450" height="115" rx="8"/><text x="317" y="263">per new uid, under the wake-queue lock</text></g>
+<g class="c4-rel"><path d="M380,290 L688,290" marker-end="url(#mp-arrow)"/><text class="c4-rel-label" x="535" y="283">4 append check wake mail:&lt;gen&gt;/&lt;uid&gt;</text></g>
+<g class="c4-rel"><path d="M380,330 L688,330" marker-end="url(#mp-arrow)"/><text class="c4-rel-label" x="535" y="323">5 record uid in journal and cursor</text></g>
+<g class="c4-rel"><path d="M380,390 L227,390" marker-end="url(#mp-arrow)"/><text class="c4-rel-label" x="303" y="383">6 result</text></g>
+<g class="c4-rel c4-rel-async"><path d="M225,430 L77,430" marker-end="url(#mp-arrow)"/><text class="c4-rel-label" x="150" y="423">7 a line, unless a no-op</text></g>
+</svg>
+</div>
+<figcaption>Steps 4 and 5 share one held lock with the drain's acknowledgement, so the drain can never delete a mail's wake between its publication and its record (<code class="cite">bin/fm-mail.sh:338-409</code>).</figcaption>
+</figure>
+
+<h2 id="exactly-once">Exactly-once, recovering</h2>
+<p>Each surfaced message is keyed by its immutable IMAP UID, together with the mailbox generation (UIDVALIDITY) when the server reports one, so expunge renumbering never re-wakes or loses mail, and a recreated mailbox cannot reuse a number to suppress a new wake (<code class="cite">bin/fm-mail.sh:17-31</code>). <code>wake_for</code> appends the wake first, then the durable records, all under one lock (<code class="cite">bin/fm-mail.sh:338-409</code>):</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Return</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>Wake appended and a durable uid record landed.</td></tr>
+<tr><td>1</td><td>Wake appended, then rolled back because no record could be written; retried next poll.</td></tr>
+<tr><td>2</td><td>Wake survived with no durable record (fail-closed); the drain delivers it and the next poll heals the uid.</td></tr>
+<tr><td>3</td><td>Wake never appended; retried next poll.</td></tr>
+<tr><td>4</td><td>Delivered, but clearing the retry entry failed.</td></tr>
+</tbody></table></div>
+<p>The one residual the code accepts is a kill in the instant between the queue append and the journal write, followed by the drain acknowledging that row before the next poll heals it: that mail wakes twice. "A possible duplicate (never a missed mail) is the deliberate, bounded tradeoff" (<code class="cite">bin/fm-mail.sh:351-356</code>; <code class="cite">docs/configuration.md:660-661</code>).</p>
+<ul>
+<li><strong>Floods are bounded.</strong> One poll surfaces at most <code>FM_MAIL_POLL_MAX_WAKES</code> messages (default 20, clamped to 200); the rest stay unseen for the next poll, so the wake queue stays bounded (<code class="cite">bin/fm-mail.sh:34-37</code>, <code class="cite">bin/fm-mail.sh:125-131</code>).</li>
+<li><strong>Unreadable headers are not skipped.</strong> A message whose header fetch fails is woken once with placeholders, retried on later polls, and re-woken once with the real sender and subject when the fetch succeeds (<code class="cite">bin/fm-mail.sh:37-39</code>).</li>
+<li><strong>Overlapping polls are serialised</strong> on a mail-seen lock (<code class="cite">bin/fm-mail.sh:27</code>).</li>
+</ul>
+<p>State files, all under <code>state/</code> and written only by <code>fm-mail.sh</code>: <code>.mail-seen</code> (cursor), <code>.mail-woken</code> (emission journal), <code>.mail-retry</code> and <code>.mail-retry-pos</code> (retry set), <code>.mail-turn</code>, and <code>.mail-seen.lock</code> (<code class="cite">AGENTS.md:131</code>).</p>
+
+<h2 id="standing-check">Running unattended</h2>
+<p><code>poll</code> has no scheduler of its own. <code>bin/fm-mail-check.sh arm</code> writes <code>state/mail.check.sh</code> and registers its bytes with the watcher's check-trust mechanism, so the watcher runs it on its slow cadence (<code>FM_CHECK_INTERVAL</code>) (<code class="cite">bin/fm-mail-check.sh:10-19</code>). The check prints a line, which becomes a <code>check:</code> wake, whenever the poll is not a proven no-op. Silence is reserved for a successful poll with no new mail or a repeated identical failure that could not have queued mail; a timeout or a fail-closed poll that already queued a wake always prints (<code class="cite">bin/fm-mail-check.sh:27-37</code>). A home armed before its <code>.env</code> is complete is told once about the missing value, "which makes a partially configured channel a wake instead of a silent gap" (<code class="cite">bin/fm-mail-check.sh:21-25</code>). How the watcher runs and trusts checks belongs to <a href="../supervision/index.html">Supervision</a>.</p>
+
+<h2 id="config">Configuration</h2>
+<p>Environment values win over <code>.env</code>, matching Relay. <code>FM_MAIL_PASS</code> is never logged. Only implicit TLS is supported: STARTTLS and port 587 are not (<code class="cite">bin/fm-mail.sh:41-62</code>).</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Key</th><th>Default</th></tr></thead>
+<tbody>
+<tr><td><code>FM_MAIL_USER</code>, <code>FM_MAIL_PASS</code>, <code>FM_IMAP_HOST</code>, <code>FM_SMTP_HOST</code></td><td>required</td></tr>
+<tr><td><code>FM_IMAP_PORT</code> / <code>FM_SMTP_PORT</code></td><td>993 / 465</td></tr>
+<tr><td><code>FM_MAIL_TIMEOUT</code></td><td>20 s socket timeout</td></tr>
+<tr><td><code>FM_MAIL_POLL_MAX_WAKES</code></td><td>20 (1–200)</td></tr>
+<tr><td><code>FM_MAIL_CHECK_BUDGET</code></td><td>15 s (5–25), cut to fit <code>FM_CHECK_TIMEOUT</code></td></tr>
+</tbody></table></div>
+<div class="callout unclear"><span class="callout-title">Open question</span>
+<p>The sources read here say how mail is surfaced and sent, but not what rules govern Firstmate replying to a mail sender, or how mail bodies are treated as untrusted input once read. <code>fm-mail.sh</code> defers that to Firstmate's own judgement "exactly as it would for a TUI message" (<code class="cite">bin/fm-mail.sh:7-8</code>). Any skill-level policy would sit in <a href="../prompts-and-skills/index.html">Prompts and skills</a>.</p></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

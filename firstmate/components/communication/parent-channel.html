@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Secondmate parent channel · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Communication</p>
+<h1>Secondmate parent channel</h1>
+<p class="lede">A secondmate is a full firstmate in its own home, and nobody reads its chat. Everything it owes the captain travels up as lines appended to one status file in the parent home, and the scripts that record an outcome publish it there themselves, so delivery does not depend on the mate remembering.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Owner: <code class="cite">bin/fm-parent-channel-lib.sh</code>; route record parser <code class="cite">bin/fm-secondmate-parent-lib.sh</code>; design note <code class="cite">docs/secondmate-parent-channel.md</code>. Up: <a href="index.html">Communication</a>.</p>
+
+<h2 id="problem">The problem it solves</h2>
+<p>On 2026-09-02 four outcomes across two mate homes never reached the captain. Each time the watcher had delivered the parent's request within a minute and the mate had done the work, but the mate then addressed "captain" in its own chat instead of appending to the channel (<code class="cite">docs/secondmate-parent-channel.md:9-14</code>). The design note calls the cause structural: the mate can obey the charter's rule about addressing the captain in local chat while missing the later rule about the return channel. A PR-ready report was the symptom, but findings, decisions, blockers, and failures all fail the same way because each depended on the model writing one line.</p>
+<p>The goal adopted: "the parent channel must not depend on the model remembering to write to it" (<code class="cite">docs/secondmate-parent-channel.md:16</code>). The rule that delivers it: "the scripts report facts, the mate reports judgement" (<code class="cite">docs/secondmate-parent-channel.md:20-21</code>).</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 760 580" role="img" aria-labelledby="pc-t pc-d">
+<title id="pc-t">Parent channel components and its two routes</title>
+<desc id="pc-d">Inside the secondmate home, fact-publishing scripts and the mate agent both hand lines to the channel resolver, which reads the home's identity and parent-binding files. On the local route it appends straight into the parent home's state file for this mate. On the remote route it appends into the mate's own parent-replies file, which the parent's remote reply mirror, a process-event delta source, ingests line for line into the same parent file. The parent watcher reads that file like any task's status log.</desc>
+<defs><marker id="pc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="10" y="30">Parent channel — facts and judgement, two routes</text>
+<g class="c4-boundary"><rect x="10" y="50" width="360" height="440" rx="8"/><text x="22" y="68">Secondmate home</text></g>
+<g class="c4-boundary"><rect x="395" y="50" width="355" height="440" rx="8"/><text x="407" y="68">Parent home</text></g>
+<g class="c4-component"><rect x="25" y="90" width="160" height="80" rx="8"/><text class="c4-label" x="105" y="119">Fact publishers</text><text class="c4-tech" x="105" y="135">[six scripts, see table]</text><text class="c4-desc" x="105" y="150">done, failed, PR, merge</text></g>
+<g class="c4-container"><rect x="200" y="90" width="160" height="80" rx="8"/><text class="c4-label" x="280" y="119">Mate agent</text><text class="c4-tech" x="280" y="135">[harness session]</text><text class="c4-desc" x="280" y="150">appends judgement only</text></g>
+<g class="c4-component"><rect x="90" y="215" width="200" height="80" rx="8"/><text class="c4-label" x="190" y="244">Channel resolver</text><text class="c4-tech" x="190" y="260">[fm-parent-channel-lib.sh]</text><text class="c4-desc" x="190" y="275">route from identity, not caller</text></g>
+<g class="c4-datastore"><rect x="25" y="345" width="160" height="70" rx="8"/><text class="c4-label" x="105" y="371">Identity files</text><text class="c4-tech" x="105" y="387">[.fm-secondmate-home</text><text class="c4-tech" x="105" y="401">.fm-secondmate-parent]</text></g>
+<g class="c4-datastore"><rect x="200" y="345" width="160" height="70" rx="8"/><text class="c4-label" x="280" y="369">Reply log</text><text class="c4-tech" x="280" y="385">[parent-replies.status]</text><text class="c4-desc" x="280" y="400">remote route only</text></g>
+<g class="c4-container"><rect x="430" y="90" width="290" height="70" rx="8"/><text class="c4-label" x="575" y="114">Parent watcher</text><text class="c4-tech" x="575" y="130">[bin/fm-watch.sh]</text><text class="c4-desc" x="575" y="145">classifies lines into wakes</text></g>
+<g class="c4-datastore"><rect x="430" y="215" width="290" height="80" rx="8"/><text class="c4-label" x="575" y="244">state/&lt;mate-id&gt;.status</text><text class="c4-tech" x="575" y="260">[the parent channel]</text><text class="c4-desc" x="575" y="275">same shape as any task's log</text></g>
+<g class="c4-container"><rect x="430" y="380" width="290" height="70" rx="8"/><text class="c4-label" x="575" y="404">Remote reply mirror</text><text class="c4-tech" x="575" y="420">[fm-procevent-remote-reply.sh]</text><text class="c4-desc" x="575" y="435">ingests deltas, writes watermark</text></g>
+<g class="c4-rel"><path d="M105,170 L160,213" marker-end="url(#pc-arrow)"/><text class="c4-rel-label" x="112" y="196">fact line</text></g>
+<g class="c4-rel"><path d="M280,170 L220,213" marker-end="url(#pc-arrow)"/><text class="c4-rel-label" x="282" y="196">judgement</text></g>
+<g class="c4-rel c4-rel-async"><path d="M150,295 L115,343" marker-end="url(#pc-arrow)"/><text class="c4-rel-label" x="112" y="322">reads</text></g>
+<g class="c4-rel"><path d="M290,255 L428,255" marker-end="url(#pc-arrow)"/><text class="c4-rel-label" x="359" y="248">local: append once</text></g>
+<g class="c4-rel"><path d="M230,295 L265,343" marker-end="url(#pc-arrow)"/><text class="c4-rel-label" x="290" y="322">remote route</text></g>
+<g class="c4-rel c4-rel-async"><path d="M360,395 L428,412" marker-end="url(#pc-arrow)"/><text class="c4-rel-label" x="394" y="392">deltas</text></g>
+<g class="c4-rel"><path d="M575,380 L575,297" marker-end="url(#pc-arrow)"/><text class="c4-rel-label" x="625" y="342">line for line</text></g>
+<g class="c4-rel c4-rel-async"><path d="M575,215 L575,162" marker-end="url(#pc-arrow)"/><text class="c4-rel-label" x="605" y="192">reads</text></g>
+<g class="c4-legend"><rect class="c4-legend-frame" x="10" y="505" width="740" height="60" rx="6"/><text class="c4-legend-heading" x="22" y="525">Legend</text><g class="c4-component"><rect x="90" y="515" width="22" height="14" rx="3"/></g><text x="118" y="527">Library or script group</text><g class="c4-container"><rect x="280" y="515" width="22" height="14" rx="3"/></g><text x="308" y="527">Running process</text><g class="c4-datastore"><rect x="430" y="515" width="22" height="14" rx="3"/></g><text x="458" y="527">File</text><text x="90" y="551">Solid arrow: append. Dashed arrow: read or copy. Dashed box: one home.</text></g>
+</svg>
+</div>
+<figcaption>The remote transport is drawn only as far as the mirror; how the mirror reaches the remote host belongs to <a href="../remote/index.html">Remote</a>. Sources: <code class="cite">bin/fm-parent-channel-lib.sh:31-41</code>, <code class="cite">bin/fm-parent-channel-lib.sh:99-124</code>.</figcaption>
+</figure>
+
+<h2 id="where">Where the channel is</h2>
+<p>The destination is resolved from the home's own durable identity, "never from a caller's choice" (<code class="cite">bin/fm-parent-channel-lib.sh:31-41</code>):</p>
+<ul>
+<li><code>.fm-secondmate-home</code> holds the mate's id in its parent home. No file means this is a main home and there is nothing to report. The id must be path-safe (<code class="cite">bin/fm-parent-channel-lib.sh:69-93</code>).</li>
+<li><code>.fm-secondmate-parent</code> names the route. A <strong>local</strong> route appends to <code>&lt;parent_home&gt;/state/&lt;mate-id&gt;.status</code>. A <strong>remote</strong> route appends to this home's own <code>state/parent-replies.status</code>, which the parent's remote reply adapter mirrors line for line into that same parent file.</li>
+</ul>
+<p>The parent watcher classifies lines there "exactly as it classifies any crewmate's status stream", so everything on the <a href="status-channel.html">status channel</a> page applies. The secondmate brief says the same thing to the mate: "Nobody reads this chat … That file is your parent channel, and in this home it IS the captain" (<code class="cite">bin/fm-brief.sh:303-307</code>).</p>
+<h3 id="record">The parent binding record</h3>
+<pre><code>schema=fm-secondmate-parent.v1
+route=local
+parent_home=/absolute/path/to/parent/home
+
+schema=fm-secondmate-parent.v1
+route=remote
+parent_host=&lt;ssh alias, diagnostic only; may be absent in legacy manifests&gt;</code></pre>
+<p>Exactly one schema and one route. A local route needs exactly one absolute <code>parent_home</code> and no <code>parent_host</code>; a remote route has no <code>parent_home</code>. Unknown fields are allowed for later additions. Duplicates, a malformed binding, an unknown route or schema, a symlink, and any NUL byte all fail closed. The NUL check exists because different bash versions handle NUL differently and could resolve to a home the bytes never name (<code class="cite">bin/fm-secondmate-parent-lib.sh:1-70</code>). Writers publish this record before <code>.fm-secondmate-home</code>, so the identity marker is the "seed complete" point.</p>
+
+<h2 id="publishers">Who publishes what</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Outcome</th><th>Evidence in the mate home</th><th>Published by</th></tr></thead>
+<tbody>
+<tr><td>Child PR ready</td><td>The child's <code>done:</code> PR-ready line; <code>pr=</code> in its record once registered</td><td><code>fm-inactive-reconcile.sh</code> on the next poll; <code>fm-pr-check.sh</code> at registration with the canonical URL</td></tr>
+<tr><td>Scout child findings</td><td><code>done:</code> line plus <code>data/&lt;child&gt;/report.md</code></td><td><code>fm-inactive-reconcile.sh</code>, with the report pointer</td></tr>
+<tr><td>Child failed</td><td><code>failed:</code> line</td><td><code>fm-inactive-reconcile.sh</code></td></tr>
+<tr><td>Decision escalated to the captain</td><td>A task held for the captain</td><td><code>fm-captain-hold.sh hold</code>, and its <code>answer</code></td></tr>
+<tr><td>PR merged</td><td>The merge poll or the mate's own merge</td><td><code>fm-merge-outcome-lib.sh</code></td></tr>
+<tr><td>Child leaving the home</td><td>Its final ledger line</td><td><code>fm-teardown.sh</code>, which refuses to remove the child while that line is undelivered</td></tr>
+<tr><td>Child ended silently</td><td>Terminal state with a silent ledger</td><td>The inactive-outcome scan in <code>fm-inactive-reconcile.sh</code></td></tr>
+<tr><td>Answer to a marked request</td><td>A correlated line</td><td><code>fm-secondmate-report.sh</code> (optional), or the mate's own <code>echo</code></td></tr>
+<tr><td>Anything that exists only in the mate's reasoning</td><td>None</td><td>The charter only</td></tr>
+</tbody></table></div>
+<p>(<code class="cite">docs/secondmate-parent-channel.md:23-33</code>; the same list in the library header, <code class="cite">bin/fm-parent-channel-lib.sh:16-28</code>.) The ledger delivery reads files only and calls no harness, forge, or state reader, so it behaves the same on every harness and backend. Each delivery is keyed with the first eight hex characters of a receipt fingerprint, so a replayed poll or restart cannot deliver an event twice while a genuinely new terminal event is delivered again (<code class="cite">docs/secondmate-parent-channel.md:35-37</code>).</p>
+
+<h2 id="append">How one line is appended</h2>
+<p><code>fm_parent_channel_report &lt;home&gt; &lt;state&gt; &lt;line&gt;</code> resolves the destination, stamps the line with its emission time, and appends it once (<code class="cite">bin/fm-parent-channel-lib.sh:147-153</code>). "Once" uses the status channel's retry rule: if the same event is already there, ignoring only a well-formed time tag, nothing is written (<code class="cite">bin/fm-parent-channel-lib.sh:132-145</code>). An existing destination must be a regular, non-symlinked file; a missing one is created with its directory. Notes copied from a child ledger are flattened to one line and cut at 1200 characters so they cannot break the line framing (<code class="cite">bin/fm-parent-channel-lib.sh:126-130</code>).</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Return</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>Resolved, or appended, or already present</td></tr>
+<tr><td>1</td><td>A main home: nothing to report</td></tr>
+<tr><td>2</td><td>Identity marker unusable (symlink, NUL, bad id)</td></tr>
+<tr><td>3</td><td>Parent binding missing or unreadable</td></tr>
+<tr><td>4</td><td>The append failed (including a destination that is a symlink or not a regular file)</td></tr>
+</tbody></table></div>
+<p>"A caller that has already recorded the outcome locally must surface a non-zero return rather than treat it as delivered" (<code class="cite">bin/fm-parent-channel-lib.sh:47-54</code>).</p>
+
+<h2 id="judgement">What the mate still writes</h2>
+<p>The brief reserves the mate's own appends for judgement: the answer to a marked request, a recommendation or caveat on a delivered outcome, its own blocker or failure, and anything else it would say to the captain (<code class="cite">bin/fm-brief.sh:306-307</code>). A duplicate is harmless and a miss is not, so the mate may still comment on a delivered outcome; the parent reads the script's line as the fact and the mate's as commentary (<code class="cite">docs/secondmate-parent-channel.md:37</code>). Answers to marked requests carry a correlation token and are tracked by <a href="pending-replies.html">pending replies</a>, which can also repair a correlated line the mate wrote into its own home's same-named status file by mistake (<code class="cite">docs/secondmate-parent-channel.md:38-41</code>).</p>
+<p>The optional helper writes that answer without ever taking a path from the caller (<code class="cite">bin/fm-secondmate-report.sh:10-23</code>):</p>
+<pre><code>fm-secondmate-report.sh done abcdef0123456789 "audit clean"
+fm-secondmate-report.sh --doc done abcdef0123456789 data/x/report.md "see report"</code></pre>
+
+<h2 id="not-built">What was deliberately not built</h2>
+<ul>
+<li>No mirror of the mate's chat: picking which sentence is an outcome would itself be model behaviour, and every harness exposes turn text differently.</li>
+<li>No automatic escalation of a child's open decision after a threshold: an escalated decision is a captain hold, which is already published.</li>
+<li>No second watcher or standalone scanner: the ledger pass runs inside the existing inactive-outcome command on every watcher poll.</li>
+<li>No orphan lifecycle: teardown refuses instead of removing an undelivered outcome.</li>
+</ul>
+<p>(<code class="cite">docs/secondmate-parent-channel.md:43-48</code>.) The design note points to <code class="cite">docs/verification/secondmate-parent-channel.md</code> for a dated live run with real tmux panes and no model.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>
