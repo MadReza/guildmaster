@@ -358,3 +358,12 @@ svg.chart .chart-bar-question { fill: var(--fg-muted); }
 @media (max-width: 52rem) {
   svg.chart.chart-dense { min-width: 640px; }
 }
+
+/* ---------- Prompts and skills area (components/prompts-and-skills/) ---------- */
+/* Free text on the diagram canvas (outside a node), and dotted sequence-diagram lifelines. */
+svg.c4 text.ps-note { fill: var(--fg-muted); font-size: 11px; text-anchor: start; }
+svg.c4 .ps-lifeline { fill: none; stroke: var(--c4-boundary); stroke-width: 1; stroke-dasharray: 2 4; }
+/* Long citations in this area may wrap on a narrow screen instead of widening the page. */
+@media (max-width: 40rem) {
+  code.cite.ps-wrap, a.cite code.cite.ps-wrap { white-space: normal; overflow-wrap: anywhere; }
+}

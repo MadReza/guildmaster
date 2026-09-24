@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Supervision protocol text · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">Components › Prompts and skills</p>
+<h1>Supervision protocol text</h1>
+<p class="lede">The harness-specific half of the supervision instructions: one Markdown snippet per primary harness, rendered into the session-start digest with the session's current posture, plus a one-line repair instruction that guards and hooks reuse.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Prompts and skills</a>. What the watcher, hooks, and extensions actually do is documented under <a href="../supervision/index.html">Supervision</a>; this page covers the words the agent is given about them.</p>
+
+<h2 id="split">Why the text is split out of AGENTS.md</h2>
+<p><code>AGENTS.md</code> section 8 is harness-neutral: "keep exactly one live supervision cycle using the emitted protocol for this primary harness … Do not substitute another harness's wait shape, use shell <code>&amp;</code>, or create a second cycle when a healthy one already exists." <code class="cite ps-wrap">AGENTS.md:422-424</code> The harness-specific recipe varies a lot (a Claude Stop hook, a Codex foreground checkpoint, a Pi extension tool, a Grok background task), and a session only ever needs its own. Loading all eight in <code>AGENTS.md</code> would charge every session for seven recipes it cannot use, so section 3 says instead that <code>bin/fm-supervision-instructions.sh</code> "renders the emitted supervision block from <code>docs/supervision-protocols/</code>" <code class="cite ps-wrap">AGENTS.md:170</code> and section 8 names "the emitted session-start block" as a mechanism owner <code class="cite ps-wrap">AGENTS.md:420</code>.</p>
+<p>The snippets are classified <code>agent-runtime</code>, not documentation: they are prompt text that happens to live under <code>docs/</code> <code class="cite ps-wrap">docs/documentation-audiences.md:14</code>.</p>
+
+<h2 id="renderer">The renderer</h2>
+<p>The header states the whole purpose: "Render the primary-harness supervision operating block for session start and the short repair line used by guards and turn-end hooks." <code class="cite ps-wrap">bin/fm-supervision-instructions.sh:2-3</code></p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1100 570" role="img" aria-labelledby="sp-t sp-d">
+<title id="sp-t">How the supervision operating block is rendered</title>
+<desc id="sp-d">Callers pass the harness and posture flags. The renderer detects the harness if none is given, maps it to one of eight snippet files, substitutes path placeholders, and prints either the full block, made of current-state lines, an ordinary-wake line, and the snippet, or a single repair line.</desc>
+<defs><marker id="sp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">fm-supervision-instructions.sh</text>
+
+<g class="c4-component"><rect x="20" y="60" width="230" height="70" rx="8"/><text class="c4-label" x="135" y="86">Session start</text><text class="c4-tech" x="135" y="103">[fm-session-start.sh]</text><text class="c4-desc" x="135" y="119">full block, every flag</text></g>
+<g class="c4-component"><rect x="20" y="150" width="230" height="70" rx="8"/><text class="c4-label" x="135" y="176">Watcher guard</text><text class="c4-tech" x="135" y="193">[fm-guard.sh]</text><text class="c4-desc" x="135" y="209">--repair-line + posture</text></g>
+<g class="c4-component"><rect x="20" y="240" width="230" height="70" rx="8"/><text class="c4-label" x="135" y="266">Turn-end guard</text><text class="c4-tech" x="135" y="283">[fm-turnend-guard.sh]</text><text class="c4-desc" x="135" y="299">--repair-line, afk, x-mode</text></g>
+<g class="c4-component"><rect x="20" y="330" width="230" height="70" rx="8"/><text class="c4-label" x="135" y="356">Bootstrap</text><text class="c4-tech" x="135" y="373">[fm-bootstrap.sh]</text><text class="c4-desc" x="135" y="389">--repair-line only</text></g>
+
+<g class="c4-component"><rect x="330" y="60" width="250" height="90" rx="8"/><text class="c4-label" x="455" y="88">Resolve harness</text><text class="c4-tech" x="455" y="105">[--harness, else fm-harness.sh]</text><text class="c4-desc" x="455" y="123">7 named, pi-signed → pi,</text><text class="c4-desc" x="455" y="139">anything else → unknown</text></g>
+<g class="c4-component"><rect x="330" y="190" width="250" height="90" rx="8"/><text class="c4-label" x="455" y="218">Resolve posture</text><text class="c4-tech" x="455" y="235">[--read-only --afk --afk-mode --x-mode]</text><text class="c4-desc" x="455" y="253">x-mode also auto-set when</text><text class="c4-desc" x="455" y="269">config/x-mode.env exists</text></g>
+<g class="c4-component"><rect x="330" y="330" width="250" height="90" rx="8"/><text class="c4-label" x="455" y="358">Substitute placeholders</text><text class="c4-tech" x="455" y="375">[__FM_PI_EXT__, __FM_X_MODE_ENV__ …]</text><text class="c4-desc" x="455" y="393">absolute extension paths and</text><text class="c4-desc" x="455" y="409">the quoted Relay env path</text></g>
+
+<g class="c4-datastore"><path d="M660,72 a100,12 0 0,0 200,0 a100,12 0 0,0 -200,0 v66 a100,12 0 0,0 200,0 v-66"/><text class="c4-label" x="760" y="104">Protocol snippets</text><text class="c4-desc" x="760" y="122">docs/supervision-protocols/</text><text class="c4-desc" x="760" y="138">8 files, 13-40 lines each</text></g>
+
+<g class="c4-component"><rect x="660" y="300" width="410" height="120" rx="8"/><text class="c4-label" x="865" y="326">Full operating block</text><text class="c4-desc" x="865" y="346">SUPERVISION OPERATING INSTRUCTIONS - primary harness: X</text><text class="c4-desc" x="865" y="364">Current state: lock, away/quiet, X mode</text><text class="c4-desc" x="865" y="382">one "Ordinary wake:" line for this harness</text><text class="c4-desc" x="865" y="400">then the rendered snippet</text></g>
+<g class="c4-component"><rect x="660" y="450" width="410" height="80" rx="8"/><text class="c4-label" x="865" y="476">Repair line</text><text class="c4-desc" x="865" y="496">one sentence: read-only, afk, quiet, or the harness's</text><text class="c4-desc" x="865" y="514">repair recipe, optionally prefixed "After draining…"</text></g>
+
+<g class="c4-rel"><path d="M250,95 H328" marker-end="url(#sp-arrow)"/></g>
+<g class="c4-rel"><path d="M250,185 H290 V110 H328" marker-end="url(#sp-arrow)"/></g>
+<g class="c4-rel"><path d="M250,275 H290"/></g>
+<g class="c4-rel"><path d="M250,365 H290 V185"/></g>
+<g class="c4-rel"><path d="M455,150 V188" marker-end="url(#sp-arrow)"/></g>
+<g class="c4-rel"><path d="M455,280 V328" marker-end="url(#sp-arrow)"/></g>
+<g class="c4-rel"><path d="M580,105 H658" marker-end="url(#sp-arrow)"/><text class="c4-rel-label" x="619" y="97">selects</text></g>
+<g class="c4-rel"><path d="M760,150 V200 H620 V340 H582" marker-end="url(#sp-arrow)"/><text class="c4-rel-label" x="690" y="194">read line by line</text></g>
+<g class="c4-rel"><path d="M580,380 H658" marker-end="url(#sp-arrow)"/><text class="c4-rel-label" x="625" y="372">default</text></g>
+<g class="c4-rel"><path d="M600,380 V490 H658" marker-end="url(#sp-arrow)"/><text class="c4-rel-label" x="610" y="510">--repair-line</text></g>
+<text class="ps-note" x="20" y="556">Each guard caller supplies its own hard-coded fallback sentence if the renderer fails, so a broken renderer never silences the warning.</text>
+</svg>
+</div>
+<figcaption>Sources: harness mapping <code class="cite ps-wrap">bin/fm-supervision-instructions.sh:90-99</code>; placeholders <code class="cite ps-wrap">bin/fm-supervision-instructions.sh:120-131</code>; full block <code class="cite ps-wrap">bin/fm-supervision-instructions.sh:217-244</code>; callers <code class="cite ps-wrap">bin/fm-session-start.sh:790-795</code> <code class="cite ps-wrap">bin/fm-guard.sh:221-227</code> <code class="cite ps-wrap">bin/fm-turnend-guard.sh:233-234</code> <code class="cite ps-wrap">bin/fm-bootstrap.sh:1041-1042</code>.</figcaption>
+</figure>
+
+<h3 id="block">What the full block says</h3>
+<p>The block always opens with the same three current-state lines before any harness text <code class="cite ps-wrap">bin/fm-supervision-instructions.sh:221-240</code>:</p>
+<ul>
+<li><strong>Lock.</strong> "held by this session; this session owns normal supervision unless away mode says otherwise", or "read-only; do not drain, arm, spawn, steer, merge, or repair fleet state here".</li>
+<li><strong>Away or quiet mode.</strong> Inactive, or active with the instruction to load <code>/afk</code> or <code>/quiet</code> "and keep normal harness supervision paused while the daemon owns the watcher".</li>
+<li><strong>Relay ("X mode").</strong> Inactive, or active with "source … before launching any watcher process so the 30s cadence is inherited".</li>
+</ul>
+<p>Then one harness-specific "Ordinary wake:" sentence <code class="cite ps-wrap">bin/fm-supervision-instructions.sh:183-210</code>, then the snippet. The ordinary-wake sentence exists because the most common mistake it guards against differs by harness: on Claude it is arming a second cycle ("do not arm another cycle yourself"), on Codex it is forgetting to start the next foreground checkpoint.</p>
+
+<h3 id="repair">The repair line</h3>
+<p><code>--repair-line</code> prints one sentence and exits <code class="cite ps-wrap">bin/fm-supervision-instructions.sh:212-215</code>. Its precedence mirrors the full block: read-only first ("Watcher repair belongs to the session holding the fleet lock"), then away or quiet ("load /afk and ensure the daemon is running instead of starting normal supervision directly"), and only then the harness recipe, optionally prefixed with "After draining queued wakes," and "source … first" <code class="cite ps-wrap">bin/fm-supervision-instructions.sh:133-181</code>. That is how a guard banner such as the turn-end guard's "TURN WOULD END BLIND - SUPERVISION IS OFF" <code class="cite ps-wrap">bin/fm-turnend-guard.sh:238</code> carries the correct recipe for the running harness without the guard owning any harness knowledge. Every caller supplies its own fallback sentence if rendering fails, for example "Repair missing watcher supervision according to the session-start operating block." <code class="cite ps-wrap">bin/fm-guard.sh:227</code></p>
+
+<h2 id="snippets">The eight snippets</h2>
+<p>Every named snippet begins with a one-line <code>Mode:</code> and "When this session owns supervision and away mode is not active:" (Pi says "in either posture"), then step 1 is always the same: drain with <code>bin/fm-wake-drain.sh</code> and acknowledge with the exact printed <code>--ack-through</code> command only after handling <code class="cite ps-wrap">docs/supervision-protocols/claude.md:3-5</code> <code class="cite ps-wrap">docs/supervision-protocols/pi.md:3-5</code>.</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Harness</th><th>Mode line</th><th>Who arms the watcher</th><th>What the agent does on an ordinary wake</th><th>Lines</th></tr></thead>
+<tbody>
+<tr><td>claude</td><td>Claude Stop-hook-owned supervision</td><td>The Stop <code>asyncRewake</code> hook, "never by you"</td><td>Drain and handle; "Do not run <code>bin/fm-watch-arm.sh</code> after an ordinary wake"</td><td>27 <code class="cite ps-wrap">docs/supervision-protocols/claude.md:6-10</code></td></tr>
+<tr><td>codex</td><td>Codex foreground checkpoint</td><td>The agent, one foreground <code>bin/fm-watch-checkpoint.sh</code> at a time</td><td>Drain, handle, start the next checkpoint; never shell <code>&amp;</code> or background tasks</td><td>16 <code class="cite ps-wrap">docs/supervision-protocols/codex.md:7-10</code></td></tr>
+<tr><td>cursor</td><td>Cursor stop-hook-owned park</td><td>The synchronous <code>stop</code> hook, which parks the turn boundary</td><td>Drain and handle; the next turn end parks again</td><td>31 <code class="cite ps-wrap">docs/supervision-protocols/cursor.md:6-10</code></td></tr>
+<tr><td>grok</td><td>Grok background-notify supervision</td><td>The agent, as a tracked <code>run_terminal_command</code> background task, as its own call</td><td>Drain, handle, re-arm the same background call</td><td>39 <code class="cite ps-wrap">docs/supervision-protocols/grok.md:7-10</code> <code class="cite ps-wrap">docs/supervision-protocols/grok.md:24-28</code></td></tr>
+<tr><td>omp</td><td>omp extension background wake</td><td>The extension, after one initial <code>fm_watch_arm_omp</code> call</td><td>Nothing: "continuity is extension-owned rather than model-memory-owned"</td><td>30 <code class="cite ps-wrap">docs/supervision-protocols/omp.md:8</code> <code class="cite ps-wrap">docs/supervision-protocols/omp.md:16</code></td></tr>
+<tr><td>opencode</td><td>OpenCode TUI plugin background wake</td><td>The TUI plugin on <code>session.idle</code></td><td>"do not ask the model to re-arm because continuity is plugin-owned"</td><td>17 <code class="cite ps-wrap">docs/supervision-protocols/opencode.md:6-9</code></td></tr>
+<tr><td>pi, pi-signed</td><td>Pi extension background wake</td><td>The extension, after one initial <code>fm_watch_arm_pi</code> call</td><td>Nothing; plus the supervision-branch contract for processing merged outcomes</td><td>40 <code class="cite ps-wrap">docs/supervision-protocols/pi.md:7</code> <code class="cite ps-wrap">docs/supervision-protocols/pi.md:22-36</code></td></tr>
+<tr><td>unknown</td><td>Unknown harness fallback</td><td>The agent chooses "a supervision wait that the harness can actually wake from"</td><td>Drain, handle, acknowledge, repeat that verified wait</td><td>13 <code class="cite ps-wrap">docs/supervision-protocols/unknown.md:5-9</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>The trend across the snippets is to move the arm out of the model entirely: on five of the seven named harnesses a hook, extension, or plugin owns every re-arm, and the text's main job becomes telling the agent <em>not</em> to act. Only Codex and Grok still ask the model to take the next cycle each time.</p>
+<p>The Pi snippet is also the only one that carries a second protocol, how main processes outcomes the supervision branch recorded, including a regression example the file marks "keep verbatim and never condense away": "<code>[seq 41] claude-mod: implementation complete, ready for review</code> requires relaying a captain-facing outcome response, not just <code>Captain, shipshape.</code>" <code class="cite ps-wrap">docs/supervision-protocols/pi.md:30</code>. See <a href="../supervision/index.html">Supervision</a> for the branch itself.</p>
+
+<h2 id="placeholders">Placeholders</h2>
+<p>Snippets never hard-code the home's absolute paths. The renderer replaces six tokens line by line: <code>__FM_PI_EXT__</code>, <code>__FM_PI_TURNEND_EXT__</code>, <code>__FM_OMP_EXT__</code>, <code>__FM_OMP_TURNEND_EXT__</code>, <code>__FM_X_MODE_ENV_SH__</code> (shell-quoted), and <code>__FM_X_MODE_ENV__</code> <code class="cite ps-wrap">bin/fm-supervision-instructions.sh:120-131</code>. So the text a Pi primary reads contains the exact <code>-e</code> paths for its own clone <code class="cite ps-wrap">docs/supervision-protocols/pi.md:6</code>, and Grok's arm command carries the quoted Relay env path <code class="cite ps-wrap">docs/supervision-protocols/grok.md:10</code>.</p>
+
+<h2 id="findings">Findings</h2>
+<div class="callout unclear"><span class="callout-title">Kimi: listed as verified, rendered as unknown</span>
+<p><code>AGENTS.md</code> lists <code>kimi</code> among the verified harnesses and puts only <code>muse</code>, <code>gemini</code>, <code>rovo</code>, and <code>agy</code> in the "for crewmates and scouts only" group <code class="cite ps-wrap">AGENTS.md:219</code>, which reads as if Kimi could be a primary. The renderer has no Kimi snippet, so a Kimi primary falls through to <code>unknown.md</code> <code class="cite ps-wrap">bin/fm-supervision-instructions.sh:94-98</code>, and the Kimi harness reference says "Kimi is outside the primary turn-end guard scope" <code class="cite ps-wrap">.agents/skills/harness-adapters/references/harness/kimi.md:45</code>. The router skill settles it against a Kimi primary: "Kimi establishes its unsupported primary boundary in its selected harness reference" <code class="cite ps-wrap">.agents/skills/harness-adapters/SKILL.md:57</code>. The always-loaded list and the implementation disagree on this point.</p></div>
+<div class="callout unclear"><span class="callout-title">Cursor's step 1 omits unread status</span>
+<p>Six named snippets say to acknowledge only after "reconciling open decisions and unread status lines". Cursor's says only "reconciling open decisions" <code class="cite ps-wrap">docs/supervision-protocols/cursor.md:5</code>, and its later step also omits <code>UNREAD STATUS</code> where Claude's includes it <code class="cite ps-wrap">docs/supervision-protocols/cursor.md:11</code> <code class="cite ps-wrap">docs/supervision-protocols/claude.md:11</code>. <code>AGENTS.md</code> section 8 requires reconciling both on every harness <code class="cite ps-wrap">AGENTS.md:431-433</code>, so the harness-neutral contract still covers it; the source does not say whether the omission is deliberate.</p></div>
+<p>A smaller one: the harness-adapter router's safety paragraph names "Muse, Gemini, and AGY" as crew-only <code class="cite ps-wrap">.agents/skills/harness-adapters/SKILL.md:38</code> while <code>AGENTS.md</code> also puts <code>rovo</code> there; the Rovo reference agrees with <code>AGENTS.md</code> that it is "Not verified … as a secondmate or primary" <code class="cite ps-wrap">.agents/skills/harness-adapters/references/harness/rovo.md:4</code>.</p>
+
+<h2 id="promotion">Adding a harness</h2>
+<p>The unknown snippet ends with the promotion rule: "Record new verification evidence before promoting an unknown harness to a named snippet." <code class="cite ps-wrap">docs/supervision-protocols/unknown.md:13</code> The renderer's <code>case</code> list is the second place a new name must land <code class="cite ps-wrap">bin/fm-supervision-instructions.sh:94-98</code>, and the harness-dependent-check policy requires a portable regression plus a live guard for anything whose verdict comes from vendor output <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:86-104</code>.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

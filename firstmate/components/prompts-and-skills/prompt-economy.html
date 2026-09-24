@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prompt economy · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">Components › Prompts and skills</p>
+<h1>Prompt economy and the startup memory budget</h1>
+<p class="lede">What Firstmate spends context on before the first real turn, what it deliberately defers until a trigger, and how the one growing part of startup, curated memory, is held to a per-home budget.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Prompts and skills</a>. Sizes are bytes measured on that commit; token figures use Firstmate's own estimator, <code>ceil(UTF-8 bytes / 3)</code>, "a conservative portable approximation rather than a provider-exact tokenizer" <code class="cite ps-wrap">docs/configuration.md:264</code>.</p>
+
+<h2 id="principle">The principle</h2>
+<p>Every always-loaded byte is paid "by every session of every fleet member, every time, whether or not that session ever hits the situation the new lines describe", while a skill's cost "is paid only by the sessions that actually load it" <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:62-63</code>. Firstmate applies that split to every instruction channel it controls.</p>
+
+<h2 id="startup">What a supervisor pays at startup</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1000 400" role="img" aria-labelledby="pe-t pe-d">
+<title id="pe-t">Startup spend versus deferred instruction text</title>
+<desc id="pe-d">Bars drawn at one pixel per 500 bytes. Paid every session on a Claude primary: AGENTS.md 85,135 bytes, the skill index at most 11,835 bytes, the Claude supervision snippet 3,372 bytes, and curated memory budgeted at 7,500 estimated tokens, about 22,500 bytes, plus variable fleet state. Deferred until a trigger: skill bodies 292,155 bytes, harness-adapter references 100,940 bytes, and the other seven supervision snippets 23,022 bytes.</desc>
+<text class="c4-diagram-title" x="20" y="28">Paid every session vs paid on trigger (1 px = 500 bytes)</text>
+<text class="ps-note" x="20" y="62">Every Claude primary session</text>
+<g class="c4-component"><rect x="20" y="72" width="170" height="30" rx="3"/></g>
+<g class="c4-container"><rect x="190" y="72" width="24" height="30" rx="0"/></g>
+<g class="c4-external"><rect x="214" y="72" width="7" height="30" rx="0"/></g>
+<g class="c4-datastore"><rect x="221" y="72" width="45" height="30" rx="0"/></g>
+<text class="ps-note" x="276" y="92">≈ 122 KB of fixed text before fleet state (about 41,000 estimated tokens)</text>
+<text class="ps-note" x="20" y="126">AGENTS.md 85,135 · skill index ≤ 11,835 · Claude snippet 3,372 · memory budget ≈ 22,500</text>
+
+<text class="ps-note" x="20" y="176">Deferred until a trigger</text>
+<g class="c4-component"><rect x="20" y="186" width="584" height="30" rx="3"/></g>
+<g class="c4-container"><rect x="604" y="186" width="202" height="30" rx="0"/></g>
+<g class="c4-external"><rect x="806" y="186" width="46" height="30" rx="0"/></g>
+<text class="ps-note" x="20" y="240">skill bodies 292,155 · harness-adapter references 100,940 · other supervision snippets 23,022</text>
+<text class="ps-note" x="20" y="256">≈ 416 KB, more than three times the fixed startup text</text>
+
+<g class="c4-legend">
+<rect class="c4-legend-frame" x="20" y="290" width="960" height="92" rx="6"/>
+<text class="c4-legend-heading" x="34" y="312">Legend</text>
+<g class="c4-component"><rect x="34" y="324" width="28" height="14" rx="3"/></g><text x="70" y="336">AGENTS.md / skill bodies</text>
+<g class="c4-container"><rect x="270" y="324" width="28" height="14" rx="3"/></g><text x="306" y="336">skill index / harness references</text>
+<g class="c4-external"><rect x="540" y="324" width="28" height="14" rx="3"/></g><text x="576" y="336">supervision snippet(s)</text>
+<g class="c4-datastore"><rect x="760" y="324" width="28" height="14" rx="3"/></g><text x="796" y="336">curated memory</text>
+<text x="34" y="366">The index bar is an upper bound: it counts every tracked skill's whole frontmatter, not just the part a harness shows.</text>
+</g>
+</svg>
+</div>
+<figcaption>Fleet state (backlog listing, task metadata, status tails, liveness) and the wake-queue presentation are added on top and depend on the fleet; the digest bounds them rather than fixing their size.</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Startup item</th><th>Size</th><th>Why it is paid up front</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><code>AGENTS.md</code></td><td>85,135 B ≈ 28,400 tokens</td><td>"This file is your entire job description"; safety boundaries and triggers must hold with nothing else loaded</td><td><code class="cite ps-wrap">AGENTS.md:9</code></td></tr>
+<tr><td><code>CLAUDE.md</code> pointer</td><td>90 B</td><td>Claude's route to <code>AGENTS.md</code></td><td><code class="cite ps-wrap">CLAUDE.md:1-2</code></td></tr>
+<tr><td>Skill index</td><td>≤ 11,835 B ≈ 3,900 tokens</td><td>The agent must know a skill exists to load it at its trigger</td><td><code class="cite ps-wrap">docs/verification/stow-memory.md:13</code></td></tr>
+<tr><td>One supervision snippet</td><td>1,070 B (unknown) to 6,900 B (Pi); Claude 3,372 B</td><td>Only the running harness's recipe is rendered</td><td><code class="cite ps-wrap">bin/fm-supervision-instructions.sh:94-99</code></td></tr>
+<tr><td>Digest framing, lock, bootstrap, queue</td><td>Small when healthy</td><td>Bootstrap is "silent by default"; the queue is this turn's work</td><td><code class="cite ps-wrap">AGENTS.md:188</code> <code class="cite ps-wrap">AGENTS.md:192</code></td></tr>
+<tr><td>Fleet state</td><td>Variable, bounded</td><td>Recovery depends on it; done rows and bodies are excluded, tails are 5 lines of at most 220 characters, queued rows capped at 20</td><td><code class="cite ps-wrap">bin/fm-session-start.sh:129-165</code> <code class="cite ps-wrap">bin/fm-session-start.sh:357-359</code></td></tr>
+<tr><td>Curated memory</td><td>Budget 7,500 tokens (primary default)</td><td>Captain preferences and learnings shape every decision</td><td><code class="cite ps-wrap">docs/configuration.md:257-258</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="deferred">What it defers, and to when</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Deferred text</th><th>Loaded when</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>21 skill bodies, 804 B to 39,716 B each (<code>fmx-respond</code>, <code>stow</code>, <code>secondmate-provisioning</code>, <code>afk</code>, and <code>bearings</code> are the largest)</td><td>At the skill's trigger, or when the captain types it</td><td><code class="cite ps-wrap">AGENTS.md:576-578</code></td></tr>
+<tr><td>16 harness-adapter references</td><td>Only the router-selected union for one operation, for example 2 common files plus 1 harness file for a spawn</td><td><code class="cite ps-wrap">.agents/skills/harness-adapters/SKILL.md:15-16</code></td></tr>
+<tr><td>Seven other harnesses' supervision snippets</td><td>Never, in this session</td><td><code class="cite ps-wrap">bin/fm-supervision-instructions.sh:94-99</code></td></tr>
+<tr><td>Script mechanics</td><td>Before first use of that script</td><td><code class="cite ps-wrap">AGENTS.md:70</code></td></tr>
+<tr><td>Full status logs, full task bodies, omitted queued rows</td><td>Only for a named read-once exception</td><td><code class="cite ps-wrap">bin/fm-session-start.sh:814-825</code></td></tr>
+<tr><td>Deep endpoint state</td><td>When action depends on it, through <code>bin/fm-crew-state.sh</code></td><td><code class="cite ps-wrap">AGENTS.md:202</code></td></tr>
+<tr><td>Network verdicts</td><td>Harvested later, or delivered as a wake</td><td><code class="cite ps-wrap">AGENTS.md:183-185</code></td></tr>
+<tr><td>Narrow, conditional memory</td><td>Moved by <code>/stow</code> into a home-local skill, then loaded at its own trigger</td><td><code class="cite ps-wrap">.agents/skills/stow/SKILL.md:150</code></td></tr>
+<tr><td>Maintainer docs under <code>docs/</code></td><td>Never agent-loaded on demand; only reachable when a skill or header points into them</td><td><code class="cite ps-wrap">.agents/skills/stow/SKILL.md:186</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="turn">Economy after startup</h2>
+<p>The same thinking governs every later turn, mostly by keeping text out of the supervisor's context:</p>
+<ul>
+<li><strong>Read once.</strong> The digest's contract forbids re-reading what it printed <code class="cite ps-wrap">bin/fm-session-start.sh:806-812</code>.</li>
+<li><strong>Sparse status.</strong> Workers are told "Each append wakes firstmate, so report sparingly … No step-by-step FYI progress lines; firstmate reads your pane for that." <code class="cite ps-wrap">bin/fm-brief.sh:519-522</code></li>
+<li><strong>Silent waiting.</strong> "Waiting on a healthy supervision cycle is silent; empty polls, elapsed time, and no-change updates are not captain-facing progress." <code class="cite ps-wrap">AGENTS.md:451</code> On Claude the arm itself runs "with no model command and no model tokens" <code class="cite ps-wrap">docs/supervision-protocols/claude.md:7</code>.</li>
+<li><strong>Pointer, not payload.</strong> An ask-user escalation points to a findings file; "The status line only points at the file; it never restates or summarizes a finding's content." <code class="cite ps-wrap">bin/fm-dod-lib.sh:243</code></li>
+<li><strong>Bounded drains.</strong> <code>OPEN DECISIONS</code> and <code>RECORD DIVERGENCE</code> are bounded sections <code class="cite ps-wrap">AGENTS.md:194</code> <code class="cite ps-wrap">AGENTS.md:197</code>; only <code>UNREAD STATUS</code> is unbounded, "so an answer buried under a later routine line is not dropped" <code class="cite ps-wrap">AGENTS.md:196</code>, which trades cost for not losing an answer.</li>
+</ul>
+
+<h2 id="budget">The startup memory budget</h2>
+<p>Curated memory is the only startup input that grows by itself as a home learns, so it is the one with an explicit allowance.</p>
+<dl class="defs">
+<dt>What it covers</dt>
+<dd>"<code>config/startup-memory-budget</code> is the primary-authoritative per-home allowance for the startup prompt-memory surface: <code>data/captain.md</code>, <code>data/captain-shared.md</code>, and <code>data/learnings.md</code> together." <code class="cite ps-wrap">docs/configuration.md:257</code> The two registries printed in the same digest section, <code>projects.md</code> and <code>secondmates.md</code>, are outside it.</dd>
+<dt>Default and authority</dt>
+<dd>"The locked mutable bootstrap path materializes its visible default of <code>7500</code> estimated tokens in a primary home when the file is absent." A secondmate "does not create an independent default" and receives the primary's value through inherited local material <code class="cite ps-wrap">docs/configuration.md:258-260</code> <code class="cite ps-wrap">bin/fm-bootstrap.sh:1372-1382</code>.</dd>
+<dt>Format</dt>
+<dd>"one positive base-10 integer followed by exactly one newline in a regular, single-linked file"; anything else is "rejected rather than treated as a default" <code class="cite ps-wrap">docs/configuration.md:261-262</code>, surfacing as <code>STARTUP_MEMORY_BUDGET: invalid …</code>, a <code>bootstrap-diagnostics</code> trigger whose instruction is "do not infer the default or propagate it" <code class="cite ps-wrap">.agents/skills/bootstrap-diagnostics/SKILL.md:38-39</code>.</dd>
+<dt>Measurement</dt>
+<dd><code>bin/fm-startup-memory-budget.sh read</code> prints the validated value; <code>report</code> prints each file's bytes and estimate, the total, <code>budget_status=within-budget</code> or <code>over-budget</code>, and in a secondmate the special case <code>primary-owned-shared-file-alone-exceeds-budget</code> <code class="cite ps-wrap">bin/fm-startup-memory-budget.sh:41-75</code>.</dd>
+<dt>Enforcement</dt>
+<dd>By curation, not truncation. The internal <code>/stow</code> skill "owns curation and its automatic secondmate cascade, which accounts every home against this same per-home allowance separately rather than against a fleet total" <code class="cite ps-wrap">docs/configuration.md:266</code>.</dd>
+</dl>
+<div class="callout unclear"><span class="callout-title">The budget is not a hard cap</span>
+<p>Nothing on the startup path reads <code>budget_status</code>. Bootstrap only validates and materializes the file <code class="cite ps-wrap">bin/fm-bootstrap.sh:1372-1382</code>, and the digest prints each memory file in full whatever its size <code class="cite ps-wrap">bin/fm-session-start.sh:945-951</code>. The only consumer of <code>over-budget</code> in <code>bin/</code> is the report itself, used by <code>/stow</code>. So an over-budget home still injects everything; the budget binds only when someone runs <code>/stow</code>. The digest's ordering puts memory last so that a truncating harness drops it first <code class="cite ps-wrap">bin/fm-session-start.sh:90-95</code>, which is the only automatic protection against oversized memory.</p></div>
+
+<h3 id="stow">How /stow keeps memory under budget</h3>
+<p><code>/stow</code> is user-invocable and also meant for "before a session reset or context compaction, or periodically" <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:3</code>. Its curation model:</p>
+<ul>
+<li><strong>Tiers with clocks.</strong> <code>pinned</code> entries never decay; <code>aging</code> entries go stale after 30 days (or 10 unreinforced passes with the opt-in pass horizon); <code>perishable</code> entries after 7 days (or 3 passes) and must name a checkable expiry condition <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:37-40</code> <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:70-71</code>. Captain files default to <code>pinned</code>, learnings to <code>aging</code> <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:45</code>.</li>
+<li><strong>Costed bookkeeping.</strong> "Marker and header-pointer bytes count toward the startup-memory budget … which is why the spellings above are as short as they are": <code>&lt;!--a:YYYY-MM-DD--&gt;</code>, <code>&lt;!--p:…--&gt;</code>, <code>&lt;!--P--&gt;</code> <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:21-25</code> <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:47</code>.</li>
+<li><strong>A cold tier.</strong> "Stale never means deleted": pruned entries move to <code>data/memory-archive.md</code>, "never-injected" and "never counted by the budget report" <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:134</code>.</li>
+<li><strong>An ordered reduction ladder.</strong> Archive stale and low-utility entries, consolidate, offload eligible conditional entries to an existing on-demand owner, then evict <code>aging</code> entries oldest-first, but only if doing so can actually reach the budget <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:112-115</code>.</li>
+<li><strong>No accepted exceptions.</strong> "Finish at or below the effective budget, or open a concrete captain decision before ending the pass … Never end a pass over budget as an accepted exception." <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:119</code> <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:126</code></li>
+<li><strong>Pinned entries are the captain's.</strong> No automatic process moves a pinned entry; the only exit is explicit, per-item captain approval <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:116-117</code>.</li>
+</ul>
+<p>Offload is where memory economy meets the skills system: knowledge "current and durable but relevant only in a nameable context, and therefore wrong to pay for in every session of every fleet member" moves to a home-local, git-excluded skill whose description is its trigger <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:150</code> <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:174-179</code>. That is the same tier-1-versus-tier-2 decision the coding guidelines apply to <code>AGENTS.md</code>, applied to private memory.</p>
+
+<h2 id="tradeoffs">What the economy costs</h2>
+<ul>
+<li><strong>A missed trigger is a missed rule.</strong> Deferred text only helps if the agent loads it; Firstmate's defence is naming triggers as concrete conditions and strings, not a mechanism that forces loading. <a href="skills.html#trigger">See skills</a>.</li>
+<li><strong>Frozen text.</strong> A loaded skill or contract never refreshes in-session <code class="cite ps-wrap">.agents/skills/updatefirstmate/SKILL.md:20</code>.</li>
+<li><strong>Two sections dominate the contract.</strong> The layout tree and task lifecycle are 44% of <code>AGENTS.md</code>; see the <a href="agents-md.html#map">section map</a>.</li>
+<li><strong>Tokens are estimated, not counted.</strong> The bytes-divided-by-three estimate is portable and conservative, not the provider's tokenizer <code class="cite ps-wrap">docs/configuration.md:264</code>.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

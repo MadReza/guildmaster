@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Briefs as contracts · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">Components › Prompts and skills</p>
+<h1>Briefs as executable contracts</h1>
+<p class="lede">A brief is the complete written instruction set one worker receives. Firstmate generates most of it from scripts, leaves exactly two holes for the supervisor to fill, and refuses to launch a worker whose brief was filled wrongly: "The scaffold is a safety contract, not a suggestion." <code class="cite ps-wrap">AGENTS.md:567</code></p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Prompts and skills</a>. The status protocol and steering inbox a brief describes are owned by <a href="../communication/index.html">Communication</a>; delivery modes and merge authority by <a href="../delivery/index.html">Delivery</a>.</p>
+
+<h2 id="owners">Who owns what</h2>
+<p><code>AGENTS.md</code> section 11 keeps only the filling rules and points everything else away: "<code>bin/fm-brief.sh</code> and its help own scaffold syntax, generated variants, status protocol, delivery-mode definitions of done, and exact safety mechanics." <code class="cite ps-wrap">AGENTS.md:554</code> The pieces:</p>
+<dl class="defs">
+<dt><code>bin/fm-brief.sh</code></dt>
+<dd>Writes <code>data/&lt;task-id&gt;/brief.md</code> in one of three kinds, ship, scout, or secondmate charter, and "Refuses to overwrite an existing brief" <code class="cite ps-wrap">bin/fm-brief.sh:2-3</code> <code class="cite ps-wrap">bin/fm-brief.sh:17-19</code> <code class="cite ps-wrap">bin/fm-brief.sh:89</code>.</dd>
+<dt><code>bin/fm-dod-lib.sh</code></dt>
+<dd>"Single owner of a ship task's mode-specific 'Definition of done' block", the first safety rule, the worker role contract, the <code>--intent</code> contract, and the brief-parsing helpers that spawn and promotion use to validate it <code class="cite ps-wrap">bin/fm-dod-lib.sh:2</code> <code class="cite ps-wrap">bin/fm-dod-lib.sh:17-19</code> <code class="cite ps-wrap">bin/fm-dod-lib.sh:36-44</code>.</dd>
+<dt><code>bin/fm-spawn.sh</code></dt>
+<dd>Refuses a badly filled brief, then renders <code>launch-brief.md</code> for the worker <code class="cite ps-wrap">bin/fm-spawn.sh:7-30</code>. See <a href="worker-launch.html">Worker launch prompt</a>.</dd>
+<dt><code>bin/fm-promote.sh</code></dt>
+<dd>Turns a scout into a ship in place and renders the same definition of done, so "a promoted scout receives the same contract" <code class="cite ps-wrap">bin/fm-brief.sh:475-477</code> <code class="cite ps-wrap">bin/fm-dod-lib.sh:3-7</code>.</dd>
+</dl>
+
+<h2 id="anatomy">Anatomy of a ship brief</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1100 800" role="img" aria-labelledby="br-t br-d">
+<title id="br-t">Sections of a ship brief and who writes each</title>
+<desc id="br-d">A ship brief from top to bottom: the opening role line, the Task section with Captain's intent and Firstmate spec filled by the supervisor, the Herdr declaration, Setup with the isolation assertion, Rules, the steering inbox, Project memory, the Definition of done rendered by fm-dod-lib.sh, and optional home brief additions. At launch fm-spawn.sh adds the worker role contract before it and, for no-mistakes ships, the intent overlay after it.</desc>
+<defs><marker id="br-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">A ship brief, top to bottom</text>
+
+<g class="c4-boundary"><rect x="20" y="96" width="600" height="610" rx="10"/><text x="34" y="116">data/&lt;id&gt;/brief.md  (written by fm-brief.sh)</text></g>
+
+<g class="c4-external"><rect x="40" y="46" width="560" height="40" rx="6"/><text class="c4-label" x="320" y="71"># Current worker role contract  (added at launch)</text></g>
+
+<g class="c4-component"><rect x="40" y="128" width="560" height="34" rx="6"/><text class="c4-label" x="320" y="150">"You are a crewmate: an autonomous worker agent …"</text></g>
+<g class="c4-container"><rect x="40" y="170" width="560" height="44" rx="6"/><text class="c4-label" x="320" y="190"># Task › ## Captain's intent  {TASK}</text><text class="c4-desc" x="320" y="206">the captain's own ask and boundaries, plus context to read it</text></g>
+<g class="c4-container"><rect x="40" y="222" width="560" height="44" rx="6"/><text class="c4-label" x="320" y="242">## Firstmate spec  {FIRSTMATE_SPEC}</text><text class="c4-desc" x="320" y="258">only the build instructions that ask requires</text></g>
+<g class="c4-component"><rect x="40" y="274" width="560" height="40" rx="6"/><text class="c4-label" x="320" y="299"># Herdr isolation contract, or "NOT ENABLED" gate</text></g>
+<g class="c4-component"><rect x="40" y="322" width="560" height="44" rx="6"/><text class="c4-label" x="320" y="342"># Setup</text><text class="c4-desc" x="320" y="358">verify isolation first, then git checkout -b fm/&lt;id&gt;</text></g>
+<g class="c4-component"><rect x="40" y="374" width="560" height="60" rx="6"/><text class="c4-label" x="320" y="394"># Rules 1-7</text><text class="c4-desc" x="320" y="410">mode-specific rule 1, status protocol, paused vs blocked,</text><text class="c4-desc" x="320" y="425">decisions, resolved lines, the shared no-mistakes daemon</text></g>
+<g class="c4-component"><rect x="40" y="442" width="560" height="40" rx="6"/><text class="c4-label" x="320" y="467"># Firstmate instruction inbox</text></g>
+<g class="c4-component"><rect x="40" y="490" width="560" height="40" rx="6"/><text class="c4-label" x="320" y="515"># Project memory</text></g>
+<g class="c4-component"><rect x="40" y="538" width="560" height="60" rx="6"/><text class="c4-label" x="320" y="558"># Definition of done</text><text class="c4-desc" x="320" y="574">"Delivery contract: mode=&lt;mode&gt;" then the</text><text class="c4-desc" x="320" y="589">mode's completion, PR, and done-line rules</text></g>
+<g class="c4-component"><rect x="40" y="606" width="560" height="44" rx="6"/><text class="c4-label" x="320" y="626"># Home brief additions  (optional)</text><text class="c4-desc" x="320" y="642">config/brief-include.md, yields to every other section</text></g>
+<g class="c4-external"><rect x="40" y="716" width="560" height="44" rx="6"/><text class="c4-label" x="320" y="736"># Current no-mistakes intent contract  (added at launch)</text><text class="c4-desc" x="320" y="752">no-mistakes ships only: the extracted intent, verbatim</text></g>
+
+<g class="c4-person"><circle cx="820" cy="186" r="14"/><rect x="740" y="200" width="160" height="44" rx="12"/><text class="c4-label" x="820" y="227">Supervisor fills</text></g>
+<g class="c4-component"><rect x="700" y="380" width="360" height="54" rx="8"/><text class="c4-label" x="880" y="403">bin/fm-brief.sh</text><text class="c4-desc" x="880" y="421">fixed text, mode-shaped Setup and rule 1</text></g>
+<g class="c4-component"><rect x="700" y="540" width="360" height="54" rx="8"/><text class="c4-label" x="880" y="563">bin/fm-dod-lib.sh</text><text class="c4-desc" x="880" y="581">fm_ship_rule_one, fm_dod_block, ask-user block</text></g>
+<g class="c4-component"><rect x="700" y="690" width="360" height="54" rx="8"/><text class="c4-label" x="880" y="713">bin/fm-spawn.sh</text><text class="c4-desc" x="880" y="731">validates, then wraps into launch-brief.md</text></g>
+
+<g class="c4-rel"><path d="M740,222 H660 V192 H602" marker-end="url(#br-arrow)"/></g>
+<g class="c4-rel"><path d="M660,222 V244 H602" marker-end="url(#br-arrow)"/></g>
+<g class="c4-rel"><path d="M700,407 H602" marker-end="url(#br-arrow)"/><text class="c4-rel-label" x="651" y="399">writes</text></g>
+<g class="c4-rel"><path d="M700,567 H602" marker-end="url(#br-arrow)"/><text class="c4-rel-label" x="651" y="559">renders</text></g>
+<g class="c4-rel"><path d="M700,704 H680 V66 H602" marker-end="url(#br-arrow)"/></g>
+<g class="c4-legend"><rect class="c4-legend-frame" x="700" y="262" width="360" height="104" rx="6"/><text class="c4-legend-heading" x="712" y="282">Legend</text><g class="c4-person"><rect x="712" y="292" width="28" height="14" rx="6"/></g><text x="750" y="304">The supervisor agent</text><g class="c4-container"><rect x="712" y="312" width="28" height="14" rx="3"/></g><text x="750" y="324">Filled by the supervisor</text><g class="c4-component"><rect x="712" y="332" width="28" height="14" rx="3"/></g><text x="750" y="344">Generated by a script</text><g class="c4-external"><rect x="890" y="292" width="28" height="14" rx="3"/></g><text x="926" y="304">Added at launch</text></g>
+<g class="c4-rel"><path d="M700,738 H602" marker-end="url(#br-arrow)"/><text class="c4-rel-label" x="651" y="730">adds</text></g>
+</svg>
+</div>
+<figcaption>Order and text: <code class="cite ps-wrap">bin/fm-brief.sh:495-561</code>. The Task section comes first so "the machine-read <code># Task</code> heading resolves to its first match" and appended text "can never shadow it" <code class="cite ps-wrap">bin/fm-brief.sh:81-84</code>. Launch-time sections: <code class="cite ps-wrap">bin/fm-spawn.sh:2751-2759</code>.</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Section</th><th>What it makes the worker do</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>Opening line</td><td>"Work on your own; do not wait for a human."</td><td><code class="cite ps-wrap">bin/fm-brief.sh:496</code></td></tr>
+<tr><td>Herdr declaration</td><td>Without <code>--herdr-lab</code>, a "HARD SAFETY GATE": the scaffold "cannot inspect the task text filled in above", so a task that will drive Herdr lifecycle must be regenerated rather than hand-edited. With it, a guarded lab contract whose helper refuses the operator's <code>default</code> session.</td><td><code class="cite ps-wrap">bin/fm-brief.sh:384-390</code> <code class="cite ps-wrap">bin/fm-brief.sh:364-382</code> <code class="cite ps-wrap">AGENTS.md:562-563</code></td></tr>
+<tr><td>Setup</td><td>"Verify isolation before anything else" with <code>pwd -P</code> and <code>git rev-parse --show-toplevel</code>; "The path check is authoritative"; stop with a <code>blocked:</code> line if it is the primary checkout. Then the branch. No-mistakes adds <code>no-mistakes doctor</code>.</td><td><code class="cite ps-wrap">bin/fm-brief.sh:505-509</code> <code class="cite ps-wrap">bin/fm-brief.sh:487-490</code> <code class="cite ps-wrap">AGENTS.md:560</code></td></tr>
+<tr><td>Rule 1</td><td>Mode-specific: never push to the default branch and never merge (<code>direct-PR</code>, <code>no-mistakes</code>), or never push and never open a PR (<code>local-only</code>).</td><td><code class="cite ps-wrap">bin/fm-dod-lib.sh:62-79</code></td></tr>
+<tr><td>Rule 4, status</td><td>One appended line per supervisor-actionable phase; the stamp is a literal <code>&lt;epoch&gt;</code> the worker replaces, "so a scaffold never emits a substitution a file-write tool would copy through"; always a full PR URL; a mid-task <code>working:</code> line is not a stopping point.</td><td><code class="cite ps-wrap">bin/fm-brief.sh:515-531</code> <code class="cite ps-wrap">bin/fm-brief.sh:63-66</code></td></tr>
+<tr><td>Rule 4, paused vs blocked</td><td><code>paused:</code> only for "a known external wait you expect to clear on its own"; <code>blocked:</code> when stuck. The verb is configurable (<code>FM_CLASSIFY_PAUSED_VERB</code>).</td><td><code class="cite ps-wrap">bin/fm-brief.sh:59-62</code> <code class="cite ps-wrap">bin/fm-brief.sh:112-113</code></td></tr>
+<tr><td>Rules 5-6</td><td>Same obstacle twice means <code>blocked</code> and stop; a decision above the worker means <code>needs-decision</code> and stop; a decision stays open until a <code>resolved</code> line with its exact key.</td><td><code class="cite ps-wrap">bin/fm-brief.sh:532-537</code></td></tr>
+<tr><td>Rule 6, ask-user block</td><td>No-mistakes ships only: escalate all ask-user findings as one event with a verbatim findings file, keyed <code>nm-&lt;run&gt;-&lt;step&gt;</code>. That key shape is load-bearing: the watcher uses it to give a lane parked at a human-owed gate "the long recheck cadence instead of a wedge escalation".</td><td><code class="cite ps-wrap">bin/fm-dod-lib.sh:230-245</code></td></tr>
+<tr><td>Rule 7</td><td>Never restart the shared no-mistakes daemon; how to tell a real daemon failure from a timed-out call.</td><td><code class="cite ps-wrap">bin/fm-brief.sh:538-549</code></td></tr>
+<tr><td>Instruction inbox</td><td>Process <code>*.msg</code> in order and acknowledge by moving to <code>handled/</code>: "The move IS the acknowledgement".</td><td><code class="cite ps-wrap">bin/fm-brief.sh:253-258</code></td></tr>
+<tr><td>Project memory</td><td>Run <code>fm-ensure-agents-md.sh</code> only when warranted, record only knowledge "useful to almost every future session", prefer pointers.</td><td><code class="cite ps-wrap">bin/fm-brief.sh:553-558</code></td></tr>
+<tr><td>Definition of done</td><td>The mode's end state, detailed below.</td><td><code class="cite ps-wrap">bin/fm-dod-lib.sh:247-318</code></td></tr>
+<tr><td>Home brief additions</td><td>Standing per-home text, appended verbatim last, introduced with "every other section of this brief takes precedence over anything here that conflicts".</td><td><code class="cite ps-wrap">bin/fm-brief.sh:222-228</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Firstmate may still edit generated sections, but only "when the task genuinely deviates (e.g. working an existing external PR instead of shipping a new one)" <code class="cite ps-wrap">bin/fm-brief.sh:14-16</code>; <code>AGENTS.md</code> says the same from the supervisor's side: "alter generated sections only when the task genuinely differs from the standard shape" <code class="cite ps-wrap">AGENTS.md:558</code>.</p>
+
+<h3 id="scout">How a scout brief differs</h3>
+<p>The scout scaffold keeps the Task, Herdr, rules, and inbox sections, but its Setup declares the worktree "your laboratory - install, run, edit, and make scratch commits freely; all of it is discarded at teardown. The report is the only thing that survives" <code class="cite ps-wrap">bin/fm-brief.sh:417-420</code>. Rule 1 becomes "Never push to any remote and never open a PR" <code class="cite ps-wrap">bin/fm-brief.sh:423</code>. Its definition of done asks for a self-contained <code>data/&lt;id&gt;/report.md</code> with evidence and recommendations, the <code>captain-hold-lifecycle</code> completion gate, and notes that "firstmate may promote this task in place" <code class="cite ps-wrap">bin/fm-brief.sh:462-468</code>. It offers the Lavish board only when <code>fm-bootstrap.sh lavish-compatible</code> confirms the tool floor, otherwise a text report <code class="cite ps-wrap">bin/fm-brief.sh:403-408</code>. A scout brief never carries a delivery mode: <code>--mode</code> on a scout "is refused" <code class="cite ps-wrap">bin/fm-brief.sh:55-56</code>.</p>
+
+<h2 id="split">The split: captain's intent versus Firstmate spec</h2>
+<p>Every ship and scout brief's <code># Task</code> has two holes, and they are filled under different rules.</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th></th><th><code>## Captain's intent</code> (<code>{TASK}</code>)</th><th><code>## Firstmate spec</code> (<code>{FIRSTMATE_SPEC}</code>)</th></tr></thead>
+<tbody>
+<tr><td>Contents</td><td>"the captain's own ask and any boundary the captain stated, plus the context needed to read it, including the substance of any report, decision, or PR the ask refers to"</td><td>"only the build instructions that ask requires, naming what stays out of scope when the ask is narrow"</td></tr>
+<tr><td>Forbidden</td><td>Widening "the ask there into a general goal or an enumerated coverage list"; speaker labels or direct address</td><td>"a generalization, consistency sweep, or extra hardening the captain did not ask for", which "is follow-up work to note, not scope to add"</td></tr>
+<tr><td>Who reads it as what</td><td>The reviewer, as acceptance criteria; the worker, as the goal</td><td>The worker, as build constraints; never passed to the reviewer</td></tr>
+<tr><td>Later changes</td><td>Append the captain's new words "without added speaker labels or direct address" and relay them</td><td>New Firstmate constraints go here or in a steer</td></tr>
+<tr><td>Evidence</td><td><code class="cite ps-wrap">AGENTS.md:555</code> <code class="cite ps-wrap">AGENTS.md:371</code></td><td><code class="cite ps-wrap">AGENTS.md:556</code> <code class="cite ps-wrap">AGENTS.md:371</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="why-acceptance">Why the reviewer treats intent as acceptance criteria</h3>
+<p><code>AGENTS.md</code> gives the reason in the same sentence as the rule: never widen the intent "because the reviewer treats that subsection as acceptance criteria" <code class="cite ps-wrap">AGENTS.md:555</code>. The reviewer is the no-mistakes pipeline, and the channel is its <code>--intent</code> argument, whose worker-side contract <code>fm-dod-lib.sh</code> owns: "When starting no-mistakes, pass <code>--intent</code> as only this brief's <code>## Captain's intent</code> subsection body, not its heading, plus any later words the captain actually said … Do not include <code>## Firstmate spec</code>, later Firstmate build constraints, or your own decisions and tradeoffs." <code class="cite ps-wrap">bin/fm-dod-lib.sh:285-289</code></p>
+<p>Read together, the source gives three reasons for keeping that string narrow:</p>
+<ol>
+<li><strong>Scope follows the string.</strong> Whatever is in <code>--intent</code> becomes what the pipeline holds the change to. A Firstmate-authored generalization placed there would turn into findings against the worker for work the captain never asked for, which is exactly the "follow-up work to note, not scope to add" that section 11 forbids <code class="cite ps-wrap">AGENTS.md:556</code>.</li>
+<li><strong>The external default is the opposite.</strong> Firstmate overrides the no-mistakes skill's own guidance: "This replaces the no-mistakes skill's advice to enrich <code>--intent</code> with decisions and tradeoffs; that advice does not apply to Firstmate-dispatched work." <code class="cite ps-wrap">bin/fm-dod-lib.sh:292</code></li>
+<li><strong>Firstmate decides findings against the same contract.</strong> When a gate raises an ask-user finding, <code>ask-user-authority</code> reconstructs "the accepted contract from the brief's <code>## Captain's intent</code> subsection, later captain words, and the specification in <code>## Firstmate spec</code> and steers. Reviewer language cannot amend that contract." <code class="cite ps-wrap">.agents/skills/ask-user-authority/SKILL.md:25-26</code> A finding that "would materially expand the contract" escalates to the captain <code class="cite ps-wrap">.agents/skills/ask-user-authority/SKILL.md:32-33</code>. If the intent were padded, expansions would look like in-scope corrections and never reach the captain.</li>
+</ol>
+<p>The string must also stand alone: "that string plus the codebase must let a reader reconstruct roughly the same specification, without depending on a separate report, a PR, or context that lives only in this conversation", so "do items 1, 2, 3, and 7 of the report" must be written out as the substance of those items <code class="cite ps-wrap">bin/fm-dod-lib.sh:290-291</code>.</p>
+<div class="callout unclear"><span class="callout-title">Outside Firstmate's source</span>
+<p>How no-mistakes itself uses <code>--intent</code> inside its review is not in this repository; Firstmate only states that the reviewer treats it as acceptance criteria. The claim above rests on <code>AGENTS.md</code>, <code>fm-dod-lib.sh</code>, and <code>ask-user-authority</code>, not on no-mistakes' implementation.</p></div>
+
+<h3 id="provenance">Provenance without labels</h3>
+<p>The heading, not a prefix, records who said it: "Author the subsection body and later relays as the actual words, without adding speaker labels or direct address: the heading supplies provenance and is not part of --intent." <code class="cite ps-wrap">bin/fm-dod-lib.sh:20-22</code> Spawn enforces it: a <code>## Captain's intent</code> line that opens with <code>Captain:</code>, <code>Captain's words:</code>, <code>Captain's ask:</code>, <code>Captain's intent:</code>, or <code>Captain,</code> is refused <code class="cite ps-wrap">bin/fm-dod-lib.sh:223-228</code>. Older briefs with one mixed <code># Task</code> are accepted only when captain lines are marked <code>[captain] </code>; for a no-mistakes ship with no marked words the worker must "stop and ask firstmate instead of starting no-mistakes" <code class="cite ps-wrap">bin/fm-dod-lib.sh:287-288</code>. The heading-based design also matches <code>AGENTS.md</code>'s channel bound, which forbids direct address in any non-chat artifact "such as a commit message, PR or issue description, brief, code, or comment" <code class="cite ps-wrap">AGENTS.md:13</code>.</p>
+
+<h2 id="dod">Definitions of done</h2>
+<p>Each ship DoD opens with a fixed machine-readable line, <code>Delivery contract: mode=&lt;mode&gt;</code>, that spawn checks against its own <code>--mode</code> <code class="cite ps-wrap">bin/fm-dod-lib.sh:11-12</code>.</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Mode</th><th>End state the worker must reach</th><th>Done line</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><code>direct-PR</code></td><td>Push the branch, open a ready (non-draft) PR with <code>gh-axi</code>, read it back and confirm <code>isDraft</code> is false. "Do NOT run /no-mistakes."</td><td><code>done [at=&lt;epoch&gt;]: PR {url}</code></td><td><code class="cite ps-wrap">bin/fm-dod-lib.sh:250-262</code></td></tr>
+<tr><td><code>local-only</code></td><td>Committed on <code>fm/&lt;id&gt;</code>, no push or PR, kept a clean fast-forward onto the default branch.</td><td><code>done [at=&lt;epoch&gt;]: ready in branch fm/&lt;id&gt;</code></td><td><code class="cite ps-wrap">bin/fm-dod-lib.sh:264-273</code></td></tr>
+<tr><td><code>no-mistakes</code></td><td>Two phases. First report done on the commit; "Firstmate will then instruct you to run /no-mistakes". Then drive the pipeline by responding to gates, never hand-fixing; background the drive call and poll; never pass <code>--yes</code>; escalate ask-user findings; after CI green confirm non-draft.</td><td><code>done …: {summary}</code>, later <code>done …: PR {url} checks green</code></td><td><code class="cite ps-wrap">bin/fm-dod-lib.sh:275-311</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Two rules in the no-mistakes block are about the harness rather than the pipeline: "Claude Code kills a command at ten minutes maximum, while one fix round is capped around thirty minutes and up to three rounds chain. So background the drive call and poll" <code class="cite ps-wrap">bin/fm-dod-lib.sh:295-296</code>, and "A killed or timed-out call is never evidence the daemon died" <code class="cite ps-wrap">bin/fm-dod-lib.sh:298</code>. Both exist because a worker would otherwise misreport a live run as blocked. <code>--yes</code> is "banned fleet-wide" because "answering your own ask-user finding is a hard rule violation" <code class="cite ps-wrap">bin/fm-dod-lib.sh:305-306</code>.</p>
+<p>What a brief deliberately never carries is merge authority: "There is no --yolo flag here. The worker never owns merge decisions, so yolo is a spawn-time and firstmate-side input only" <code class="cite ps-wrap">bin/fm-brief.sh:57-58</code>, and passing <code>--yolo</code> to the scaffold is an error so it is "never silently dropped here and then believed to have been recorded" <code class="cite ps-wrap">bin/fm-brief.sh:166-169</code>.</p>
+
+<h2 id="refusals">Refusals: where the contract is enforced</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Where</th><th>Refused</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td rowspan="6"><code>fm-brief.sh</code></td><td>A ship scaffold with no <code>--mode</code>, or an unknown mode</td><td><code class="cite ps-wrap">bin/fm-brief.sh:177-188</code></td></tr>
+<tr><td><code>no-mistakes-prod-only</code> as a mode: "a registry policy, not a task mode"</td><td><code class="cite ps-wrap">bin/fm-brief.sh:184-186</code></td></tr>
+<tr><td><code>--mode</code> on a scout or charter; <code>--yolo</code> anywhere</td><td><code class="cite ps-wrap">bin/fm-brief.sh:189-191</code> <code class="cite ps-wrap">bin/fm-brief.sh:169</code></td></tr>
+<tr><td><code>--herdr-lab</code> on a charter; <code>--no-projects</code> on anything but a charter</td><td><code class="cite ps-wrap">bin/fm-brief.sh:195-203</code></td></tr>
+<tr><td>A <code>config/brief-include.md</code> that is not a readable regular file, or that carries its own <code>Delivery contract: mode=</code> line</td><td><code class="cite ps-wrap">bin/fm-brief.sh:209-217</code></td></tr>
+<tr><td>An existing brief at the target path</td><td><code class="cite ps-wrap">bin/fm-brief.sh:231</code></td></tr>
+<tr><td rowspan="5"><code>fm-spawn.sh</code></td><td>Leftover <code>{TASK}</code> or <code>{FIRSTMATE_SPEC}</code></td><td><code class="cite ps-wrap">bin/fm-spawn.sh:2724-2727</code></td></tr>
+<tr><td>An empty Task, or only one of the two subsections</td><td><code class="cite ps-wrap">bin/fm-spawn.sh:2728-2731</code> <code class="cite ps-wrap">bin/fm-dod-lib.sh:204-219</code></td></tr>
+<tr><td>A <code>## Captain's intent</code> line opening with a Captain label or address</td><td><code class="cite ps-wrap">bin/fm-spawn.sh:2732-2735</code></td></tr>
+<tr><td>A no-mistakes legacy brief with no <code>[captain] </code> lines</td><td><code class="cite ps-wrap">bin/fm-spawn.sh:2736-2746</code></td></tr>
+<tr><td>A brief whose <code>Delivery contract: mode=</code> disagrees with <code>--mode</code>; a pre-contract brief only warns</td><td><code class="cite ps-wrap">bin/fm-spawn.sh:2787-2793</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Spawn also refuses <code>--mode</code> and <code>--yolo</code> being absent on a ship, and prints "a loud one-line deviation notice" when the explicit mode is less rigorous than the project's standing posture, without refusing <code class="cite ps-wrap">bin/fm-spawn.sh:7-11</code> <code class="cite ps-wrap">bin/fm-spawn.sh:22-24</code>.</p>
+
+<h2 id="include">Home brief include</h2>
+<p><code>config/brief-include.md</code> lets one home add standing worker instructions "without editing this tracked script" <code class="cite ps-wrap">bin/fm-brief.sh:78-79</code>. It is local, gitignored, not inherited by secondmate homes, and <code>AGENTS.md</code> tells the supervisor to "keep its text out of <code>## Firstmate spec</code>" <code class="cite ps-wrap">AGENTS.md:85</code>. It goes last and yields to everything above it, secondmate charters never take it, and it may not declare a delivery mode because "a later scout promotion could not outrank" it <code class="cite ps-wrap">bin/fm-brief.sh:80-88</code>.</p>
+
+<h2 id="lifecycle">A brief over time</h2>
+<ol>
+<li>Scaffolded by the supervisor after intake resolves project, kind, and mode <code class="cite ps-wrap">AGENTS.md:315-324</code>.</li>
+<li>Filled: the two Task subsections, and <code>firstmate-coding-guidelines</code> added by hand for a Firstmate-repo task <code class="cite ps-wrap">AGENTS.md:561</code>.</li>
+<li>Resolved for dispatch: "Run <code>bin/fm-dispatch-resolve.sh</code> directly on the written brief in the same turn" when typed dispatch resolution is on <code class="cite ps-wrap">AGENTS.md:235</code>.</li>
+<li>Validated and wrapped at spawn into <code>launch-brief.md</code>; the source brief is left as written <code class="cite ps-wrap">bin/fm-spawn.sh:2748-2769</code>.</li>
+<li>Amended mid-task only by appending captain words to <code>## Captain's intent</code> <code class="cite ps-wrap">AGENTS.md:371</code>; everything else goes through steers.</li>
+<li>Extended on promotion with a ship contract below the scout's text <code class="cite ps-wrap">bin/fm-brief.sh:83-84</code>.</li>
+<li>Left in <code>data/&lt;id&gt;/</code> after teardown: <code>bin/fm-teardown.sh</code> reads the scout report there but contains no removal of that directory, and <code>AGENTS.md</code> states only that the report "survives teardown" <code class="cite ps-wrap">AGENTS.md:99-100</code> <code class="cite ps-wrap">bin/fm-teardown.sh:3281</code>.</li>
+</ol>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

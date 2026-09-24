@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skills system · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">Components › Prompts and skills</p>
+<h1>The skills system</h1>
+<p class="lede">Skills are Firstmate's deferred instructions: procedures that matter only in a nameable situation, stored as <code>SKILL.md</code> files that the harness indexes by name and description and loads in full only when a trigger fires.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Prompts and skills</a>.</p>
+
+<h2 id="why">Why skills exist</h2>
+<p>A skill is the second tier of the knowledge-placement tree: anything the agent needs "only in a nameable situation - a spawn, a recovery, a specific wake type, a specific lifecycle step" goes to "an agent-only skill under <code>.agents/skills/</code>, plus a one-line trigger pointer left inline in <code>AGENTS.md</code>" <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:24-25</code>. The reason is cost: "A skill's cost is paid only by the sessions that actually load it" <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:63</code>. At the pinned commit the 21 tracked skill bodies total 292,155 bytes, three and a half times <code>AGENTS.md</code>; loading them all every session would cost more than the whole contract they serve. See <a href="prompt-economy.html">Prompt economy</a>.</p>
+
+<h2 id="layout">Where skills live</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1100 520" role="img" aria-labelledby="sk-t sk-d">
+<title id="sk-t">Skill locations and who reads them</title>
+<desc id="sk-d">The tracked internal skills in .agents/skills are reached by Claude through the .claude/skills symlink and by other harnesses directly. A Claude mod in .claude/mods is reached through a symlink with no SKILL.md. Public skills in skills/ are for installers and never loaded by Firstmate. A home-local skill excluded through .git/info/exclude is discovered like any other.</desc>
+<defs><marker id="sk-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">Skill locations</text>
+
+<g class="c4-boundary"><rect x="20" y="50" width="760" height="450" rx="10"/><text x="34" y="72">Firstmate code root (a git clone)</text></g>
+
+<g class="c4-component"><rect x="50" y="95" width="300" height="90" rx="8"/><text class="c4-label" x="200" y="122">.agents/skills/&lt;name&gt;/</text><text class="c4-tech" x="200" y="139">[tracked, metadata.internal: true]</text><text class="c4-desc" x="200" y="157">21 internal skills Firstmate loads</text><text class="c4-desc" x="200" y="173">6 user-invocable, 15 agent-only</text></g>
+<g class="c4-component"><rect x="450" y="95" width="300" height="90" rx="8"/><text class="c4-label" x="600" y="122">.claude/skills</text><text class="c4-tech" x="600" y="139">[tracked symlink → ../.agents/skills]</text><text class="c4-desc" x="600" y="157">Claude compatibility; one tree</text><text class="c4-desc" x="600" y="173">serves every harness</text></g>
+<g class="c4-component"><rect x="50" y="225" width="300" height="90" rx="8"/><text class="c4-label" x="200" y="252">.claude/mods/firstmate-calm</text><text class="c4-tech" x="200" y="269">[tracked Claude Code plugin]</text><text class="c4-desc" x="200" y="287">Reached via .agents/skills symlink;</text><text class="c4-desc" x="200" y="303">no SKILL.md, so others ignore it</text></g>
+<g class="c4-component"><rect x="450" y="225" width="300" height="90" rx="8"/><text class="c4-label" x="600" y="252">Home-local skill</text><text class="c4-tech" x="600" y="269">[untracked, in .git/info/exclude]</text><text class="c4-desc" x="600" y="287">Created only by an approved /stow</text><text class="c4-desc" x="600" y="303">offload; description is its trigger</text></g>
+<g class="c4-component"><rect x="50" y="355" width="300" height="90" rx="8"/><text class="c4-label" x="200" y="382">skills/stow</text><text class="c4-tech" x="200" y="399">[tracked, public, installer-facing]</text><text class="c4-desc" x="200" y="417">Never loaded by Firstmate;</text><text class="c4-desc" x="200" y="433">shares no code with the internal one</text></g>
+
+<g class="c4-external"><rect x="840" y="95" width="230" height="90" rx="8"/><text class="c4-label" x="955" y="122">Harness skill loader</text><text class="c4-tech" x="955" y="139">[claude, codex, pi, …]</text><text class="c4-desc" x="955" y="157">Scans the filesystem,</text><text class="c4-desc" x="955" y="173">ignores git status</text></g>
+<g class="c4-external"><rect x="840" y="355" width="230" height="90" rx="8"/><text class="c4-label" x="955" y="382">Skill installers</text><text class="c4-tech" x="955" y="399">[for example npx skills add]</text><text class="c4-desc" x="955" y="417">Hide internal: true skills</text></g>
+
+<g class="c4-rel"><path d="M350,140 L448,140" marker-end="url(#sk-arrow)"/><text class="c4-rel-label" x="399" y="132">linked by</text></g>
+<g class="c4-rel"><path d="M750,140 L838,140" marker-end="url(#sk-arrow)" marker-start="url(#sk-arrow)"/><text class="c4-rel-label" x="794" y="132">indexes</text></g>
+<g class="c4-rel"><path d="M200,225 L200,187" marker-end="url(#sk-arrow)"/><text class="c4-rel-label" x="200" y="210">symlinked into</text></g>
+<g class="c4-rel"><path d="M750,270 H800 V170 H838" marker-end="url(#sk-arrow)"/><text class="c4-rel-label" x="800" y="222">discovered</text></g>
+<g class="c4-rel c4-rel-async"><path d="M350,400 L838,400" marker-end="url(#sk-arrow)"/><text class="c4-rel-label" x="594" y="392">installed standalone into other projects</text></g>
+</svg>
+</div>
+<figcaption>Only the top four boxes are ever part of a running Firstmate's instruction surface. Sources: <code class="cite ps-wrap">AGENTS.md:66-69</code> <code class="cite ps-wrap">CONTRIBUTING.md:58</code> <code class="cite ps-wrap">README.md:205-212</code> <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:174-179</code>.</figcaption>
+</figure>
+<ul>
+<li><strong>One tree for every harness.</strong> <code>.agents/skills/</code> holds "firstmate-loaded internal skills, committed; each carries metadata.internal=true for installers", and <code>.claude/skills</code> is a "symlink to .agents/skills for claude compatibility" <code class="cite ps-wrap">AGENTS.md:66-67</code>.</li>
+<li><strong><code>metadata.internal</code> is for installers only.</strong> "That flag hides them from installer discovery … without affecting how firstmate itself loads them - frontmatter metadata is inert to the agent's own skill loader." <code class="cite ps-wrap">README.md:207</code></li>
+<li><strong>Public skills are a separate product.</strong> <code>skills/</code> is "standalone public installer-facing skills, committed; not loaded by firstmate" <code class="cite ps-wrap">AGENTS.md:69</code>. The internal <code>stow</code> carries a maintainer comment that the public counterpart is "deliberately a separate file with no shared code or environment branching" <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:9</code>.</li>
+<li><strong>A mod is a skill-shaped entry with no <code>SKILL.md</code>.</strong> "each is reached through an <code>.agents/skills/&lt;mod&gt;</code> symlink because Claude Code adopts project plugins only from <code>.claude/skills</code>, carries no <code>SKILL.md</code> so every other harness's skill loader ignores that entry" <code class="cite ps-wrap">CONTRIBUTING.md:58</code>.</li>
+</ul>
+
+<h2 id="anatomy">Anatomy of a SKILL.md</h2>
+<p>Every tracked internal skill uses the same four frontmatter keys:</p>
+<pre><code>---
+name: ask-user-authority
+description: &gt;-
+  Agent-only decision procedure for ask-user findings.
+  Use before deciding any ask-user finding.
+  This skill is the single owner of finding-decision policy: …
+user-invocable: false
+metadata:
+  internal: true
+---</code></pre>
+<p><code class="cite ps-wrap">.agents/skills/ask-user-authority/SKILL.md:1-10</code>. The conventions visible across the 21 files:</p>
+<dl class="defs">
+<dt><code>description</code> states the trigger as a condition</dt>
+<dd>Agent-only skills begin "Agent-only …" and then say "Use before …", "Use when …", or "Use on …", matching the trigger-hygiene rule that a trigger is stated as a condition, "never as a vague pointer" <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:70</code>. Several also declare ownership in the description itself, so the index entry tells the agent what the body is authoritative for.</dd>
+<dt><code>user-invocable</code> separates the two kinds</dt>
+<dd><code>true</code> for the six skills the captain may type as commands, <code>false</code> for the fifteen that only the agent loads. <code>AGENTS.md</code> section 13's heading states the agent-only meaning: "These skills are not captain-invocable; load them only at their precise triggers." <code class="cite ps-wrap">AGENTS.md:578</code></dd>
+<dt>The body opens with its ownership and its boundary</dt>
+<dd>For example: "This skill is the single owner of the decision policy … <code>AGENTS.md</code> section 7 points here and does not restate this procedure." <code class="cite ps-wrap">.agents/skills/ask-user-authority/SKILL.md:15-16</code></dd>
+<dt>Relative links resolve against the skill directory</dt>
+<dd>"Resolve on-demand reference links and relative links … against the skill directory" <code class="cite ps-wrap">.agents/skills/harness-adapters/SKILL.md:21-22</code>, which is why skill bodies write <code>../../../bin/fm-control.sh</code>.</dd>
+</dl>
+
+<h2 id="kinds">Agent-only versus user-invocable</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th></th><th>User-invocable (6)</th><th>Agent-only (15)</th></tr></thead>
+<tbody>
+<tr><td>Frontmatter</td><td><code>user-invocable: true</code></td><td><code>user-invocable: false</code></td></tr>
+<tr><td>Who fires it</td><td>The captain typing <code>/afk</code>, <code>/stow</code>, and so on; Claude and Grok use the slash form, Codex the <code>$</code> form <code class="cite ps-wrap">README.md:181-182</code>. Several also have agent-side triggers.</td><td>Only the agent, on a condition named in <code>AGENTS.md</code> and repeated in the description</td></tr>
+<tr><td>Members</td><td><code>afk</code>, <code>quiet</code>, <code>ahoy</code>, <code>bearings</code>, <code>stow</code>, <code>updatefirstmate</code></td><td>The rest, listed in the catalogue below</td></tr>
+<tr><td>Where the trigger is declared</td><td>The operating section it belongs to, for example section 8 for <code>/afk</code> <code class="cite ps-wrap">AGENTS.md:462-463</code>, section 6 for <code>/stow</code> <code class="cite ps-wrap">AGENTS.md:285</code>, section 12 for <code>/updatefirstmate</code> <code class="cite ps-wrap">AGENTS.md:573</code></td><td>Section 13, one bullet per skill <code class="cite ps-wrap">AGENTS.md:580-595</code>, plus a load line at the operating point, for example <code class="cite ps-wrap">AGENTS.md:218</code></td></tr>
+<tr><td>Typical content</td><td>A mode or report the captain asks for</td><td>A decision procedure, playbook, or verified-facts reference</td></tr>
+</tbody>
+</table>
+</div>
+<p>The two flags are not exclusive in practice. <code>/afk</code> is user-invocable but must also load when <code>state/.afk-contract</code> exists or a marked message arrives <code class="cite ps-wrap">AGENTS.md:462</code>; <code>bearings</code> is user-invocable but also loads "on a contributions check wake or when filing work linked to an upstream issue" <code class="cite ps-wrap">AGENTS.md:445</code>.</p>
+<div class="callout unclear"><span class="callout-title">A trigger declared nowhere in AGENTS.md</span>
+<p><code>ahoy</code> is user-invocable and absent from <code>AGENTS.md</code>; the only trigger is its description, "when the captain explicitly invokes /ahoy" <code class="cite ps-wrap">.agents/skills/ahoy/SKILL.md:3</code>. That fits a captain-typed command, which the harness routes by name, but it is an exception to trigger hygiene's "declared inline" rule <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:69</code>. The source does not say whether captain-typed skills are meant to be exempt.</p></div>
+
+<h2 id="trigger">How a skill is triggered, and why at the trigger</h2>
+<p>Firstmate does not load skills itself. It relies on the harness's skill mechanism, whose behaviour the repository records empirically: a verification probe put a sentinel "only in the skill body below the frontmatter, so returning it required the fresh session to load the excluded skill rather than merely see its indexed name or description" <code class="cite ps-wrap">docs/verification/stow-memory.md:13</code>. So at session open the agent sees each skill's name and description; the body enters context only when the agent chooses to load it.</p>
+<p>That choice is steered from two sides. <code>AGENTS.md</code> names the condition in the always-loaded text, and the description repeats it in the index. The body is then loaded at the trigger rather than always, for three stated reasons:</p>
+<ul>
+<li><strong>Cost.</strong> Sessions that never hit the situation never pay for the procedure <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:62-63</code>.</li>
+<li><strong>One owner.</strong> The procedure lives in exactly one place, and <code>AGENTS.md</code> keeps only the stub that "must survive with no skill loaded" <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:51-52</code>.</li>
+<li><strong>Precision.</strong> Some triggers are mechanical strings, so the agent loads the right procedure at the right moment: <code>bootstrap-diagnostics</code> fires on any of seventeen named digest prefixes such as <code>TANGLE:</code> or <code>STARTUP_MEMORY_BUDGET:</code>, and explicitly not on silence or other <code>BOOTSTRAP_INFO:</code> facts <code class="cite ps-wrap">AGENTS.md:580</code>.</li>
+</ul>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1100 520" role="img" aria-labelledby="skt-t skt-d">
+<title id="skt-t">Sequence: a skill loaded at its trigger</title>
+<desc id="skt-d">At session open the harness indexes skill names and descriptions and loads AGENTS.md. Later the session-start digest prints an actionable diagnostic line. The agent matches it to the bootstrap-diagnostics trigger, loads that skill's body, follows the owner procedure, and reads the named script header before acting.</desc>
+<defs><marker id="skt-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">A skill loaded at its trigger</text>
+<g class="c4-external"><rect x="30" y="50" width="180" height="56" rx="8"/><text class="c4-label" x="120" y="75">Harness</text><text class="c4-tech" x="120" y="92">[skill index]</text></g>
+<g class="c4-container"><rect x="300" y="50" width="200" height="56" rx="8"/><text class="c4-label" x="400" y="75">Supervisor agent</text><text class="c4-tech" x="400" y="92">[context window]</text></g>
+<g class="c4-component"><rect x="590" y="50" width="200" height="56" rx="8"/><text class="c4-label" x="690" y="75">Session-start digest</text><text class="c4-tech" x="690" y="92">[fm-session-start.sh]</text></g>
+<g class="c4-component"><rect x="880" y="50" width="190" height="56" rx="8"/><text class="c4-label" x="975" y="75">SKILL.md body</text><text class="c4-tech" x="975" y="92">[bootstrap-diagnostics]</text></g>
+<path class="ps-lifeline" d="M120,106 V500"/>
+<path class="ps-lifeline" d="M400,106 V500"/>
+<path class="ps-lifeline" d="M690,106 V500"/>
+<path class="ps-lifeline" d="M975,106 V500"/>
+<g class="c4-rel"><path d="M120,140 H398" marker-end="url(#skt-arrow)"/><text class="c4-rel-label" x="260" y="133">1 AGENTS.md + skill names, descriptions</text></g>
+<text class="ps-note" x="410" y="178">2 holds the trigger line: load on any</text>
+<text class="ps-note" x="410" y="192">MISSING:, TANGLE:, STARTUP_MEMORY_BUDGET: …</text>
+<g class="c4-rel"><path d="M690,230 H402" marker-end="url(#skt-arrow)"/><text class="c4-rel-label" x="546" y="223">3 digest prints TANGLE: …</text></g>
+<g class="c4-rel"><path d="M400,275 H122" marker-end="url(#skt-arrow)"/><text class="c4-rel-label" x="260" y="268">4 load bootstrap-diagnostics</text></g>
+<g class="c4-rel"><path d="M120,315 H973" marker-end="url(#skt-arrow)"/><text class="c4-rel-label" x="700" y="308">5 harness reads the body from disk</text></g>
+<g class="c4-rel c4-rel-async"><path d="M975,355 H402" marker-end="url(#skt-arrow)"/><text class="c4-rel-label" x="700" y="348">6 owner procedure for that line enters context</text></g>
+<text class="ps-note" x="410" y="395">7 read the named script's header before first use,</text>
+<text class="ps-note" x="410" y="409">then act through the guarded script</text>
+<text class="ps-note" x="410" y="450">8 the body stays in this conversation's context</text>
+<text class="ps-note" x="410" y="464">until the conversation ends: frozen, not refreshed</text>
+</svg>
+</div>
+<figcaption>Steps 1 and 5 are harness behaviour Firstmate relies on and verified for its local-skill case <code class="cite ps-wrap">docs/verification/stow-memory.md:5</code>. Step 2 is <code class="cite ps-wrap">AGENTS.md:580</code>; step 7 is <code class="cite ps-wrap">AGENTS.md:70</code>; step 8 is <code class="cite ps-wrap">.agents/skills/updatefirstmate/SKILL.md:20</code>.</figcaption>
+</figure>
+<div class="callout unclear"><span class="callout-title">Open question</span>
+<p>Whether each harness exposes the whole frontmatter, just the description, or a truncated description in its index is harness behaviour that Firstmate's source does not record. The repository only establishes that name and description are visible before loading <code class="cite ps-wrap">docs/verification/stow-memory.md:13</code>.</p></div>
+
+<h2 id="router">The router pattern: harness-adapters</h2>
+<p>The largest reference set is split further so that one operation loads only what it needs. <code>harness-adapters</code> is "the one skill, trigger, and routing owner for harness-specific Firstmate operations. Load this router first, then exactly the common reference and one harness reference selected below. When an action spans rows, load the union once rather than every reference. Files under <code>references/</code> are resources of this skill, not additional catalogued skills." <code class="cite ps-wrap">.agents/skills/harness-adapters/SKILL.md:14-17</code></p>
+<p>The selection is a machine-readable object in the skill body, <code>harness-adapter-routing-v1</code>: an operation (<code>start</code>, <code>trust</code>, <code>skill</code>, <code>interrupt</code>, <code>exit</code>, <code>resume</code>, <code>recovery</code>, <code>primary</code>, <code>model-effort</code>, <code>verify</code>), a scenario within it, and then one harness file (thirteen harness names map onto twelve files) <code class="cite ps-wrap">.agents/skills/harness-adapters/SKILL.md:55-100</code>. A Claude spawn therefore loads the 101-line router, <code>common/dispatch.md</code>, <code>common/model-and-effort.md</code>, and <code>harness/claude.md</code>, and none of the other twelve harness files. The router keeps its non-negotiable safety rules inline, such as "Never dispatch a crewmate or secondmate on an unverified adapter" <code class="cite ps-wrap">.agents/skills/harness-adapters/SKILL.md:27</code>, applying the inline-stub rule one level down.</p>
+
+<h2 id="catalogue">Catalogue</h2>
+<p>Every tracked internal skill at the pinned commit. Triggers are quoted or closely paraphrased from <code>AGENTS.md</code> or the skill's own description.</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Skill</th><th>Invocable</th><th>Trigger</th><th>Lines</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><code>afk</code></td><td>captain</td><td><code>/afk</code>, "going afk", <code>state/.afk-contract</code> or <code>state/.afk</code> present, an <code>FM_INJECT_MARK</code> message, any <code>state/.subsuper-*</code> marker</td><td>256</td><td><code class="cite ps-wrap">AGENTS.md:462</code></td></tr>
+<tr><td><code>quiet</code></td><td>captain</td><td><code>/quiet</code>, a request for quiet mode, or <code>state/.afk</code> already in quiet mode</td><td>78</td><td><code class="cite ps-wrap">AGENTS.md:463</code></td></tr>
+<tr><td><code>ahoy</code></td><td>captain</td><td>Explicit <code>/ahoy</code>; falls back to Bearings as the session's first real message</td><td>56</td><td><code class="cite ps-wrap">.agents/skills/ahoy/SKILL.md:3</code></td></tr>
+<tr><td><code>bearings</code></td><td>captain and agent</td><td><code>/bearings</code> or a catch-up request; also a contributions check wake or filing upstream-linked work</td><td>214</td><td><code class="cite ps-wrap">AGENTS.md:445</code> <code class="cite ps-wrap">.agents/skills/bearings/SKILL.md:3-8</code></td></tr>
+<tr><td><code>stow</code></td><td>captain</td><td><code>/stow</code>; also "before a session reset or context compaction, or periodically"</td><td>309</td><td><code class="cite ps-wrap">AGENTS.md:285</code> <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:3</code></td></tr>
+<tr><td><code>updatefirstmate</code></td><td>captain</td><td><code>/updatefirstmate</code> or a request to update Firstmate</td><td>107</td><td><code class="cite ps-wrap">AGENTS.md:573</code></td></tr>
+<tr><td><code>bootstrap-diagnostics</code></td><td>agent</td><td>Any actionable bootstrap or network-checks line from seventeen named prefixes</td><td>76</td><td><code class="cite ps-wrap">AGENTS.md:580</code></td></tr>
+<tr><td><code>diagnostic-reasoning</code></td><td>agent</td><td>Before scoping a reported bug and before acting on a diagnostic report</td><td>53</td><td><code class="cite ps-wrap">AGENTS.md:581</code></td></tr>
+<tr><td><code>ask-user-authority</code></td><td>agent</td><td>Before deciding any ask-user finding</td><td>57</td><td><code class="cite ps-wrap">AGENTS.md:582</code></td></tr>
+<tr><td><code>quota-array-dispatch</code></td><td>agent</td><td>Before choosing among a matched dispatch-profile array</td><td>134</td><td><code class="cite ps-wrap">AGENTS.md:583</code></td></tr>
+<tr><td><code>harness-adapters</code></td><td>agent</td><td>Before spawning or recovering, trust handling, harness-specific skill invocation, interrupt, exit, resume, or adapter verification</td><td>101 + 16 references</td><td><code class="cite ps-wrap">AGENTS.md:584</code></td></tr>
+<tr><td><code>firstmate-orca</code></td><td>agent</td><td>Switching to, spawning on, smoke-testing, debugging, or reconciling the Orca backend</td><td>92</td><td><code class="cite ps-wrap">AGENTS.md:585</code></td></tr>
+<tr><td><code>project-management</code></td><td>agent</td><td>Before adding, creating, removing, or initializing a project; cloning counts as add</td><td>92</td><td><code class="cite ps-wrap">AGENTS.md:586-587</code></td></tr>
+<tr><td><code>stuck-crewmate-recovery</code></td><td>agent</td><td>A dead endpoint, a stale wake, looping, confusion, an unresponsive worker, a failed steer, or a worker claiming its pipeline is dead</td><td>82</td><td><code class="cite ps-wrap">AGENTS.md:588</code></td></tr>
+<tr><td><code>secondmate-provisioning</code></td><td>agent</td><td>Any secondmate create, seed, validate, launch, handoff, recover, push, or retire, and before editing <code>data/secondmates.md</code></td><td>264</td><td><code class="cite ps-wrap">AGENTS.md:589</code></td></tr>
+<tr><td><code>captain-hold-lifecycle</code></td><td>agent</td><td>Before treating an investigation or visual review as complete, recording a captain answer, or on a <code>RECORD DIVERGENCE</code> line</td><td>68</td><td><code class="cite ps-wrap">AGENTS.md:590</code></td></tr>
+<tr><td><code>decision-hold-lifecycle</code></td><td>agent</td><td>None of its own: a renamed pointer to <code>captain-hold-lifecycle</code> kept for in-flight briefs</td><td>15</td><td><code class="cite ps-wrap">.agents/skills/decision-hold-lifecycle/SKILL.md:4-5</code></td></tr>
+<tr><td><code>process-event-sources</code></td><td>agent</td><td>Before arming a long-polling source or a condition→action watch, and on <code>procevent</code> wakes</td><td>167</td><td><code class="cite ps-wrap">AGENTS.md:591-592</code></td></tr>
+<tr><td><code>fmx-respond</code></td><td>agent</td><td>Relay <code>x-mention</code>, <code>x-mode-error</code>, and <code>public-followup</code> wakes, and Relay-linked milestones; only when Relay is on</td><td>310</td><td><code class="cite ps-wrap">AGENTS.md:593</code></td></tr>
+<tr><td><code>firstmate-codexapp</code></td><td>agent</td><td>Coordinating a visible Codex Desktop thread or evaluating a Codex App backend request</td><td>110</td><td><code class="cite ps-wrap">AGENTS.md:594</code></td></tr>
+<tr><td><code>firstmate-coding-guidelines</code></td><td>agent</td><td>Before changing Firstmate's shared tracked material, directly or through a brief</td><td>134</td><td><code class="cite ps-wrap">AGENTS.md:595</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="workers">Skills and workers</h2>
+<p>Skills are a supervisor surface. A worker in a project worktree does not have Firstmate's <code>.agents/skills/</code> in its tree, so the brief reaches the skills it needs by absolute path. The scout scaffold says "Before reporting done, read and follow <code>$FM_ROOT/.agents/skills/captain-hold-lifecycle/SKILL.md</code>" <code class="cite ps-wrap">bin/fm-brief.sh:466</code>, and the secondmate charter says "load <code>captain-hold-lifecycle</code> from this home's <code>.agents/skills/</code>" <code class="cite ps-wrap">bin/fm-brief.sh:319</code>.</p>
+<p>The other direction is a worker's own harness skill, such as the external <code>no-mistakes</code> skill. Firstmate triggers it by typing the harness-native form into the worker through <code>fm-send</code>: "Conversation and harness-native skill invocation use <code>../../../bin/fm-send.sh</code>" <code class="cite ps-wrap">.agents/skills/harness-adapters/references/common/control-and-recovery.md:8</code>. The form differs by harness, <code>/&lt;skill&gt;</code> on Claude and <code>$&lt;skill&gt;</code> on Codex, where "<code>/&lt;skill&gt;</code> is Claude-only and Codex rejects it" <code class="cite ps-wrap">.agents/skills/harness-adapters/references/harness/claude.md:12</code> <code class="cite ps-wrap">.agents/skills/harness-adapters/references/harness/codex.md:12</code>. A successful send is not proof: "require the tool-specific postcondition" <code class="cite ps-wrap">.agents/skills/harness-adapters/references/common/control-and-recovery.md:27-28</code>.</p>
+
+<h2 id="local">Home-local skills</h2>
+<p>A home can hold skills that are not part of the template. They are created only through <code>/stow</code>'s over-budget offload, for conditional memory that is too expensive to keep in the always-injected files. The rules are strict: "the stow process never creates or writes a firstmate-repo-tracked skill", and every such skill "is user-owned and local, excluded through that active home's repository-local exclude file" <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:170-171</code>. The skill "stays per-home and untracked, and the harness still lists and JIT-loads it because skill discovery scans the filesystem and ignores git status" <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:178</code>, which is the guarantee the verification record exists for <code class="cite ps-wrap">docs/verification/stow-memory.md:5</code>. Because such a skill cannot be declared in shared <code>AGENTS.md</code>, "Its precise, condition-stated description line is its entire trigger" <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:179</code>.</p>
+<p>The operator checkout studied here carries one such untracked, excluded skill. Its contents are private and are not described.</p>
+
+<h2 id="failure">Failure modes and what guards them</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Failure</th><th>Guard</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>A skill nothing loads</td><td>Trigger hygiene; review only, no script checks it</td><td><code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:68-70</code></td></tr>
+<tr><td>A renamed skill that running briefs still name</td><td>A redirect stub kept for one release</td><td><code class="cite ps-wrap">.agents/skills/decision-hold-lifecycle/SKILL.md:13-15</code></td></tr>
+<tr><td>A stale body after an update</td><td>None in-session; a fresh conversation or the <code>/updatefirstmate</code> restart</td><td><code class="cite ps-wrap">.agents/skills/updatefirstmate/SKILL.md:20</code></td></tr>
+<tr><td>Loading every harness reference for one action</td><td>The routing object selects one harness file</td><td><code class="cite ps-wrap">.agents/skills/harness-adapters/SKILL.md:15-16</code></td></tr>
+<tr><td>A private fact leaking into the shared template</td><td>Offload destinations exclude every tracked skill and <code>AGENTS.md</code></td><td><code class="cite ps-wrap">.agents/skills/stow/SKILL.md:186</code></td></tr>
+<tr><td>A skill invocation typed but not submitted</td><td>Tool-specific postcondition, popup settle in the send path</td><td><code class="cite ps-wrap">.agents/skills/harness-adapters/references/common/control-and-recovery.md:27-29</code> <code class="cite ps-wrap">docs/architecture.md:208</code></td></tr>
+</tbody>
+</table>
+</div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Knowledge placement · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Prompts and skills</p>
+<h1>Knowledge placement and the one-owner rule</h1>
+<p class="lede">The rules that decide where any instruction lives in Firstmate: which tier a fact belongs to, why each contract has exactly one full statement, and what a pointer left behind in <code>AGENTS.md</code> may still say.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Prompts and skills</a>.</p>
+
+<h2 id="owner">Where the rules live</h2>
+<p>These rules are themselves a skill, <code>firstmate-coding-guidelines</code>, agent-only and loaded "before changing firstmate's shared, tracked material … whether working as firstmate directly or as a crewmate briefed on a firstmate-repo task" <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:4-5</code> <code class="cite ps-wrap">AGENTS.md:595</code>. They are not in <code>AGENTS.md</code>, because an ordinary supervision session never edits Firstmate's own tracked files. That placement is the rule applied to itself.</p>
+
+<h2 id="tree">The seven-tier decision tree</h2>
+<p>"Before writing a new fact anywhere in this repo, ask where it belongs, in this order … Stop at the first tier that answers yes. Do not place a fact at a more convenient tier than the one this tree gives you." <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:20</code> <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:37-38</code></p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 900 660" role="img" aria-labelledby="kp-t kp-d">
+<title id="kp-t">Knowledge-placement decision tree</title>
+<desc id="kp-d">Seven questions asked in order. The first yes decides the owner: AGENTS.md inline, an agent-only skill plus a trigger line, the public or operator doc for that audience, maintainer architecture, a maintainer-verification record, a private task report or PR evidence, or the script header and help output.</desc>
+<defs><marker id="kp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">Where does a new fact go?</text>
+
+<g class="c4-component"><rect x="20" y="50" width="430" height="58" rx="8"/><text class="c4-label" x="235" y="74">1. Needed every session or every turn?</text><text class="c4-desc" x="235" y="94">to operate at all</text></g>
+<g class="c4-component"><rect x="20" y="136" width="430" height="58" rx="8"/><text class="c4-label" x="235" y="160">2. Needed only in a nameable situation?</text><text class="c4-desc" x="235" y="180">a spawn, a recovery, a wake type, a lifecycle step</text></g>
+<g class="c4-component"><rect x="20" y="222" width="430" height="58" rx="8"/><text class="c4-label" x="235" y="246">3. Public product, setup, or operator reference?</text><text class="c4-desc" x="235" y="266">current behaviour, limits, invariants</text></g>
+<g class="c4-component"><rect x="20" y="308" width="430" height="58" rx="8"/><text class="c4-label" x="235" y="332">4. Contributor or maintainer architecture?</text><text class="c4-desc" x="235" y="352">ownership, extension points, safety rationale</text></g>
+<g class="c4-component"><rect x="20" y="394" width="430" height="58" rx="8"/><text class="c4-label" x="235" y="418">5. Active verification for a current guarantee?</text><text class="c4-desc" x="235" y="438">dates, versions, exact commands and output</text></g>
+<g class="c4-component"><rect x="20" y="480" width="430" height="58" rx="8"/><text class="c4-label" x="235" y="504">6. Task or incident evidence?</text><text class="c4-desc" x="235" y="524">chronology, transcripts, failed hypotheses</text></g>
+<g class="c4-component"><rect x="20" y="566" width="430" height="58" rx="8"/><text class="c4-label" x="235" y="590">7. Mechanics?</text><text class="c4-desc" x="235" y="610">exact flags, commands, paths</text></g>
+
+<g class="c4-container"><rect x="560" y="50" width="320" height="58" rx="8"/><text class="c4-label" x="720" y="74">AGENTS.md, inline</text><text class="c4-desc" x="720" y="94">paid by every session</text></g>
+<g class="c4-container"><rect x="560" y="136" width="320" height="58" rx="8"/><text class="c4-label" x="720" y="160">Agent-only skill + trigger line</text><text class="c4-desc" x="720" y="180">.agents/skills/, usually AGENTS.md §13</text></g>
+<g class="c4-container"><rect x="560" y="222" width="320" height="58" rx="8"/><text class="c4-label" x="720" y="246">Audience-classified doc</text><text class="c4-desc" x="720" y="266">per docs/documentation-audiences.md</text></g>
+<g class="c4-container"><rect x="560" y="308" width="320" height="58" rx="8"/><text class="c4-label" x="720" y="332">Maintainer-architecture owner</text><text class="c4-desc" x="720" y="352">for example docs/architecture.md</text></g>
+<g class="c4-container"><rect x="560" y="394" width="320" height="58" rx="8"/><text class="c4-label" x="720" y="418">Verification record</text><text class="c4-desc" x="720" y="438">docs/verification/</text></g>
+<g class="c4-container"><rect x="560" y="480" width="320" height="58" rx="8"/><text class="c4-label" x="720" y="504">Private report or PR evidence</text><text class="c4-desc" x="720" y="524">after distilling unique facts upward</text></g>
+<g class="c4-container"><rect x="560" y="566" width="320" height="58" rx="8"/><text class="c4-label" x="720" y="590">Script header + --help</text><text class="c4-desc" x="720" y="610">never a second prose owner</text></g>
+
+<g class="c4-rel"><path d="M450,79 L558,79" marker-end="url(#kp-arrow)"/><text class="c4-rel-label" x="504" y="72">yes</text></g>
+<g class="c4-rel"><path d="M450,165 L558,165" marker-end="url(#kp-arrow)"/><text class="c4-rel-label" x="504" y="158">yes</text></g>
+<g class="c4-rel"><path d="M450,251 L558,251" marker-end="url(#kp-arrow)"/><text class="c4-rel-label" x="504" y="244">yes</text></g>
+<g class="c4-rel"><path d="M450,337 L558,337" marker-end="url(#kp-arrow)"/><text class="c4-rel-label" x="504" y="330">yes</text></g>
+<g class="c4-rel"><path d="M450,423 L558,423" marker-end="url(#kp-arrow)"/><text class="c4-rel-label" x="504" y="416">yes</text></g>
+<g class="c4-rel"><path d="M450,509 L558,509" marker-end="url(#kp-arrow)"/><text class="c4-rel-label" x="504" y="502">yes</text></g>
+<g class="c4-rel"><path d="M450,595 L558,595" marker-end="url(#kp-arrow)"/><text class="c4-rel-label" x="504" y="588">yes</text></g>
+<g class="c4-rel"><path d="M235,108 L235,134" marker-end="url(#kp-arrow)"/></g>
+<g class="c4-rel"><path d="M235,194 L235,220" marker-end="url(#kp-arrow)"/></g>
+<g class="c4-rel"><path d="M235,280 L235,306" marker-end="url(#kp-arrow)"/></g>
+<g class="c4-rel"><path d="M235,366 L235,392" marker-end="url(#kp-arrow)"/></g>
+<g class="c4-rel"><path d="M235,452 L235,478" marker-end="url(#kp-arrow)"/></g>
+<g class="c4-rel"><path d="M235,538 L235,564" marker-end="url(#kp-arrow)"/></g>
+<text class="ps-note" x="245" y="125">no</text>
+<text class="ps-note" x="20" y="648">The first yes wins; a lower tier is never chosen for convenience.</text>
+</svg>
+</div>
+<figcaption>Tiers 1 and 2 are the prompt-economy decision: always paid versus paid on trigger. Tier 7 is why script headers are part of the instruction surface. Source: <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:22-35</code>.</figcaption>
+</figure>
+<p>The audience classification used by tiers 3 to 5 has one machine-read owner, <code>docs/documentation-audiences.json</code>: "do not add parallel front matter or a second audience list" <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:39</code>. Its classes are <code>public-product</code>, <code>operator-current</code>, <code>operator-example</code>, <code>maintainer-architecture</code>, <code>maintainer-verification</code>, and <code>agent-runtime</code> <code class="cite ps-wrap">docs/documentation-audiences.md:9-14</code>; <code>bin/fm-doc-audience-check.sh</code> enforces coverage, owner pointers, and local links <code class="cite ps-wrap">docs/documentation-audiences.md:4</code>.</p>
+
+<h2 id="one-owner">The one-owner rule</h2>
+<blockquote><p>"Every contract - a data format, a state machine, a decision procedure - is stated in full exactly once. Every other mention of it is a one-line cross-reference, never a restatement. A single deliberate one-line reinforcement at a genuine risk point is allowed, for example a "don't forget X" placed exactly where forgetting X is costly. Restating the contract's substance a second time is not allowed: the two copies will drift the moment only one is edited."</p></blockquote>
+<p><code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:43-46</code>. Editing follows from it: "patch, replace, or prune the owner's existing language rather than appending … then grep the repo for its other mentions and update the cross-references" <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:47</code>.</p>
+
+<h3 id="owner-examples">How owners declare themselves</h3>
+<p>The rule is visible because owners say so in their first lines, and non-owners point at them. A reader can find the owner of any contract by grepping for "single owner" or "owns".</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Contract</th><th>Owner's declaration</th><th>A pointer to it</th></tr></thead>
+<tbody>
+<tr><td>The no-mistakes <code>--intent</code> string</td><td>"This file is the one owner of the no-mistakes <code>--intent</code> contract … Other mentions of <code>--intent</code> point here rather than restating the rule." <code class="cite ps-wrap">bin/fm-dod-lib.sh:17-33</code></td><td>"<code>bin/fm-dod-lib.sh</code> owns the worker-side <code>--intent</code> contract." <code class="cite ps-wrap">AGENTS.md:372</code></td></tr>
+<tr><td>Session-start composition and digest</td><td>The script header "is the single owner of composed commands, ordering, and digest contents" <code class="cite ps-wrap">AGENTS.md:169</code></td><td><code>docs/sessionstart-nudge.md</code> defers delivery mechanics back to that header <code class="cite ps-wrap">docs/sessionstart-nudge.md:40</code></td></tr>
+<tr><td>Ask-user finding policy</td><td>"This skill is the single owner of the decision policy … <code>AGENTS.md</code> section 7 points here and does not restate this procedure." <code class="cite ps-wrap">.agents/skills/ask-user-authority/SKILL.md:15-16</code></td><td>"Load <code>ask-user-authority</code> before deciding any ask-user finding" <code class="cite ps-wrap">AGENTS.md:362</code></td></tr>
+<tr><td>Harness-specific operations</td><td>"This is the one skill, trigger, and routing owner for harness-specific Firstmate operations." <code class="cite ps-wrap">.agents/skills/harness-adapters/SKILL.md:14</code></td><td><code class="cite ps-wrap">AGENTS.md:218</code></td></tr>
+<tr><td>Memory tier semantics</td><td>"This skill text is the single owner of tier semantics, marker spellings, and clocks, and no memory file header may restate them." <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:49</code></td><td>Each memory file header carries "at most a one-line pointer" <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:48</code></td></tr>
+<tr><td>Operational-home layout</td><td><code>docs/configuration.md</code> "is the single owner of the top-level operational-home layout and configuration schemas" <code class="cite ps-wrap">AGENTS.md:53</code></td><td>Script headers own child fields <code class="cite ps-wrap">AGENTS.md:53</code></td></tr>
+<tr><td>Ship/scout worker role</td><td>"<code>fm_brief_worker_role</code> owns the ship/scout role scope. <code>bin/fm-spawn.sh</code> is its one emitter" <code class="cite ps-wrap">bin/fm-dod-lib.sh:36-37</code></td><td>The brief scaffold carries no role scope so it "never becomes a second owner" <code class="cite ps-wrap">bin/fm-brief.sh:75-77</code></td></tr>
+<tr><td>Mode-specific definition of done</td><td>"Single owner of a ship task's mode-specific 'Definition of done' block" <code class="cite ps-wrap">bin/fm-dod-lib.sh:2</code></td><td>Rendered by both the scaffold and scout promotion <code class="cite ps-wrap">bin/fm-dod-lib.sh:3-7</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>The allowed reinforcement shows up too. Every brief carries a steering-inbox section, and the scaffold says why that is not a second owner: "the doorbell itself is self-describing, so this section is reinforcement for the natural-checkpoint habit, not the only carrier of the instruction" <code class="cite ps-wrap">bin/fm-brief.sh:248-252</code>.</p>
+
+<h2 id="stub">The inline-stub pattern</h2>
+<p>When content leaves <code>AGENTS.md</code> for a skill, what stays is decided by one question: "what must survive with no skill loaded? That is the trigger condition for loading the skill, plus any safety-critical fact that fires on a wake the skill itself is not loaded for. Everything else - the procedure, the mechanism, the surrounding detail - moves out completely. Do not leave a partial restatement behind 'just in case'." <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:51-54</code></p>
+<p>The named model is section 8's away-mode stub <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:56</code>. Read against that rule, its parts are:</p>
+<dl class="defs">
+<dt>Trigger</dt>
+<dd>"Invoke the <code>/afk</code> skill when the captain says <code>/afk</code> … <code>state/.afk-contract</code> or <code>state/.afk</code> exists, an incoming message starts with <code>FM_INJECT_MARK</code>, or any <code>state/.subsuper-*</code> marker is involved." <code class="cite ps-wrap">AGENTS.md:462</code> A trigger that names a file's existence and a message marker fires even when nobody said "/afk".</dd>
+<dt>Marker format</dt>
+<dd>Daemon injections use the <code>away-supervisor</code> kind after U+2063 and <code>FIRSTMATE_OP: </code> <code class="cite ps-wrap">AGENTS.md:466</code>. Without this the agent could not tell an internal escalation from the captain.</dd>
+<dt>Ownership transfer</dt>
+<dd>"While <code>state/.afk</code> exists, the daemon owns supervision; do not arm a separate watcher." <code class="cite ps-wrap">AGENTS.md:468</code></dd>
+<dt>Exit condition</dt>
+<dd>"Any other unmarked message means the captain returned in away mode" <code class="cite ps-wrap">AGENTS.md:472</code>, biased by "Bias ambiguous input toward exit because a present captain takes precedence" <code class="cite ps-wrap">AGENTS.md:474</code>.</dd>
+<dt>Authority boundary</dt>
+<dd>"Away and quiet mode never expand approval authority for merges, ask-user findings, destructive actions, irreversible actions, or security-sensitive choices." <code class="cite ps-wrap">AGENTS.md:473</code></dd>
+</dl>
+<p>The 256-line <code>/afk</code> skill holds everything else. A second, much smaller stub is a whole skill: <code>decision-hold-lifecycle</code> survives only as a "Renamed pointer kept for in-flight briefs" that redirects to <code>captain-hold-lifecycle</code> and "will be removed one release after the collapse" <code class="cite ps-wrap">.agents/skills/decision-hold-lifecycle/SKILL.md:4-5</code>. It exists because briefs already handed to running workers name the old skill, and a brief cannot be edited once delivered.</p>
+
+<h2 id="size">Size discipline</h2>
+<p>"If an addition needs more than a few lines of conditional detail … or reference detail (a wire format, an exact schema, historical rationale), you are almost certainly adding it to the wrong file." The reason is cost: "<code>AGENTS.md</code>'s token cost is paid by every session of every fleet member, every time, whether or not that session ever hits the situation the new lines describe. A skill's cost is paid only by the sessions that actually load it." <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:60-63</code>. The <a href="prompt-economy.html">prompt economy page</a> puts numbers on this.</p>
+
+<h2 id="triggers">Trigger hygiene</h2>
+<p>"A new skill is dead weight if nothing loads it. Every new skill needs its load trigger declared inline: section 13 for agent-only reference skills, or the relevant operating section for anything else. State the trigger as a condition ('load before X', 'load on Y wake'), never as a vague pointer." <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:68-70</code></p>
+<p>One trigger cannot be automated, and the guideline records why: "<code>bin/fm-brief.sh</code>'s <code>REPO</code> argument is a caller-supplied string with no reliable signal that it names firstmate's own repo … Firstmate adds this skill's load instruction to firstmate-repo briefs by hand instead." <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:72-73</code> <code>AGENTS.md</code> section 11 carries the matching instruction to the supervisor <code class="cite ps-wrap">AGENTS.md:561</code>, and the launch role contract names the skill for any worker on a Firstmate task <code class="cite ps-wrap">bin/fm-dod-lib.sh:58</code>.</p>
+<p>There is one deliberate exception to "declare the trigger in <code>AGENTS.md</code>": a home-local skill created by <code>/stow</code>'s offload. "Its precise, condition-stated description line is its entire trigger; it gets no <code>AGENTS.md</code> declaration because <code>AGENTS.md</code> is shared tracked material." <code class="cite ps-wrap">.agents/skills/stow/SKILL.md:179</code> See <a href="skills.html#local">local skills</a>.</p>
+
+<h2 id="headers">Script headers as contracts</h2>
+<p>Tier 7 makes every <code>bin/</code> header an instruction owner. The repository convention is "Each starts with a usage header comment; keep it accurate when you change behavior" <code class="cite ps-wrap">CONTRIBUTING.md:65-66</code>, and <code>AGENTS.md</code> tells the agent to "read each script's header before first use" <code class="cite ps-wrap">AGENTS.md:70</code>. Several scripts print that header as their <code>--help</code>, so the contract and the help cannot diverge: <code>fm-brief.sh</code> prints every leading comment line <code class="cite ps-wrap">bin/fm-brief.sh:94-100</code>, and <code>fm-session-start.sh</code> prints its header down to <code>set -u</code> <code class="cite ps-wrap">bin/fm-session-start.sh:249-251</code>.</p>
+
+<h2 id="enforcement">Instructions plus enforcement</h2>
+<p>The last rule balances the rest: "For critical safety, routing, startup, and supervision infrastructure, prefer deterministic and idempotent enforcement over relying on agent memory alone. Keep instructions as the authority and discovery layer, but make repeated execution converge safely and make invalid or unsafe states fail closed wherever the runtime can enforce them." <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:81-82</code> The brief is the clearest case: <code>AGENTS.md</code> tells the supervisor how to fill it, and <code>fm-spawn.sh</code> refuses a brief that was not filled that way. See <a href="briefs.html#refusals">spawn-time refusals</a>.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

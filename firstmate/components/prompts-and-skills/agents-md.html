@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AGENTS.md contract · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Prompts and skills</p>
+<h1>AGENTS.md, the always-loaded contract</h1>
+<p class="lede"><code>AGENTS.md</code> is the supervisor's entire job description, loaded whole at every session: "You are the first mate. The user is the captain. This file is your entire job description." <code class="cite ps-wrap">AGENTS.md:7-9</code></p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Prompts and skills</a>.</p>
+
+<h2 id="who">Who it binds, and who it does not</h2>
+<p>The file opens by scoping itself: it "is the supervisor contract for primary firstmates and persistent secondmates" <code class="cite ps-wrap">AGENTS.md:3</code>. A ship or scout worker launched into a worktree of the Firstmate repository will also have the file loaded by its harness, because it is that repository's project instruction file. The file says so and defers: such a worker "follows the current worker role contract at the start of its <code>FIRSTMATE_OP: v1 launch-brief</code> … it does not become a supervisor by loading this file", and "Merely storing a ship or scout brief in a home does not select the worker role for the agent running here" <code class="cite ps-wrap">AGENTS.md:4-5</code>. The worker side of that handshake lives in the launch brief's role contract, which tells a worker on a Firstmate task that the root <code>AGENTS.md</code> "is project content and the supervisor contract for the firstmate managing you: follow this brief instead" <code class="cite ps-wrap">bin/fm-dod-lib.sh:57</code>. See <a href="worker-launch.html">Worker launch prompt</a>.</p>
+<p>A secondmate runs the same file in its own home. The differences are carried inline at the two points they matter: the captain address "is form only" there <code class="cite ps-wrap">AGENTS.md:14</code>, and "reaching the captain means appending the outcome to the parent channel your charter names" <code class="cite ps-wrap">AGENTS.md:522</code>. Everything else a secondmate needs comes from its <a href="secondmate-charter.html">charter</a>.</p>
+
+<h2 id="loading">How it reaches the model</h2>
+<p>Firstmate relies on the harness's own project-instruction loader; no Firstmate script injects the file at an ordinary session start. For Claude Code the repository ships a two-line <code>CLAUDE.md</code>:</p>
+<pre><code>&lt;!-- Points Claude at AGENTS.md via import; edit AGENTS.md, not this file. --&gt;
+@AGENTS.md</code></pre>
+<p><code class="cite ps-wrap">CLAUDE.md:1-2</code>. The layout section calls it "a real @AGENTS.md pointer" <code class="cite ps-wrap">AGENTS.md:61</code>. It is a regular file, not a symlink, and the same bytes are what Firstmate installs into projects: <code>bin/fm-ensure-agents-md.sh</code> "Owns the canonical CLAUDE.md pointer content (the exact two-line @AGENTS.md form). A real-file pointer cannot follow a write into AGENTS.md, which is why the installer never creates a CLAUDE.md symlink." <code class="cite ps-wrap">bin/fm-ensure-agents-md.sh:18-20</code> <code class="cite ps-wrap">bin/fm-ensure-agents-md.sh:119-124</code>.</p>
+<div class="callout unclear"><span class="callout-title">Open question</span>
+<p>Firstmate's source does not state, per harness, which of the other primary harnesses (Codex, Pi, OpenCode, Grok, Cursor, omp) reads <code>AGENTS.md</code> natively at session open. The harness-adapter references do not list it either. The only per-harness evidence found is incidental: Muse's launch control is "verified to remove foreign <code>rules_file</code> while retaining project <code>AGENTS.md</code>" <code class="cite ps-wrap">.agents/skills/harness-adapters/references/harness/muse.md:41</code>. Treat native loading on the other harnesses as assumed by the design rather than documented by it.</p></div>
+
+<h3 id="frozen">Frozen at launch, and the one refresh path</h3>
+<p>A running session does not see edits: "A running agent holds <code>AGENTS.md</code> and every skill it has already loaded frozen from the moment it launched, and no verified harness offers a reload, so new bytes on disk change nothing for it until it starts a fresh conversation" <code class="cite ps-wrap">.agents/skills/updatefirstmate/SKILL.md:20</code>. Changes also arrive only through the default branch: "Firstmate's shared instruction surface reaches running homes only after it lands on the default branch and those homes fast-forward" <code class="cite ps-wrap">AGENTS.md:571</code>.</p>
+<p>Three mechanisms deal with staleness:</p>
+<ul>
+<li><strong>Self-update.</strong> After <code>/updatefirstmate</code> prints <code>reread-firstmate: yes</code>, the skill orders "<strong>Read <code>AGENTS.md</code> now</strong> … before doing anything else" <code class="cite ps-wrap">.agents/skills/updatefirstmate/SKILL.md:55-57</code>, and restarts live secondmates rather than trusting them to re-read <code class="cite ps-wrap">.agents/skills/updatefirstmate/SKILL.md:6</code>.</li>
+<li><strong>Pi compaction refresh.</strong> A true <code>startup</code> that owns the lock records a SHA-256 baseline of <code>AGENTS.md</code> keyed to the harness pid; on a later Pi or pi-signed <code>compact</code>, a missing, foreign, or changed baseline makes the digest print "CURRENT AGENTS.md - INSTRUCTION REFRESH" with the complete current file ahead of the bulky sections <code class="cite ps-wrap">bin/fm-session-start.sh:211-221</code> <code class="cite ps-wrap">bin/fm-session-start.sh:587-610</code>. The baseline is immutable for that lock owner "so every later drifted compaction refreshes again" <code class="cite ps-wrap">bin/fm-session-start.sh:219-221</code>.</li>
+<li><strong>Nothing, elsewhere.</strong> The refresh is limited to Pi deliberately: "Claude fresh-reads on reset, and Codex has no tracked interactive reset delivery path" <code class="cite ps-wrap">bin/fm-session-start.sh:583-585</code>.</li>
+</ul>
+
+<h2 id="map">Section map</h2>
+<figure class="diagram">
+<svg class="c4" viewBox="0 0 720 560" role="img" aria-labelledby="am-t am-d">
+<title id="am-t">AGENTS.md sections by size</title>
+<desc id="am-d">A horizontal bar per section of AGENTS.md, proportional to its size in bytes at commit ada21f5b. Section 2, layout and state, is the largest at 21,195 bytes, then section 7, task lifecycle, at 16,259 bytes.</desc>
+<text class="c4-diagram-title" x="20" y="28">AGENTS.md — bytes per section (total 85,135)</text>
+<g class="c4-component">
+<rect x="230" y="50" width="32" height="20" rx="3"/>
+<rect x="230" y="78" width="69" height="20" rx="3"/>
+<rect x="230" y="106" width="410" height="20" rx="3"/>
+<rect x="230" y="134" width="165" height="20" rx="3"/>
+<rect x="230" y="162" width="87" height="20" rx="3"/>
+<rect x="230" y="190" width="30" height="20" rx="3"/>
+<rect x="230" y="218" width="51" height="20" rx="3"/>
+<rect x="230" y="246" width="315" height="20" rx="3"/>
+<rect x="230" y="274" width="142" height="20" rx="3"/>
+<rect x="230" y="302" width="120" height="20" rx="3"/>
+<rect x="230" y="330" width="48" height="20" rx="3"/>
+<rect x="230" y="358" width="41" height="20" rx="3"/>
+<rect x="230" y="386" width="10" height="20" rx="3"/>
+<rect x="230" y="414" width="72" height="20" rx="3"/>
+<rect x="230" y="442" width="31" height="20" rx="3"/>
+<rect x="230" y="470" width="18" height="20" rx="3"/>
+<rect x="230" y="498" width="8" height="20" rx="3"/>
+</g>
+<text class="ps-note" x="20" y="65">Preamble: identity, address</text>
+<text class="ps-note" x="270" y="65">1,630</text>
+<text class="ps-note" x="20" y="93">§1 Identity, prime directives</text>
+<text class="ps-note" x="307" y="93">3,564</text>
+<text class="ps-note" x="20" y="121">§2 Layout and state</text>
+<text class="ps-note" x="648" y="121">21,195</text>
+<text class="ps-note" x="20" y="149">§3 Session start</text>
+<text class="ps-note" x="403" y="149">8,536</text>
+<text class="ps-note" x="20" y="177">§4 Harness and dispatch</text>
+<text class="ps-note" x="325" y="177">4,491</text>
+<text class="ps-note" x="20" y="205">§5 Recovery</text>
+<text class="ps-note" x="268" y="205">1,546</text>
+<text class="ps-note" x="20" y="233">§6 Projects and knowledge</text>
+<text class="ps-note" x="289" y="233">2,635</text>
+<text class="ps-note" x="20" y="261">§7 Task lifecycle</text>
+<text class="ps-note" x="553" y="261">16,259</text>
+<text class="ps-note" x="20" y="289">§8 Supervision protocol</text>
+<text class="ps-note" x="380" y="289">7,344</text>
+<text class="ps-note" x="20" y="317">§9 Escalation, etiquette</text>
+<text class="ps-note" x="358" y="317">6,189</text>
+<text class="ps-note" x="20" y="345">§10 Backlog contract</text>
+<text class="ps-note" x="286" y="345">2,505</text>
+<text class="ps-note" x="20" y="373">§11 Crewmate briefs</text>
+<text class="ps-note" x="279" y="373">2,106</text>
+<text class="ps-note" x="20" y="401">§12 Self-update</text>
+<text class="ps-note" x="248" y="401">502</text>
+<text class="ps-note" x="20" y="429">§13 Agent-only skills</text>
+<text class="ps-note" x="310" y="429">3,728</text>
+<text class="ps-note" x="20" y="457">§14 Relay</text>
+<text class="ps-note" x="269" y="457">1,604</text>
+<text class="ps-note" x="20" y="485">Captain precedence</text>
+<text class="ps-note" x="256" y="485">910</text>
+<text class="ps-note" x="20" y="513">Maintaining this file</text>
+<text class="ps-note" x="246" y="513">392</text>
+<text class="ps-note" x="20" y="518">Bytes measured on the pinned commit, including each heading line.</text>
+</svg>
+<figcaption>Two sections, the layout tree and the task lifecycle, hold 44% of the file. Everything else is short by design: most sections end in a pointer to a skill, a script header, or a doc.</figcaption>
+</figure>
+
+<h2 id="sections">What each section owns inline, and what it pushes out</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Section</th><th>Kept inline</th><th>Pushed out to</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>Preamble</td><td>Role, captain address rule, its channel bound (never in commits, PRs, briefs, code), nautical seasoning</td><td>Section 9 for escalation style</td><td><code class="cite ps-wrap">AGENTS.md:7-16</code></td></tr>
+<tr><td>1 Identity and prime directives</td><td>The five hard rules in priority order; what is shared tracked material; never add an agent co-author</td><td>Referenced skills and scripts own each guarded exception path</td><td><code class="cite ps-wrap">AGENTS.md:25-49</code></td></tr>
+<tr><td>2 Layout and state</td><td>A one-line purpose, owner, and inheritance note for every tracked, <code>config/</code>, <code>data/</code>, and <code>state/</code> path</td><td><code>docs/configuration.md</code> "is the single owner of the top-level operational-home layout"; each producing script's header owns child fields</td><td><code class="cite ps-wrap">AGENTS.md:53</code> <code class="cite ps-wrap">AGENTS.md:60-161</code></td></tr>
+<tr><td>3 Session start</td><td>Run the digest exactly once, read it once, lock-refused sessions stay read-only, the seven digest parts</td><td><code>bin/fm-session-start.sh</code> header, <code>docs/sessionstart-nudge.md</code>, <code>bootstrap-diagnostics</code></td><td><code class="cite ps-wrap">AGENTS.md:168-176</code> <code class="cite ps-wrap">AGENTS.md:212</code></td></tr>
+<tr><td>4 Harness and runtime dispatch</td><td>Verified harness list, routing precedence, quota-informed selection boundary, effort fallback</td><td><code>harness-adapters</code>, <code>quota-array-dispatch</code>, <code>docs/configuration.md</code>, <code>bin/fm-spawn.sh</code></td><td><code class="cite ps-wrap">AGENTS.md:218-241</code></td></tr>
+<tr><td>5 Recovery</td><td>Reconcile before new work, only this home's direct reports, "A restart must be a non-event"</td><td><code>stuck-crewmate-recovery</code>, <code>secondmate-provisioning</code>, <code>/afk</code>, <code>/quiet</code></td><td><code class="cite ps-wrap">AGENTS.md:245-256</code></td></tr>
+<tr><td>6 Project and knowledge management</td><td>Where each kind of durable knowledge goes; Firstmate never writes a project's <code>AGENTS.md</code></td><td><code>project-management</code>, <code>secondmate-provisioning</code>, <code>stow</code>, <code>bin/fm-ensure-agents-md.sh</code></td><td><code class="cite ps-wrap">AGENTS.md:273-285</code></td></tr>
+<tr><td>7 Task lifecycle</td><td>Declared "an always-loaded operational contract": intake, ship vs scout, delivery mode and <code>yolo</code>, dispatch, validation, PR ready, teardown, promotion</td><td>"referenced scripts own exact commands, flags, and data mechanics"</td><td><code class="cite ps-wrap">AGENTS.md:289</code></td></tr>
+<tr><td>8 Supervision protocol</td><td>Also declared always-loaded: one live cycle, drain before acting, wake handling order, the away-mode stub</td><td><code>docs/architecture.md</code>, <code>docs/turnend-guard.md</code>, the emitted session-start block</td><td><code class="cite ps-wrap">AGENTS.md:420</code> <code class="cite ps-wrap">AGENTS.md:460-474</code></td></tr>
+<tr><td>9 Escalation and captain etiquette</td><td>Talk in outcomes; the internal-term translation list; the stand-alone final message; when to reach the captain</td><td><code>docs/secondmate-parent-channel.md</code> for what a secondmate's scripts deliver</td><td><code class="cite ps-wrap">AGENTS.md:482-530</code></td></tr>
+<tr><td>10 Backlog contract</td><td>The backlog tracks work items only; a decision is a held task; note hygiene</td><td><code>.tasks.toml</code>, <code>docs/configuration.md</code>, <code>tasks-axi --help</code>, <code>captain-hold-lifecycle</code></td><td><code class="cite ps-wrap">AGENTS.md:534-550</code></td></tr>
+<tr><td>11 Crewmate briefs</td><td>How to fill the two Task subsections, isolation must survive, the Herdr and coding-guidelines additions</td><td><code>bin/fm-brief.sh</code>, <code>bin/fm-dod-lib.sh</code>, <code>bin/fm-classify-lib.sh</code></td><td><code class="cite ps-wrap">AGENTS.md:554-567</code></td></tr>
+<tr><td>12 Self-update</td><td>What is a running instruction surface; the trigger</td><td><code>/updatefirstmate</code></td><td><code class="cite ps-wrap">AGENTS.md:571-574</code></td></tr>
+<tr><td>13 Agent-only reference skills</td><td>Nothing but triggers: one bullet per agent-only skill</td><td>The skills themselves</td><td><code class="cite ps-wrap">AGENTS.md:578-595</code></td></tr>
+<tr><td>14 Relay</td><td>Inert until opted in; consent boundary; promised replies are durable state</td><td><code>docs/configuration.md</code>, <code>fmx-respond</code></td><td><code class="cite ps-wrap">AGENTS.md:599-610</code></td></tr>
+<tr><td>Captain instruction precedence</td><td>A current, explicit, concrete captain instruction overrides a standing rule, never inferred or broadened</td><td>—</td><td><code class="cite ps-wrap">AGENTS.md:614-619</code></td></tr>
+<tr><td>Maintaining this file</td><td>Its own admission rule</td><td><code>firstmate-coding-guidelines</code></td><td><code class="cite ps-wrap">AGENTS.md:623-626</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="belongs">What belongs in it</h2>
+<p>The file states its own admission rule last: "Keep this file for knowledge useful to almost every future agent session in this project. Do not repeat what the codebase already shows; point to the authoritative file, skill, command, or doc. Prefer rewriting or pruning existing entries over appending new ones. When updating this file, preserve every safety boundary and keep the always-loaded contract concise." <code class="cite ps-wrap">AGENTS.md:623-626</code></p>
+<p>The contributor skill turns that into a test. A fact goes into <code>AGENTS.md</code> inline only if "the firstmate AGENT need[s] this on every session or every turn to operate"; a fact needed "only in a nameable situation - a spawn, a recovery, a specific wake type, a specific lifecycle step" goes to a skill with "a one-line trigger pointer left inline" <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:22-25</code>. Exact flags, commands, and paths belong in "the script's own header comment plus its <code>--help</code> output, not prose in <code>AGENTS.md</code>" <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:34-35</code>. The <a href="knowledge-placement.html">knowledge placement page</a> covers the full tree.</p>
+<p>In practice three kinds of text stay inline:</p>
+<ul>
+<li><strong>Safety boundaries that must hold with nothing else loaded.</strong> The hard rules, lock-refused read-only mode, never merge a red PR, never tear down unlanded work, never answer one's own ask-user finding.</li>
+<li><strong>Triggers.</strong> Section 13 is almost entirely "load X before Y" lines, and each operating section starts its conditional work with the same shape, such as "Load <code>harness-adapters</code> before every spawn or recovery" <code class="cite ps-wrap">AGENTS.md:218</code>.</li>
+<li><strong>Declared always-loaded contracts.</strong> Sections 7 and 8 open by saying they are always-loaded operational contracts <code class="cite ps-wrap">AGENTS.md:289</code> <code class="cite ps-wrap">AGENTS.md:420</code>, which is why they are the second- and fourth-largest sections.</li>
+</ul>
+
+<h3 id="history">Size pressure is real</h3>
+<p>The discipline exists because the file once doubled: the coding-guidelines skill "exists because <code>AGENTS.md</code> grew from 585 to 958 lines between its last two restructures, entirely from conditional detail added inline instead of routed to its right home" <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:15</code>. At the pinned commit it is 626 lines.</p>
+<div class="callout unclear"><span class="callout-title">A tension worth noting</span>
+<p>Section 2's layout tree is the largest section (21,195 bytes, a quarter of the file). Most entries are one line, but many carry reference detail the guidelines assign to other owners: exact record formats such as the wake queue's <code>epoch&lt;TAB&gt;seq&lt;TAB&gt;kind&lt;TAB&gt;key&lt;TAB&gt;payload</code> <code class="cite ps-wrap">AGENTS.md:145</code>, and per-harness hook-token files <code class="cite ps-wrap">AGENTS.md:107-111</code>. The section itself says <code>docs/configuration.md</code> owns the layout <code class="cite ps-wrap">AGENTS.md:53</code>. The source does not say why the tree is kept inline anyway; a plausible reading is that "never touch" warnings on private state files (for example <code class="cite ps-wrap">AGENTS.md:146</code> <code class="cite ps-wrap">AGENTS.md:152-156</code>) are safety facts the agent needs with no skill loaded, but that rationale is not written down.</p></div>
+
+<h2 id="style">House style it is written in</h2>
+<ul>
+<li>One full sentence per physical line, never two sentences on one line, and a plain dash rather than an em dash <code class="cite ps-wrap">.agents/skills/firstmate-coding-guidelines/SKILL.md:123-125</code>. The file follows it throughout, which is what lets a one-owner edit touch a single line.</li>
+<li>Numbered sections referred to by number from elsewhere ("section 7 owns delivery and merge defaults" <code class="cite ps-wrap">AGENTS.md:33</code>), so a cross-reference is stable while prose moves inside a section.</li>
+<li>Rules stated as conditions with an owner, not as procedures: "Load <code>diagnostic-reasoning</code> before scoping a reported bug and before acting on a diagnostic report" <code class="cite ps-wrap">AGENTS.md:313</code>.</li>
+<li>Regression examples kept verbatim where a past failure is the clearest statement of the rule, such as the incomplete merge ask <code class="cite ps-wrap">AGENTS.md:487</code>.</li>
+</ul>
+
+<h2 id="precedence">Precedence inside the contract</h2>
+<p>The hard rules are ordered: "Hard rules, in priority order" <code class="cite ps-wrap">AGENTS.md:25</code>. Above all standing text sits the captain-instruction rule: "A current, explicit, concrete captain instruction overrides any conflicting standing rule written above", limited to the named action or object, never inferred, broadened, or turned into standing authority <code class="cite ps-wrap">AGENTS.md:614-616</code>. Destructive, irreversible, security-sensitive, discard, and merge actions still need the captain to name the concrete action <code class="cite ps-wrap">AGENTS.md:618</code>. Section 1 points at this rule rather than restating it <code class="cite ps-wrap">AGENTS.md:33</code>, which is the one-owner rule applied to the contract itself.</p>
+
+<h2 id="failure">How it fails</h2>
+<ul>
+<li><strong>Stale copy in a long session.</strong> Covered above: only self-update and Pi compaction refresh it.</li>
+<li><strong>Truncated delivery.</strong> <code>AGENTS.md</code> itself is loaded by the harness, not through the bounded digest, so the digest's truncation banner does not cover it. The Pi refresh path is the exception: it prints the file inside the digest, which Pi delivers with a 512 KiB cap and a loud truncation marker <code class="cite ps-wrap">docs/sessionstart-nudge.md:93</code>.</li>
+<li><strong>A worker adopting the supervisor role.</strong> Handled by precedence in two places: the file's own scope lines and the launch-brief role contract, which "supersedes any conflicting role identity" <code class="cite ps-wrap">bin/fm-dod-lib.sh:51</code>.</li>
+<li><strong>Guidance drift.</strong> Guarded only by review and the one-owner rule; no script checks that <code>AGENTS.md</code> agrees with a skill or header. The documentation audience check validates classification, owner pointers, and local links, not semantic agreement <code class="cite ps-wrap">docs/documentation-audiences.md:4</code> <code class="cite ps-wrap">docs/documentation-audiences.md:25-26</code>.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

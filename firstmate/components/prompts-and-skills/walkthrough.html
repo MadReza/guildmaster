@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>End-to-end instructions · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">Components › Prompts and skills</p>
+<h1>End to end: one task's instructions</h1>
+<p class="lede">A traced path through every instruction surface in this area, following one ordinary bug fix from session open to merged PR, and naming at each step which text is in whose context.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Prompts and skills</a>. The scenario is illustrative: a Claude primary, a Claude worker, a registered project whose standing posture is <code>direct-PR</code> with <code>yolo</code> off, and no dispatch profiles. Every rule it applies is cited.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1100 930" role="img" aria-labelledby="wt-t wt-d">
+<title id="wt-t">Sequence: one bug fix through Firstmate's instruction surfaces</title>
+<desc id="wt-d">Session start loads AGENTS.md and the digest into the supervisor. The captain reports a bug. The supervisor loads diagnostic-reasoning, resolves the project and mode, scaffolds and fills a brief, loads harness-adapters, and spawns a worker, which receives the launch brief and a system prompt. The worker verifies isolation, implements, opens a PR, and appends a done line. The watcher wakes the supervisor, which drains the queue, registers the PR, and asks the captain to merge in plain language. The captain approves and the supervisor merges through the guarded script.</desc>
+<defs><marker id="wt-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">One bug fix, instruction by instruction</text>
+<g class="c4-person"><circle cx="90" cy="54" r="12"/><rect x="30" y="66" width="120" height="40" rx="10"/><text class="c4-label" x="90" y="91">Captain</text></g>
+<g class="c4-container"><rect x="220" y="56" width="190" height="50" rx="8"/><text class="c4-label" x="315" y="78">Supervisor agent</text><text class="c4-tech" x="315" y="95">[Claude, code root]</text></g>
+<g class="c4-component"><rect x="480" y="56" width="190" height="50" rx="8"/><text class="c4-label" x="575" y="78">Toolbelt scripts</text><text class="c4-tech" x="575" y="95">[bin/]</text></g>
+<g class="c4-container"><rect x="740" y="56" width="170" height="50" rx="8"/><text class="c4-label" x="825" y="78">Worker agent</text><text class="c4-tech" x="825" y="95">[Claude, worktree]</text></g>
+<g class="c4-external"><rect x="960" y="56" width="120" height="50" rx="8"/><text class="c4-label" x="1020" y="78">Watcher</text><text class="c4-tech" x="1020" y="95">[+ Stop hook]</text></g>
+<path class="ps-lifeline" d="M90,106 V850"/>
+<path class="ps-lifeline" d="M315,106 V850"/>
+<path class="ps-lifeline" d="M575,106 V850"/>
+<path class="ps-lifeline" d="M825,106 V850"/>
+<path class="ps-lifeline" d="M1020,106 V850"/>
+
+<g class="c4-rel"><path d="M575,135 H317" marker-end="url(#wt-arrow)"/><text class="c4-rel-label" x="446" y="128">1 digest (AGENTS.md already loaded)</text></g>
+<g class="c4-rel"><path d="M90,180 H313" marker-end="url(#wt-arrow)"/><text class="c4-rel-label" x="202" y="173">2 "export crashes on empty lists"</text></g>
+<text class="ps-note" x="325" y="206">3 load diagnostic-reasoning; resolve project,</text>
+<text class="ps-note" x="325" y="220">ship vs scout, mode and yolo from the registry</text>
+<g class="c4-rel"><path d="M315,250 H573" marker-end="url(#wt-arrow)"/><text class="c4-rel-label" x="444" y="243">4 fm-tasks-axi add; fm-brief.sh --mode direct-PR</text></g>
+<text class="ps-note" x="325" y="276">5 fill Captain's intent (the words) and Firstmate spec</text>
+<text class="ps-note" x="325" y="292">6 load harness-adapters</text>
+<g class="c4-rel"><path d="M315,320 H573" marker-end="url(#wt-arrow)"/><text class="c4-rel-label" x="444" y="313">7 fm-spawn.sh … --mode direct-PR --yolo off</text></g>
+<g class="c4-rel"><path d="M575,355 H823" marker-end="url(#wt-arrow)"/><text class="c4-rel-label" x="700" y="348">8 launch-brief + system prompt</text></g>
+<text class="ps-note" x="600" y="378">spawn moves the backlog item to In flight</text>
+<g class="c4-rel c4-rel-async"><path d="M315,410 H1018" marker-end="url(#wt-arrow)"/><text class="c4-rel-label" x="668" y="403">9 turn ends; Stop hook arms one watcher cycle</text></g>
+<text class="ps-note" x="835" y="440">10 verify isolation, branch,</text>
+<text class="ps-note" x="835" y="454">implement, push, open ready PR,</text>
+<text class="ps-note" x="835" y="468">confirm isDraft is false</text>
+<g class="c4-rel"><path d="M825,500 H1018" marker-end="url(#wt-arrow)"/><text class="c4-rel-label" x="922" y="493">11 done: PR https://…</text></g>
+<g class="c4-rel c4-rel-async"><path d="M1020,540 H317" marker-end="url(#wt-arrow)"/><text class="c4-rel-label" x="668" y="533">12 Stop hook feedback: signal wake</text></g>
+<g class="c4-rel"><path d="M315,580 H573" marker-end="url(#wt-arrow)"/><text class="c4-rel-label" x="444" y="573">13 fm-wake-drain.sh; fm-pr-check.sh</text></g>
+<g class="c4-rel"><path d="M315,630 H92" marker-end="url(#wt-arrow)"/><text class="c4-rel-label" x="202" y="623">14 outcome + full PR URL + merge ask</text></g>
+<g class="c4-rel"><path d="M90,680 H313" marker-end="url(#wt-arrow)"/><text class="c4-rel-label" x="202" y="673">15 "merge it"</text></g>
+<g class="c4-rel"><path d="M315,720 H573" marker-end="url(#wt-arrow)"/><text class="c4-rel-label" x="444" y="713">16 fm-pr-merge.sh; later fm-teardown.sh</text></g>
+<g class="c4-rel"><path d="M315,770 H92" marker-end="url(#wt-arrow)"/><text class="c4-rel-label" x="202" y="763">17 one-line landed outcome</text></g>
+<text class="ps-note" x="325" y="810">18 run the printed --ack-through only after</text>
+<text class="ps-note" x="325" y="824">handling; re-evaluate the queue</text>
+<g class="c4-legend"><rect class="c4-legend-frame" x="20" y="866" width="1060" height="48" rx="6"/><text class="c4-legend-heading" x="34" y="895">Legend</text><g class="c4-person"><rect x="110" y="883" width="28" height="16" rx="6"/></g><text x="146" y="895">Person</text><g class="c4-container"><rect x="220" y="883" width="28" height="16" rx="3"/></g><text x="256" y="895">Agent (container)</text><g class="c4-component"><rect x="390" y="883" width="28" height="16" rx="3"/></g><text x="426" y="895">Scripts</text><g class="c4-external"><rect x="500" y="883" width="28" height="16" rx="3"/></g><text x="536" y="895">Out-of-model mechanism</text><g class="c4-rel c4-rel-async"><path d="M720,891 L760,891"/></g><text x="770" y="895">Event-driven</text><g class="c4-rel"><path d="M870,891 L910,891"/></g><text x="920" y="895">Call or message</text></g>
+</svg>
+</div>
+<figcaption>Each numbered step is expanded in the table below with the exact instruction text that governs it.</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>#</th><th>What happens</th><th>Instruction in play</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>Claude loads <code>CLAUDE.md</code>, which imports <code>AGENTS.md</code>; the harness indexes skill names and descriptions.</td><td>The whole contract, from the first token.</td><td><code class="cite ps-wrap">CLAUDE.md:1-2</code> <code class="cite ps-wrap">docs/verification/stow-memory.md:13</code></td></tr>
+<tr><td>1</td><td>The Claude <code>SessionStart</code> hook runs the digest before the first turn: lock, silent bootstrap, empty queue, the Claude supervision block, the read-once contract, fleet state, network result, memory.</td><td>"Read the complete digest once and trust it as this turn's startup and recovery input."</td><td><code class="cite ps-wrap">docs/sessionstart-nudge.md:73</code> <code class="cite ps-wrap">AGENTS.md:174</code></td></tr>
+<tr><td>2</td><td>The captain reports the bug in chat.</td><td>—</td><td></td></tr>
+<tr><td>3</td><td>The supervisor loads <code>diagnostic-reasoning</code> because this is a reported bug, resolves the project ("Proceed on one confident match while naming the project in plain language"), checks secondmate scopes, classifies it as a ship, and takes <code>direct-PR</code> and <code>yolo</code> off from the registry because the captain said nothing else.</td><td>§7 intake; the skill's trigger.</td><td><code class="cite ps-wrap">AGENTS.md:313</code> <code class="cite ps-wrap">AGENTS.md:293-300</code> <code class="cite ps-wrap">AGENTS.md:307</code> <code class="cite ps-wrap">AGENTS.md:315-317</code></td></tr>
+<tr><td>4</td><td>It files the backlog item, then scaffolds the brief. The scaffold refuses a missing <code>--mode</code> and would refuse <code>--yolo</code>.</td><td>"what remains yours is filing the item before dispatch"; the scaffold header.</td><td><code class="cite ps-wrap">AGENTS.md:540</code> <code class="cite ps-wrap">bin/fm-brief.sh:177-188</code> <code class="cite ps-wrap">bin/fm-brief.sh:169</code></td></tr>
+<tr><td>5</td><td>It writes the captain's words, without a "Captain:" label, under <code>## Captain's intent</code>, and only the build constraints the ask needs under <code>## Firstmate spec</code>, naming what is out of scope.</td><td>§11 filling rules.</td><td><code class="cite ps-wrap">AGENTS.md:555-556</code></td></tr>
+<tr><td>6</td><td>It loads <code>harness-adapters</code>, which routes a Claude <code>start</code> to two common references and the Claude harness file.</td><td>"Load <code>harness-adapters</code> before every spawn or recovery".</td><td><code class="cite ps-wrap">AGENTS.md:218</code> <code class="cite ps-wrap">.agents/skills/harness-adapters/SKILL.md:63-65</code></td></tr>
+<tr><td>7</td><td>It spawns with the mode and posture explicit; spawn refuses placeholders, an empty or half-filled Task, operator address, and a mode mismatch.</td><td>"each command refuses to guess the values it consumes".</td><td><code class="cite ps-wrap">AGENTS.md:316</code> <code class="cite ps-wrap">bin/fm-spawn.sh:2724-2735</code> <code class="cite ps-wrap">bin/fm-spawn.sh:2787-2793</code></td></tr>
+<tr><td>8</td><td>Spawn renders <code>launch-brief.md</code> (role contract + brief), encodes it as <code>launch-brief</code>, and launches Claude with the first-party system prompt. Because the tasks-axi gate applies, spawn itself moves the item to In flight.</td><td>The launch prompt.</td><td><code class="cite ps-wrap">bin/fm-spawn.sh:2751-2769</code> <code class="cite ps-wrap">bin/fm-spawn.sh:1856-1859</code> <code class="cite ps-wrap">AGENTS.md:331</code></td></tr>
+<tr><td>9</td><td>After confirming the worker is processing its brief, the supervisor ends the turn; the Stop hook arms one watcher cycle with no model tokens.</td><td>The Claude snippet: arm and re-arm are "owned by the Stop <code>asyncRewake</code> hook … never by you".</td><td><code class="cite ps-wrap">AGENTS.md:332</code> <code class="cite ps-wrap">docs/supervision-protocols/claude.md:6-7</code></td></tr>
+<tr><td>10</td><td>The worker reads its role contract, verifies isolation before branching, implements, pushes, opens a ready PR, and reads it back to confirm it is not a draft. It writes no FYI status lines.</td><td>The brief's Setup, Rules, and <code>direct-PR</code> definition of done.</td><td><code class="cite ps-wrap">bin/fm-dod-lib.sh:48-59</code> <code class="cite ps-wrap">bin/fm-brief.sh:505-509</code> <code class="cite ps-wrap">bin/fm-dod-lib.sh:254-259</code></td></tr>
+<tr><td>11</td><td>The worker appends <code>done [at=&lt;epoch&gt;]: PR https://…</code> with the URL as the forge printed it, and stops.</td><td>"write its full https:// URL exactly as the forge printed it".</td><td><code class="cite ps-wrap">bin/fm-brief.sh:523-525</code> <code class="cite ps-wrap">bin/fm-dod-lib.sh:259</code></td></tr>
+<tr><td>12</td><td>The watcher sees the status append and closes the cycle as a <code>signal</code> wake; the hook's exit-2 rewake arrives as <code>Stop hook feedback</code>.</td><td>The Claude snippet, step 3.</td><td><code class="cite ps-wrap">docs/supervision-protocols/claude.md:8-9</code></td></tr>
+<tr><td>13</td><td>The supervisor drains the queue before anything else, reads the listed event, and registers the PR with the URL copied from the ready line.</td><td>"drain the durable wake queue before peeking"; §7 PR ready.</td><td><code class="cite ps-wrap">AGENTS.md:428</code> <code class="cite ps-wrap">AGENTS.md:439</code> <code class="cite ps-wrap">AGENTS.md:395</code></td></tr>
+<tr><td>14</td><td>It tells the captain what was fixed, gives the full PR URL, and asks whether to merge, in the captain's nouns: "the fix", "the PR", never "crewmate", "brief", or "done:". The final message stands alone.</td><td>§9 translation and final-message rules; hard rule 2.</td><td><code class="cite ps-wrap">AGENTS.md:484</code> <code class="cite ps-wrap">AGENTS.md:489</code> <code class="cite ps-wrap">AGENTS.md:529</code> <code class="cite ps-wrap">AGENTS.md:32</code></td></tr>
+<tr><td>15-16</td><td>The captain approves; the supervisor merges through the guarded script, and tears down only after landing is confirmed; the item moves to Done through teardown.</td><td>"Use <code>bin/fm-pr-merge.sh</code> for every task PR merge"; "Tear down a ship task only after landing is confirmed".</td><td><code class="cite ps-wrap">AGENTS.md:363</code> <code class="cite ps-wrap">AGENTS.md:401</code> <code class="cite ps-wrap">AGENTS.md:540</code></td></tr>
+<tr><td>17-18</td><td>A one-line landed outcome to the captain; the drain's generation-bound acknowledgement is run only after everything is handled; queued work is re-evaluated.</td><td>§8 acknowledgement; §7 teardown.</td><td><code class="cite ps-wrap">AGENTS.md:433</code> <code class="cite ps-wrap">AGENTS.md:404</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="variations">How the path changes</h2>
+<dl class="defs">
+<dt>The captain adds a requirement mid-task</dt>
+<dd>The supervisor appends the captain's words, unlabelled, to the brief's <code>## Captain's intent</code> and relays them through <code>fm-send</code>; Firstmate's own constraints go into <code>## Firstmate spec</code> or the steer <code class="cite ps-wrap">AGENTS.md:371</code>. The worker receives the relay as an inbox record plus doorbell, which on Claude its system prompt already marks as first-party <code class="cite ps-wrap">bin/fm-spawn.sh:1857</code>.</dd>
+<dt>The project is <code>no-mistakes</code></dt>
+<dd>The launch brief gains the intent overlay; the worker first reports done on its commit, then is told to run <code>/no-mistakes</code> and passes only the captain's intent as <code>--intent</code> <code class="cite ps-wrap">bin/fm-dod-lib.sh:280-289</code>. An ask-user finding returns as a keyed <code>needs-decision</code>, which triggers <code>ask-user-authority</code> in the supervisor <code class="cite ps-wrap">AGENTS.md:382-383</code>.</dd>
+<dt>The worker gets stuck</dt>
+<dd>A <code>stale:</code> wake or a looping pane triggers <code>stuck-crewmate-recovery</code> <code class="cite ps-wrap">AGENTS.md:440</code> <code class="cite ps-wrap">AGENTS.md:588</code>.</dd>
+<dt>The work belongs to a secondmate's scope</dt>
+<dd>Steps 4 to 11 happen inside that secondmate's home under its own copy of this same path; the main supervisor sends one marked request and later reads one correlated line on the parent channel <code class="cite ps-wrap">AGENTS.md:299</code> <code class="cite ps-wrap">bin/fm-brief.sh:312-316</code>. See <a href="secondmate-charter.html">Secondmate charter</a>.</dd>
+<dt>The session restarts halfway</dt>
+<dd>Nothing in the conversation is needed: the next digest reprints the task's meta and status tail, and the durable queue still holds any unacknowledged wake. "A restart must be a non-event because durable state and live backend inventory, not conversation memory, are authoritative." <code class="cite ps-wrap">AGENTS.md:256</code></dd>
+</dl>
+
+<h2 id="count">What was loaded, in the end</h2>
+<p>Across the whole path the supervisor loaded two skill bodies (<code>diagnostic-reasoning</code>, <code>harness-adapters</code>) and three of the sixteen harness references, on top of <code>AGENTS.md</code>, the index, and one digest. The worker saw only its launch brief, one system-prompt paragraph, and its project's own instructions. Every other skill, snippet, and reference stayed on disk. That is the economy described on the <a href="prompt-economy.html">prompt economy page</a>, observed on one task.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>
