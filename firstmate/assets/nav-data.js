@@ -84,7 +84,17 @@ window.FM_NAV = [
   // end observability
 
   // begin remote
-  { section: "remote", title: "Remote", href: "components/remote/index.html", stub: true },
+  { section: "remote", title: "Remote", href: "components/remote/index.html" },
+  { section: "remote", title: "SSH transport and entrypoint", href: "components/remote/transport.html" },
+  { section: "remote", title: "Remote job worker", href: "components/remote/job-worker.html" },
+  { section: "remote", title: "Non-interactive tool contract", href: "components/remote/tool-path.html" },
+  { section: "remote", title: "Readiness doctor", href: "components/remote/readiness-doctor.html" },
+  { section: "remote", title: "fm-remote session and guard", href: "components/remote/herdr-session.html" },
+  { section: "remote", title: "Provisioning and launch", href: "components/remote/provisioning.html" },
+  { section: "remote", title: "Link operations", href: "components/remote/link-operations.html" },
+  { section: "remote", title: "Recovery rules", href: "components/remote/recovery.html" },
+  { section: "remote", title: "Security posture", href: "components/remote/security.html" },
+  { section: "remote", title: "End-to-end trace", href: "components/remote/end-to-end.html" },
   // end remote
 
   // begin issues

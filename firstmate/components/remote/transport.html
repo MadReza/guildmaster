@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SSH transport and entrypoint · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Remote</p>
+<h1>SSH transport and entrypoint</h1>
+<p class="lede"><code>fm-on.sh</code> runs exactly one tracked Firstmate script in a configured remote home over plain SSH, and <code>fm-remote-entrypoint.sh</code> is the one fixed program on the far side that will accept it: encoded argument vectors only, never a shell command string.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>.</p>
+
+<h2 id="problem">What problem it solves</h2>
+<p>Every remote operation in Firstmate, whether launching a mate, steering it, reading its replies, handing off backlog, or retiring it, needs to run code in another machine's home. The transport gives all of them one shape: name a route and a tracked <code>bin/fm-*.sh</code> command, pass arguments, get back stdout, stderr, and an exit status. The usage line is <code>fm-on.sh [--stdin] &lt;secondmate-id|unambiguous-ssh-alias&gt; &lt;fm-command&gt; [args...]</code> <code class="cite">bin/fm-on.sh:4-5</code>. There is no per-command table; any genuine tracked executable in the <code>fm-*.sh</code> namespace is allowed <code class="cite">bin/fm-on.sh:10-11</code>. What keeps that safe is where the command is resolved and how many times it is re-checked, described below.</p>
+
+<h2 id="layers">Three authorization layers</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1000 450" role="img" aria-labelledby="rmt-title rmt-desc">
+<title id="rmt-title">The three places a remote command is checked</title>
+<desc id="rmt-desc">fm-on.sh checks the route and command locally, then opens ssh. The fixed entrypoint on the remote account decodes and re-checks the root, home, and command against its own checkout. The doctor alone is exec'd directly; every other command is staged for the job worker, which checks the record a third time before running the child under env -i. Results return as separate stdout, stderr, and exit status, and ssh's status reaches the caller unchanged.</desc>
+<defs><marker id="rmt-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">Where a remote command is checked</text>
+
+<g class="c4-component"><rect x="20" y="80" width="225" height="160" rx="8"/>
+<text class="c4-label" x="132" y="106">1 · fm-on.sh</text>
+<text class="c4-tech" x="132" y="121">[primary machine]</text>
+<text class="c4-desc" x="132" y="144">route: safe id or unique alias</text>
+<text class="c4-desc" x="132" y="160">command: fm-*.sh basename</text>
+<text class="c4-desc" x="132" y="176">genuine, git-tracked locally</text>
+<text class="c4-desc" x="132" y="192">root and home absolute,</text>
+<text class="c4-desc" x="132" y="208">no traversal or control bytes</text></g>
+
+<g class="c4-external"><rect x="280" y="115" width="140" height="80" rx="8"/>
+<text class="c4-label" x="350" y="142">ssh</text>
+<text class="c4-tech" x="350" y="157">[OpenSSH]</text>
+<text class="c4-desc" x="350" y="176">no agent, no forwards,</text>
+<text class="c4-desc" x="350" y="190">no SendEnv</text></g>
+
+<g class="c4-component"><rect x="455" y="80" width="235" height="175" rx="8"/>
+<text class="c4-label" x="572" y="106">2 · Fixed entrypoint</text>
+<text class="c4-tech" x="572" y="121">[remote, in the sshd session]</text>
+<text class="c4-desc" x="572" y="144">protocol must equal 1</text>
+<text class="c4-desc" x="572" y="160">no NUL, CR, LF in root or home</text>
+<text class="c4-desc" x="572" y="176">root is a Firstmate checkout</text>
+<text class="c4-desc" x="572" y="192">root and home do not overlap</text>
+<text class="c4-desc" x="572" y="208">argv[0] fm-*.sh, genuine file</text>
+<text class="c4-desc" x="572" y="224">tracked by the operator's git</text></g>
+
+<g class="c4-component"><rect x="730" y="40" width="250" height="90" rx="8"/>
+<text class="c4-label" x="855" y="66">Doctor bootstrap</text>
+<text class="c4-tech" x="855" y="81">[exec, never staged]</text>
+<text class="c4-desc" x="855" y="100">fm-remote-doctor.sh only, env -i;</text>
+<text class="c4-desc" x="855" y="115">digest pin if git is missing</text></g>
+
+<g class="c4-component"><rect x="730" y="165" width="250" height="90" rx="8"/>
+<text class="c4-label" x="855" y="191">Stage and wait</text>
+<text class="c4-tech" x="855" y="206">[every other command]</text>
+<text class="c4-desc" x="855" y="225">ensure worker, stage bounded record,</text>
+<text class="c4-desc" x="855" y="240">wait; cancel if the caller vanishes</text></g>
+
+<g class="c4-component"><rect x="730" y="295" width="250" height="125" rx="8"/>
+<text class="c4-label" x="855" y="321">3 · Job worker</text>
+<text class="c4-tech" x="855" y="336">[account GUI session]</text>
+<text class="c4-desc" x="855" y="358">root must equal worker's FM_ROOT</text>
+<text class="c4-desc" x="855" y="374">genuine executable, re-checked</text>
+<text class="c4-desc" x="855" y="390">git ls-files, re-checked</text>
+<text class="c4-desc" x="855" y="406">child runs under env -i</text></g>
+
+<g class="c4-rel"><path d="M245,145 L280,145" marker-end="url(#rmt-arrow)"/></g>
+<g class="c4-rel"><path d="M420,145 L455,145" marker-end="url(#rmt-arrow)"/></g>
+<g class="c4-rel"><path d="M690,110 L730,90" marker-end="url(#rmt-arrow)"/></g>
+<g class="c4-rel"><path d="M690,210 L730,210" marker-end="url(#rmt-arrow)"/></g>
+<g class="c4-rel"><path d="M855,255 L855,295" marker-end="url(#rmt-arrow)"/>
+<text class="c4-rel-label" x="905" y="279">claims</text></g>
+<g class="c4-rel c4-rel-async"><path d="M730,360 L572,360 L572,257" marker-end="url(#rmt-arrow)"/>
+<text class="c4-rel-label" x="650" y="352">stdout · stderr · exit</text></g>
+<g class="c4-rel c4-rel-async"><path d="M455,235 L350,235 L350,197" marker-end="url(#rmt-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M280,178 L247,178" marker-end="url(#rmt-arrow)"/></g>
+<text class="c4-rel-label" x="300" y="290">ssh exit status returned unchanged;</text>
+<text class="c4-rel-label" x="300" y="305">255 = transport lost or completion unknown</text>
+</svg>
+</div>
+<figcaption>Three independent checks of the same command: locally in <code>fm-on.sh</code>, remotely in the entrypoint, and again in the worker immediately before it runs. Dashed arrows are the result path.</figcaption>
+</figure>
+
+<h2 id="fm-on">Layer 1: <code>fm-on.sh</code> on the primary</h2>
+<h3>Route resolution</h3>
+<p>Routes come only from remote records in <code>data/secondmates.md</code>. A remote record carries <code>host:</code> (an SSH config alias), <code>root:</code> (the remote Firstmate code clone), and <code>home:</code> (the remote <code>FM_HOME</code>) <code class="cite">bin/fm-on.sh:7-9</code>. The parser recognises the remote form by that parenthesised tail <code class="cite">bin/fm-secondmate-registry-lib.sh:37</code>. A host alias may be used as the route only when exactly one record selects it; otherwise the call is refused with "use a secondmate id" <code class="cite">bin/fm-on.sh:77-93</code>.</p>
+<p>The route argument itself must match <code>[A-Za-z0-9._-]</code> and must not start with <code>-</code> <code class="cite">bin/fm-on.sh:64</code>, which is what stops an option-shaped route such as <code>-oProxyCommand=bad</code>; the test suite asserts exactly that <code class="cite">tests/fm-on.test.sh:463-466</code>. The configured alias, root, and home are re-validated after lookup: safe alias characters, absolute paths, no tab, CR, or LF, no <code>/../</code> or <code>/./</code> components, and no empty components <code class="cite">bin/fm-on.sh:94-101</code>.</p>
+<h3>Command authorization</h3>
+<p>The command must be a basename in the <code>fm-*.sh</code> namespace with no slash and no <code>..</code>, must be a regular non-symlink executable in this checkout's <code>bin/</code>, and must be tracked by git in this checkout <code class="cite">bin/fm-on.sh:65-74</code>. The local check proves the caller is asking for something Firstmate ships; it does not prove the remote copy is the same, which is why the far side checks again.</p>
+<h3>Encoding and the SSH call</h3>
+<p>The root and home are each base64-encoded, and the whole argv (command first) is written as one NUL-delimited stream and base64-encoded <code class="cite">bin/fm-on.sh:103-105</code>. The remote command line is therefore always <code>fm-remote-entrypoint.sh 1 &lt;root_b64&gt; &lt;home_b64&gt; &lt;argv_b64&gt;</code> <code class="cite">bin/fm-on.sh:120</code>. Base64 output contains only letters, digits, <code>+</code>, <code>/</code>, and <code>=</code>, so none of the four values carries anything a remote shell would interpret. The documents state the rule ("It never accepts a shell command string" <code class="cite">docs/remote-secondmates.md:28-29</code>); that the encoding is the means of keeping arguments shell-inert is this page's reading of the code, not a sentence in the source.</p>
+<p>Every call passes these options, regardless of the user's SSH configuration <code class="cite">bin/fm-on.sh:114-121</code>:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Option</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>ForwardAgent=no</code></td><td>The remote account never gets the primary's SSH agent.</td></tr>
+<tr><td><code>ClearAllForwardings=yes</code></td><td>Any configured local, remote, or dynamic forwarding is dropped for this call.</td></tr>
+<tr><td><code>SendEnv=-*</code></td><td>Configured <code>SendEnv</code> patterns are cleared, so no local environment variable is offered to the server.</td></tr>
+<tr><td><code>ServerAliveInterval=15</code>, <code>ServerAliveCountMax=3</code></td><td>Dead-peer detection. A vanished host becomes a bounded ssh failure (exit 255) in roughly interval × count seconds instead of a hang on a half-open connection. Overridable with <code>FM_SSH_ALIVE_INTERVAL</code> and <code>FM_SSH_ALIVE_COUNT_MAX</code>, both validated as positive integers <code class="cite">bin/fm-on.sh:28-34</code> <code class="cite">bin/fm-on.sh:107-112</code>.</td></tr>
+<tr><td><code>--</code> before the host</td><td>Ends option parsing, so the alias can never be read as an option.</td></tr>
+</tbody></table></div>
+<p>The header explains why keepalives do not kill long jobs: the remote sshd answers keepalive probes independently of what the remote command is doing <code class="cite">bin/fm-on.sh:30-33</code>. Public-key authentication and strict host-key checking stay in the operator's normal <code>~/.ssh</code> configuration <code class="cite">bin/fm-on.sh:23</code> <code class="cite">docs/remote-secondmates.md:15-17</code>. <code>FM_SSH_BIN</code> can substitute the ssh binary, which the tests use for a deterministic SSH boundary <code class="cite">bin/fm-on.sh:106</code>.</p>
+<h3>stdin and the exit status</h3>
+<p>The remote command's stdin is <code>/dev/null</code> unless the caller passes <code>--stdin</code>, because remote staging reads stdin to EOF and an open caller stream would block staging indefinitely <code class="cite">bin/fm-on.sh:14-17</code>. Payload callers, such as provisioning and backlog handoff, pass <code>--stdin</code> and pipe a file.</p>
+<p><code>fm-on.sh</code> <code>exec</code>s ssh, so ssh's exit status is returned unchanged, and OpenSSH is never told to retry. Exit 255 "means unavailable transport or unknown remote completion and must be reconciled by the semantic caller, never blindly repeated by this layer" <code class="cite">bin/fm-on.sh:18-21</code>. What each caller does with 255 is on the <a href="recovery.html">Recovery</a> page.</p>
+
+<h2 id="entrypoint">Layer 2: the fixed entrypoint</h2>
+<h3>Installation</h3>
+<p>The operator clones Firstmate on the remote host at an absolute path and symlinks that clone's <code>bin/fm-remote-entrypoint.sh</code> into a directory on the account's non-interactive SSH PATH, for example <code>~/.local/bin</code> <code class="cite">docs/remote-secondmates.md:20-26</code>. The entrypoint resolves its own real path (Python <code>os.path.realpath</code>, then <code>realpath</code>, then the raw path) and sources the job library from that real directory, so the symlink selects which clone is trusted <code class="cite">bin/fm-remote-entrypoint.sh:35-41</code>. The doctor can recreate the symlink when it is absent, but never overwrites a file there that is not its own symlink <code class="cite">docs/remote-secondmates.md:119</code>.</p>
+<h3>Validation, in order</h3>
+<ol>
+<li>Exactly four arguments, and the protocol must equal the entrypoint's own <code>PROTOCOL=1</code>; a mismatch names both sides <code class="cite">bin/fm-remote-entrypoint.sh:83-84</code>.</li>
+<li>Root and home decode as base64, are non-empty, and contain no NUL, LF, or CR <code class="cite">bin/fm-remote-entrypoint.sh:52-59</code> <code class="cite">bin/fm-remote-job-lib.sh:329-331</code>.</li>
+<li>Root canonicalises to an existing directory with a real <code>AGENTS.md</code> and a real <code>bin/</code>; home canonicalises with at most one absent leaf <code class="cite">bin/fm-remote-entrypoint.sh:122-125</code> <code class="cite">bin/fm-remote-job-lib.sh:353-377</code>.</li>
+<li>Root and home are separate and neither contains the other <code class="cite">bin/fm-remote-entrypoint.sh:126-128</code>.</li>
+<li>argv[0] is an <code>fm-*.sh</code> basename naming a regular, non-symlink executable in <code>&lt;root&gt;/bin</code> <code class="cite">bin/fm-remote-entrypoint.sh:130-138</code>.</li>
+<li>The command is tracked by git in the configured root, using a <code>git</code> resolved only from the operator portion of the composed PATH, before <code>&lt;root&gt;/bin</code> is prepended. A checkout-local <code>bin/git</code> therefore cannot vouch for an untracked command <code class="cite">bin/fm-remote-entrypoint.sh:139-145</code> <code class="cite">bin/fm-remote-job-lib.sh:298-308</code> <code class="cite">docs/remote-secondmates.md:56-57</code>. The tests prove the checkout-local git is never consulted <code class="cite">tests/fm-on.test.sh:426-429</code>.</li>
+</ol>
+<p>Failures exit 64 by default; staging and wait failures exit 70 <code class="cite">bin/fm-remote-entrypoint.sh:43</code> <code class="cite">bin/fm-remote-entrypoint.sh:178-185</code>.</p>
+
+<h3 id="doctor-bootstrap">The doctor bootstrap and its digest pin</h3>
+<p>The readiness doctor is the one command not staged. It is <code>exec</code>'d directly in the SSH process under <code>env -i</code> with only <code>PATH</code> (the composed child PATH), <code>HOME</code>, <code>FM_HOME</code>, <code>FM_ROOT_OVERRIDE</code>, and <code>FM_REMOTE_DOCTOR_BOOTSTRAP=1</code> (plus two test-only overrides when set) <code class="cite">bin/fm-remote-entrypoint.sh:154-173</code>. This is what lets read-only mode report worker gaps without depending on the worker, and lets <code>--fix</code> install the worker in the first place <code class="cite">bin/fm-remote-entrypoint.sh:10-12</code>.</p>
+<p>Because the doctor must be able to report "git is missing", it cannot always be authorized by git. When no operator git resolves, the entrypoint accepts <code>fm-remote-doctor.sh</code> only if its SHA-256 matches the digest pinned in the entrypoint itself; every other command is refused with the install-or-wrapper diagnostic <code class="cite">bin/fm-remote-entrypoint.sh:34</code> <code class="cite">bin/fm-remote-entrypoint.sh:146-153</code> <code class="cite">docs/remote-secondmates.md:31</code>. At <code>ada21f5b</code> the pinned digest matches the doctor file byte for byte. Nothing regenerates the pin automatically; the only guard is a test that runs the repository's own doctor through a git-less bootstrap and then proves a one-byte change fails closed <code class="cite">tests/fm-on.test.sh:431-461</code>. Any edit to the doctor therefore requires editing the entrypoint in the same change.</p>
+
+<h3 id="staging">Staging, waiting, relaying</h3>
+<p>For every non-doctor command the entrypoint calls <code>fm_remote_job_ensure_worker</code>, stages the argv and stdin as a job record, waits for the published result, prints stdout to stdout and stderr to stderr, reaps the record, and exits with the job's own status <code class="cite">bin/fm-remote-entrypoint.sh:175-193</code>. On Darwin a missing Aqua login session fails before staging with the console-login diagnostic <code class="cite">bin/fm-remote-entrypoint.sh:12-15</code> <code class="cite">bin/fm-remote-job-lib.sh:1205-1211</code>.</p>
+<div class="callout unclear"><span class="callout-title">Header and implementation differ</span>
+<p>The entrypoint header says "Every other command is staged after the worker is ready" <code class="cite">bin/fm-remote-entrypoint.sh:11-12</code>, and the document says every other command "verifies" the worker <code class="cite">docs/remote-secondmates.md:32</code>. The function it calls does more than verify: when the LaunchAgent plist does not match its contract, the loaded job is stale, or the running worker's code identity differs, <code>fm_remote_job_ensure_worker</code> rewrites the plist and reloads it on macOS, or restarts the worker on Linux <code class="cite">bin/fm-remote-job-lib.sh:1204-1237</code>. An ordinary <code>fm-on</code> call can therefore repair the job worker by itself. The Herdr agent, the entrypoint symlink, and tool wrappers are repaired only by the doctor's <code>--fix</code>.</p></div>
+
+<h3 id="cancel">Cancellation when the caller goes away</h3>
+<p>A staged job whose caller disappears is cancelled rather than left to run for nobody. The EXIT trap cancels any staged-but-unfinished job; HUP, INT, PIPE, and TERM are mapped to exits 129, 130, 141, and 143 so the trap runs <code class="cite">bin/fm-remote-entrypoint.sh:104-115</code>. Because an ssh channel can die without delivering any signal, the entrypoint also records its parent pid at start and, while waiting, probes about once per second whether it has been reparented; only an observed parent change cancels, and an unreadable probe never does <code class="cite">bin/fm-remote-entrypoint.sh:23-30</code> <code class="cite">bin/fm-remote-entrypoint.sh:90-102</code> <code class="cite">bin/fm-remote-job-lib.sh:317-324</code>. What the worker does with a cancelled record is on the <a href="job-worker.html#cancel">job worker</a> page.</p>
+
+<h2 id="layer3">Layer 3: the worker's own check</h2>
+<p>Before running anything, the worker re-reads the staged record and refuses (exit 126) unless the staged root equals its own configured <code>FM_ROOT</code>, the root is still a real checkout, the command is a genuine <code>fm-*.sh</code> executable, and an operator git confirms it is tracked. The child then runs under <code>env -i</code> <code class="cite">bin/fm-remote-job-worker.sh:683-766</code>. The worker header states the contract: it "executes only a tracked non-symlink fm-*.sh under this worker's configured FM_ROOT/bin" <code class="cite">bin/fm-remote-job-worker.sh:6-8</code>.</p>
+
+<h2 id="knobs">Configuration knobs</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Setting</th><th>Default</th><th>Where</th></tr></thead>
+<tbody>
+<tr><td><code>FM_SSH_ALIVE_INTERVAL</code></td><td>15</td><td><code class="cite">bin/fm-on.sh:107</code></td></tr>
+<tr><td><code>FM_SSH_ALIVE_COUNT_MAX</code></td><td>3</td><td><code class="cite">bin/fm-on.sh:108</code></td></tr>
+<tr><td><code>FM_SSH_BIN</code></td><td><code>ssh</code></td><td><code class="cite">bin/fm-on.sh:106</code></td></tr>
+<tr><td><code>--stdin</code></td><td>off (stdin is <code>/dev/null</code>)</td><td><code class="cite">bin/fm-on.sh:54-58</code></td></tr>
+<tr><td>Protocol</td><td>1, fixed on both sides</td><td><code class="cite">bin/fm-on.sh:42</code> <code class="cite">bin/fm-remote-entrypoint.sh:33</code></td></tr>
+</tbody></table></div>
+
+<h2 id="callers">Who calls it</h2>
+<p>Every remote operation. From the source: <code>fm-spawn.sh</code> (sync and launch), <code>fm-send.sh</code> (steering), <code>fm-teardown.sh</code> (retire), <code>fm-backlog-handoff.sh</code> (outbox put and receive), <code>fm-bootstrap.sh</code> (sync, state, route), <code>fm-crew-state.sh</code> and <code>fm-peek.sh</code> (reads), <code>fm-fleet-snapshot.sh</code> (remote home summary), <code>fm-procevent-remote-reply.sh</code> (delta reads and document fetches), <code>fm-update.sh</code>, <code>fm-secondmate-restart.sh</code>, <code>fm-public-followup.sh</code>, <code>fm-stow-cascade.sh</code>, <code>fm-extension.sh</code>, and <code>fm-remote-readiness-lib.sh</code> <code class="cite">bin/fm-spawn.sh:982</code> <code class="cite">bin/fm-send.sh:782</code> <code class="cite">bin/fm-teardown.sh:954-956</code> <code class="cite">bin/fm-backlog-handoff.sh:689-696</code> <code class="cite">bin/fm-fleet-snapshot.sh:1448</code>.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

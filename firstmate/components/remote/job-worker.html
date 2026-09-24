@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Remote job worker · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Remote</p>
+<h1>Remote job worker</h1>
+<p class="lede">A long-lived, account-owned process on the remote host that runs every non-doctor <code>fm-on</code> command from a file-based queue, so remote commands execute in the account's GUI session rather than in the SSH process or a Herdr pane.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>.</p>
+
+<h2 id="why">Why a worker at all</h2>
+<p>After the doctor bootstrap, "every non-doctor <code>fm-on.sh</code> target runs through that worker in the remote account's GUI session, never in the SSH process or a Herdr pane" <code class="cite">docs/remote-secondmates.md:34</code>. On macOS the reason is the audit session: only a process born in the <code>gui/&lt;uid&gt;</code> launchd domain can read the login keychain without a prompt, which the Herdr session needs for every agent it spawns <code class="cite">bin/fm-remote-herdr-owner-lib.sh:10-18</code>. A Herdr server started by the worker counts as Aqua-born (birth marker <code>worker</code>) exactly because the worker itself is an Aqua LaunchAgent <code class="cite">bin/fm-remote-herdr-owner-lib.sh:44-45</code>. Linux uses the same queue and worker protocol without the Aqua requirement <code class="cite">docs/remote-secondmates.md:39</code>.</p>
+<p>Two files own it. <code>bin/fm-remote-job-lib.sh</code> is sourced by the entrypoint, the worker, and the doctor, and owns "the per-account queue at ~/.firstmate/remote-job …, the bounded job record, worker installation, and the remote runtime PATH" <code class="cite">bin/fm-remote-job-lib.sh:4-8</code>. <code>bin/fm-remote-job-worker.sh</code> is the serving loop <code class="cite">bin/fm-remote-job-worker.sh:2-8</code>.</p>
+
+<h2 id="state">State on disk</h2>
+<p>All state lives under <code>~/.firstmate/remote-job</code>; <code>FM_REMOTE_JOB_STATE_ROOT</code> overrides it only for isolated tests <code class="cite">bin/fm-remote-job-lib.sh:5-6</code>. Every directory is created through a safe-child helper that refuses symlinks <code class="cite">bin/fm-remote-job-lib.sh:395-444</code>.</p>
+<dl class="defs">
+<dt><code>jobs/job-XXXXXX/</code></dt><dd>One published job record, mode 0700. Staging happens in <code>jobs/.stage.XXXXXX</code> and is renamed into place.</dd>
+<dt><code>.seq-claims/&lt;n&gt;/</code></dt><dd>One directory per reserved staging sequence number; <code>mkdir</code> is the atomic reservation.</dd>
+<dt><code>seq</code></dt><dd>A forward-moving allocation hint only, never the source of truth <code class="cite">bin/fm-remote-job-lib.sh:16-21</code>.</dd>
+<dt><code>worker.lock/</code></dt><dd>Worker ownership: <code>pid</code>, <code>start</code>, <code>command</code>, and an optional <code>quarantine</code> marker.</dd>
+<dt><code>worker.pid</code>, <code>worker.ready</code>, <code>worker.identity</code></dt><dd>Published pid, heartbeat (rewritten every loop), and code identity of the running worker.</dd>
+<dt><code>logs/</code></dt><dd>Linux worker log. On macOS the LaunchAgent logs to <code>~/Library/Logs/dev.firstmate.remote-job.log</code> <code class="cite">bin/fm-remote-job-lib.sh:824-830</code>.</dd>
+</dl>
+
+<h3 id="record">The job record</h3>
+<p>The library header is the field contract <code class="cite">bin/fm-remote-job-lib.sh:10-30</code>:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>File</th><th>Written by</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>root</code>, <code>home</code></td><td>stager</td><td>Canonical remote code root and home. <code>home</code>'s exact text is the lane key.</td></tr>
+<tr><td><code>argv</code></td><td>stager</td><td>NUL-delimited; argv[0] is the <code>fm-*.sh</code> name. Capped at 1&nbsp;MiB.</td></tr>
+<tr><td><code>stdin</code></td><td>stager</td><td>Captured caller input, capped at 1&nbsp;MiB.</td></tr>
+<tr><td><code>seq</code></td><td>stager</td><td>Queue-wide staging sequence; the FIFO key.</td></tr>
+<tr><td><code>queue_deadline</code>, <code>timeout</code></td><td>stager</td><td>Latest time the job may still start; execution budget in seconds.</td></tr>
+<tr><td><code>state</code></td><td>both</td><td><code>queued</code> (written last by the stager), <code>running</code>, <code>done</code> (written last by the worker).</td></tr>
+<tr><td><code>deadline</code></td><td>worker</td><td>Absolute execution deadline, set when the lane starts.</td></tr>
+<tr><td><code>stdout</code>, <code>stderr</code>, <code>exit</code></td><td>worker</td><td>Bounded outputs (1&nbsp;MiB each) and a numeric status 0–255.</td></tr>
+<tr><td><code>cancel</code></td><td>caller</td><td>Optional cancellation marker; never rewrites <code>state</code>.</td></tr>
+<tr><td><code>.claim/</code></td><td>worker</td><td><code>owner</code>, <code>owner_start</code>, <code>supervisor</code>, <code>supervisor_start</code>, <code>group</code>, <code>group_start</code>, <code>armed</code>.</td></tr>
+</tbody></table></div>
+<p>Every pid in the record is paired with its process start time, and every liveness check compares both, so a recycled pid is never mistaken for the original owner <code class="cite">bin/fm-remote-job-lib.sh:764-772</code> <code class="cite">bin/fm-remote-job-lib.sh:1005-1020</code>.</p>
+
+<h2 id="lifecycle">Lifecycle of one job</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1000 470" role="img" aria-labelledby="rmj-title rmj-desc">
+<title id="rmj-title">Remote job record lifecycle</title>
+<desc id="rmj-desc">A job is staged in a private directory, published as queued, claimed by a lane, marked running, and published done with its exit status. A queued job can go straight to done when cancelled, past its queue deadline, or malformed. A running job ends by normal exit, timeout, cancellation, or preemption. A running job left behind by a crashed worker is reclaimed by the next worker and published as 125. Done records are reaped by the waiting caller, by whichever side sees a cancelled job finish, or by the hourly stale sweep.</desc>
+<defs><marker id="rmj-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">Job record states</text>
+
+<g class="c4-component"><rect x="20" y="80" width="150" height="72" rx="8"/>
+<text class="c4-label" x="95" y="108">staging</text>
+<text class="c4-tech" x="95" y="123">[jobs/.stage.*]</text>
+<text class="c4-desc" x="95" y="140">private, 0700</text></g>
+<g class="c4-component"><rect x="220" y="80" width="150" height="72" rx="8"/>
+<text class="c4-label" x="295" y="108">queued</text>
+<text class="c4-tech" x="295" y="123">[state=queued]</text>
+<text class="c4-desc" x="295" y="140">FIFO by seq, per home</text></g>
+<g class="c4-component"><rect x="420" y="80" width="150" height="72" rx="8"/>
+<text class="c4-label" x="495" y="108">claimed</text>
+<text class="c4-tech" x="495" y="123">[.claim/ owner]</text>
+<text class="c4-desc" x="495" y="140">one lane per home</text></g>
+<g class="c4-component"><rect x="620" y="80" width="150" height="72" rx="8"/>
+<text class="c4-label" x="695" y="108">running</text>
+<text class="c4-tech" x="695" y="123">[state=running]</text>
+<text class="c4-desc" x="695" y="140">own process group</text></g>
+<g class="c4-component"><rect x="820" y="80" width="160" height="72" rx="8"/>
+<text class="c4-label" x="900" y="108">done</text>
+<text class="c4-tech" x="900" y="123">[exit, then state=done]</text>
+<text class="c4-desc" x="900" y="140">result is complete</text></g>
+
+<g class="c4-component"><rect x="620" y="300" width="150" height="72" rx="8"/>
+<text class="c4-label" x="695" y="328">orphan recovery</text>
+<text class="c4-tech" x="695" y="343">[next worker]</text>
+<text class="c4-desc" x="695" y="360">stop recorded tree</text></g>
+
+<g class="c4-datastore">
+<path d="M825,395 a75,10 0 0,0 150,0 a75,10 0 0,0 -150,0 v45 a75,10 0 0,0 150,0 v-45"/>
+<text class="c4-label" x="900" y="425">reaped</text>
+<text class="c4-desc" x="900" y="440">record removed</text></g>
+
+<g class="c4-rel"><path d="M170,116 L220,116" marker-end="url(#rmj-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="195" cy="100" r="10"/><text x="195" y="104">1</text></g>
+<g class="c4-rel"><path d="M370,116 L420,116" marker-end="url(#rmj-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="395" cy="100" r="10"/><text x="395" y="104">2</text></g>
+<g class="c4-rel"><path d="M570,116 L620,116" marker-end="url(#rmj-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="595" cy="100" r="10"/><text x="595" y="104">3</text></g>
+<g class="c4-rel"><path d="M770,116 L820,116" marker-end="url(#rmj-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="795" cy="100" r="10"/><text x="795" y="104">4</text></g>
+<g class="c4-rel"><path d="M295,152 L295,220 L870,220 L870,154" marker-end="url(#rmj-arrow)"/>
+<text class="c4-rel-label" x="560" y="212">skipped before running: cancel → 130 · queue deadline → 124 · malformed → 126</text></g>
+<g class="c4-rel-num"><circle cx="295" cy="190" r="10"/><text x="295" y="194">5</text></g>
+<g class="c4-rel c4-rel-async"><path d="M695,152 L695,298" marker-end="url(#rmj-arrow)"/>
+<text class="c4-rel-label" x="695" y="270">worker crashed</text></g>
+<g class="c4-rel"><path d="M770,336 L940,336 L940,154" marker-end="url(#rmj-arrow)"/>
+<text class="c4-rel-label" x="850" y="328">publish 125</text></g>
+<g class="c4-rel-num"><circle cx="720" cy="250" r="10"/><text x="720" y="254">6</text></g>
+<g class="c4-rel"><path d="M900,154 L900,383" marker-end="url(#rmj-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="900" cy="280" r="10"/><text x="900" y="284">7</text></g>
+<g class="c4-rel c4-rel-async"><path d="M95,152 L95,420 L823,420" marker-end="url(#rmj-arrow)"/>
+<text class="c4-rel-label" x="400" y="412">stale staging litter: owner gone and older than 600 s</text></g>
+<g class="c4-rel-num"><circle cx="95" cy="300" r="10"/><text x="95" y="304">8</text></g>
+</svg>
+</div>
+<figcaption>Transitions of one job record. Numbers match the table below. Dashed arrows are recovery paths taken by a later worker or sweep, not by the original lane.</figcaption>
+</figure>
+
+<div class="table-wrap"><table>
+<thead><tr><th>#</th><th>Transition</th><th>Mechanism</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>staging → queued</td><td>Write every field into a private <code>.stage.*</code> directory, check the argv and stdin bounds, reserve a <code>seq</code>, write <code>seq</code> then <code>state=queued</code>, and rename the directory into <code>jobs/job-*</code>. Queued is therefore never visible before the record is complete.</td><td><code class="cite">bin/fm-remote-job-lib.sh:613-676</code> <code class="cite">bin/fm-remote-job-lib.sh:566-576</code></td></tr>
+<tr><td>2</td><td>queued → claimed</td><td>The serving loop starts a lane process, which claims by <code>mkdir .claim</code> and records its pid and start time as owner, then as supervisor.</td><td><code class="cite">bin/fm-remote-job-worker.sh:429-449</code> <code class="cite">bin/fm-remote-job-worker.sh:843-869</code></td></tr>
+<tr><td>3</td><td>claimed → running</td><td>Honour a cancel that arrived first; refuse a passed queue deadline (124); compute <code>deadline = now + timeout + 1</code> (the +1 compensates for truncated clock reads); write <code>state=running</code>.</td><td><code class="cite">bin/fm-remote-job-worker.sh:870-898</code></td></tr>
+<tr><td>4</td><td>running → done</td><td>The child's own exit, or 124 on timeout, 130 on cancel, 76 on preemption. <code>exit</code> is written, then <code>state=done</code> last.</td><td><code class="cite">bin/fm-remote-job-worker.sh:517-535</code> <code class="cite">bin/fm-remote-job-worker.sh:630-636</code></td></tr>
+<tr><td>5</td><td>queued → done</td><td>A queued job that is cancelled (130, stderr names the disconnect), past its queue deadline (124), or has an unreadable home or deadline (126) is finalized without running.</td><td><code class="cite">bin/fm-remote-job-worker.sh:944-964</code> <code class="cite">bin/fm-remote-job-worker.sh:782-788</code></td></tr>
+<tr><td>6</td><td>running, owner gone → done</td><td>A <code>running</code> record no lane of this worker owns was left by a crashed worker. The new worker stops the recorded supervisor and command group, then publishes 125 with stderr "remote job worker stopped before this job completed".</td><td><code class="cite">bin/fm-remote-job-worker.sh:477-502</code></td></tr>
+<tr><td>7</td><td>done → reaped</td><td>The waiting entrypoint reaps its own record after relaying. A cancelled record is reaped by whichever side sees it finish, because no consumer remains. Done records older than <code>FM_REMOTE_JOB_REAP_SECONDS</code> (3600) are swept.</td><td><code class="cite">bin/fm-remote-job-lib.sh:740-756</code> <code class="cite">bin/fm-remote-job-lib.sh:774-788</code></td></tr>
+<tr><td>8</td><td>staging litter → removed</td><td>A <code>.stage.*</code> directory whose recorded owner process (pid plus start time) is gone and which is older than 600 s is deleted.</td><td><code class="cite">bin/fm-remote-job-lib.sh:812-821</code></td></tr>
+</tbody></table></div>
+
+<h3 id="exit-codes">Exit statuses the worker itself publishes</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td>0–255 from the child</td><td>The command's own result, relayed unchanged.</td></tr>
+<tr><td>76</td><td>A preemptible long-poll was preempted by a queued command for the same home; stdout and stderr are emptied <code class="cite">bin/fm-remote-job-lib.sh:37-43</code> <code class="cite">bin/fm-remote-job-worker.sh:773-776</code>.</td></tr>
+<tr><td>124</td><td>Queue deadline passed before start, or execution deadline reached (TERM then KILL of the group).</td></tr>
+<tr><td>125</td><td>Internal failure establishing the execution (group records, fifos), or a crashed worker's orphaned job.</td></tr>
+<tr><td>126</td><td>Refused: record malformed, root differs from the worker's <code>FM_ROOT</code>, command not genuine or not tracked, no operator git <code class="cite">bin/fm-remote-job-worker.sh:683-725</code>.</td></tr>
+<tr><td>130</td><td>Cancelled by its caller.</td></tr>
+</tbody></table></div>
+<p>Exit 75 is not a worker status: it is <code>fm-remote-delta-read.sh</code>'s own "window closed with no data" result, which the worker relays like any other child exit <code class="cite">bin/fm-remote-delta-read.sh:13-17</code>.</p>
+
+<h2 id="ordering">Ordering: FIFO within a home, concurrency across homes</h2>
+<p><code>seq</code> is reserved by <code>mkdir .seq-claims/&lt;n&gt;</code>, walking up from the hint. If 100&nbsp;000 attempts in a row find the number taken, allocation rescans the claims for the maximum and continues above it, once <code class="cite">bin/fm-remote-job-lib.sh:543-583</code>. The FIFO contract is defined over completed stagings only: "a stage that returns before another begins executes first; concurrently overlapping stagings have no relative ordering contract", with the job id as the deterministic tiebreak <code class="cite">bin/fm-remote-job-lib.sh:21-25</code>. The serving loop sorts candidates by <code>seq</code> numerically, then id; a record staged by an older library without <code>seq</code> sorts as 0, ahead of sequenced work <code class="cite">bin/fm-remote-job-worker.sh:965-969</code> <code class="cite">bin/fm-remote-job-worker.sh:997</code>.</p>
+<p>The worker "serves one lane per staged home: jobs for the same home run strictly FIFO in seq order while lanes for different homes run concurrently, so one home's long job never delays another home's commands" <code class="cite">bin/fm-remote-job-lib.sh:32-35</code>. In each pass the loop skips a home that already has a lane, and also skips a home that has a queued job whose claim owner is still alive (a reserved home), then starts at most one lane per remaining home in sorted order <code class="cite">bin/fm-remote-job-worker.sh:931-998</code>.</p>
+<p>Each lane is a separate top-level <code>fm-remote-job-worker.sh --lane &lt;job-id&gt;</code> process rather than a backgrounded subshell, because "a bash subshell does not reliably reap its dead children, and a zombie group leader keeps its process group signalable", which could make a finished command look alive until its deadline <code class="cite">bin/fm-remote-job-worker.sh:904-919</code>.</p>
+
+<h2 id="preemption">Preemption of the reply long-poll</h2>
+<p>The reply mirror keeps a blocking delta read of the remote status log open (default wait window 55 s <code class="cite">bin/fm-remote-delta-read.sh:116</code>). Within one home's lane that poll would otherwise serialize every short interactive command behind it <code class="cite">bin/fm-remote-job-lib.sh:35-36</code>. The preemptible class is exactly one command, <code>fm-remote-delta-read.sh</code> <code class="cite">bin/fm-remote-job-lib.sh:119-121</code>. While a preemptible job runs, the lane checks about once a second whether any non-cancelled queued job for the same home is not itself preemptible; if so it sends TERM, waits up to about one second, sends KILL, and publishes 76 with empty output <code class="cite">bin/fm-remote-job-worker.sh:615-625</code> <code class="cite">bin/fm-remote-job-worker.sh:646-661</code>. Only a same-home waiter may preempt, since other homes have their own lanes.</p>
+<p>Nothing is lost, because the delta read is non-destructive and cursor-anchored, "so the caller's normal re-arm re-reads the same data and a preempted poll loses nothing" <code class="cite">bin/fm-remote-job-lib.sh:41-43</code>. The distinction between 76 and 75 matters to the parent: only a genuinely quiet window (75) proves the mirror is caught up, while either outcome can re-arm <code class="cite">docs/remote-secondmates.md:37</code>. See <a href="link-operations.html#replies">reply mirroring</a>.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 960 560" role="img" aria-labelledby="rmp-title rmp-desc">
+<title id="rmp-title">A steer preempts the reply long-poll for the same home</title>
+<desc id="rmp-desc">The reply adapter's delta read is staged and runs in home H's lane, blocking for its wait window. A steer for the same home is staged by a second entrypoint. Within about a second the lane sees the non-preemptible waiter, stops the poll, and publishes exit 76 with empty output; the adapter re-arms at the same cursor. The serving loop then starts the steer in home H's lane and relays its result. Other homes' lanes are unaffected.</desc>
+<defs><marker id="rmp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">Preemption within one home's lane</text>
+
+<g class="c4-component"><rect x="15" y="48" width="150" height="46" rx="8"/><text class="c4-label" x="90" y="70">Reply adapter</text><text class="c4-tech" x="90" y="85">[primary]</text></g>
+<g class="c4-component"><rect x="205" y="48" width="150" height="46" rx="8"/><text class="c4-label" x="280" y="70">Entrypoint A</text><text class="c4-tech" x="280" y="85">[delta read]</text></g>
+<g class="c4-component"><rect x="395" y="48" width="150" height="46" rx="8"/><text class="c4-label" x="470" y="70">Entrypoint B</text><text class="c4-tech" x="470" y="85">[steer from fm-send]</text></g>
+<g class="c4-component"><rect x="585" y="48" width="150" height="46" rx="8"/><text class="c4-label" x="660" y="70">Serving loop</text><text class="c4-tech" x="660" y="85">[worker --serve]</text></g>
+<g class="c4-component"><rect x="775" y="48" width="150" height="46" rx="8"/><text class="c4-label" x="850" y="70">Lane for home H</text><text class="c4-tech" x="850" y="85">[worker --lane]</text></g>
+
+<g class="c4-rel c4-rel-async"><line x1="90" y1="94" x2="90" y2="540"/><line x1="280" y1="94" x2="280" y2="540"/><line x1="470" y1="94" x2="470" y2="540"/><line x1="660" y1="94" x2="660" y2="540"/><line x1="850" y1="94" x2="850" y2="540"/></g>
+
+<g class="c4-rel"><path d="M90,135 L278,135" marker-end="url(#rmp-arrow)"/><text class="c4-rel-label" x="185" y="128">fm-on … fm-remote-delta-read.sh</text></g>
+<g class="c4-rel"><path d="M280,170 L658,170" marker-end="url(#rmp-arrow)"/><text class="c4-rel-label" x="470" y="163">stage job (home H), then wait</text></g>
+<g class="c4-rel"><path d="M660,205 L848,205" marker-end="url(#rmp-arrow)"/><text class="c4-rel-label" x="755" y="198">start lane, run delta read</text></g>
+<text class="c4-rel-label" x="850" y="240">blocks up to its wait window</text>
+<g class="c4-rel"><path d="M470,280 L658,280" marker-end="url(#rmp-arrow)"/><text class="c4-rel-label" x="565" y="273">stage control send (home H)</text></g>
+<g class="c4-rel"><path d="M852,305 L905,305 L905,340 L854,340" marker-end="url(#rmp-arrow)"/></g>
+<text class="c4-rel-label" x="760" y="318">≤1 s: same-home waiter seen</text>
+<text class="c4-rel-label" x="760" y="332">→ TERM, then KILL the poll</text>
+<g class="c4-rel c4-rel-async"><path d="M850,375 L282,375" marker-end="url(#rmp-arrow)"/><text class="c4-rel-label" x="565" y="368">done: exit 76, stdout and stderr emptied</text></g>
+<g class="c4-rel c4-rel-async"><path d="M280,410 L92,410" marker-end="url(#rmp-arrow)"/><text class="c4-rel-label" x="185" y="403">76 → re-arm, same cursor</text></g>
+<g class="c4-rel"><path d="M660,450 L848,450" marker-end="url(#rmp-arrow)"/><text class="c4-rel-label" x="755" y="443">next lane for H: the send</text></g>
+<g class="c4-rel c4-rel-async"><path d="M850,490 L472,490" marker-end="url(#rmp-arrow)"/><text class="c4-rel-label" x="660" y="483">done: exit 0, record written</text></g>
+<text class="c4-rel-label" x="480" y="530">Jobs for other homes run in their own lanes concurrently throughout.</text>
+</svg>
+</div>
+<figcaption>A steer is never serialized behind a reply poll for the same home. Dashed horizontal arrows are results; dashed verticals are lifelines.</figcaption>
+</figure>
+
+<h2 id="cancel">Cancellation</h2>
+<p>"A caller that disconnects before its job completes cancels it instead of abandoning it" <code class="cite">bin/fm-remote-job-lib.sh:45-54</code>. <code>fm_remote_job_cancel</code> atomically writes a <code>cancel</code> marker and never rewrites <code>state</code>; if the record is already done it reaps instead, and cancelling a vanished job is a no-op <code class="cite">bin/fm-remote-job-lib.sh:585-611</code>. The worker then skips a cancelled queued job (publishing 130 and reaping), or, for a running one, notices within about a second, sends TERM to the group, waits up to about one second, sends KILL, and publishes 130 <code class="cite">bin/fm-remote-job-worker.sh:603-614</code>. The document's summary: "cancelled queued work is skipped, cancelled running work is stopped, and the finalized record is cleaned up, so retries never convoy behind abandoned work" <code class="cite">docs/remote-secondmates.md:38</code>. The triggers on the entrypoint side are on the <a href="transport.html#cancel">transport</a> page.</p>
+
+<h2 id="execution">How one command is executed</h2>
+<ol>
+<li><strong>Re-validation.</strong> The lane re-reads root, home, argv, stdin, and deadline, and refuses with 126 unless the root equals the worker's own <code>FM_ROOT</code> and the command is a genuine executable <code class="cite">bin/fm-remote-job-worker.sh:683-709</code>.</li>
+<li><strong>Tracking check under the deadline.</strong> <code>git -C &lt;root&gt; ls-files --error-unmatch bin/&lt;command&gt;</code> runs through the same timed, group-isolated runner, using the operator git only <code class="cite">bin/fm-remote-job-worker.sh:710-725</code>.</li>
+<li><strong>Bounded output capture.</strong> stdout and stderr go through two private FIFOs; each reader keeps the first 1&nbsp;MiB and discards the rest, so a noisy child cannot block and cannot exceed the bound <code class="cite">bin/fm-remote-job-worker.sh:671-677</code> <code class="cite">bin/fm-remote-job-worker.sh:730-745</code>.</li>
+<li><strong>Clean environment.</strong> The child runs as <code>/usr/bin/env -i PATH=&lt;child PATH&gt; HOME=&lt;account home&gt; FM_HOME=&lt;home&gt; FM_ROOT_OVERRIDE=&lt;root&gt; FM_REMOTE_JOB_ACTIVE=1</code>, with its captured stdin <code class="cite">bin/fm-remote-job-worker.sh:746-766</code>. The PATH is described on the <a href="tool-path.html">tool contract</a> page.</li>
+<li><strong>Process-group isolation.</strong> Job control places the child in its own process group. The child waits for an <code>armed</code> marker before it <code>exec</code>s, so the group id and start time are durably recorded before any work begins; if recording fails the group is killed and 125 published <code class="cite">bin/fm-remote-job-worker.sh:537-593</code>. Timeout, cancel, and preemption all signal the whole group.</li>
+</ol>
+
+<h2 id="ownership">Worker ownership, heartbeat, and identity</h2>
+<p>Exactly one serving worker owns an account's queue. It takes <code>worker.lock</code> by <code>mkdir</code> and records its pid, start time, and command line. A competing start that finds a live owner exits 0; a lock whose owner is dead and whose heartbeat is stale is cleared and retried <code class="cite">bin/fm-remote-job-worker.sh:160-184</code> <code class="cite">bin/fm-remote-job-worker.sh:1008-1015</code>. The worker then publishes its code identity and pid and, on every loop, rewrites <code>worker.ready</code> as a heartbeat <code class="cite">bin/fm-remote-job-worker.sh:1017-1020</code>.</p>
+<p>Readiness is a fresh heartbeat (no older than 10 s) with no quarantine marker <code class="cite">bin/fm-remote-job-lib.sh:1087-1099</code>. Staleness of the code is detected separately: the identity is three <code>git hash-object</code> values, of the root path, the library, and the worker script, joined by colons <code class="cite">bin/fm-remote-job-lib.sh:1048-1062</code>. When the running worker's published identity differs from what the current checkout computes, <code>fm_remote_job_ensure_worker</code> reloads the LaunchAgent (macOS) or stops and restarts the worker tree (Linux), then waits up to 20 s for a matching probe <code class="cite">bin/fm-remote-job-lib.sh:1101-1109</code> <code class="cite">bin/fm-remote-job-lib.sh:1186-1241</code>.</p>
+
+<h3 id="quarantine">Shutdown and quarantine</h3>
+<p>On HUP, INT, or TERM the worker ignores further copies of those signals, writes a <code>quarantine</code> marker into the lock, stops every tracked lane and its recorded command group, verifies they are gone, and only then clears the marker and exits <code class="cite">bin/fm-remote-job-worker.sh:391-418</code>. The comment explains the ignored signals: a replacement stops a Linux worker by signalling its whole group, and the supervisor forwards a second signal to the same child, which previously killed the shutdown half way and left a lock no later worker could clear. If execution cannot be confirmed stopped, the marker stays; a later worker only clears it after proving no recorded supervisor or group is alive, and otherwise refuses to start (exit 75) <code class="cite">bin/fm-remote-job-worker.sh:136-158</code> <code class="cite">bin/fm-remote-job-worker.sh:1013</code>. Jobs interrupted by a clean shutdown stay <code>running</code> with a dead owner for the replacement's orphan recovery <code class="cite">bin/fm-remote-job-worker.sh:18-23</code>.</p>
+
+<h2 id="platforms">macOS LaunchAgent and Linux supervisor</h2>
+<div class="table-wrap"><table>
+<thead><tr><th></th><th>macOS</th><th>Linux</th></tr></thead>
+<tbody>
+<tr><td>Started by</td><td>LaunchAgent <code>dev.firstmate.remote-job</code> at <code>~/Library/LaunchAgents/dev.firstmate.remote-job.plist</code> with <code>LimitLoadToSessionType=Aqua</code>, <code>RunAtLoad</code>, <code>KeepAlive=true</code>, and <code>HOME</code> and <code>FM_ROOT_OVERRIDE</code> in its environment <code class="cite">bin/fm-remote-job-lib.sh:836-873</code></td><td><code>nohup env … fm-remote-job-worker.sh</code> in its own process group (<code>set -m</code>), logging to <code>logs/</code> <code class="cite">bin/fm-remote-job-lib.sh:1149-1184</code></td></tr>
+<tr><td>Installed or repaired by</td><td>Plist rewritten when its whitespace-stripped text differs from the rendered contract; <code>launchctl bootout</code>, <code>bootstrap gui/&lt;uid&gt;</code>, <code>kickstart -k</code> <code class="cite">bin/fm-remote-job-lib.sh:875-882</code> <code class="cite">bin/fm-remote-job-lib.sh:1135-1147</code></td><td>Stale-identity worker tree stopped through its verified group, then restarted once more if the first start loses an ownership race <code class="cite">bin/fm-remote-job-lib.sh:1229-1236</code></td></tr>
+<tr><td>Restart policy</td><td>launchd <code>KeepAlive</code></td><td>A restart supervisor gives up after 20 failed children in total, backs off 1–5 s between immediate failures, and resets only the backoff (not the total) after a child stays up 10 s; exit 75 (quarantine) stops it at once <code class="cite">bin/fm-remote-job-worker.sh:32-41</code> <code class="cite">bin/fm-remote-job-worker.sh:1066-1109</code></td></tr>
+<tr><td>Precondition</td><td>An Aqua login session for the uid; otherwise the console-login diagnostic <code class="cite">bin/fm-remote-job-lib.sh:1208-1211</code></td><td>None beyond the account</td></tr>
+</tbody></table></div>
+<p>Stopping a worker tree signals the isolated group only when its leader is provably a worker and is not the caller's own group; otherwise it signals the single process. TERM comes first, KILL only for survivors <code class="cite">bin/fm-remote-job-lib.sh:943-991</code>.</p>
+
+<h2 id="orphans">Abandoned code roots</h2>
+<p>A worker is bound to one code root, and roots can disappear: a pruned no-mistakes gate worktree, a returned pooled worktree, or a removed test fixture <code class="cite">bin/fm-remote-job-worker.sh:25-29</code>. Once the root has stopped being a real checkout (no <code>AGENTS.md</code> or no worker script) for <code>FM_REMOTE_JOB_ORPHAN_GRACE_SECONDS</code> (5), the serving loop and the Linux supervisor both stop <code class="cite">bin/fm-remote-job-lib.sh:935-941</code> <code class="cite">bin/fm-remote-job-worker.sh:223-236</code>. <code>bin/fm-remote-job-reap-orphans.sh [--dry-run]</code> clears workers already orphaned by older builds; its whole test is that the root named in the worker's own command line fails the same liveness predicate, so a healthy LaunchAgent worker or any worker whose checkout still exists is never a candidate. It inspects only the user's own processes, never signals itself, its group, or an ancestor, and exits 0 unless the process scan itself fails <code class="cite">bin/fm-remote-job-reap-orphans.sh:2-33</code>.</p>
+
+<div class="callout unclear"><span class="callout-title">Observation: the stale sweep runs every loop</span>
+<p>The serving loop resets <code>worker_reap=0</code> immediately before testing it, so <code>fm_remote_job_reap_stale</code> runs on every iteration, about every 50 ms <code class="cite">bin/fm-remote-job-worker.sh:1027-1031</code>. The variable reads like a once-only guard but does not act as one. The sweep's own internal bounds still hold (records must be older than 3600 s, the sequence-claim sweep is rate-limited to once an hour by its marker file <code class="cite">bin/fm-remote-job-lib.sh:789-811</code>), so this is a cost question, not a correctness one. The source does not say whether the per-loop scan is intended.</p></div>
+
+<h2 id="knobs">Configuration knobs</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Setting</th><th>Default</th><th>Bound</th></tr></thead>
+<tbody>
+<tr><td><code>FM_REMOTE_JOB_MAX_BYTES</code></td><td>1048576</td><td>≤ 1048576 <code class="cite">bin/fm-remote-job-lib.sh:123-135</code></td></tr>
+<tr><td><code>FM_REMOTE_JOB_QUEUE_TIMEOUT</code></td><td>360 s</td><td>1–3600</td></tr>
+<tr><td><code>FM_REMOTE_JOB_TIMEOUT</code></td><td>360 s</td><td>1–3600</td></tr>
+<tr><td><code>FM_REMOTE_JOB_WAIT_GRACE</code></td><td>30 s</td><td>0–300; caller waits queue deadline + timeout + grace <code class="cite">bin/fm-remote-job-lib.sh:698</code></td></tr>
+<tr><td><code>FM_REMOTE_JOB_POLL_SECONDS</code></td><td>0.05</td><td>—</td></tr>
+<tr><td><code>FM_REMOTE_JOB_REAP_SECONDS</code></td><td>3600</td><td>positive</td></tr>
+<tr><td><code>FM_REMOTE_JOB_STAGE_REAP_SECONDS</code></td><td>600</td><td>positive</td></tr>
+<tr><td><code>FM_REMOTE_JOB_ORPHAN_GRACE_SECONDS</code></td><td>5</td><td>non-numeric falls back to default</td></tr>
+<tr><td><code>FM_REMOTE_JOB_SUPERVISOR_MAX_RESTARTS</code> / <code>_MAX_BACKOFF_SECONDS</code> / <code>_HEALTHY_SECONDS</code></td><td>20 / 5 / 10</td><td>Linux only <code class="cite">bin/fm-remote-job-worker.sh:46-52</code></td></tr>
+</tbody></table></div>
+<p>Constants in <code class="cite">bin/fm-remote-job-lib.sh:86-97</code>. Sequence claims are reaped after 86400 s, at most once per 3600 s; these two are not overridable.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

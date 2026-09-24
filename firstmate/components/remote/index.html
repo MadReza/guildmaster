@@ -11,12 +11,236 @@
 <div class="layout">
 <nav id="site-nav" aria-label="Site"></nav>
 <main id="main">
-<article>
-<p class="breadcrumb">Components</p>
+<article class="wide">
+<p class="breadcrumb">Components › Remote</p>
 <h1>Remote</h1>
-<p class="lede">Will cover whole-home remote secondmates on SSH-reachable hosts: route provisioning, <code>fm-on</code> and the remote job worker, the remote doctor, remote status relay, inherited material push, and remote update and failure behaviour.</p>
-<div class="callout unclear"><span class="callout-title">Stub</span>
-<p>This section is reserved and not yet written. A follow-up task fills it in under <a href="../../AUTHORING.md">the authoring contract</a>. Until then, the <a href="../../c4/containers.html">Level 2 containers page</a> is the entry point for this area.</p></div>
+<p class="lede">How Firstmate places a whole persistent secondmate home on another SSH-reachable machine, and the narrow, argv-only transport that is the only way the primary ever reaches it.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Every citation links to that commit.</p>
+
+<h2 id="decision">The placement decision: whole homes, never single workers</h2>
+<p>Firstmate's remote unit is a complete operational home, not an individual worker. "Remote second mates place a whole persistent Firstmate home on another SSH-reachable host. The primary still owns routing and supervision, while the remote home owns its own projects, backlog, and workers." The same document rules out the two alternatives explicitly: Firstmate "does not support placing an individual worker remotely or failing a remote route over to a local replacement" <code class="cite">docs/remote-secondmates.md:3-5</code>.</p>
+<p>What the source gives as the reasons, and what follows from them in the code:</p>
+<ul>
+<li><strong>The far side must be self-sufficient between contacts.</strong> The remote home clones its own projects from their origins on that host (<code class="cite">docs/remote-secondmates.md:42</code>, <code class="cite">bin/fm-remote-home-provision.sh:224-238</code>), keeps its own backlog (<code class="cite">bin/fm-remote-home-provision.sh:188-194</code>), and supervises its own workers with their ordinary backend selection (<code class="cite">docs/remote-secondmates.md:11</code>). The primary crosses the link only for routing, steering, reply mirroring, and lifecycle.</li>
+<li><strong>The remote agent must outlive every SSH disconnection.</strong> The remote secondmate agent always runs on Herdr in the dedicated <code>fm-remote</code> session, because "Herdr's remote-session server belongs to the host's own GUI login session rather than to the SSH connection, so the agent's endpoint survives every disconnection the primary's supervision depends on" <code class="cite">docs/remote-secondmates.md:7-10</code>. The control plane restates this as a hard requirement, not a preference <code class="cite">bin/fm-remote-secondmate-control.sh:168-171</code>.</li>
+<li><strong>Unreachable is never the same as dead.</strong> Because a whole home carries durable state on its own disk, an unavailable remote home "is projected as unknown and is never replaced by a local second mate" <code class="cite">docs/remote-secondmates.md:219</code>. Failing over would fork that state; see <a href="recovery.html">Recovery</a>.</li>
+</ul>
+<div class="callout unclear"><span class="callout-title">Open question</span>
+<p>The source states the decision and its mechanical consequences but does not record a comparative argument against remote workers (for example, cost or latency figures). The reasons above are the ones the documents and headers actually give; anything beyond them is not in the source.</p></div>
+
+<h2 id="components">Component view (C4 Level 3)</h2>
+<p>The remote area spans two machines. On the primary, every semantic caller reaches the far side only through <code>fm-on.sh</code>. On the remote account, one fixed entrypoint accepts that call and hands it either to the readiness doctor (a plain SSH bootstrap) or to the account-owned job worker, which runs the tracked target script in the account's GUI session.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1240 790" role="img" aria-labelledby="rmi-title rmi-desc">
+<title id="rmi-title">Remote area components (C4 level 3)</title>
+<desc id="rmi-desc">On the primary machine, semantic callers, the remote home seed, the readiness gate, and the reply adapter all call the fm-on transport, which reads routes from data/secondmates.md and opens one SSH connection. On the remote account, the fixed entrypoint either execs the readiness doctor directly or stages a job in the per-account queue; the job worker claims it and runs one tracked target script, which acts on the remote home and on the Herdr fm-remote session. The doctor's fix mode installs the job worker and the Herdr guard launch agents. The guard owns the fm-remote Herdr server, where the remote secondmate agent runs and appends replies into the remote home.</desc>
+<defs><marker id="rmi-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="32">Remote — components across two machines</text>
+
+<g class="c4-boundary"><rect x="20" y="60" width="425" height="610" rx="6"/><text x="32" y="80">Parent (primary) home — local machine</text></g>
+
+<g class="c4-component"><rect x="40" y="100" width="245" height="78" rx="8"/>
+<text class="c4-label" x="162" y="125">Semantic callers</text>
+<text class="c4-tech" x="162" y="140">[fm-spawn · fm-send · fm-teardown · …]</text>
+<text class="c4-desc" x="162" y="157">launch, steer, peek, state,</text>
+<text class="c4-desc" x="162" y="171">handoff, retire, update</text></g>
+
+<g class="c4-component"><rect x="40" y="210" width="245" height="78" rx="8"/>
+<text class="c4-label" x="162" y="235">Remote home seed</text>
+<text class="c4-tech" x="162" y="250">[fm-remote-home-seed.sh]</text>
+<text class="c4-desc" x="162" y="267">registers route, sends a</text>
+<text class="c4-desc" x="162" y="281">bounded provisioning manifest</text></g>
+
+<g class="c4-component"><rect x="40" y="320" width="245" height="78" rx="8"/>
+<text class="c4-label" x="162" y="345">Readiness gate</text>
+<text class="c4-tech" x="162" y="360">[fm-remote-readiness-lib.sh]</text>
+<text class="c4-desc" x="162" y="377">check → fix → check; the last</text>
+<text class="c4-desc" x="162" y="391">read-only run is the verdict</text></g>
+
+<g class="c4-component"><rect x="40" y="430" width="245" height="78" rx="8"/>
+<text class="c4-label" x="162" y="455">Reply adapter</text>
+<text class="c4-tech" x="162" y="470">[fm-procevent-remote-reply.sh]</text>
+<text class="c4-desc" x="162" y="487">mirrors the remote status log</text>
+<text class="c4-desc" x="162" y="501">into state/&lt;id&gt;.status</text></g>
+
+<g class="c4-component"><rect x="315" y="100" width="115" height="520" rx="8"/>
+<text class="c4-label" x="372" y="330">fm-on</text>
+<text class="c4-tech" x="372" y="346">[fm-on.sh]</text>
+<text class="c4-desc" x="372" y="366">one tracked</text>
+<text class="c4-desc" x="372" y="380">fm-*.sh per</text>
+<text class="c4-desc" x="372" y="394">call, argv</text>
+<text class="c4-desc" x="372" y="408">base64-encoded</text></g>
+
+<g class="c4-datastore">
+<path d="M60,560 a90,11 0 0,0 180,0 a90,11 0 0,0 -180,0 v60 a90,11 0 0,0 180,0 v-60"/>
+<text class="c4-label" x="150" y="596">data/secondmates.md</text>
+<text class="c4-desc" x="150" y="613">host: · root: · home:</text></g>
+
+<g class="c4-external"><rect x="462" y="345" width="150" height="80" rx="8"/>
+<text class="c4-label" x="537" y="372">OpenSSH</text>
+<text class="c4-tech" x="537" y="387">[ssh alias in ~/.ssh]</text>
+<text class="c4-desc" x="537" y="404">key auth, strict host</text>
+<text class="c4-desc" x="537" y="418">keys, no forwarding</text></g>
+
+<g class="c4-boundary"><rect x="632" y="60" width="590" height="610" rx="6"/><text x="644" y="80">Remote SSH host — dedicated remote account</text></g>
+
+<g class="c4-container"><rect x="660" y="95" width="240" height="90" rx="8"/>
+<text class="c4-label" x="780" y="121">Herdr fm-remote session</text>
+<text class="c4-tech" x="780" y="136">[herdr server · 2ndmate-&lt;id&gt;]</text>
+<text class="c4-desc" x="780" y="154">remote secondmate agent,</text>
+<text class="c4-desc" x="780" y="168">one workspace per mate</text></g>
+
+<g class="c4-component"><rect x="940" y="95" width="260" height="90" rx="8"/>
+<text class="c4-label" x="1070" y="121">Herdr guard</text>
+<text class="c4-tech" x="1070" y="136">[fm-remote-herdr-guard.sh]</text>
+<text class="c4-desc" x="1070" y="154">LaunchAgent dev.firstmate.herdr.</text>
+<text class="c4-desc" x="1070" y="168">fm-remote; Aqua-born server only</text></g>
+
+<g class="c4-component"><rect x="660" y="230" width="240" height="90" rx="8"/>
+<text class="c4-label" x="780" y="256">Tracked targets</text>
+<text class="c4-tech" x="780" y="271">[bin/fm-*.sh in the remote root]</text>
+<text class="c4-desc" x="780" y="289">control · provision · file ·</text>
+<text class="c4-desc" x="780" y="303">delta-read · inherit · receive</text></g>
+
+<g class="c4-datastore">
+<path d="M960,240 a110,11 0 0,0 220,0 a110,11 0 0,0 -220,0 v62 a110,11 0 0,0 220,0 v-62"/>
+<text class="c4-label" x="1070" y="276">Remote home (FM_HOME)</text>
+<text class="c4-desc" x="1070" y="293">state/parent-replies.status,</text>
+<text class="c4-desc" x="1070" y="307">state/parent-route/&lt;id&gt;.inbox</text></g>
+
+<g class="c4-component"><rect x="660" y="345" width="240" height="80" rx="8"/>
+<text class="c4-label" x="780" y="371">Fixed entrypoint</text>
+<text class="c4-tech" x="780" y="386">[fm-remote-entrypoint.sh]</text>
+<text class="c4-desc" x="780" y="403">decodes, re-validates, stages;</text>
+<text class="c4-desc" x="780" y="417">never a shell string</text></g>
+
+<g class="c4-component"><rect x="940" y="345" width="260" height="80" rx="8"/>
+<text class="c4-label" x="1070" y="371">Readiness doctor</text>
+<text class="c4-tech" x="1070" y="386">[fm-remote-doctor.sh]</text>
+<text class="c4-desc" x="1070" y="403">sole owner of "ready"; runs in</text>
+<text class="c4-desc" x="1070" y="417">the plain SSH bootstrap</text></g>
+
+<g class="c4-datastore">
+<path d="M670,490 a110,11 0 0,0 220,0 a110,11 0 0,0 -220,0 v62 a110,11 0 0,0 220,0 v-62"/>
+<text class="c4-label" x="780" y="526">Job queue</text>
+<text class="c4-desc" x="780" y="543">~/.firstmate/remote-job/jobs,</text>
+<text class="c4-desc" x="780" y="557">0700 records, FIFO by seq</text></g>
+
+<g class="c4-component"><rect x="940" y="480" width="260" height="90" rx="8"/>
+<text class="c4-label" x="1070" y="506">Remote job worker</text>
+<text class="c4-tech" x="1070" y="521">[fm-remote-job-worker.sh + lib]</text>
+<text class="c4-desc" x="1070" y="539">LaunchAgent dev.firstmate.remote-job;</text>
+<text class="c4-desc" x="1070" y="553">one lane per home, env -i children</text></g>
+
+<!-- relationships -->
+<g class="c4-rel"><path d="M285,139 L315,139" marker-end="url(#rmi-arrow)"/></g>
+<g class="c4-rel"><path d="M285,249 L315,249" marker-end="url(#rmi-arrow)"/></g>
+<g class="c4-rel"><path d="M285,359 L315,359" marker-end="url(#rmi-arrow)"/></g>
+<g class="c4-rel"><path d="M285,469 L315,469" marker-end="url(#rmi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="300" cy="139" r="9"/><text x="300" y="143">1</text></g>
+<g class="c4-rel-num"><circle cx="300" cy="249" r="9"/><text x="300" y="253">1</text></g>
+<g class="c4-rel-num"><circle cx="300" cy="359" r="9"/><text x="300" y="363">1</text></g>
+<g class="c4-rel-num"><circle cx="300" cy="469" r="9"/><text x="300" y="473">1</text></g>
+<g class="c4-rel"><path d="M315,590 L240,590" marker-end="url(#rmi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="278" cy="604" r="10"/><text x="278" y="608">2</text></g>
+<g class="c4-rel"><path d="M430,385 L462,385" marker-end="url(#rmi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="446" cy="368" r="10"/><text x="446" y="372">3</text></g>
+<g class="c4-rel"><path d="M612,385 L660,385" marker-end="url(#rmi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="636" cy="368" r="10"/><text x="636" y="372">4</text></g>
+<g class="c4-rel"><path d="M900,385 L940,385" marker-end="url(#rmi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="912" cy="406" r="10"/><text x="912" y="410">5</text></g>
+<g class="c4-rel"><path d="M780,425 L780,478" marker-end="url(#rmi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="762" cy="452" r="10"/><text x="762" y="456">6</text></g>
+<g class="c4-rel"><path d="M940,525 L892,525" marker-end="url(#rmi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="916" cy="508" r="10"/><text x="916" y="512">7</text></g>
+<g class="c4-rel"><path d="M960,480 L960,450 L930,450 L930,300 L902,300" marker-end="url(#rmi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="930" cy="330" r="10"/><text x="930" y="334">8</text></g>
+<g class="c4-rel"><path d="M900,270 L958,270" marker-end="url(#rmi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="929" cy="254" r="10"/><text x="929" y="258">9</text></g>
+<g class="c4-rel"><path d="M780,230 L780,187" marker-end="url(#rmi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="798" cy="208" r="10"/><text x="798" y="212">10</text></g>
+<g class="c4-rel"><path d="M940,140 L902,140" marker-end="url(#rmi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="921" cy="123" r="10"/><text x="921" y="127">11</text></g>
+<g class="c4-rel"><path d="M1190,345 L1190,187" marker-end="url(#rmi-arrow)"/></g>
+<g class="c4-rel"><path d="M1070,425 L1070,478" marker-end="url(#rmi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="1190" cy="210" r="10"/><text x="1190" y="214">12</text></g>
+<g class="c4-rel-num"><circle cx="1088" cy="452" r="10"/><text x="1088" y="456">12</text></g>
+<g class="c4-rel c4-rel-async"><path d="M880,185 L1000,236" marker-end="url(#rmi-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="945" cy="203" r="10"/><text x="945" y="207">13</text></g>
+
+<g class="c4-legend">
+<rect class="c4-legend-frame" x="20" y="690" width="1202" height="80" rx="6"/>
+<text class="c4-legend-heading" x="36" y="712">Legend</text>
+<g class="c4-component"><rect x="36" y="726" width="28" height="18" rx="4"/></g><text x="72" y="740">Component (a script or library)</text>
+<g class="c4-container"><rect x="300" y="726" width="28" height="18" rx="4"/></g><text x="336" y="740">Container (separately running server)</text>
+<g class="c4-datastore"><rect x="590" y="726" width="28" height="18" rx="4"/></g><text x="626" y="740">Datastore (file tree or queue)</text>
+<g class="c4-external"><rect x="840" y="726" width="28" height="18" rx="4"/></g><text x="876" y="740">External system</text>
+<text x="1010" y="740">– – dashed arrow: asynchronous</text>
+<text x="36" y="760">Numbered arrows are described in the interactions table below. Dashed boxes are machine boundaries.</text>
+</g>
+</svg>
+</div>
+<figcaption>Remote components. The primary never talks to the far side except through <code>fm-on.sh</code>; the far side never runs anything except a tracked <code>bin/fm-*.sh</code> of its own configured code root.</figcaption>
+</figure>
+
+<div class="table-wrap"><table>
+<thead><tr><th>#</th><th>Interaction</th><th>What travels and what is guaranteed</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Every primary-side caller → <code>fm-on.sh</code></td><td>One tracked command name plus its arguments. There is no per-command table: any genuine executable, tracked <code>bin/fm-*.sh</code> in the local checkout is allowed.</td><td><code class="cite">bin/fm-on.sh:7-11</code> <code class="cite">bin/fm-on.sh:64-74</code></td></tr>
+<tr><td>2</td><td><code>fm-on.sh</code> → route registry</td><td>Resolves a secondmate id, or an unambiguous SSH alias, to <code>host</code>, <code>root</code>, and <code>home</code>. Ambiguity is refused.</td><td><code class="cite">bin/fm-on.sh:77-101</code></td></tr>
+<tr><td>3</td><td><code>fm-on.sh</code> → OpenSSH</td><td>One <code>ssh</code> invocation with agent forwarding, forwardings, and <code>SendEnv</code> disabled and dead-peer keepalives armed. ssh's exit status is returned unchanged.</td><td><code class="cite">bin/fm-on.sh:114-125</code></td></tr>
+<tr><td>4</td><td>SSH → fixed entrypoint</td><td>Protocol number plus three base64 values: root, home, and a NUL-delimited argv stream.</td><td><code class="cite">bin/fm-on.sh:103-105</code> <code class="cite">bin/fm-remote-entrypoint.sh:83-84</code></td></tr>
+<tr><td>5</td><td>Entrypoint → doctor (bootstrap)</td><td>Only <code>fm-remote-doctor.sh</code> is exec'd directly in the SSH process, under <code>env -i</code>, so it can inspect and repair the worker it would otherwise depend on.</td><td><code class="cite">bin/fm-remote-entrypoint.sh:154-173</code></td></tr>
+<tr><td>6</td><td>Entrypoint → job queue</td><td>Every other command: ensure the worker, stage a bounded record, wait, relay stdout, stderr, and exit separately, cancel on disconnect.</td><td><code class="cite">bin/fm-remote-entrypoint.sh:175-193</code></td></tr>
+<tr><td>7</td><td>Worker → job queue</td><td>Atomic claim, FIFO per home, concurrent lanes across homes, bounded outputs, <code>state=done</code> published last.</td><td><code class="cite">bin/fm-remote-job-lib.sh:26-43</code></td></tr>
+<tr><td>8</td><td>Worker → tracked target</td><td>Re-checks git tracking, then runs the target under <code>env -i</code> with only the composed PATH, HOME, FM_HOME, FM_ROOT_OVERRIDE, and FM_REMOTE_JOB_ACTIVE=1.</td><td><code class="cite">bin/fm-remote-job-worker.sh:710-766</code></td></tr>
+<tr><td>9</td><td>Target → remote home</td><td>Provisioning, steering-inbox records, delta reads of the reply log, confined file get/put, inherited-allowlist writes.</td><td><a href="provisioning.html">Provisioning</a>, <a href="link-operations.html">Link operations</a></td></tr>
+<tr><td>10</td><td>Control plane → Herdr session</td><td>Launch, relaunch, doorbell, capture, and retire of the <code>2ndmate-&lt;id&gt;</code> endpoint, only inside <code>fm-remote</code>.</td><td><code class="cite">bin/fm-remote-secondmate-control.sh:86-112</code></td></tr>
+<tr><td>11</td><td>Guard → Herdr server</td><td>Execs the server in the foreground under launchd, or takes the session over from a server not born in the Aqua session.</td><td><code class="cite">bin/fm-remote-herdr-guard.sh:18-32</code></td></tr>
+<tr><td>12</td><td>Doctor <code>--fix</code> → both LaunchAgents</td><td>Writes and reloads <code>dev.firstmate.remote-job</code> and <code>dev.firstmate.herdr.fm-remote</code>, both Aqua-scoped, bootstrapped into <code>gui/&lt;uid&gt;</code>.</td><td><code class="cite">docs/remote-secondmates.md:100-104</code></td></tr>
+<tr><td>13</td><td>Remote agent → remote home (async)</td><td>The remote charter appends replies and status to <code>state/parent-replies.status</code>, which the reply adapter later mirrors across the link.</td><td><code class="cite">docs/remote-secondmates.md:191-195</code></td></tr>
+</tbody></table></div>
+
+<h2 id="pages">Pages in this section</h2>
+<ul class="cards">
+<li><a href="transport.html"><strong>SSH transport and entrypoint</strong><span><code>fm-on.sh</code>, argv encoding, the fixed entrypoint, the three authorization layers, exit 255</span></a></li>
+<li><a href="job-worker.html"><strong>Remote job worker</strong><span>Queue records, lanes, FIFO, preemption, cancellation, orphan and quarantine recovery</span></a></li>
+<li><a href="tool-path.html"><strong>Non-interactive tool contract</strong><span>Why the worker builds PATH by filesystem discovery, the exact order, and wrappers</span></a></li>
+<li><a href="readiness-doctor.html"><strong>Readiness doctor</strong><span>The single owner of "ready", its line protocol, <code>--fix</code>, and the human-only gaps</span></a></li>
+<li><a href="herdr-session.html"><strong>fm-remote session and guard</strong><span>The dedicated Herdr session, server birth, and the guard's decision table</span></a></li>
+<li><a href="provisioning.html"><strong>Provisioning and launch</strong><span>Seeding a remote home, the manifest, launch, sync, and inherited material</span></a></li>
+<li><a href="link-operations.html"><strong>Link operations</strong><span>Steering, reply mirroring, peek and state, backlog handoff, relaunch, retirement</span></a></li>
+<li><a href="recovery.html"><strong>Recovery rules</strong><span>Exit 255, unknown-not-dead, no failover, liveness recovery</span></a></li>
+<li><a href="security.html"><strong>Security posture</strong><span>Disabled on every call, verified at each hop, and deliberately never automated</span></a></li>
+<li><a href="end-to-end.html"><strong>End-to-end trace</strong><span>One remote mate from seed to retirement, with a steer and a reply in between</span></a></li>
+</ul>
+
+<h2 id="parts">Parts at a glance</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Part</th><th>Owns</th><th>Runs where</th><th>Files</th></tr></thead>
+<tbody>
+<tr><td>Transport</td><td>Route resolution, argv encoding, SSH options, exit-status pass-through</td><td>Primary</td><td><code>bin/fm-on.sh</code></td></tr>
+<tr><td>Entrypoint</td><td>Decoding, re-validation, git-tracking authorization, doctor bootstrap, staging and relay</td><td>Remote, inside the sshd session</td><td><code>bin/fm-remote-entrypoint.sh</code></td></tr>
+<tr><td>Job protocol and worker</td><td>Queue records, worker install, PATH composition, lanes, preemption, cancellation</td><td>Remote, in the account's GUI session (macOS) or a detached supervisor (Linux)</td><td><code>bin/fm-remote-job-lib.sh</code>, <code>bin/fm-remote-job-worker.sh</code>, <code>bin/fm-remote-job-reap-orphans.sh</code></td></tr>
+<tr><td>Readiness</td><td>What "ready" means, repair of automatable gaps</td><td>Remote (doctor); primary (gate)</td><td><code>bin/fm-remote-doctor.sh</code>, <code>bin/fm-remote-readiness-lib.sh</code></td></tr>
+<tr><td>Herdr session ownership</td><td>Which process may own the <code>fm-remote</code> socket</td><td>Remote, under launchd</td><td><code>bin/fm-remote-herdr-guard.sh</code>, <code>bin/fm-remote-herdr-owner-lib.sh</code></td></tr>
+<tr><td>Provisioning</td><td>Registering a route and creating the remote home</td><td>Both</td><td><code>bin/fm-remote-home-seed.sh</code>, <code>bin/fm-remote-home-provision.sh</code></td></tr>
+<tr><td>Host-local control</td><td>Launch, relaunch, state, route, send, key, capture, observe, sync, update, retire</td><td>Remote</td><td><code>bin/fm-remote-secondmate-control.sh</code></td></tr>
+<tr><td>Confined data movement</td><td>Reply-log delta reads, bounded file get/put, inherited-allowlist writes</td><td>Remote</td><td><code>bin/fm-remote-delta-read.sh</code>, <code>bin/fm-remote-file.sh</code>, <code>bin/fm-remote-inherit.sh</code>, <code>bin/fm-remote-inherit-push.sh</code></td></tr>
+<tr><td>Reply mirror</td><td>Turning the remote status log into the parent's status stream</td><td>Primary</td><td><code>bin/fm-procevent-remote-reply.sh</code></td></tr>
+</tbody></table></div>
+
+<h2 id="siblings">Where Remote meets other areas</h2>
+<ul>
+<li><a href="../communication/index.html">Communication</a> owns the steering inbox, doorbell, marked requests, and pending-reply model; Remote only carries them across the link.</li>
+<li><a href="../supervision/index.html">Supervision</a> owns the startup liveness sweep and process-event sources that call into the remote readiness gate and the reply adapter.</li>
+<li><a href="../crew/index.html">Crew</a> owns what a secondmate is, the Herdr backend adapter, and the local control plane that a remote relaunch reuses on the far host.</li>
+<li><a href="../persistence/index.html">Persistence</a> owns the secondmate registry, task metadata, and home layout that remote routes extend with <code>host:</code>, <code>root:</code>, and <code>home:</code>.</li>
+<li><a href="../backlog-and-decisions/index.html">Backlog and decisions</a> owns backlog handoff and the open-decision fold; Remote adds the outbox transfer.</li>
+<li><a href="../observability/index.html">Observability</a> owns fleet snapshots and home summaries, which read a remote home's summary over the confined file reader.</li>
+</ul>
 </article>
 </main>
 </div>

@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Remote end-to-end trace · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">Components › Remote</p>
+<h1>End-to-end trace</h1>
+<p class="lede">One remote secondmate, followed from the seed command to retirement, with a steer out and a correlated reply back in between. Every step names the script and line that performs it.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. The scenario matches the real-host smoke test the document describes <code class="cite">docs/remote-secondmates.md:289</code>.</p>
+
+<h2 id="scenario">Scenario</h2>
+<p>The primary home on a laptop routes iOS work to a secondmate <code>ios</code> on a Mac reachable as the SSH alias <code>build-mac</code>. The Mac's account has a Firstmate clone at <code>/Users/ops/firstmate</code> with the entrypoint on its non-interactive PATH, and the home will live at <code>/Users/ops/fm-homes/ios</code>. (The names are illustrative; the shapes come from the usage lines cited below.)</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 980 880" role="img" aria-labelledby="rme-title rme-desc">
+<title id="rme-title">A remote secondmate from seed to retirement</title>
+<desc id="rme-desc">Five phases. Seed: the primary runs the readiness gate and sends a provisioning manifest; the remote job clones the home and projects. Launch: the primary syncs the home to its own commit, pushes inherited settings, and asks the host-local control plane to launch the agent in the fm-remote Herdr session, then records the returned route. Steer: fm-send writes a durable inbox record on the host and rings the doorbell. Reply: the agent appends a correlated line to its remote log, and the primary's blocking delta read returns it for mirroring into the parent status stream. Retire: the control plane closes only this mate's workspace, and the primary drops the route.</desc>
+<defs><marker id="rme-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">Remote secondmate lifecycle, one pass</text>
+
+<g class="c4-component"><rect x="10" y="48" width="140" height="46" rx="8"/><text class="c4-label" x="80" y="70">Primary home</text><text class="c4-tech" x="80" y="85">[fm-* callers]</text></g>
+<g class="c4-external"><rect x="180" y="48" width="180" height="46" rx="8"/><text class="c4-label" x="270" y="70">Transport</text><text class="c4-tech" x="270" y="85">[fm-on · entrypoint · worker]</text></g>
+<g class="c4-component"><rect x="385" y="48" width="150" height="46" rx="8"/><text class="c4-label" x="460" y="70">Control plane</text><text class="c4-tech" x="460" y="85">[host-local verbs]</text></g>
+<g class="c4-container"><rect x="575" y="48" width="150" height="46" rx="8"/><text class="c4-label" x="650" y="70">Remote agent</text><text class="c4-tech" x="650" y="85">[Herdr fm-remote]</text></g>
+<g class="c4-datastore"><rect x="785" y="48" width="150" height="46" rx="8"/><text class="c4-label" x="860" y="70">Remote home</text><text class="c4-tech" x="860" y="85">[FM_HOME files]</text></g>
+
+<g class="c4-rel c4-rel-async"><line x1="80" y1="94" x2="80" y2="868"/><line x1="270" y1="94" x2="270" y2="868"/><line x1="460" y1="94" x2="460" y2="868"/><line x1="650" y1="94" x2="650" y2="868"/><line x1="860" y1="94" x2="860" y2="868"/></g>
+
+<g class="c4-boundary"><rect x="4" y="108" width="972" height="125" rx="6"/><text x="12" y="124">A · Seed</text></g>
+<g class="c4-rel"><path d="M80,145 L268,145" marker-end="url(#rme-arrow)"/><text class="c4-rel-label" x="175" y="138">1 readiness: doctor · fix · doctor</text></g>
+<g class="c4-rel"><path d="M80,180 L268,180" marker-end="url(#rme-arrow)"/><text class="c4-rel-label" x="175" y="173">2 provision.sh &lt; manifest</text></g>
+<g class="c4-rel"><path d="M270,212 L858,212" marker-end="url(#rme-arrow)"/><text class="c4-rel-label" x="565" y="205">3 clone code root and origins; publish; home marker last</text></g>
+
+<g class="c4-boundary"><rect x="4" y="243" width="972" height="227" rx="6"/><text x="12" y="259">B · Launch</text></g>
+<g class="c4-rel"><path d="M80,282 L268,282" marker-end="url(#rme-arrow)"/><text class="c4-rel-label" x="175" y="275">4 sync &lt;primary commit&gt;</text></g>
+<g class="c4-rel"><path d="M270,305 L858,305" marker-end="url(#rme-arrow)"/><text class="c4-rel-label" x="565" y="298">import the commit, fast-forward the home</text></g>
+<g class="c4-rel"><path d="M80,340 L268,340" marker-end="url(#rme-arrow)"/><text class="c4-rel-label" x="175" y="333">5 inherit push</text></g>
+<g class="c4-rel"><path d="M270,363 L858,363" marker-end="url(#rme-arrow)"/><text class="c4-rel-label" x="565" y="356">put allowlisted config and shared file</text></g>
+<g class="c4-rel"><path d="M80,398 L458,398" marker-end="url(#rme-arrow)"/><text class="c4-rel-label" x="270" y="391">6 fm-on … control launch ios claude - - herdr</text></g>
+<g class="c4-rel"><path d="M460,422 L648,422" marker-end="url(#rme-arrow)"/><text class="c4-rel-label" x="555" y="415">host-local fm-spawn</text></g>
+<g class="c4-rel c4-rel-async"><path d="M460,452 L82,452" marker-end="url(#rme-arrow)"/><text class="c4-rel-label" x="270" y="445">7 backend=herdr target=fm-remote:… → task record</text></g>
+
+<g class="c4-boundary"><rect x="4" y="480" width="972" height="100" rx="6"/><text x="12" y="496">C · Steer</text></g>
+<g class="c4-rel"><path d="M80,512 L458,512" marker-end="url(#rme-arrow)"/><text class="c4-rel-label" x="270" y="505">8 fm-send → fm-on … control send</text></g>
+<g class="c4-rel"><path d="M460,537 L858,537" marker-end="url(#rme-arrow)"/><text class="c4-rel-label" x="755" y="530">durable inbox record, idempotent</text></g>
+<g class="c4-rel"><path d="M460,562 L648,562" marker-end="url(#rme-arrow)"/><text class="c4-rel-label" x="555" y="555">doorbell, best-effort</text></g>
+
+<g class="c4-boundary"><rect x="4" y="590" width="972" height="140" rx="6"/><text x="12" y="606">D · Reply</text></g>
+<g class="c4-rel"><path d="M650,625 L858,625" marker-end="url(#rme-arrow)"/><text class="c4-rel-label" x="755" y="618">9 append line with corr=</text></g>
+<g class="c4-rel"><path d="M80,652 L268,652" marker-end="url(#rme-arrow)"/><text class="c4-rel-label" x="175" y="645">10 delta read, blocking</text></g>
+<g class="c4-rel"><path d="M270,677 L858,677" marker-end="url(#rme-arrow)"/><text class="c4-rel-label" x="565" y="670">verify prefix digest; wait for a whole new line</text></g>
+<g class="c4-rel c4-rel-async"><path d="M270,710 L82,710" marker-end="url(#rme-arrow)"/><text class="c4-rel-label" x="175" y="703">11 delta → mirror, settle corr</text></g>
+
+<g class="c4-boundary"><rect x="4" y="740" width="972" height="125" rx="6"/><text x="12" y="756">E · Retire</text></g>
+<g class="c4-rel"><path d="M80,780 L458,780" marker-end="url(#rme-arrow)"/><text class="c4-rel-label" x="270" y="773">12 fm-teardown → fm-on … control retire</text></g>
+<g class="c4-rel"><path d="M460,805 L648,805" marker-end="url(#rme-arrow)"/><text class="c4-rel-label" x="555" y="798">close only 2ndmate-ios</text></g>
+<g class="c4-rel c4-rel-async"><path d="M460,838 L82,838" marker-end="url(#rme-arrow)"/><text class="c4-rel-label" x="270" y="831">13 retired → drop route and task record</text></g>
+</svg>
+</div>
+<figcaption>Every arrow that leaves the primary is one <code>fm-on.sh</code> call; arrows drawn straight to the control plane pass through the transport lifeline without being redrawn. Dashed arrows are results.</figcaption>
+</figure>
+
+<h2 id="steps">Step by step</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>#</th><th>What happens</th><th>Command or code</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>The operator checks the host by hand. The doctor runs in the SSH bootstrap, prints its PATH and tools, and tags each gap <code>fixable:</code> or <code>human:</code>.</td><td><code>bin/fm-on.sh build-mac fm-remote-doctor.sh</code></td><td><code class="cite">docs/remote-secondmates.md:84-92</code></td></tr>
+<tr><td>1</td><td>The seed locks the registry, rewrites the charter's status and inbox paths to host-local ones, writes the route line, and runs the readiness gate. A red host restores the registry and creates nothing remotely.</td><td><code>bin/fm-remote-home-seed.sh ios build-mac /Users/ops/firstmate /Users/ops/fm-homes/ios app=&lt;origin-url&gt;</code></td><td><code class="cite">bin/fm-remote-home-seed.sh:107-253</code></td></tr>
+<tr><td>2</td><td>The seed sends the bounded <code>fm-remote-home-provision.v1</code> manifest on stdin. The entrypoint stages it; the worker runs the provision script under <code>env -i</code>.</td><td><code>fm-on.sh --stdin ios fm-remote-home-provision.sh &lt; manifest</code></td><td><code class="cite">bin/fm-remote-home-seed.sh:255-270</code> <code class="cite">bin/fm-remote-entrypoint.sh:175-193</code></td></tr>
+<tr><td>3</td><td>The host clones its own Firstmate code root into the home, clones each origin (initialising no-mistakes where registered), publishes charter, project registry, and parent record, and writes <code>.fm-secondmate-home</code> last.</td><td><code>fm-remote-home-provision.sh</code></td><td><code class="cite">bin/fm-remote-home-provision.sh:148-255</code></td></tr>
+<tr><td>4</td><td><code>fm-spawn</code> checks the route metadata and runs the gate again, then syncs the home to the primary's default-branch commit.</td><td><code>bin/fm-spawn.sh ios --secondmate</code> → <code>… control sync ios &lt;commit&gt;</code></td><td><code class="cite">bin/fm-spawn.sh:891-939</code> <code class="cite">bin/fm-remote-secondmate-control.sh:347-375</code></td></tr>
+<tr><td>5</td><td>Under a per-route lock with a new generation, the inherited allowlist is pushed; failure refuses the launch.</td><td><code>fm-remote-inherit-push.sh ios &lt;generation&gt;</code></td><td><code class="cite">bin/fm-spawn.sh:940-968</code></td></tr>
+<tr><td>6</td><td>The control plane refuses any backend but Herdr and runs the ordinary <code>fm-spawn.sh … --secondmate --backend herdr</code> on the host with <code>HERDR_SESSION=fm-remote</code>, state redirected to <code>state/parent-route</code>.</td><td><code>… control launch ios &lt;harness&gt; &lt;model|-&gt; &lt;effort|-&gt; herdr</code></td><td><code class="cite">bin/fm-remote-secondmate-control.sh:154-211</code></td></tr>
+<tr><td>7</td><td>The primary validates backend, harness, and session from the reply, then writes its task record with <code>remote_host</code>, <code>remote_root</code>, <code>remote_target</code>, and related fields.</td><td>—</td><td><code class="cite">bin/fm-spawn.sh:998-1050</code></td></tr>
+<tr><td>8</td><td>A steer: the host writes an idempotent record into <code>state/parent-route/ios.inbox</code> and rings the doorbell. Exit 0 means the record exists; a 255 is retried once within the 30 s budget.</td><td><code>FM_HOME=&lt;primary&gt; bin/fm-send.sh fm-ios '…'</code></td><td><code class="cite">bin/fm-remote-secondmate-control.sh:256-297</code> <code class="cite">bin/fm-send.sh:126-144</code></td></tr>
+<tr><td>9</td><td>The agent answers per its charter by appending to <code>state/parent-replies.status</code> in its own home.</td><td>—</td><td><code class="cite">docs/remote-secondmates.md:192</code></td></tr>
+<tr><td>10</td><td>The process-event runner's blocking source is a delta read at the committed cursor. If a steer arrives for the same home meanwhile, the poll is preempted (76) and re-armed.</td><td><code>fm-on.sh ios fm-remote-delta-read.sh state/parent-replies.status &lt;offset&gt; &lt;sha256&gt; 55</code></td><td><code class="cite">bin/fm-procevent-remote-reply.sh:256-267</code> <code class="cite">bin/fm-remote-job-lib.sh:37-43</code></td></tr>
+<tr><td>11</td><td>The adapter normalizes, deduplicates, fetches offered reports, appends the lines to the parent's <code>state/ios.status</code>, and the <code>corr=</code> token settles the pending reply.</td><td><code>fm-procevent-remote-reply.sh autohandle …</code></td><td><code class="cite">bin/fm-procevent-remote-reply.sh:546-610</code> <code class="cite">docs/remote-secondmates.md:209</code></td></tr>
+<tr><td>12</td><td>Teardown refuses while an outbox or unresolved reply remains, quiesces the reply source, and asks the host to retire; the host runs the ordinary guarded teardown against the private route state.</td><td><code>bin/fm-teardown.sh ios</code></td><td><code class="cite">bin/fm-teardown.sh:923-957</code> <code class="cite">bin/fm-remote-secondmate-control.sh:397-420</code></td></tr>
+<tr><td>13</td><td>On success the primary finalizes the reply source, removes the registry line and task record, and prints <code>teardown ios complete (remote build-mac:/Users/ops/fm-homes/ios)</code>.</td><td>—</td><td><code class="cite">bin/fm-teardown.sh:966-989</code></td></tr>
+</tbody></table></div>
+
+<h2 id="failure">The same trace with the link failing</h2>
+<p>If <code>build-mac</code> reboots during step 8, the ssh keepalives turn the half-open connection into exit 255 within about 45 s at the defaults <code class="cite">bin/fm-on.sh:28-34</code> <code class="cite">bin/fm-on.sh:107-108</code>. <code>fm-send</code> retries the leg once; if that also fails it exits non-zero, keeps the pending-reply expectation, and prints the <code>FM_PENDING_REPLY_EXISTING_CORR=&lt;id&gt;</code> resend <code class="cite">bin/fm-send.sh:133-141</code>. <code>fm-crew-state.sh</code> reports <code>unknown-remote</code>, not dead <code class="cite">bin/fm-crew-state.sh:273-275</code>. At the Mac's next GUI login the two LaunchAgents start; if an SSH attach won the <code>fm-remote</code> socket first, the guard takes the session over and the panes close <code class="cite">bin/fm-remote-herdr-guard.sh:18-34</code>. The primary's next startup liveness sweep sees <code>missing</code> or <code>dead</code> and relaunches through <code>fm-spawn</code>, passing the same readiness gate <code class="cite">bin/fm-bootstrap.sh:790-800</code>. At no point is a local replacement started <code class="cite">docs/remote-secondmates.md:219</code>.</p>
+<div class="callout unclear"><span class="callout-title">Not traced here</span>
+<p>Whether the relaunched agent re-reads the durable inbox record written before the reboot depends on the inbox and charter contracts owned by <a href="../communication/index.html">Communication</a>; this page does not restate them.</p></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

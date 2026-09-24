@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recovery rules · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Remote</p>
+<h1>Recovery rules</h1>
+<p class="lede">The remote area has one governing rule for failure: a lost or ambiguous SSH call means "completion unknown", so the route is preserved, nothing is blindly repeated, and an unreachable remote endpoint is reported as unknown rather than dead, and is never replaced locally.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>.</p>
+
+<h2 id="rule">Exit 255 means unknown, never failure</h2>
+<p>"An SSH exit status of 255 always means transport failure or unknown remote completion. The underlying <code>fm-on</code> transport never retries automatically, but <code>fm-send</code> retries its correlation-preserving steering-inbox leg exactly once. Semantic callers preserve the route or pending request; an operation that is not idempotent requires same-host reconciliation rather than a blind resend" <code class="cite">docs/remote-secondmates.md:216-218</code>. The transport's own header puts the responsibility on the caller: 255 "must be reconciled by the semantic caller, never blindly repeated by this layer" <code class="cite">bin/fm-on.sh:18-21</code>.</p>
+<p>Why the distinction is real: the remote command may have completed after the connection dropped. On the far side, a caller that vanished cancels its staged job <code class="cite">bin/fm-remote-entrypoint.sh:23-30</code>, but a job that already published its result, or a side effect that already landed, is not undone. So 255 cannot mean "did not happen".</p>
+
+<h2 id="table">What each caller does with 255</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Caller and step</th><th>On 255</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>Seed: readiness gate or provisioning</td><td>Route and any new brief preserved; "a same-route rerun converges"</td><td><code class="cite">bin/fm-remote-home-seed.sh:23-24</code> <code class="cite">bin/fm-remote-home-seed.sh:244-268</code></td></tr>
+<tr><td>Spawn: readiness gate</td><td>"readiness could not be confirmed; preserved route", returns 255</td><td><code class="cite">bin/fm-spawn.sh:916-923</code></td></tr>
+<tr><td>Spawn: inherited-material push</td><td>"inheritance completion is unknown; launch refused and route preserved for reconciliation"</td><td><code class="cite">bin/fm-spawn.sh:962-968</code></td></tr>
+<tr><td>Spawn: remote launch</td><td>"unavailable or launch completion is unknown; preserved route"</td><td><code class="cite">bin/fm-spawn.sh:988-997</code></td></tr>
+<tr><td>Send: steering-inbox leg</td><td>Retried identically once; still unconfirmed keeps the pending-reply expectation and prints the correlation-preserving resend</td><td><code class="cite">bin/fm-send.sh:133-144</code></td></tr>
+<tr><td>Reply mirror: delta read</td><td>No capture; the runner retries</td><td><code class="cite">bin/fm-procevent-remote-reply.sh:77-83</code></td></tr>
+<tr><td>Reply mirror: document fetch</td><td>Delta left uncommitted for the runner's normal retry</td><td><code class="cite">docs/remote-secondmates.md:207</code> <code class="cite">bin/fm-procevent-remote-reply.sh:562-563</code></td></tr>
+<tr><td>Backlog handoff: put or receive</td><td>Outbox preserved</td><td><code class="cite">bin/fm-backlog-handoff.sh:689-700</code></td></tr>
+<tr><td>Teardown: remote retire</td><td>"completion is unknown; preserving the route and local records for same-host reconciliation"</td><td><code class="cite">bin/fm-teardown.sh:958-962</code></td></tr>
+<tr><td>Relaunch</td><td>"leaves completion unknown and the route preserved, exactly as every other verb here"</td><td><code class="cite">docs/remote-secondmates.md:244</code></td></tr>
+<tr><td>Crew state</td><td><code>unknown-remote: … unreachable or endpoint unreadable (not proof of death)</code></td><td><code class="cite">bin/fm-crew-state.sh:273-275</code></td></tr>
+<tr><td>Peek</td><td>Fails loudly naming the host: "the mate is not thereby dead"</td><td><code class="cite">bin/fm-peek.sh:33-37</code></td></tr>
+<tr><td>Startup liveness sweep</td><td>Skips the mate: "remote host unavailable or endpoint state unknown; route preserved"</td><td><code class="cite">bin/fm-bootstrap.sh:744-747</code> <code class="cite">bin/fm-bootstrap.sh:760-763</code></td></tr>
+</tbody></table></div>
+<p>A known, non-255 failure is different: the seed rolls the registry back <code class="cite">bin/fm-remote-home-seed.sh:259-267</code>, the provision job removes a home it created <code class="cite">bin/fm-remote-home-provision.sh:72-93</code>, and a teardown whose remote leg refused re-arms the reply source <code class="cite">bin/fm-teardown.sh:960-962</code>.</p>
+
+<h2 id="unknown">Unknown, not dead, and no failover</h2>
+<p>Three statements in the document fix the model. "An unreachable or unreadable remote read is unknown, not evidence that the endpoint is dead" <code class="cite">docs/remote-secondmates.md:189</code>. "An unavailable remote home is projected as unknown and is never replaced by a local second mate" <code class="cite">docs/remote-secondmates.md:219</code>. And Firstmate "does not support … failing a remote route over to a local replacement" <code class="cite">docs/remote-secondmates.md:5</code>.</p>
+<p>The source's own reasons for keeping an unreachable endpoint as unknown:</p>
+<ul>
+<li>The agent is designed to survive exactly this: its Herdr server belongs to the host's GUI login session, not the SSH connection, "so the agent's endpoint survives every disconnection the primary's supervision depends on" <code class="cite">docs/remote-secondmates.md:10</code>. A dropped link is therefore expected to leave a live mate behind.</li>
+<li>A transport blip must not read as a dead or torn-down mate; "only the remote host's own dead/missing verdict may say the endpoint is actually gone" <code class="cite">bin/fm-crew-state.sh:251-255</code>.</li>
+</ul>
+<div class="callout unclear"><span class="callout-title">Reading, not a quoted reason</span>
+<p>A further consequence follows from the whole-home design but is not stated as the reason in the source: a local replacement would start a second owner of the same routed domain while the remote home, with its own backlog and workers, may still be running. The documents state the no-failover rule without spelling out this argument.</p></div>
+
+<h2 id="liveness">Liveness recovery at startup</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 980 440" role="img" aria-labelledby="rmv-title rmv-desc">
+<title id="rmv-title">Startup liveness sweep for one remote secondmate</title>
+<desc id="rmv-desc">For a task record with a remote host, the sweep runs the readiness gate. 255 or a remaining gap skips the mate and preserves the route. When ready, it asks the host for the endpoint state. 255 or an unreadable probe skips. Alive is confirmed by reading the route and requiring the herdr backend. Dead or missing relaunches through fm-spawn, which passes the same readiness gate again.</desc>
+<defs><marker id="rmv-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">fm-bootstrap.sh, one remote mate</text>
+
+<g class="c4-component"><rect x="20" y="170" width="170" height="70" rx="8"/>
+<text class="c4-label" x="105" y="197">Readiness gate</text>
+<text class="c4-desc" x="105" y="216">check · fix · check</text></g>
+<g class="c4-component"><rect x="250" y="170" width="170" height="70" rx="8"/>
+<text class="c4-label" x="335" y="197">state &lt;id&gt;</text>
+<text class="c4-desc" x="335" y="216">host's own endpoint verdict</text></g>
+<g class="c4-component"><rect x="490" y="60" width="200" height="70" rx="8"/>
+<text class="c4-label" x="590" y="87">alive: route &lt;id&gt;</text>
+<text class="c4-desc" x="590" y="106">backend must be herdr</text></g>
+<g class="c4-component"><rect x="490" y="290" width="200" height="70" rx="8"/>
+<text class="c4-label" x="590" y="317">dead or missing</text>
+<text class="c4-desc" x="590" y="336">fm-spawn &lt;id&gt; --secondmate</text></g>
+
+<g class="c4-container"><rect x="760" y="60" width="200" height="70" rx="8"/>
+<text class="c4-label" x="860" y="87">already live</text>
+<text class="c4-desc" x="860" y="106">nothing to do</text></g>
+<g class="c4-container"><rect x="760" y="290" width="200" height="70" rx="8"/>
+<text class="c4-label" x="860" y="317">relaunched</text>
+<text class="c4-desc" x="860" y="336">through the same gate</text></g>
+<g class="c4-external"><rect x="250" y="360" width="200" height="60" rx="8"/>
+<text class="c4-label" x="350" y="386">skip, route preserved</text>
+<text class="c4-desc" x="350" y="404">SECONDMATE_LIVENESS: line</text></g>
+
+<g class="c4-rel"><path d="M190,205 L248,205" marker-end="url(#rmv-arrow)"/><text class="c4-rel-label" x="219" y="197">0</text></g>
+<g class="c4-rel"><path d="M420,190 L460,190 L460,95 L488,95" marker-end="url(#rmv-arrow)"/><text class="c4-rel-label" x="462" y="150">alive</text></g>
+<g class="c4-rel"><path d="M420,220 L460,220 L460,325 L488,325" marker-end="url(#rmv-arrow)"/><text class="c4-rel-label" x="462" y="270">dead · missing</text></g>
+<g class="c4-rel"><path d="M690,95 L758,95" marker-end="url(#rmv-arrow)"/><text class="c4-rel-label" x="712" y="87">herdr</text></g>
+<g class="c4-rel"><path d="M690,325 L758,325" marker-end="url(#rmv-arrow)"/><text class="c4-rel-label" x="712" y="317">ok</text></g>
+<g class="c4-rel c4-rel-async"><path d="M105,240 L105,390 L248,390" marker-end="url(#rmv-arrow)"/><text class="c4-rel-label" x="150" y="382">255 · gap</text></g>
+<g class="c4-rel c4-rel-async"><path d="M335,240 L335,358" marker-end="url(#rmv-arrow)"/><text class="c4-rel-label" x="380" y="300">255 · unreadable</text></g>
+<g class="c4-rel c4-rel-async"><path d="M590,130 L590,160 L740,160 L740,390 L452,390" marker-end="url(#rmv-arrow)"/><text class="c4-rel-label" x="655" y="152">255 · not herdr</text></g>
+</svg>
+</div>
+<figcaption>Every exit that is not a proven verdict ends in "skip, route preserved". Source: <code class="cite">bin/fm-bootstrap.sh:740-800</code>.</figcaption>
+</figure>
+<p>An alive endpoint on a non-Herdr backend, or one whose route cannot be read, is skipped with an instruction to "migrate or retire it explicitly" rather than touched <code class="cite">bin/fm-bootstrap.sh:776-789</code>. The relaunch path goes through <code>fm-spawn.sh</code>, "so recovery passes the same readiness gate rather than a weaker one" <code class="cite">docs/remote-secondmates.md:170</code>. The sweep itself belongs to <a href="../supervision/index.html">Supervision</a>.</p>
+<p>A remote route's parent metadata has no local spawn-generation marker and is identified by its recorded host. The Bearings inventory-reconcile hook therefore accepts these markerless routes, revalidates the sampled host at delivery, and refuses a route that changed hosts <code class="cite">docs/remote-secondmates.md:172-173</code>.</p>
+
+<h2 id="other">Other recovery paths in this area</h2>
+<ul>
+<li><strong>Session takeover.</strong> When the guard replaces a foreign <code>fm-remote</code> server, every pane closes, and "the parent firstmate's secondmate liveness sweep relaunches its mates into the Aqua-born server" <code class="cite">bin/fm-remote-herdr-guard.sh:33-34</code>. See <a href="herdr-session.html#guard">the guard</a>.</li>
+<li><strong>Crashed job worker.</strong> Its running jobs are stopped and published as 125 by the next worker; an unconfirmed shutdown quarantines ownership until execution is proven stopped. See <a href="job-worker.html#quarantine">quarantine</a>.</li>
+<li><strong>Abandoned caller.</strong> A disconnected <code>fm-on</code> cancels its job instead of leaving it to convoy retries. See <a href="job-worker.html#cancel">cancellation</a>.</li>
+<li><strong>Reply-log continuity break.</strong> Escalated as a keyed <code>blocked:</code> line; the source is not re-armed and the cursor is never silently reset <code class="cite">bin/fm-procevent-remote-reply.sh:530-540</code>.</li>
+<li><strong>Drifted host.</strong> "A launch after a host has drifted out of readiness fails with the doctor's own gap text instead of leaving a half-created endpoint" <code class="cite">docs/remote-secondmates.md:166</code>.</li>
+<li><strong>Endpoint in the wrong session.</strong> Classified <code>unverified</code> and left untouched until an operator migrates it <code class="cite">docs/remote-secondmates.md:165</code>.</li>
+</ul>
+<div class="callout unclear"><span class="callout-title">Open: what "explicit migration" is</span>
+<p>Several refusals say an endpoint must be "explicitly migrated" <code class="cite">bin/fm-remote-secondmate-control.sh:90-111</code> <code class="cite">docs/remote-secondmates.md:165</code>. A search of <code>bin/</code>, <code>docs/</code>, and the skills finds no migration command or procedure for remote endpoints; the word appears only in these refusal messages. Whether it is a manual operator task or a command owned by another area is not settled here.</p></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Readiness doctor · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Remote</p>
+<h1>Readiness doctor</h1>
+<p class="lede"><code>fm-remote-doctor.sh</code> is the single owner of what "ready for a remote second mate" means: it checks one remote account, repairs only what can be repaired safely, and names every remaining gap as either fixable or human-only, with the exact step to take.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>.</p>
+
+<h2 id="owner">One owner, many gates</h2>
+<p>"<code>bin/fm-remote-doctor.sh</code> is the single owner of what 'ready for a remote second mate' means" <code class="cite">docs/remote-secondmates.md:81</code>. Nothing else restates its checks. The gate library that callers use says so directly: the doctor "remains the single owner of every check, every repair, and every message; nothing here restates them" <code class="cite">bin/fm-remote-readiness-lib.sh:10-12</code>. An operator runs it through the ordinary transport, where the entrypoint execs it in the plain SSH bootstrap rather than through the worker it inspects <code class="cite">bin/fm-remote-doctor.sh:4-10</code> <code class="cite">bin/fm-remote-entrypoint.sh:154-173</code>:</p>
+<pre><code>bin/fm-on.sh &lt;secondmate-id|ssh-alias&gt; fm-remote-doctor.sh         # read-only
+bin/fm-on.sh &lt;secondmate-id|ssh-alias&gt; fm-remote-doctor.sh --fix   # repair automatable gaps</code></pre>
+<p>A third, internal mode <code>--worker-tool-probe</code> exists only for the doctor to ask the worker which tools it resolves, and refuses to run unless <code>FM_REMOTE_JOB_ACTIVE=1</code> <code class="cite">bin/fm-remote-doctor.sh:90-94</code>.</p>
+
+<h2 id="protocol">Output line protocol</h2>
+<p>The header defines a stable, one-fact-per-line protocol for script consumers <code class="cite">bin/fm-remote-doctor.sh:29-46</code>:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Line</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>mode=check|fix</code></td><td>Which mode ran.</td></tr>
+<tr><td><code>path=…</code></td><td>The child PATH this doctor inherited from its entrypoint launch.</td></tr>
+<tr><td><code>entrypoint=yes|no</code></td><td><code>yes</code> only when PATH starts with the configured root's <code>bin</code>; otherwise the reported PATH is just the caller's environment <code class="cite">bin/fm-remote-doctor.sh:890-895</code>.</td></tr>
+<tr><td><code>platform=darwin|linux|…</code></td><td>From <code>uname -s</code> (or a test override).</td></tr>
+<tr><td><code>required &lt;tool&gt;=&lt;path&gt;|MISSING</code></td><td>One per required tool, plus <code>required harness=&lt;name&gt;:&lt;path&gt;</code>.</td></tr>
+<tr><td><code>optional &lt;tool&gt;=&lt;path&gt;|absent</code></td><td><code>tmux</code>, <code>no-mistakes</code>, <code>gh</code>.</td></tr>
+<tr><td><code>fix &lt;check&gt;=applied|failed: …</code></td><td>Only under <code>--fix</code>: what each repair did.</td></tr>
+<tr><td><code>check &lt;check&gt;=ok|skip|fixable|human: …</code></td><td>One per readiness check, with evidence.</td></tr>
+<tr><td><code>action: &lt;check&gt;: …</code></td><td>The exact step for every gap.</td></tr>
+</tbody></table></div>
+<p>"Every check line is authoritative for the moment it printed: under --fix it is the state after the repair attempt, so a human gap is never presented as fixed." Any remaining fixable or human gap, and any missing required tool, exits non-zero; a clean run prints <code>ok: remote second-mate readiness confirmed on this host</code> <code class="cite">bin/fm-remote-doctor.sh:43-46</code> <code class="cite">bin/fm-remote-doctor.sh:923-949</code>.</p>
+
+<h2 id="checks">What it checks</h2>
+<p>Checks run in this order: herdr, gui-session, the three remote-job checks, the three Herdr launch-agent checks, herdr-server, entrypoint-link <code class="cite">bin/fm-remote-doctor.sh:721-732</code>.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Check</th><th>ok when</th><th>fixable when</th><th>human when</th></tr></thead>
+<tbody>
+<tr><td><code>herdr</code></td><td>A <code>herdr</code> client resolves on the runtime PATH (the line names a bypassed stale client if one was stepped around)</td><td>—</td><td>No <code>herdr</code> resolves <code class="cite">bin/fm-remote-doctor.sh:565-581</code></td></tr>
+<tr><td><code>gui-session</code></td><td>macOS: <code>launchctl print gui/&lt;uid&gt;</code> succeeds. Skipped on Linux</td><td>—</td><td>No uid, no <code>launchctl</code>, or no Aqua login session <code class="cite">bin/fm-remote-doctor.sh:583-604</code></td></tr>
+<tr><td><code>remote-job-worker</code></td><td>macOS: the job plist matches the rendered contract. Linux: the worker is running</td><td>Plist differs or is missing; Linux worker not running; running worker's code identity is stale</td><td>The code root has no safe worker executable <code class="cite">bin/fm-remote-doctor.sh:368-416</code></td></tr>
+<tr><td><code>remote-job-worker-loaded</code></td><td><code>dev.firstmate.remote-job</code> is loaded in <code>gui/&lt;uid&gt;</code></td><td>Not loaded</td><td>No login session, or <code>launchctl</code>/uid unavailable</td></tr>
+<tr><td><code>remote-job-probe</code></td><td>Fresh heartbeat, then the worker completes the tool probe with exactly six valid <code>required</code> lines and empty stderr</td><td>No fresh heartbeat, stale identity, probe rejected, incomplete, or malformed <code class="cite">bin/fm-remote-doctor.sh:410-420</code> <code class="cite">bin/fm-remote-doctor.sh:452-496</code></td><td>—</td></tr>
+<tr><td><code>launchagent</code></td><td>The Herdr plist equals the rendered contract after whitespace is stripped</td><td>Missing or different</td><td>— <code class="cite">bin/fm-remote-doctor.sh:606-633</code></td></tr>
+<tr><td><code>launchagent-scope</code></td><td>Plist has <code>LimitLoadToSessionType=Aqua</code></td><td>Not Aqua-scoped</td><td>—</td></tr>
+<tr><td><code>launchagent-loaded</code></td><td><code>launchctl print</code> shows the loaded job's path, program, arguments, log paths, the successful-exit semaphore, and <code>runatload</code></td><td>Loaded job differs, or not loaded</td><td>No login session, or the domain cannot be inspected <code class="cite">bin/fm-remote-doctor.sh:318-337</code> <code class="cite">bin/fm-remote-doctor.sh:635-658</code></td></tr>
+<tr><td><code>herdr-server</code></td><td>The <code>fm-remote</code> server runs; on macOS its socket owner is proven Aqua-born</td><td>Not running; socket owner unprovable; owner born outside the Aqua session</td><td><code>herdr</code>/<code>jq</code> missing; <code>lsof</code> missing on macOS; not running and no GUI session <code class="cite">bin/fm-remote-doctor.sh:660-699</code></td></tr>
+<tr><td><code>entrypoint-link</code></td><td><code>~/.local/bin/fm-remote-entrypoint.sh</code> is the symlink to this root's entrypoint. Skipped when not launched through the entrypoint</td><td>Absent</td><td>Present but not that symlink <code class="cite">bin/fm-remote-doctor.sh:701-719</code></td></tr>
+</tbody></table></div>
+<p>Required tools are <code>git jq herdr tasks-axi treehouse</code>, where <code>tasks-axi</code> must also pass a compatibility check, and at least one harness from <code>claude codex opencode pi pi-signed grok kimi</code> <code class="cite">bin/fm-remote-doctor.sh:70-72</code> <code class="cite">bin/fm-remote-doctor.sh:424-450</code>. When the worker's identity is current, the tool report comes from the worker itself rather than from the SSH process, so it reflects what jobs will actually resolve <code class="cite">bin/fm-remote-doctor.sh:910-914</code>.</p>
+<div class="callout unclear"><span class="callout-title">Where the document and the code differ</span>
+<p>The document lists <code>lsof</code> as part of "the required remote tool set" on macOS <code class="cite">docs/remote-secondmates.md:115</code>. In the code <code>lsof</code> is not in <code>REQUIRED_TOOLS</code> and never gets a <code>required</code> line; its absence surfaces only as a <code>herdr-server=human:</code> gap, and only while a server is running <code class="cite">bin/fm-remote-doctor.sh:70</code> <code class="cite">bin/fm-remote-doctor.sh:676-679</code>. A host without <code>lsof</code> and without a running server is reported as <code>fixable</code>, not as missing a tool.</p>
+<p>The host-local control plane accepts <code>cursor</code> as a remote secondmate harness <code class="cite">bin/fm-remote-secondmate-control.sh:160-163</code>, but the doctor's harness list does not include it <code class="cite">bin/fm-remote-doctor.sh:71</code>. A host whose only harness is <code>cursor</code> would fail readiness even though launch would accept it. The source does not say which list is intended.</p></div>
+
+<h2 id="fix">What <code>--fix</code> does</h2>
+<p><code>--fix</code> first tries owned tool wrappers (see <a href="tool-path.html#wrappers">wrappers</a>), then walks the recorded checks and repairs each <code>fixable</code> one at most once <code class="cite">bin/fm-remote-doctor.sh:833-878</code>:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Gap</th><th>Repair</th></tr></thead>
+<tbody>
+<tr><td>Any remote-job check</td><td><code>fm_remote_job_ensure_worker</code>: write and reload the job LaunchAgent, or start the Linux worker <code class="cite">bin/fm-remote-doctor.sh:554-561</code></td></tr>
+<tr><td><code>launchagent</code>, <code>launchagent-scope</code></td><td>Render and atomically publish the Herdr plist; if a GUI session exists, reload it at once <code class="cite">bin/fm-remote-doctor.sh:740-766</code></td></tr>
+<tr><td><code>launchagent-loaded</code></td><td><code>launchctl bootout</code>, <code>bootstrap gui/&lt;uid&gt;</code>, <code>kickstart -k</code>, then wait up to 10 s for an Aqua-owned server <code class="cite">bin/fm-remote-doctor.sh:768-805</code></td></tr>
+<tr><td><code>herdr-server</code></td><td>On macOS, restart through launchd rather than starting a stray server outside the Aqua session; elsewhere start it through the Herdr adapter <code class="cite">bin/fm-remote-doctor.sh:863-874</code> <code class="cite">bin/fm-remote-doctor.sh:807-818</code></td></tr>
+<tr><td><code>entrypoint-link</code></td><td>Create the symlink with <code>ln -s</code>, which cannot overwrite an existing file <code class="cite">bin/fm-remote-doctor.sh:820-831</code></td></tr>
+</tbody></table></div>
+<p>It then "re-derive[s] every check from the host itself, so what prints below is the state after repair rather than the intent of a repair" <code class="cite">bin/fm-remote-doctor.sh:903-908</code>. The header's never-list: it "never installs packages, creates a login session, writes an auto-login password, changes FileVault, stores an account password, or replaces a non-Firstmate wrapper; those remain reported gaps" <code class="cite">bin/fm-remote-doctor.sh:48-54</code>.</p>
+
+<h2 id="human">The gaps only a person at that machine can close</h2>
+<p>These are "never automated and are always reported rather than silently attempted, because SSH cannot create a GUI session from nothing" <code class="cite">docs/remote-secondmates.md:110-118</code>:</p>
+<ul>
+<li>The first console login on that Mac, and automatic login in System Settings › Users &amp; Groups when the machine runs headless and must come back on its own after a reboot. The doctor's action text for a missing session says the same and adds that Firstmate "never writes an auto-login password or changes FileVault" <code class="cite">bin/fm-remote-doctor.sh:602-603</code>.</li>
+<li>FileVault, which holds a reboot at pre-boot authentication before any login session exists.</li>
+<li>Installing any missing required tool that no safe wrapper can resolve.</li>
+<li>Each worker runtime's own <code>/login</code>, and any keychain password prompt that login needs.</li>
+<li>A file at <code>~/.local/bin/fm-remote-entrypoint.sh</code> that is not Firstmate's symlink, which is reported for inspection and never overwritten <code class="cite">docs/remote-secondmates.md:119</code>.</li>
+</ul>
+
+<h2 id="gate">The readiness gate every launch passes</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1040 480" role="img" aria-labelledby="rmr-title rmr-desc">
+<title id="rmr-title">Readiness gate sequence</title>
+<desc id="rmr-desc">Seed, spawn, and the startup liveness sweep call the readiness gate. It runs the doctor read-only. Exit 0 means ready; ssh 255 means unknown. Any other failure runs the doctor with fix and then a third read-only time, whose result is the verdict: 0 ready, 1 not ready, or 255 unknown.</desc>
+<defs><marker id="rmr-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">fm_remote_readiness_ensure</text>
+
+<g class="c4-component"><rect x="20" y="140" width="200" height="110" rx="8"/>
+<text class="c4-label" x="120" y="166">Callers</text>
+<text class="c4-tech" x="120" y="181">[primary]</text>
+<text class="c4-desc" x="120" y="202">fm-remote-home-seed.sh</text>
+<text class="c4-desc" x="120" y="218">fm-spawn.sh (every launch)</text>
+<text class="c4-desc" x="120" y="234">fm-bootstrap.sh liveness</text></g>
+
+<g class="c4-component"><rect x="260" y="150" width="160" height="80" rx="8"/>
+<text class="c4-label" x="340" y="178">Run 1</text>
+<text class="c4-tech" x="340" y="193">[doctor, read-only]</text>
+<text class="c4-desc" x="340" y="212">first look</text></g>
+<g class="c4-component"><rect x="470" y="260" width="160" height="80" rx="8"/>
+<text class="c4-label" x="550" y="288">Run 2</text>
+<text class="c4-tech" x="550" y="303">[doctor --fix]</text>
+<text class="c4-desc" x="550" y="322">repair, result ignored</text></g>
+<g class="c4-component"><rect x="680" y="260" width="160" height="80" rx="8"/>
+<text class="c4-label" x="760" y="288">Run 3</text>
+<text class="c4-tech" x="760" y="303">[doctor, read-only]</text>
+<text class="c4-desc" x="760" y="322">the verdict</text></g>
+
+<g class="c4-system"><rect x="470" y="50" width="160" height="60" rx="8"/>
+<text class="c4-label" x="550" y="76">return 0</text>
+<text class="c4-desc" x="550" y="95">ready</text></g>
+<g class="c4-system"><rect x="880" y="265" width="140" height="70" rx="8"/>
+<text class="c4-label" x="950" y="293">return 1</text>
+<text class="c4-desc" x="950" y="312">gap remains</text></g>
+<g class="c4-external"><rect x="470" y="400" width="160" height="60" rx="8"/>
+<text class="c4-label" x="550" y="426">return 255</text>
+<text class="c4-desc" x="550" y="445">unknown completion</text></g>
+
+<g class="c4-rel"><path d="M220,190 L260,190" marker-end="url(#rmr-arrow)"/></g>
+<g class="c4-rel"><path d="M340,150 L340,80 L468,80" marker-end="url(#rmr-arrow)"/><text class="c4-rel-label" x="395" y="72">exit 0</text></g>
+<g class="c4-rel"><path d="M420,210 L450,210 L450,300 L468,300" marker-end="url(#rmr-arrow)"/><text class="c4-rel-label" x="450" y="255">gap</text></g>
+<g class="c4-rel"><path d="M630,300 L678,300" marker-end="url(#rmr-arrow)"/><text class="c4-rel-label" x="654" y="292">always</text></g>
+<g class="c4-rel"><path d="M760,260 L760,80 L632,80" marker-end="url(#rmr-arrow)"/><text class="c4-rel-label" x="700" y="72">exit 0</text></g>
+<g class="c4-rel"><path d="M840,300 L878,300" marker-end="url(#rmr-arrow)"/><text class="c4-rel-label" x="859" y="292">other</text></g>
+<g class="c4-rel c4-rel-async"><path d="M340,230 L340,430 L468,430" marker-end="url(#rmr-arrow)"/><text class="c4-rel-label" x="395" y="422">ssh 255</text></g>
+<g class="c4-rel c4-rel-async"><path d="M550,340 L550,398" marker-end="url(#rmr-arrow)"/><text class="c4-rel-label" x="590" y="372">ssh 255</text></g>
+<g class="c4-rel c4-rel-async"><path d="M760,340 L760,430 L632,430" marker-end="url(#rmr-arrow)"/><text class="c4-rel-label" x="700" y="422">ssh 255</text></g>
+</svg>
+</div>
+<figcaption>A repair is never trusted on its own word: only the third, read-only run decides. <code>FM_REMOTE_READINESS_OUT</code> always holds the last run's output, with the remaining gaps and their actions <code class="cite">bin/fm-remote-readiness-lib.sh:7-18</code> <code class="cite">bin/fm-remote-readiness-lib.sh:24-44</code>.</figcaption>
+</figure>
+<p>Where the gate runs and what each caller does with its answer:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Caller</th><th>On 1 (not ready)</th><th>On 255 (unknown)</th></tr></thead>
+<tbody>
+<tr><td><code>fm-remote-home-seed.sh</code>, before touching the host</td><td>Restores the registry and removes a newly scaffolded brief; prints the doctor's gaps; "nothing was provisioned"</td><td>Keeps route and brief "for same-host reconciliation" <code class="cite">bin/fm-remote-home-seed.sh:237-253</code></td></tr>
+<tr><td><code>fm-spawn.sh</code>, before anything is published or transferred</td><td>Refuses the launch: "host … is not ready for a remote second mate; launch refused", then the doctor's text</td><td>"readiness could not be confirmed; preserved route", returns 255 <code class="cite">bin/fm-spawn.sh:904-924</code></td></tr>
+<tr><td><code>fm-bootstrap.sh</code> startup liveness sweep</td><td>Skips the mate, reporting the first gap or action line</td><td>Skips: "remote host unavailable or endpoint state unknown; route preserved" <code class="cite">bin/fm-bootstrap.sh:740-754</code></td></tr>
+</tbody></table></div>
+<p>Because liveness recovery relaunches through <code>fm-spawn.sh</code>, recovery passes the same gate as a first launch rather than a weaker one <code class="cite">docs/remote-secondmates.md:170</code> <code class="cite">bin/fm-spawn.sh:904-908</code>.</p>
+
+<h2 id="verification">How far the tests reach</h2>
+<p>The doctor tests use a controlled account fixture. "The account-level checks the doctor performs - a real Aqua login session, a real <code>launchctl</code> domain, and a real herdr server - are only ever exercised against fixtures here, so the readiness gate's behavior on a genuine Mac remains an operator-run smoke test" <code class="cite">docs/remote-secondmates.md:286</code>. The audit-session facts the guard and doctor rely on are recorded with their commands in <code>docs/verification/runtime-backends.md</code> under "fm-remote server birth and login-keychain access" <code class="cite">docs/verification/runtime-backends.md:1049</code>.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>
