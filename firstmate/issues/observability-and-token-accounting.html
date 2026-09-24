@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Observability and token accounting · Firstmate C4</title>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">GitHub tickets &rsaquo; Observability and token accounting</p>
+<h1>Observability and token accounting</h1>
+<p class="lede">Making a task&#x27;s cost, spend and outcome visible and auditable after the fact, including token reporting and metrics that are supposed to reach durable records.</p>
+<p class="meta-line">12 open tickets in this category out of 563 total &middot; 10 defects, 2 feature requests &middot; 9 already carry a <code>ready-for-pr</code> label.</p><div class="callout"><span class="callout-title">Design-flaw signal</span><p>1 ticket in this category read as a design gap rather than a coding slip &mdash; the mechanism does what it was built to do, and that is exactly the problem: <a href="https://github.com/kunchenguid/firstmate/issues/4238">#4238</a>.</p></div><h2>Defects</h2><div class="table-wrap"><table class="issues-table"><thead><tr><th>#</th><th>Title</th><th>Kind</th><th>Opened (approx.)</th><th>Summary</th></tr></thead><tbody><tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/4238">#4238</a></td><td>No-mistakes pipeline spend never reaches Firstmate&#x27;s records, so a task&#x27;s review-loop cost is invisible <span class="tag tag-design-flaw">design flaw</span></td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-09-12</td><td>We reconstructed one account&#x27;s spend over about two days of a fleet&#x27;s work on a private repository, with no-mistakes v1.72.0 running Pi as the pipeline agent.</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/4205">#4205</a></td><td>no-mistakes test step counts four tasks-axi-gated watcher-triage tests as passed when tasks-axi is not on the pipeline agent&#x27;s PATH</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-09-11</td><td>During a no-mistakes validation run on fm/fm-bearings-board-answers-never-collected-b1 (run 01M260WC1Z9DD31796PD6KX2AA, test step), the pipeline&#x27;s test agent…</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/4185">#4185</a></td><td>Export kernel supervision telemetry for autoresearch beyond per-task teardown metrics</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-09-11</td><td>- spawn latency (brief → processing)</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/4114">#4114</a></td><td>fm-token-report: wrapper help still says claude is never named UNMEASURED</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-09-10</td><td>Follow-up from the bin/fm-token-report.py review (branch fm/fm-token-report).</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/4112">#4112</a></td><td>fm-token-report: free aborts labelled &quot;spent nothing&quot; tests only output tokens</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-09-10</td><td>Follow-up from the bin/fm-token-report.py review (branch fm/fm-token-report).</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/4111">#4111</a></td><td>fm-token-report: (between steps) label asserts facts that do not hold for its members</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-09-10</td><td>Follow-up from the bin/fm-token-report.py review (branch fm/fm-token-report).</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/4110">#4110</a></td><td>fm-token-report: superseded-runs definition is false, scoped to the window</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-09-10</td><td>Follow-up from the bin/fm-token-report.py review (branch fm/fm-token-report).</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/4109">#4109</a></td><td>fm-token-report: pipeline-bucket spend with no run binding is reported nowhere</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-09-10</td><td>Follow-up from the bin/fm-token-report.py review (branch fm/fm-token-report).</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/978">#978</a></td><td>Design a durable coordinator for No Mistakes validation admission</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-07-25</td><td>Firstmate currently relies on operator memory to serialize expensive No Mistakes validations, verify exact branch/head custody, avoid duplicate launches, and…</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/923">#923</a></td><td>Crazy token usage</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-07-25</td><td>&lt;img width=&quot;1510&quot; height=&quot;250&quot; alt=&quot;Image&quot; src=&quot;https://github.com/user-attachments/assets/cea89a41-276d-49b1-abb5-f563b57b00f5&quot; /&gt;</td></tr></tbody></table></div><h2>Feature requests</h2><div class="table-wrap"><table class="issues-table"><thead><tr><th>#</th><th>Title</th><th>Kind</th><th>Opened (approx.)</th><th>Summary</th></tr></thead><tbody><tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/2342">#2342</a></td><td>Automate honest per-task metrics emission at teardown</td><td><span class="tag tag-feature">feature</span></td><td class="date">2026-08-24</td><td>Emit task-metrics rows automatically from durable task, pipeline, PR, and status sources during guarded teardown.</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/1795">#1795</a></td><td>Question / feature request: Hermes Agent integration and worker observability</td><td><span class="tag tag-feature">feature</span></td><td class="date">2026-08-24</td><td>Hi! I’ve been experimenting with Firstmate and looking at [Hermes Agent](https://github.com/NousResearch/hermes-agent).</td></tr></tbody></table></div><p class="evidence">Ticket data: point-in-time snapshot of open issues on <a href="https://github.com/kunchenguid/firstmate/issues">kunchenguid/firstmate</a>, captured 2026-09-23. See the <a href="index.html">overview</a> for the capture method and the taxonomy rules used to sort tickets into this page.</p></article>
+</main>
+</div>
+<script src="../assets/nav-data.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

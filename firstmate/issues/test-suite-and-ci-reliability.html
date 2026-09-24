@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test suite and CI reliability · Firstmate C4</title>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">GitHub tickets &rsaquo; Test suite and CI reliability</p>
+<h1>Test suite and CI reliability</h1>
+<p class="lede">Firstmate&#x27;s own test suite and CI workflow: flaky fixtures, platform-specific failures, and assertions that drift out of sync with the code they check.</p>
+<p class="meta-line">12 open tickets in this category out of 563 total &middot; 12 defects, 0 feature requests &middot; 9 already carry a <code>ready-for-pr</code> label.</p><h2>Defects</h2><div class="table-wrap"><table class="issues-table"><thead><tr><th>#</th><th>Title</th><th>Kind</th><th>Opened (approx.)</th><th>Summary</th></tr></thead><tbody><tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/5351">#5351</a></td><td>fm-pi-watch-extension.test.sh: intermittent flake under load (pre-existing, unrelated to watcher-leak fix)</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-09-22</td><td>tests/fm-pi-watch-extension.test.sh is intermittently flaky under machine load.</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/4770">#4770</a></td><td>.github/workflows/ci.yml asserts an exact passing-test count for tests/fm-fleet-snapshot-view.test.sh</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-09-18</td><td>.github/workflows/ci.yml (the Stock macOS Bash snapshot compatibility job) runs tests/fm-fleet-snapshot-view.test.sh and then asserts an exact hardcoded…</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/4080">#4080</a></td><td>tests/fm-procevent: orphan-runner reconcile case unregisters before the launch-floor stamp (racy stopped=1 assertion)</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-09-09</td><td>tests/fm-procevent.test.sh case &quot;reconcile stops a runner whose registration was removed&quot; asserts stopped=1, but the case unregisters the runner as soon as…</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/4012">#4012</a></td><td>test(wake): stabilize foreign-stall checkpoint fixture</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-09-08</td><td>At base commit b84e0e36, bash tests/fm-wake-queue.test.sh exits 1 at test_secondmate_foreign_queue_stall_tracks_progress_and_alerts_once: not ok - a foreign…</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/3925">#3925</a></td><td>fix(fm-lint): bound each file&#x27;s shellcheck by time and memory so one pathological file cannot starve the host</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-09-07</td><td>_Filed from the reporter&#x27;s secondary account because the primary one (NewAiCoder, reporter of #3517 and #3336) is rate-limited today; same person, not…</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/3536">#3536</a></td><td>fm-test-run.sh serial lane does not scrub inherited fleet-home overrides</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-09-02</td><td>bin/fm-test-run.sh&#x27;s serial execution lane does not scrub fleet-home environment overrides (FM_HOME, FM_STATE_OVERRIDE, FM_DATA_OVERRIDE, FM_ROOT_OVERRIDE,…</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/3535">#3535</a></td><td>fm-muse-harness.test.sh detection fixtures fail on macOS (copied bash is SIGKILLed by code-signing)</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-09-02</td><td>tests/fm-muse-harness.test.sh fails on current macOS because its detection fixtures build a renamed process by copying the system bash, and macOS refuses to…</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/3534">#3534</a></td><td>fm-arm-pretool-check.test.sh case A13 fails when FM_HOME points at another home</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-09-02</td><td>tests/fm-arm-pretool-check.test.sh case A13 fails whenever FM_HOME points at a home other than the repository&#x27;s own code root.</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/3133">#3133</a></td><td>Fix fm-teardown expected_base fixtures</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-08-27</td><td>Commit dff0d6f made fm-pr-check fail closed unless task metadata carries expected_base.</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/2995">#2995</a></td><td>Fix missing remote-job-reaper symlink in fm-gotmp test fixture</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-08-25</td><td>Context: validation of the committed-work return guard ran tests/fm-gotmp.test.sh at both target commit 16dc0387 and base 038d0f7.</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/2489">#2489</a></td><td>CI: fork PR workflow runs end in action_required, so no checks attach to any open PR</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-08-24</td><td>Hi. I&#x27;m flagging a repository-level observation rather than anything about a specific pull request.</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/2325">#2325</a></td><td>harness-adapters: Claude Code 2.1.223 shows TWO trust dialogs; current docs only cover the first</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-08-24</td><td>The claude section of the harness-adapters skill documents a single trust/bypass confirmation dialog and tells the operator to accept it with --key Enter.</td></tr></tbody></table></div><p class="evidence">Ticket data: point-in-time snapshot of open issues on <a href="https://github.com/kunchenguid/firstmate/issues">kunchenguid/firstmate</a>, captured 2026-09-23. See the <a href="index.html">overview</a> for the capture method and the taxonomy rules used to sort tickets into this page.</p></article>
+</main>
+</div>
+<script src="../assets/nav-data.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

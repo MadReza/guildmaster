@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Context and session stability · Firstmate C4</title>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">GitHub tickets &rsaquo; Context and session stability</p>
+<h1>Context and session stability</h1>
+<p class="lede">What happens to a long-lived supervision session as its context grows: degraded reasoning, tool-call corruption, and multiple concurrent sessions on one machine.</p>
+<p class="meta-line">7 open tickets in this category out of 563 total &middot; 2 defects, 5 feature requests &middot; 4 already carry a <code>ready-for-pr</code> label.</p><div class="callout"><span class="callout-title">Design-flaw signal</span><p>1 ticket in this category read as a design gap rather than a coding slip &mdash; the mechanism does what it was built to do, and that is exactly the problem: <a href="https://github.com/kunchenguid/firstmate/issues/95">#95</a>.</p></div><h2>Defects</h2><div class="table-wrap"><table class="issues-table"><thead><tr><th>#</th><th>Title</th><th>Kind</th><th>Opened (approx.)</th><th>Summary</th></tr></thead><tbody><tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/2362">#2362</a></td><td>Detect long-session reasoning degradation and hand off to a fresh Pi primary before policy drift</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-08-24</td><td>After one Captain-facing Firstmate conversation stays open for a long time and accumulates unrelated topics and operations, reasoning quality can degrade:…</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/95">#95</a></td><td>Long-session context growth triggers Opus tool-call decoder-flip (malformed calls leak to captain); add context-threshold session breaking <span class="tag tag-design-flaw">design flaw</span></td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-07-25</td><td>During a long continuous supervision session, firstmate (Opus 4.8 — claude-opus-4-8[1m], Claude Code 2.1.193) emitted malformed tool calls: the tool-call…</td></tr></tbody></table></div><h2>Feature requests</h2><div class="table-wrap"><table class="issues-table"><thead><tr><th>#</th><th>Title</th><th>Kind</th><th>Opened (approx.)</th><th>Summary</th></tr></thead><tbody><tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/4796">#4796</a></td><td>Automatic stow before context compaction (PreCompact hook + usage-threshold nudge)</td><td><span class="tag tag-feature">feature</span></td><td class="date">2026-09-18</td><td>A long primary session on the claude harness hit the harness&#x27;s automatic context compaction mid-supervision.</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/3336">#3336</a></td><td>feat(bin): opt-in idle-worker pre-cache-expiry compaction (config/idle-compact)</td><td><span class="tag tag-feature">feature</span></td><td class="date">2026-08-30</td><td>On a subscription-billed Claude account the prompt cache has a one-hour TTL.</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/2341">#2341</a></td><td>Standardize durable pre-compaction and cross-harness task notes</td><td><span class="tag tag-feature">feature</span></td><td class="date">2026-08-24</td><td>Make the proven survive-compaction status note part of FirstMate&#x27;s worker brief contract.</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/1588">#1588</a></td><td>Calm: preflight Pi queue-retention capability before suppressing queued operational rows</td><td><span class="tag tag-feature">feature</span></td><td class="date">2026-08-24</td><td>Calm&#x27;s queued-notification suppression can hide an operational notification and then expose its raw text, on a Pi whose session does not provide the…</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/868">#868</a></td><td>feat: graceful handling of multiple concurrent firstmate sessions on one machine</td><td><span class="tag tag-feature">feature</span></td><td class="date">2026-07-25</td><td>Feedback from a captain (Jacob, via his firstmate)</td></tr></tbody></table></div><p class="evidence">Ticket data: point-in-time snapshot of open issues on <a href="https://github.com/kunchenguid/firstmate/issues">kunchenguid/firstmate</a>, captured 2026-09-23. See the <a href="index.html">overview</a> for the capture method and the taxonomy rules used to sort tickets into this page.</p></article>
+</main>
+</div>
+<script src="../assets/nav-data.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

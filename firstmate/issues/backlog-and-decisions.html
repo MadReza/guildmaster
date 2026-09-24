@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backlog and decisions · Firstmate C4</title>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">GitHub tickets &rsaquo; Backlog and decisions</p>
+<h1>Backlog and decisions</h1>
+<p class="lede">`data/backlog.md` and the open-decision log: how work is queued, claimed, numbered and kept in sync between the captain and the branch supervision actor.</p>
+<p class="meta-line">10 open tickets in this category out of 563 total &middot; 10 defects, 0 feature requests &middot; 5 already carry a <code>ready-for-pr</code> label, 1 an <code>existing-pr</code> label.</p><h2>Defects</h2><div class="table-wrap"><table class="issues-table"><thead><tr><th>#</th><th>Title</th><th>Kind</th><th>Opened (approx.)</th><th>Summary</th></tr></thead><tbody><tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/5349">#5349</a></td><td>fm-fleet-snapshot.sh --contribution-input passes backlog JSON via --argjson and hits MAX_ARG_STRLEN on large backlogs</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-09-22</td><td>bin/fm-fleet-snapshot.sh --contribution-input passes the full backlog JSON and the task-record JSON to jq through --argjson (line 1991 at 39f4c2af).</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/4311">#4311</a></td><td>RunPod watchdog: restating a partially cleared pod-never-seen note reopens a hand-closed decision</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-09-13</td><td>Follow-up deferred from #4307.</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/4310">#4310</a></td><td>RunPod watchdog: a carried ceiling anchor is judged stale by wall clock when uptime could settle it</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-09-13</td><td>Follow-up deferred from #4307.</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/4018">#4018</a></td><td>Backlog hygiene: open issues stay open past the merge/PR that resolves them, get handed out as unclaimed work again</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-09-09</td><td>Tasked with picking more open Firstmate defects for a local-model build pipeline to work on overnight, starting from the specific batch of ten issues filed…</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/3096">#3096</a></td><td>Prevent decision-log number collisions across parallel workers</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-08-26</td><td>Decision-log entries currently allocate numbers without a concurrency guarantee, so sibling workers can choose the same number.</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/3056">#3056</a></td><td>fm-bearings-snapshot dies with &#x27;Argument list too long&#x27; once the backlog exceeds jq&#x27;s single-argument limit</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-08-25</td><td>bin/fm-bearings-snapshot.sh fails outright once a home&#x27;s backlog grows past a certain size:</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/2790">#2790</a></td><td>Captain-Entscheidungen: Duplikate beim Anlegen, und eine Antwort wurde nicht zu Arbeit</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-08-24</td><td>Vom Captain benannt, 2026-08-22:</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/1558">#1558</a></td><td>fleet snapshot: backlog JSON exceeds jq 128KB arg limit, snapshot dies</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-08-24</td><td>Bug: the fleet snapshot dies when the backlog grows large.</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/1242">#1242</a></td><td>tests/fm-bearings-snapshot.test.sh: BSD sed &#x27;a\&#x27; drops the trailing newline, corrupting the fixture backlog and aborting the suite at 28/42 on macOS</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-08-24</td><td>tests/fm-bearings-snapshot.test.sh aborts at 28 of 42 assertions on macOS, under both Bash 5 and stock Bash 3.2:</td></tr>
+<tr><td class="num"><a href="https://github.com/kunchenguid/firstmate/issues/911">#911</a></td><td>data/captain.md is not respected</td><td><span class="tag tag-defect">defect</span></td><td class="date">2026-07-25</td><td>There doesn&#x27;t seem to be a way to reliably record custom instructions for the agent.</td></tr></tbody></table></div><p class="evidence">Ticket data: point-in-time snapshot of open issues on <a href="https://github.com/kunchenguid/firstmate/issues">kunchenguid/firstmate</a>, captured 2026-09-23. See the <a href="index.html">overview</a> for the capture method and the taxonomy rules used to sort tickets into this page.</p></article>
+</main>
+</div>
+<script src="../assets/nav-data.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>
