@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Away and quiet postures · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Supervision</p>
+<h1>Away and quiet postures</h1>
+<p class="lede">When the captain steps away (<code>/afk</code>) or asks for fewer interruptions while staying (<code>/quiet</code>), supervision changes owner: a bash sub-supervisor daemon wraps the watcher, handles the routine majority itself, and injects only batched, distilled escalations into the supervisor's pane.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Supervision</a>. Scripts: <code class="cite">bin/fm-supervise-daemon.sh</code>, <code class="cite">bin/fm-afk-contract.sh</code>, <code class="cite">bin/fm-afk-launch.sh</code>, <code class="cite">bin/fm-afk-start.sh</code>, <code class="cite">bin/fm-afk-return.sh</code>. The <code>/afk</code> and <code>/quiet</code> skills themselves belong to <a href="../prompts-and-skills/index.html">Prompts and skills</a>.</p>
+
+<h2 id="two-files">Two files, two meanings</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>File</th><th>What it is</th><th>Who writes it</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><code>state/.afk-contract</code></td><td>The <strong>away-posture record</strong>: "Away mode is a posture of the one supervision session, recorded in state/.afk-contract and never inferred from chat." Holds the captain's away words verbatim, expected return, spend cap, and reach line.</td><td>Only <code>bin/fm-afk-contract.sh</code>, in the same turn as <code>/afk</code>; archived under <code>state/afk-contracts/</code> on return.</td><td><code class="cite">bin/fm-afk-contract.sh:1-60</code></td></tr>
+<tr><td><code>state/.afk</code></td><td>The <strong>daemon flag</strong>: "present = sub-supervisor may inject escalations", first line <code>away</code> or <code>quiet</code>. Not used on Pi.</td><td><code>fm_afk_flag_write</code> in <code>bin/fm-afk-start.sh</code>, under a lock shared with the Cursor park.</td><td><code class="cite">AGENTS.md:151</code>, <code class="cite">bin/fm-afk-start.sh:113-135</code></td></tr>
+</tbody>
+</table></div>
+<p>The mode is read by exactly one owner, <code>fm_afk_mode</code>: only an exact first line <code>quiet</code> reads as quiet, and every other content — missing, empty, unreadable, or the legacy bare epoch — reads as <code>away</code>, "the safe default" (<code class="cite">bin/fm-wake-lib.sh:348-368</code>). The record is read wherever captain-held rechecks are decided: while it exists, an item held for the captain is never rechecked, in either supervision shape (<code class="cite">bin/fm-watch.sh:324-330</code>).</p>
+<p>"ENTRY IS THE GO. <code>/afk</code> itself is the captain's go: <code>enter</code> writes the record in the same turn, before any other work, and never waits for a further human response, because the captain who typed /afk may not look at the screen again" (<code class="cite">bin/fm-afk-contract.sh:14-18</code>). "NO PARSER, TOKENIZER, CLASSIFIER, OR GRAMMAR READS THE WORDS HERE, BY THE CAPTAIN'S MANDATE"; what stays mechanical is a merge green at its live head, synchronous merges only, the spend cap, and the never-set, and "destructive, irreversible, and security-sensitive actions are never pre-authorizable whatever the words say" (<code class="cite">bin/fm-afk-contract.sh:20-33</code>).</p>
+
+<h2 id="daemon">The sub-supervisor daemon</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 740 520" role="img" aria-labelledby="aw-c-t aw-c-d">
+<title id="aw-c-t">Away-mode components</title>
+<desc id="aw-c-d">The daemon runs the watcher one-shot as its child. After each actionable close it drains the durable queue, classifies each row, self-handles routine rows, appends escalations to a buffer, and acknowledges. Housekeeping flushes the buffer as a digest injected into the supervisor pane when the pane is idle and its composer confirmed empty, rechecks stale panes, runs a catch-all status scan, and raises a wedge alarm through external channels when a digest stays undelivered.</desc>
+<defs><marker id="aw-c-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">While state/.afk exists</text>
+<g class="c4-legend"><rect class="c4-legend-frame" x="510" y="12" width="225" height="98" rx="6"/><text class="c4-legend-heading" x="522" y="30">Legend</text>
+<g class="c4-container"><rect x="522" y="38" width="28" height="14" rx="3"/></g><text x="556" y="50">Container</text>
+<g class="c4-component"><rect x="625" y="38" width="28" height="14" rx="3"/></g><text x="659" y="50">Component</text>
+<g class="c4-datastore"><path d="M522,64 a14,3 0 0,0 28,0 a14,3 0 0,0 -28,0 v9 a14,3 0 0,0 28,0 v-9"/></g><text x="556" y="74">Data store</text>
+<g class="c4-external"><rect x="625" y="62" width="28" height="14" rx="3"/></g><text x="659" y="74">External</text>
+<g class="c4-rel c4-rel-async"><path d="M522,94 L550,94"/></g><text x="556" y="98">Injected / notified</text></g>
+<g class="c4-boundary"><rect x="10" y="120" width="500" height="390" rx="8"/><text x="22" y="500">bin/fm-supervise-daemon.sh (single instance, .supervise-daemon.lock)</text></g>
+<g class="c4-component"><rect x="30" y="140" width="210" height="64" rx="6"/><text class="c4-label" x="135" y="162">Watcher child</text><text class="c4-tech" x="135" y="178">[fm-watch.sh, one-shot]</text><text class="c4-desc" x="135" y="194">queues and exits on every wake</text></g>
+<g class="c4-component"><rect x="280" y="140" width="210" height="64" rx="6"/><text class="c4-label" x="385" y="162">handle_durable_wakes</text><text class="c4-tech" x="385" y="178">[drain → classify → ack]</text><text class="c4-desc" x="385" y="194">ack only after routing</text></g>
+<g class="c4-component"><rect x="280" y="244" width="210" height="64" rx="6"/><text class="c4-label" x="385" y="266">Classifiers</text><text class="c4-tech" x="385" y="282">[classify_signal/stale/…]</text><text class="c4-desc" x="385" y="298">self or escalate</text></g>
+<g class="c4-datastore"><path d="M30,250 a105,8 0 0,0 210,0 a105,8 0 0,0 -210,0 v58 a105,8 0 0,0 210,0 v-58"/><text class="c4-label" x="135" y="276">Escalation buffer</text><text class="c4-tech" x="135" y="291">[state/.subsuper-escalations]</text><text class="c4-desc" x="135" y="306">survives afk exit and crash</text></g>
+<g class="c4-component"><rect x="30" y="360" width="210" height="80" rx="6"/><text class="c4-label" x="135" y="382">housekeeping</text><text class="c4-tech" x="135" y="398">[every FM_HOUSEKEEPING_TICK]</text><text class="c4-desc" x="135" y="414">batch flush, stale recheck,</text><text class="c4-desc" x="135" y="428">catch-all scan, max-defer</text></g>
+<g class="c4-component"><rect x="280" y="360" width="210" height="80" rx="6"/><text class="c4-label" x="385" y="382">inject_msg</text><text class="c4-tech" x="385" y="398">[away-supervisor kind]</text><text class="c4-desc" x="385" y="414">pane not busy, composer</text><text class="c4-desc" x="385" y="428">affirmatively empty</text></g>
+<g class="c4-datastore"><path d="M530,150 a95,8 0 0,0 190,0 a95,8 0 0,0 -190,0 v44 a95,8 0 0,0 190,0 v-44"/><text class="c4-label" x="625" y="174">Durable wake queue</text><text class="c4-tech" x="625" y="188">[state/.wake-queue]</text></g>
+<g class="c4-container"><rect x="530" y="360" width="190" height="80" rx="8"/><text class="c4-label" x="625" y="384">Supervisor pane</text><text class="c4-tech" x="625" y="400">[tmux or herdr]</text><text class="c4-desc" x="625" y="416">one digest per batch</text></g>
+<g class="c4-external"><rect x="530" y="460" width="190" height="50" rx="8"/><text class="c4-label" x="625" y="482">Wedge alarm channels</text><text class="c4-desc" x="625" y="498">osascript · herdr · command:</text></g>
+<g class="c4-rel"><path d="M240,172 H278" marker-end="url(#aw-c-arrow)"/><text class="c4-rel-label" x="259" y="166">close</text></g>
+<g class="c4-rel"><path d="M490,172 H528" marker-end="url(#aw-c-arrow)"/></g>
+<g class="c4-rel"><path d="M385,204 V242" marker-end="url(#aw-c-arrow)"/></g>
+<g class="c4-rel"><path d="M280,276 H242" marker-end="url(#aw-c-arrow)"/><text class="c4-rel-label" x="261" y="270">append</text></g>
+<g class="c4-rel"><path d="M135,318 V358" marker-end="url(#aw-c-arrow)"/><text class="c4-rel-label" x="135" y="342">flush</text></g>
+<g class="c4-rel"><path d="M240,400 H278" marker-end="url(#aw-c-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M490,400 H528" marker-end="url(#aw-c-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M135,440 V485 H528" marker-end="url(#aw-c-arrow)"/><text class="c4-rel-label" x="330" y="479">undelivered past FM_MAX_DEFER_SECS</text></g>
+</svg>
+</div>
+<figcaption>Sources: <code class="cite">bin/fm-supervise-daemon.sh:1-60</code> (contract), <code class="cite">bin/fm-supervise-daemon.sh:1480-1516</code> (durable handling), <code class="cite">bin/fm-supervise-daemon.sh:1022-1060</code> (housekeeping), <code class="cite">bin/fm-supervise-daemon.sh:1245-1300</code> (injection), <code class="cite">docs/wedge-alarm.md:1-39</code>. The daemon restarts its watcher child after every close (<code class="cite">bin/fm-supervise-daemon.sh:1705-1770</code>).</figcaption>
+</figure>
+
+<h3>Contract</h3>
+<p>The daemon "SELF-HANDLES the routine majority in bash (no firstmate turn) or ESCALATES a batched, distilled digest to the supervisor pane on captain-relevant events plus bounded declared-wait rechecks"; routine wakes "cost zero firstmate context" (<code class="cite">bin/fm-supervise-daemon.sh:2-13</code>). Its reliability model (<code class="cite">bin/fm-supervise-daemon.sh:34-60</code>):</p>
+<ul>
+<li><strong>Nothing is lost</strong>: the watcher "enqueues every wake to state/.wake-queue BEFORE advancing its suppression markers, so a crash/restart/missed injection is recovered on the next fm-wake-drain.sh"; the daemon acknowledges "only after routing completes".</li>
+<li><strong>Fail-safe-to-escalate</strong>: "any wake the classifier cannot confidently mark routine is escalated".</li>
+<li><strong>Bounded wedge latency</strong>: a stale pane without a declared wait escalates after <code>STALE_ESCALATE_SECS</code>, "rechecked once"; declared waits get <code>PAUSE_RESURFACE_SECS</code>, and captain-held transfers are not rechecked while the posture record exists.</li>
+<li><strong>Max-defer alarm</strong>: a digest undelivered past <code>FM_MAX_DEFER_SECS</code> (300) retries a flush, writes <code>state/.subsuper-inject-wedged</code>, and fires the configured active alert, rate-limited to once per window (<code class="cite">bin/fm-supervise-daemon.sh:1036-1054</code>, <code class="cite">docs/wedge-alarm.md:3-6</code>).</li>
+<li><strong>Catch-all</strong>: every <code>HEARTBEAT_SCAN_SECS</code> the daemon greps every status log for a captain-relevant line the per-wake classifier might have missed.</li>
+</ul>
+<p>Classification reuses the same library as the watcher: "The SAME library backs the always-on watcher's triage, so the captain-relevant verb set and the classification predicates have exactly one definition" (<code class="cite">bin/fm-supervise-daemon.sh:173-178</code>). A decision-owned row arrives with payload <code>needs-decision:</code> and is classified as a signal, so its suppression markers commit and the digest names the decision instead of reporting an unknown wake (<code class="cite">bin/fm-supervise-daemon.sh:1332-1336</code>).</p>
+
+<h3>Sharing one input channel with the captain</h3>
+<p>The daemon types into the same pane the captain types into. Every injection is built by <code>bin/fm-operational-input.sh</code> as the <code>away-supervisor</code> kind after the U+2063 <code>FIRSTMATE_OP: </code> prefix, which "A human cannot type … from a normal keyboard at the start of a message" (<code class="cite">bin/fm-supervise-daemon.sh:23-32</code>). An unmarked message means the captain is back; <code>should_exit_afk</code> keeps away mode only for a marked message or a <code>/afk</code> command and biases everything else toward exit, since "A false exit is self-correcting" (<code class="cite">bin/fm-supervise-daemon.sh:281-296</code>). Injection defers while the supervisor pane is busy and "on anything that is not affirmatively 'empty'", because typing an escalation into a shell "could execute it" (<code class="cite">bin/fm-supervise-daemon.sh:1268-1284</code>).</p>
+
+<h3>Crash and pane guards</h3>
+<p>A missing supervisor pane backs off without losing work; a watcher that exits nonzero or with no reason is a crash, and a tight crash loop backs off; a non-wake stdout line such as <code>watcher: already running</code> "is NOT a wake" and idles instead of flooding the buffer (<code class="cite">bin/fm-supervise-daemon.sh:1705-1760</code>, <code class="cite">bin/fm-supervise-daemon.sh:1316-1329</code>). Supervisor backends are tmux and herdr only; zellij, orca, and cmux are refused at startup (<code class="cite">bin/fm-supervise-daemon.sh:75-91</code>).</p>
+
+<h2 id="ownership">Who owns supervision while away</h2>
+<ul>
+<li><strong>The watcher</strong> turns one-shot and never absorbs (<a href="watcher.html#away">Watcher</a>).</li>
+<li><strong>The Claude auto-arm</strong> exits 0 and "NEVER rewake[s] the primary", and re-checks at translation time (<code class="cite">bin/fm-claude-stop-autoarm.sh:22-24</code>, <code class="cite">bin/fm-claude-stop-autoarm.sh:279-285</code>).</li>
+<li><strong>The turn-end guard</strong> accepts a live, identity-matched daemon with a fresh beacon in place of a watcher (<a href="turn-end-guards.html#push">Turn-end guards</a>).</li>
+<li><strong>The model</strong>: "While <code>state/.afk</code> exists, the daemon owns supervision; do not arm a separate watcher" (<code class="cite">AGENTS.md:468</code>).</li>
+<li><strong>On Pi</strong> the daemon is never launched: <code>start</code> refuses on Pi and pi-signed, and "the ordinary supervision session keeps running in both postures" with main parked while the branch takes every safe row (<code class="cite">bin/fm-afk-launch.sh:17-22</code>, <code class="cite">AGENTS.md:469</code>). See <a href="pi-branch.html#postures">Pi supervision branch</a>.</li>
+</ul>
+
+<h2 id="launch">Entry and the daemon's terminal</h2>
+<p><code>bin/fm-afk-launch.sh</code> owns entry and exit. Harnesses with a native tracked background tool (Claude, Grok) run <code>bin/fm-afk-start.sh</code> directly; a harness without one needs a terminal manufactured for it, and splitting the captain's pane "visibly shrinks it", so the launcher creates a non-visible herdr tab or detached tmux session and passes the captain pane in as <code>FM_SUPERVISOR_TARGET</code>, never using shell <code>&amp;</code> (<code class="cite">bin/fm-afk-launch.sh:26-40</code>, <code class="cite">bin/fm-afk-start.sh:20-32</code>). <code>stop</code> "SIGTERM[s] the daemon so its cleanup flushes WHILE state/.afk is still present", then clears the flag, then archives the record last (<code class="cite">bin/fm-afk-launch.sh:58-64</code>).</p>
+
+<h2 id="return">Return</h2>
+<p><code>bin/fm-afk-return.sh</code> renders the return brief "from durable records, never from conversation memory", in a fixed order: supervisor health across the away window, the captain's away words verbatim and every action taken under them, what waits on the captain, what failed, landed work still owing teardown, what was handled, and cost; "The health snapshot is taken BEFORE the daemon shutdown so the shutdown itself cannot read as a gap" (<code class="cite">bin/fm-afk-return.sh:14-33</code>). A durable catch-up gate, <code>state/.afk-return-catchup</code>, is written before shutdown "so a crash between stopping, wake presentation, and blocker handling fails closed", and every open <code>blocked:</code> must be remediated and closed before ordinary captain requests proceed (<code class="cite">bin/fm-afk-return.sh:35-58</code>).</p>
+
+<h2 id="quiet">Quiet mode</h2>
+<p><code>/quiet</code> is "the same token-saving daemon tradeoff as <code>/afk</code>, made explicit for a captain who is staying, watching the session, and does not want to exit the mode just by chatting" (<code class="cite">.agents/skills/quiet/SKILL.md:13-16</code>). It sets the same flag with first line <code>quiet</code> (<code>FM_AFK_MODE=quiet</code>); "Every mechanism below … is owned once by the <code>afk</code> skill and is IDENTICAL in quiet mode"; only an explicit <code>/quiet off</code> exits it, through the same unchanged <code>bin/fm-afk-return.sh</code>. It is "presentation only": decisions, failures, credentials, and review-ready work escalate every time (<code class="cite">.agents/skills/quiet/SKILL.md:18-78</code>). A refresh without a mode preserves the on-disk mode, which "keeps a refresh from silently flipping a captain's quiet mode back to away underneath them" (<code class="cite">bin/fm-afk-start.sh:117-128</code>).</p>
+<p>Both postures change "how aggressively firstmate surfaces things, never who approves what" (<code class="cite">.agents/skills/quiet/SKILL.md:64-67</code>); the Pi branch's relocation of standing authority under the away record is the one place authority moves, and only through guarded scripts (<a href="pi-branch.html#postures">Pi supervision branch</a>).</p>
+
+<h2 id="findings">Findings</h2>
+<div class="callout unclear"><span class="callout-title">A stale writer comment</span>
+<p><code>afk_enter</code> in the daemon writes only an epoch into <code>state/.afk</code> and says it is "Called by the /afk skill (enter)" (<code class="cite">bin/fm-supervise-daemon.sh:269-275</code>). No script under <code>bin/</code> or <code>.agents/</code> calls it; the live writer is <code>fm_afk_flag_write</code>, which writes the mode line and then the epoch (<code class="cite">bin/fm-afk-start.sh:113-135</code>). An epoch-only file still reads as <code>away</code> through <code>fm_afk_mode</code>, so the stale helper is harmless, but its comment no longer describes the entry path.</p></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

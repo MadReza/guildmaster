@@ -11,12 +11,281 @@
 <div class="layout">
 <nav id="site-nav" aria-label="Site"></nav>
 <main id="main">
-<article>
-<p class="breadcrumb">Components</p>
+<article class="wide">
+<p class="breadcrumb">Components › Supervision</p>
 <h1>Supervision</h1>
-<p class="lede">Will cover the event-driven supervision engine: the watcher and its arm layer, the durable wake queue and drain, wake classification and absorption, the semantic busy-state contract, per-harness supervision protocols and hooks, the turn-end guard, away and quiet posture, and the Pi supervision branch.</p>
-<div class="callout unclear"><span class="callout-title">Stub</span>
-<p>This section is reserved and not yet written. A follow-up task fills it in under <a href="../../AUTHORING.md">the authoring contract</a>. Until then, the <a href="../../c4/containers.html">Level 2 containers page</a> is the entry point for this area.</p></div>
+<p class="lede">The loop that keeps the first mate aware of its fleet while it is not looking, and the stack of mechanisms that stop any supervisor turn from ending with work in flight and nobody watching.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="../../c4/containers.html">Level 2 containers</a>, where the watcher, the wait and turn-end hooks, the away sub-supervisor, and the durable wake queue appear as containers. This section opens them to Level 3.</p>
+
+<h2 id="problem">The problem this area solves</h2>
+<p>The first mate is a language-model session. It only acts during a turn, and a turn only starts when something delivers input to it. Every worker it supervises runs in another terminal and finishes, blocks, or wedges on its own schedule. Supervision is therefore the answer to two questions that the model cannot answer for itself:</p>
+<ol>
+<li><strong>Who notices, between turns, that a worker needs attention?</strong> A bash poll loop, <code class="cite">bin/fm-watch.sh</code>, classifies every candidate event for free and only wakes the model for the ones that need judgment (<code class="cite">bin/fm-watch.sh:247-265</code>).</li>
+<li><strong>Who guarantees that such a loop is running at every moment work is in flight?</strong> Not the model's memory. Per-harness hooks and extensions re-arm the loop at turn boundaries, and a turn-end guard blocks or forces a follow-up whenever a turn would end with no live watcher (<code class="cite">docs/watcher-continuity.md:3-4</code>, <code class="cite">docs/turnend-guard.md:12-19</code>).</li>
+</ol>
+<p>Everything else in this section exists to make those two answers survive crashes, interrupted turns, restarted sessions, duplicate processes, and the quirks of eight different agent harnesses. <code class="cite">AGENTS.md:418-456</code> states the operating rule the supervisor follows: keep exactly one live supervision cycle, drain the queue before anything else on a wake, and acknowledge only after handling.</p>
+
+<h2 id="components">Component view (Level 3)</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1240 940" role="img" aria-labelledby="sup-c4-t sup-c4-d">
+<title id="sup-c4-t">Supervision components (C4 level 3)</title>
+<desc id="sup-c4-d">Inside one operational home: the supervisor agent's harness fires a continuity owner that runs the arm wrapper, which forks the watcher. The watcher reads state files, asks the classifier and the busy-state contract whether a crew is provably working, and appends actionable wakes through the wake library to the durable queue. The drain presents and acknowledges queue rows. The turn-end guard and pull guard check watcher health. The away daemon and the Pi supervision branch are alternative consumers.</desc>
+<defs><marker id="sup-c4-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="32">Supervision — Components (Level 3)</text>
+
+<g class="c4-legend">
+<rect class="c4-legend-frame" x="370" y="44" width="540" height="92" rx="6"/>
+<text class="c4-legend-heading" x="382" y="62">Legend</text>
+<g class="c4-container"><rect x="382" y="72" width="32" height="16" rx="3"/></g><text x="422" y="84">Container</text>
+<g class="c4-component"><rect x="510" y="72" width="32" height="16" rx="3"/></g><text x="550" y="84">Component</text>
+<g class="c4-datastore"><path d="M640,75 a16,3 0 0,0 32,0 a16,3 0 0,0 -32,0 v11 a16,3 0 0,0 32,0 v-11"/></g><text x="680" y="84">Data store</text>
+<g class="c4-external"><rect x="770" y="72" width="32" height="16" rx="3"/></g><text x="810" y="84">External</text>
+<g class="c4-boundary"><rect x="382" y="102" width="32" height="16"/></g><text x="422" y="114">Boundary</text>
+<g class="c4-rel"><path d="M510,110 L542,110"/></g><text x="550" y="114">Runs / writes</text>
+<g class="c4-rel c4-rel-async"><path d="M640,110 L672,110"/></g><text x="680" y="114">Hook, poll, or injection</text>
+</g>
+
+<g class="c4-container">
+<rect x="40" y="62" width="260" height="78" rx="8"/>
+<text class="c4-label" x="170" y="90">Supervisor agent</text>
+<text class="c4-tech" x="170" y="106">[harness session reading AGENTS.md]</text>
+<text class="c4-desc" x="170" y="124">Drains, handles, acknowledges</text>
+</g>
+<g class="c4-external">
+<rect x="920" y="62" width="250" height="78" rx="8"/>
+<text class="c4-label" x="1045" y="90">Crew harnesses, backends</text>
+<text class="c4-tech" x="1045" y="106">[worker hooks · tmux / herdr panes]</text>
+<text class="c4-desc" x="1045" y="124">Status, turn-ended, busy events</text>
+</g>
+
+<g class="c4-boundary"><rect x="20" y="170" width="1200" height="752" rx="10"/><text x="32" y="914">Supervision area · inside one operational home (FM_HOME)</text></g>
+
+<g class="c4-component"><rect x="50" y="200" width="250" height="86" rx="8"/>
+<text class="c4-label" x="175" y="226">Continuity owner</text>
+<text class="c4-tech" x="175" y="242">[per-harness hook or extension]</text>
+<text class="c4-desc" x="175" y="259">Arms the next cycle; turns an</text>
+<text class="c4-desc" x="175" y="274">actionable close into a turn</text></g>
+<g class="c4-component"><rect x="340" y="200" width="250" height="86" rx="8"/>
+<text class="c4-label" x="465" y="226">Turn-end guard</text>
+<text class="c4-tech" x="465" y="242">[bin/fm-turnend-guard.sh]</text>
+<text class="c4-desc" x="465" y="259">Blocks or forces a follow-up</text>
+<text class="c4-desc" x="465" y="274">when a turn would end blind</text></g>
+<g class="c4-component"><rect x="630" y="200" width="250" height="86" rx="8"/>
+<text class="c4-label" x="755" y="226">Pull guard</text>
+<text class="c4-tech" x="755" y="242">[bin/fm-guard.sh]</text>
+<text class="c4-desc" x="755" y="259">Mid-turn banner: supervision</text>
+<text class="c4-desc" x="755" y="274">down, queued wakes, tangle</text></g>
+<g class="c4-component"><rect x="920" y="200" width="250" height="86" rx="8"/>
+<text class="c4-label" x="1045" y="226">Wake drain</text>
+<text class="c4-tech" x="1045" y="242">[bin/fm-wake-drain.sh]</text>
+<text class="c4-desc" x="1045" y="259">Presents rows, OPEN DECISIONS;</text>
+<text class="c4-desc" x="1045" y="274">generation-bound acknowledgement</text></g>
+
+<g class="c4-component"><rect x="50" y="360" width="250" height="86" rx="8"/>
+<text class="c4-label" x="175" y="386">Arm wrapper</text>
+<text class="c4-tech" x="175" y="402">[bin/fm-watch-arm.sh]</text>
+<text class="c4-desc" x="175" y="419">Forks and verifies one watcher:</text>
+<text class="c4-desc" x="175" y="434">started · attached · FAILED</text></g>
+<g class="c4-component"><rect x="340" y="360" width="250" height="86" rx="8"/>
+<text class="c4-label" x="465" y="386">Watcher</text>
+<text class="c4-tech" x="465" y="402">[bin/fm-watch.sh · bash poll]</text>
+<text class="c4-desc" x="465" y="419">Absorbs benign wakes; queues</text>
+<text class="c4-desc" x="465" y="434">and exits on actionable ones</text></g>
+<g class="c4-component"><rect x="630" y="360" width="250" height="86" rx="8"/>
+<text class="c4-label" x="755" y="386">Classifier</text>
+<text class="c4-tech" x="755" y="402">[bin/fm-classify-lib.sh]</text>
+<text class="c4-desc" x="755" y="419">Status spans, pause and hold</text>
+<text class="c4-desc" x="755" y="434">verbs, provably-working proof</text></g>
+<g class="c4-component"><rect x="920" y="360" width="250" height="86" rx="8"/>
+<text class="c4-label" x="1045" y="386">Wake library</text>
+<text class="c4-tech" x="1045" y="402">[bin/fm-wake-lib.sh]</text>
+<text class="c4-desc" x="1045" y="419">Queue append, locks, recovery</text>
+<text class="c4-desc" x="1045" y="434">marker, auto-arm ledger</text></g>
+
+<g class="c4-component"><rect x="50" y="520" width="250" height="86" rx="8"/>
+<text class="c4-label" x="175" y="546">Away sub-supervisor</text>
+<text class="c4-tech" x="175" y="562">[bin/fm-supervise-daemon.sh]</text>
+<text class="c4-desc" x="175" y="579">Owns triage while state/.afk</text>
+<text class="c4-desc" x="175" y="594">exists; injects digests</text></g>
+<g class="c4-component"><rect x="630" y="520" width="250" height="86" rx="8"/>
+<text class="c4-label" x="755" y="546">Busy-state contract</text>
+<text class="c4-tech" x="755" y="562">[fm-busy-lib.sh · fm-busy-event.sh]</text>
+<text class="c4-desc" x="755" y="579">busy | idle | unknown | dead,</text>
+<text class="c4-desc" x="755" y="594">always with its source</text></g>
+<g class="c4-component"><rect x="920" y="520" width="250" height="86" rx="8"/>
+<text class="c4-label" x="1045" y="546">Pi supervision branch</text>
+<text class="c4-tech" x="1045" y="562">[.pi/extensions/fm-branch-*.ts]</text>
+<text class="c4-desc" x="1045" y="579">Second conversation takes</text>
+<text class="c4-desc" x="1045" y="594">eligible rows (Pi only)</text></g>
+
+<g class="c4-boundary"><rect x="40" y="660" width="1160" height="240" rx="8"/><text x="52" y="680">state/ — record formats owned by the Persistence area</text></g>
+<g class="c4-datastore"><path d="M60,700 a120,9 0 0,0 240,0 a120,9 0 0,0 -240,0 v58 a120,9 0 0,0 240,0 v-58"/>
+<text class="c4-label" x="180" y="726">Status logs, turn-ended</text>
+<text class="c4-tech" x="180" y="741">[state/&lt;id&gt;.status · .turn-ended]</text>
+<text class="c4-desc" x="180" y="757">Wake events, never current truth</text></g>
+<g class="c4-datastore"><path d="M350,700 a120,9 0 0,0 240,0 a120,9 0 0,0 -240,0 v58 a120,9 0 0,0 240,0 v-58"/>
+<text class="c4-label" x="470" y="726">Durable wake queue</text>
+<text class="c4-tech" x="470" y="741">[state/.wake-queue]</text>
+<text class="c4-desc" x="470" y="757">epoch seq kind key payload</text></g>
+<g class="c4-datastore"><path d="M640,700 a120,9 0 0,0 240,0 a120,9 0 0,0 -240,0 v58 a120,9 0 0,0 240,0 v-58"/>
+<text class="c4-label" x="760" y="726">Recovery marker</text>
+<text class="c4-tech" x="760" y="741">[state/.watcher-down]</text>
+<text class="c4-desc" x="760" y="757">status:kind:generation</text></g>
+<g class="c4-datastore"><path d="M930,700 a120,9 0 0,0 240,0 a120,9 0 0,0 -240,0 v58 a120,9 0 0,0 240,0 v-58"/>
+<text class="c4-label" x="1050" y="726">Busy records</text>
+<text class="c4-tech" x="1050" y="741">[&lt;id&gt;.busy-state · .busy-gen]</text>
+<text class="c4-desc" x="1050" y="757">one line, incarnation-bound</text></g>
+<g class="c4-datastore"><path d="M60,800 a120,9 0 0,0 240,0 a120,9 0 0,0 -240,0 v58 a120,9 0 0,0 240,0 v-58"/>
+<text class="c4-label" x="180" y="826">Beacon and watch lock</text>
+<text class="c4-tech" x="180" y="841">[.last-watcher-beat · .watch.lock]</text>
+<text class="c4-desc" x="180" y="857">touched every poll</text></g>
+<g class="c4-datastore"><path d="M350,800 a120,9 0 0,0 240,0 a120,9 0 0,0 -240,0 v58 a120,9 0 0,0 240,0 v-58"/>
+<text class="c4-label" x="470" y="826">Watcher markers</text>
+<text class="c4-tech" x="470" y="841">[.seen- .hash- .stale- .paused- …]</text>
+<text class="c4-desc" x="470" y="857">classification bookkeeping</text></g>
+<g class="c4-datastore"><path d="M640,800 a120,9 0 0,0 240,0 a120,9 0 0,0 -240,0 v58 a120,9 0 0,0 240,0 v-58"/>
+<text class="c4-label" x="760" y="826">Away records</text>
+<text class="c4-tech" x="760" y="841">[state/.afk · .afk-contract]</text>
+<text class="c4-desc" x="760" y="857">daemon flag · posture record</text></g>
+<g class="c4-datastore"><path d="M930,800 a120,9 0 0,0 240,0 a120,9 0 0,0 -240,0 v58 a120,9 0 0,0 240,0 v-58"/>
+<text class="c4-label" x="1050" y="826">Auto-arm ledger</text>
+<text class="c4-tech" x="1050" y="841">[state/.claude-autoarm-epoch]</text>
+<text class="c4-desc" x="1050" y="857">generation claims (Claude)</text></g>
+
+<g class="c4-rel c4-rel-async"><path d="M170,140 V198" marker-end="url(#sup-c4-arrow)"/></g>
+<g class="c4-rel"><path d="M300,100 H320 V155 H1045 V198" marker-end="url(#sup-c4-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M465,155 V198" marker-end="url(#sup-c4-arrow)"/></g>
+<g class="c4-rel"><path d="M755,155 V198" marker-end="url(#sup-c4-arrow)"/></g>
+<g class="c4-rel"><path d="M175,286 V358" marker-end="url(#sup-c4-arrow)"/></g>
+<g class="c4-rel"><path d="M300,403 H338" marker-end="url(#sup-c4-arrow)"/></g>
+<g class="c4-rel"><path d="M590,403 H628" marker-end="url(#sup-c4-arrow)"/></g>
+<g class="c4-rel"><path d="M465,360 V330 H1045 V358" marker-end="url(#sup-c4-arrow)"/></g>
+<g class="c4-rel"><path d="M1100,286 V358" marker-end="url(#sup-c4-arrow)"/></g>
+<g class="c4-rel"><path d="M755,446 V518" marker-end="url(#sup-c4-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M465,446 V658" marker-end="url(#sup-c4-arrow)"/></g>
+<g class="c4-rel"><path d="M1170,403 H1190 V658" marker-end="url(#sup-c4-arrow)"/></g>
+<g class="c4-rel"><path d="M300,563 H400 V448" marker-end="url(#sup-c4-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M50,580 H30 V120 H38" marker-end="url(#sup-c4-arrow)"/></g>
+<g class="c4-rel"><path d="M1045,518 V448" marker-end="url(#sup-c4-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M1170,100 H1210 V658" marker-end="url(#sup-c4-arrow)"/></g>
+
+<g class="c4-rel-num"><circle cx="170" cy="168" r="9"/><text x="170" y="172">1</text></g>
+<g class="c4-rel-num"><circle cx="900" cy="155" r="9"/><text x="900" y="159">2</text></g>
+<g class="c4-rel-num"><circle cx="465" cy="178" r="9"/><text x="465" y="182">3</text></g>
+<g class="c4-rel-num"><circle cx="755" cy="178" r="9"/><text x="755" y="182">4</text></g>
+<g class="c4-rel-num"><circle cx="175" cy="322" r="9"/><text x="175" y="326">5</text></g>
+<g class="c4-rel-num"><circle cx="319" cy="403" r="9"/><text x="319" y="407">6</text></g>
+<g class="c4-rel-num"><circle cx="609" cy="403" r="9"/><text x="609" y="407">7</text></g>
+<g class="c4-rel-num"><circle cx="755" cy="330" r="9"/><text x="755" y="334">8</text></g>
+<g class="c4-rel-num"><circle cx="1100" cy="322" r="9"/><text x="1100" y="326">9</text></g>
+<g class="c4-rel-num"><circle cx="755" cy="482" r="9"/><text x="755" y="486">10</text></g>
+<g class="c4-rel-num"><circle cx="465" cy="560" r="9"/><text x="465" y="564">11</text></g>
+<g class="c4-rel-num"><circle cx="1190" cy="540" r="9"/><text x="1190" y="544">12</text></g>
+<g class="c4-rel-num"><circle cx="350" cy="563" r="9"/><text x="350" y="567">13</text></g>
+<g class="c4-rel-num"><circle cx="30" cy="330" r="9"/><text x="30" y="334">14</text></g>
+<g class="c4-rel-num"><circle cx="1045" cy="482" r="9"/><text x="1045" y="486">15</text></g>
+<g class="c4-rel-num"><circle cx="1210" cy="380" r="9"/><text x="1210" y="384">16</text></g>
+</svg>
+</div>
+<figcaption>Level 3 view of the supervision area. Numbers key into the <a href="#interactions">interactions table</a>. Dashed arrows are hook-fired, polled, or injected. The state files are drawn inside a nested boundary because their formats are owned by <a href="../persistence/index.html">Persistence</a>; this section only describes how supervision uses them.</figcaption>
+</figure>
+
+<h3 id="interactions">Interactions</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>#</th><th>From → to</th><th>What happens</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Supervisor harness → continuity owner</td><td>A turn boundary (Claude <code>Stop</code>, Pi <code>agent_settled</code> and session start, OpenCode <code>session.idle</code>, Cursor <code>stop</code>) fires the hook or extension that owns re-arming. On Codex and Grok the model itself runs the checkpoint or background arm.</td><td><code class="cite">docs/watcher-continuity.md:8-27</code></td></tr>
+<tr><td>2</td><td>Supervisor → wake drain</td><td>First action of every wake-handling turn and of session start: present the queue, then run the printed <code>--ack-through</code> after handling.</td><td><code class="cite">AGENTS.md:428-433</code>, <code class="cite">bin/fm-session-start.sh:741</code></td></tr>
+<tr><td>3</td><td>Harness turn end → turn-end guard</td><td>Every primary turn end asks whether supervision is needed and a live identity-matched watcher holds a fresh beacon; if not, block (exit 2) or force one bounded follow-up.</td><td><code class="cite">bin/fm-turnend-guard.sh:1-24</code></td></tr>
+<tr><td>4</td><td>Guarded scripts and drain → pull guard</td><td>Mid-turn, any supervision script and every drain print a delimited banner when supervision is down or rows are queued. It never blocks.</td><td><code class="cite">bin/fm-guard.sh:1-42</code>, <code class="cite">bin/fm-wake-drain.sh:223-225</code></td></tr>
+<tr><td>5</td><td>Continuity owner → arm wrapper</td><td>The owner foregrounds or tracks <code>bin/fm-watch-arm.sh</code> and receives the wake reason line (or a typed failure) when the cycle ends.</td><td><code class="cite">bin/fm-claude-stop-autoarm.sh:252-277</code></td></tr>
+<tr><td>6</td><td>Arm wrapper → watcher</td><td>Forks the watcher as a tracked child, verifies a live identity-matched watcher with a fresh beacon, or attaches to an existing healthy one.</td><td><code class="cite">bin/fm-watch-arm.sh:23-45</code></td></tr>
+<tr><td>7</td><td>Watcher → classifier</td><td>Reads status spans since the last classified offset, pause and hold verbs, and the provably-working verdict.</td><td><code class="cite">bin/fm-classify-lib.sh:2120-2146</code></td></tr>
+<tr><td>8</td><td>Watcher → wake library</td><td>Appends an actionable wake under the queue lock before advancing any suppression marker, then prints the reason and exits.</td><td><code class="cite">bin/fm-wake-lib.sh:1823-1865</code></td></tr>
+<tr><td>9</td><td>Drain → wake library</td><td>Claims rows per actor, presents them deduplicated, and deletes only claimed rows at or below the acknowledged sequence.</td><td><code class="cite">bin/fm-wake-drain.sh:627-761</code></td></tr>
+<tr><td>10</td><td>Classifier → busy-state contract</td><td>Current state comes from <code>bin/fm-crew-state.sh</code>, which consults the semantic busy record; the watcher also calls the contract directly for pane busy verdicts.</td><td><code class="cite">bin/fm-watch.sh:343-363</code></td></tr>
+<tr><td>11</td><td>Watcher → state</td><td>Scans status and turn-ended signatures, keeps per-window pane markers, touches the liveness beacon once per cycle.</td><td><code class="cite">bin/fm-watch.sh:1706-1732</code>, <code class="cite">bin/fm-watch.sh:2309</code></td></tr>
+<tr><td>12</td><td>Wake library → queue and marker</td><td>Every append publishes recovery evidence in <code>state/.watcher-down</code> first, then writes the row.</td><td><code class="cite">bin/fm-wake-lib.sh:1852-1863</code></td></tr>
+<tr><td>13</td><td>Away sub-supervisor → watcher</td><td>While <code>state/.afk</code> exists the daemon runs the watcher one-shot, drains, classifies, and acknowledges after routing.</td><td><code class="cite">bin/fm-supervise-daemon.sh:1480-1516</code></td></tr>
+<tr><td>14</td><td>Away sub-supervisor → supervisor pane</td><td>Batched, distilled escalation digests are injected as a typed operational input.</td><td><code class="cite">bin/fm-supervise-daemon.sh:1-33</code></td></tr>
+<tr><td>15</td><td>Pi branch ↔ wake library</td><td>The branch receives a row grant bound to its live process and drains and acknowledges only those rows.</td><td><code class="cite">docs/watcher-continuity.md:69-98</code></td></tr>
+<tr><td>16</td><td>Crew → state</td><td>Workers append status lines; harness hooks touch <code>state/&lt;id&gt;.turn-ended</code> and apply busy events through the only writer, <code>bin/fm-busy-event.sh</code>.</td><td><code class="cite">bin/fm-spawn.sh:4088</code>, <code class="cite">bin/fm-busy-event.sh:1-38</code></td></tr>
+</tbody>
+</table></div>
+
+<h2 id="loop">The loop in one picture</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 980 330" role="img" aria-labelledby="sup-loop-t">
+<title id="sup-loop-t">The supervision loop: event, classification, durable row, wake, drain, handling, acknowledgement, re-arm</title>
+<defs><marker id="sup-loop-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">One supervision cycle</text>
+<g class="c4-external"><rect x="30" y="60" width="200" height="70" rx="8"/><text class="c4-label" x="130" y="88">1 · Crew event</text><text class="c4-desc" x="130" y="108">status append, turn end,</text><text class="c4-desc" x="130" y="122">idle pane, check output</text></g>
+<g class="c4-component"><rect x="270" y="60" width="200" height="70" rx="8"/><text class="c4-label" x="370" y="88">2 · Watcher triage</text><text class="c4-desc" x="370" y="108">absorb benign in bash,</text><text class="c4-desc" x="370" y="122">no model tokens spent</text></g>
+<g class="c4-datastore"><path d="M510,66 a100,8 0 0,0 200,0 a100,8 0 0,0 -200,0 v58 a100,8 0 0,0 200,0 v-58"/><text class="c4-label" x="610" y="92">3 · Queue row</text><text class="c4-desc" x="610" y="110">appended before any</text><text class="c4-desc" x="610" y="124">marker advances</text></g>
+<g class="c4-component"><rect x="750" y="60" width="200" height="70" rx="8"/><text class="c4-label" x="850" y="88">4 · Watcher exits</text><text class="c4-desc" x="850" y="108">prints one reason line;</text><text class="c4-desc" x="850" y="122">harness wakes the model</text></g>
+<g class="c4-container"><rect x="750" y="230" width="200" height="70" rx="8"/><text class="c4-label" x="850" y="258">5 · Drain</text><text class="c4-desc" x="850" y="278">rows, OPEN DECISIONS,</text><text class="c4-desc" x="850" y="292">WAKE_ACK_REQUIRED</text></g>
+<g class="c4-container"><rect x="510" y="230" width="200" height="70" rx="8"/><text class="c4-label" x="610" y="258">6 · Handle</text><text class="c4-desc" x="610" y="278">steer, merge, escalate,</text><text class="c4-desc" x="610" y="292">or record no action</text></g>
+<g class="c4-container"><rect x="270" y="230" width="200" height="70" rx="8"/><text class="c4-label" x="370" y="258">7 · Acknowledge</text><text class="c4-desc" x="370" y="278">--ack-through SEQ</text><text class="c4-desc" x="370" y="292">--recovery-generation G</text></g>
+<g class="c4-component"><rect x="30" y="230" width="200" height="70" rx="8"/><text class="c4-label" x="130" y="258">8 · Re-arm</text><text class="c4-desc" x="130" y="278">turn-end hook starts the</text><text class="c4-desc" x="130" y="292">next cycle; guard backstops</text></g>
+<g class="c4-rel"><path d="M230,95 H268" marker-end="url(#sup-loop-arrow)"/></g>
+<g class="c4-rel"><path d="M470,95 H508" marker-end="url(#sup-loop-arrow)"/></g>
+<g class="c4-rel"><path d="M710,95 H748" marker-end="url(#sup-loop-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M850,130 V228" marker-end="url(#sup-loop-arrow)"/><text class="c4-rel-label" x="850" y="185">rewake / follow-up</text></g>
+<g class="c4-rel"><path d="M750,265 H712" marker-end="url(#sup-loop-arrow)"/></g>
+<g class="c4-rel"><path d="M510,265 H472" marker-end="url(#sup-loop-arrow)"/></g>
+<g class="c4-rel"><path d="M270,265 H232" marker-end="url(#sup-loop-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M130,230 V132" marker-end="url(#sup-loop-arrow)"/><text class="c4-rel-label" x="130" y="185">next cycle watches</text></g>
+<g class="c4-rel c4-rel-async"><path d="M410,130 C410,185 330,185 330,133" marker-end="url(#sup-loop-arrow)"/><text class="c4-rel-label" x="370" y="200">benign: keep blocking</text></g>
+</svg>
+</div>
+<figcaption>Steps 2 to 4 cost no model tokens; only an actionable wake reaches step 5. If anything interrupts steps 5 to 7, the row stays queued and is presented again (see <a href="durability.html">Durability</a>). The <a href="end-to-end.html">end-to-end trace</a> follows one real path through every step.</figcaption>
+</figure>
+
+<h2 id="pages">Pages in this section</h2>
+<ul class="cards">
+<li><a href="watcher.html"><strong>Watcher poll loop</strong><span>fm-watch.sh: singleton start, the fixed order of one cycle, absorb-on-positive-evidence, beacon, event fast path, knobs.</span></a></li>
+<li><a href="wake-kinds.html"><strong>Wake kinds and triage</strong><span>signal, stale, check, heartbeat: who produces each, every reason variant, and what each demands of the supervisor.</span></a></li>
+<li><a href="wake-queue.html"><strong>Durable wake queue</strong><span>Record format, append ordering, drain sections, generation-bound acknowledgement, recovery episodes, per-actor claims.</span></a></li>
+<li><a href="busy-state.html"><strong>Busy state and turn ends</strong><span>The semantic busy-state contract, incarnation gens, sources, precedence, and how turn-ended markers differ from state.</span></a></li>
+<li><a href="wedge-and-pauses.html"><strong>Wedges and declared waits</strong><span>The escalation ladder, its three deliberate deferrals, demand-deep-inspection, paused and captain-held absorption.</span></a></li>
+<li><a href="continuity.html"><strong>Watcher continuity</strong><span>The arm layer and who re-arms on each harness; Option B ordering; the delivery ledger and cycle log.</span></a></li>
+<li><a href="claude-autoarm.html"><strong>Claude Stop auto-arm</strong><span>The asyncRewake hook, generation claims in the epoch ledger, failure episodes, and exit-status commit.</span></a></li>
+<li><a href="turn-end-guards.html"><strong>Turn-end and pull guards</strong><span>The PID-strict boundary guard, the model-aware pull guard, per-harness integrations, budgets and fail-open.</span></a></li>
+<li><a href="away-and-quiet.html"><strong>Away and quiet postures</strong><span>state/.afk, the away-posture record, the sub-supervisor daemon, quiet mode, return brief, and wedge alarm.</span></a></li>
+<li><a href="pi-branch.html"><strong>Pi supervision branch</strong><span>The alternative shape: a second in-process conversation that takes eligible wakes and merges outcomes back.</span></a></li>
+<li><a href="durability.html"><strong>Durability argument</strong><span>What survives a watcher crash, an interrupted turn, a restarted session, and what deliberately does not.</span></a></li>
+<li><a href="end-to-end.html"><strong>End-to-end trace</strong><span>A crewmate reports done on a Claude primary: every file write and process hand-off, in order.</span></a></li>
+</ul>
+
+<h2 id="invariants">Invariants the whole area defends</h2>
+<dl class="defs">
+<dt>Exactly one live cycle per home</dt>
+<dd>The watcher is a singleton through <code>state/.watch.lock</code>; a duplicate stands down within one poll by self-eviction (<code class="cite">bin/fm-watch.sh:2296-2305</code>). Repair is home-scoped; <code>pkill -f bin/fm-watch.sh</code> is forbidden because it would kill sibling homes (<code class="cite">AGENTS.md:452-453</code>, <code class="cite">bin/fm-watch-arm.sh:54-60</code>).</dd>
+<dt>Absorb only on positive evidence</dt>
+<dd>A wake is silently absorbed only when the crew is provably working or has declared a bounded wait; every uncertain case surfaces (<code class="cite">bin/fm-watch.sh:5-18</code>).</dd>
+<dt>Enqueue before suppress, acknowledge after handling</dt>
+<dd>A durable row exists before any marker says "already reported", and it is deleted only by an explicit post-handling acknowledgement (<code class="cite">AGENTS.md:433</code>, <code class="cite">bin/fm-supervise-daemon.sh:35-40</code>).</dd>
+<dt>No turn ends blind</dt>
+<dd>At every primary turn boundary with supervision need, a live watcher (or, while away, a live daemon) with a fresh beacon must exist, or the harness is made to continue (<code class="cite">docs/turnend-guard.md:14-19</code>).</dd>
+<dt>Never an automatic interrupt</dt>
+<dd>Wedge escalation is for human inspection only; the watcher never signals, interrupts, or restarts a worker (<code class="cite">bin/fm-watch.sh:73-78</code>).</dd>
+<dt>Waiting is silent</dt>
+<dd>Empty polls, absorbed wakes, and elapsed time are never captain-facing (<code class="cite">AGENTS.md:451</code>).</dd>
+</dl>
+
+<h2 id="neighbours">Where this area touches its siblings</h2>
+<ul>
+<li><a href="../communication/index.html">Communication</a> owns status-line grammar, the steering inbox and its re-ring ladder, and operational input prefixes. Supervision only calls the inbox ladder once per window per poll (<code class="cite">bin/fm-watch.sh:434-510</code>).</li>
+<li><a href="../persistence/index.html">Persistence</a> owns the layout of <code>state/</code> and the session lock <code>state/.lock</code>.</li>
+<li><a href="../crew/index.html">Crew</a> owns spawning, harness adapters, and backends, including where each harness's busy hooks are installed.</li>
+<li><a href="../delivery/index.html">Delivery</a> owns PR merge polls and no-mistakes runs; the watcher only executes their checks and reads run-step state.</li>
+<li><a href="../backlog-and-decisions/index.html">Backlog and decisions</a> owns captain holds and the decision fold that the drain's OPEN DECISIONS section prints.</li>
+<li><a href="../prompts-and-skills/index.html">Prompts and skills</a> owns the <code>/afk</code> and <code>/quiet</code> skills and how <code>bin/fm-supervision-instructions.sh</code> renders <code>docs/supervision-protocols/</code> into the session-start block.</li>
+<li><a href="../observability/index.html">Observability</a> owns fleet views; supervision's own diagnostics are <code>state/.watch-triage.log</code>, <code>state/.watch-cycle-exits.log</code>, and <code>state/.watch-deliveries.log</code>.</li>
+<li><a href="../remote/index.html">Remote</a> owns remote secondmate homes, which keep their host-local supervision boundary.</li>
+</ul>
 </article>
 </main>
 </div>

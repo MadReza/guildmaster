@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Watcher continuity · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Supervision</p>
+<h1>Watcher continuity</h1>
+<p class="lede">The watcher ends after every actionable wake, so something must start the next cycle every time. Firstmate moved that duty out of the model's memory and into per-harness hooks and extensions, all of which go through one verifying wrapper, <code>bin/fm-watch-arm.sh</code>.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Supervision</a>. Contract owner: <code class="cite">docs/watcher-continuity.md</code>.</p>
+
+<h2 id="principle">The principle</h2>
+<p>"The watcher remains intentionally one-shot: one actionable reason closes one watcher cycle. Must-work continuity now lives above that process boundary instead of depending on the model remembering a re-arm step" (<code class="cite">docs/watcher-continuity.md:3-4</code>). On the harnesses where that is fully true, "The model no longer re-arms after ordinary wakes" and "No PreToolUse hook denies fleet commands based on watcher status" (<code class="cite">docs/watcher-continuity.md:45-46</code>).</p>
+
+<h2 id="arm">The arm wrapper: fm-watch-arm.sh</h2>
+<p>Every harness path reaches the watcher through this script, which exists to make one claim honestly: a watcher is running for this home. Its header warns why a plain background job is not enough: "NEVER fire it and forget with a shell <code>&amp;</code> inside another call: that backgrounded child is reaped when the call returns, leaving NO watcher running and a false 'already running' off the dying process. That exact mistake silently took supervision down for ~30 minutes" (<code class="cite">bin/fm-watch-arm.sh:14-17</code>). It must therefore run as the harness's own tracked background task, or inside a hook-owned process tree.</p>
+<h3>What it prints</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Line</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>watcher: started pid=N (beacon fresh)</code></td><td>It forked a watcher as its own child and confirmed it holds the lock with a fresh beacon; a handling successor adds <code>recovery-generation=G</code>.</td></tr>
+<tr><td><code>watcher: attached pid=N (beacon Ns)</code></td><td>A live, identity-matched, fresh watcher already held the lock; this arm follows it and its verified successors.</td></tr>
+<tr><td>a <code>signal:</code> / <code>stale:</code> / <code>check:</code> / <code>heartbeat</code> line</td><td>The cycle ended with that wake.</td></tr>
+<tr><td><code>watcher: FAILED - no live watcher with a fresh beacon</code></td><td>Confirmation timed out (<code>FM_ARM_CONFIRM_TIMEOUT</code>, 10 s, or 30 s on Git Bash).</td></tr>
+<tr><td><code>watcher: FAILED - cycle ended without an actionable reason</code></td><td>A cycle ended with no reason, no healthy successor, and no matching delivery record.</td></tr>
+</tbody>
+</table></div>
+<p class="evidence">Sources: <code class="cite">bin/fm-watch-arm.sh:23-45</code>, <code class="cite">bin/fm-watch-arm.sh:72-79</code>.</p>
+<p>"It NEVER reports started/attached/healthy off a stale beacon or a dead/reused pid" (<code class="cite">bin/fm-watch-arm.sh:35-37</code>). The single honesty gate is <code>fm_watcher_healthy</code>: a live pid, whose lock records this home, this watcher path, and a process identity that still matches, with a beacon younger than the grace (<code class="cite">bin/fm-wake-lib.sh:139-174</code>, <code class="cite">bin/fm-watch-arm.sh:236-249</code>).</p>
+
+<h3 id="never-empty">Never a clean empty success</h3>
+<p>"<code>bin/fm-watch-arm.sh</code> never returns a clean empty success" (<code class="cite">docs/watcher-continuity.md:102</code>). An adapter that saw exit 0 with no output could mistake a lost cycle for a no-op, so every close is resolved:</p>
+<ol>
+<li>an actionable reason is printed as is;</li>
+<li>a clean exit with no reason waits for a verified successor and attaches to it;</li>
+<li>failing that, the arm consults the watcher's bounded delivery ledger, <code>state/.watch-deliveries.log</code>, which <code>wake()</code> writes with the watcher's pid and process identity before the lock is released; a matching record lets the arm report the delivered reason "even after its durable wake was handled and acknowledged, while an unrelated queue producer or a recycled PID cannot satisfy the match";</li>
+<li>only then <code>FAILED - cycle ended without an actionable reason</code>.</li>
+</ol>
+<p class="evidence">Sources: <code class="cite">bin/fm-watch-arm.sh:272-339</code>, <code class="cite">bin/fm-watch-arm.sh:490-541</code>, <code class="cite">bin/fm-push-transition-lib.sh:43-74</code>, <code class="cite">docs/watcher-continuity.md:103-108</code>.</p>
+
+<h3>Modes</h3>
+<dl class="defs">
+<dt>default (<code>arm</code>)</dt><dd>Attach if a healthy watcher exists, otherwise fork and verify one (<code class="cite">bin/fm-watch-arm.sh:433-443</code>).</dd>
+<dt><code>--restart</code></dt><dd>Stop only the pid in this home's lock after an identity check, wait up to 5 s for it to exit, then own a fresh cycle; a stale recorded lock is cleared through the recovery marker. "NEVER <code>pkill -f bin/fm-watch.sh</code>: that pattern matches every firstmate home's watcher" (<code class="cite">bin/fm-watch-arm.sh:54-60</code>, <code class="cite">bin/fm-watch-arm.sh:410-431</code>).</dd>
+<dt><code>--handling-delivered G --watcher-pid P</code></dt><dd>Confirms that a successor watcher is live and matched, and moves the recovery marker into handling for generation <code>G</code> (<code class="cite">bin/fm-watch-arm.sh:403-408</code>). Used by the Pi, omp, and OpenCode adapters before they deliver a wake (<code class="cite">.pi/extensions/fm-primary-pi-watch.ts:618</code>, <code class="cite">.opencode/plugins/fm-primary-watch-arm.js:201</code>).</dd>
+<dt><code>FM_WATCH_PREDECESSOR_ARM_PID</code></dt><dd>Set by persistent adapters; starts the child with <code>FM_WATCH_HANDLING_SUCCESSOR=1</code> so it does not re-announce downtime, and links the predecessor's cycle-log record to its successor (<code class="cite">bin/fm-watch-arm.sh:187-223</code>, <code class="cite">bin/fm-watch-arm.sh:481-486</code>).</dd>
+</dl>
+
+<h3 id="cycle-log">The lifecycle ledger</h3>
+<p>One tab-separated record per observed cycle in <code>state/.watch-cycle-exits.log</code>: arm and watcher pids, origin, start and end times, exit code and signal, classified reason, beacon age, lock identity before and after, and successor disposition, capped by <code>FM_WATCH_CYCLE_LOG_MAX_BYTES</code> (256 KiB) and <code>FM_WATCH_CYCLE_LOG_KEEP_LINES</code> (1000). It "is diagnostic evidence, not a supervision dependency" (<code class="cite">bin/fm-watch-arm.sh:82-185</code>, <code class="cite">docs/watcher-continuity.md:110-113</code>).</p>
+
+<h2 id="owners">Who re-arms, per harness</h2>
+<p>The supervision model of the primary harness decides what "healthy" means mid-turn (<code class="cite">bin/fm-wake-lib.sh:186-216</code>): <strong>autoarm</strong> (Claude, Cursor: the watcher runs only between turns), <strong>extension</strong> (Pi, pi-signed, omp: the extension tears the watcher down and respawns it on each wake), <strong>persistent</strong> (everything else: a tracked live process). The session-start block for the detected harness is rendered from <code>docs/supervision-protocols/</code> by <code class="cite">bin/fm-supervision-instructions.sh</code>; how that prompt is assembled belongs to <a href="../prompts-and-skills/index.html">Prompts and skills</a>.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Harness</th><th>Continuity owner</th><th>Wake delivery</th><th>Model re-arms?</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>Claude</td><td>Stop <code>asyncRewake</code> hook <code>bin/fm-claude-stop-autoarm.sh</code>, foregrounding the arm</td><td>hook exit 2, "Stop hook feedback"</td><td>No</td><td><code class="cite">docs/supervision-protocols/claude.md:1-27</code></td></tr>
+<tr><td>Cursor</td><td>awaited <code>stop</code> hook <code>bin/fm-turnend-guard-cursor.sh</code> parks on the arm</td><td>one <code>followup_message</code></td><td>No</td><td><code class="cite">docs/supervision-protocols/cursor.md:1-31</code></td></tr>
+<tr><td>Pi, pi-signed</td><td><code>.pi/extensions/fm-primary-pi-watch.ts</code></td><td><code>sendUserMessage</code> follow-up, or the supervision branch</td><td>Once per process (<code>fm_watch_arm_pi</code>)</td><td><code class="cite">docs/supervision-protocols/pi.md:1-40</code></td></tr>
+<tr><td>omp</td><td><code>.omp/extensions/fm-primary-omp-watch.ts</code></td><td>follow-up</td><td>Once per process (<code>fm_watch_arm_omp</code>)</td><td><code class="cite">docs/supervision-protocols/omp.md:1-30</code></td></tr>
+<tr><td>OpenCode</td><td><code>.opencode/plugins/fm-primary-watch-arm.js</code> on <code>session.idle</code></td><td><code>client.session.promptAsync</code></td><td>No</td><td><code class="cite">docs/supervision-protocols/opencode.md:1-17</code></td></tr>
+<tr><td>Codex</td><td>the model, via <code>bin/fm-watch-checkpoint.sh --seconds 180</code></td><td>the foreground command returns</td><td>Yes, every checkpoint</td><td><code class="cite">docs/supervision-protocols/codex.md:1-16</code></td></tr>
+<tr><td>Grok</td><td>the model, via Grok's tracked background tool</td><td>synthetic <code>task_completed</code> message</td><td>Yes, after each wake</td><td><code class="cite">docs/supervision-protocols/grok.md:1-39</code></td></tr>
+<tr><td>unknown</td><td>the model</td><td>whatever verified wait the harness has</td><td>Yes</td><td><code class="cite">docs/supervision-protocols/unknown.md:1-13</code></td></tr>
+</tbody>
+</table></div>
+<p>Codex has a foreground checkpoint because it "cannot reason while a foreground tool call is running. The bounded checkpoint returns control regularly so user messages and queued wakes can be handled" (<code class="cite">docs/supervision-protocols/codex.md:14-16</code>). The checkpoint runs the watcher under a timeout and prints <code>checkpoint: no actionable wake within Ns</code> with exit 124 when nothing happened (<code class="cite">bin/fm-watch-checkpoint.sh:91-116</code>).</p>
+
+<h2 id="ordering">Ordering: protect the fleet before the model handles the wake</h2>
+<h3>Pi, omp, OpenCode — "Option B"</h3>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 740 420" role="img" aria-labelledby="ct-b-t ct-b-d">
+<title id="ct-b-t">Option B ordering on an extension-owned harness</title>
+<desc id="ct-b-d">The watcher prints a reason and exits. The extension waits for it to close, starts the next arm as a handling successor, reads the started line with the recovery generation, confirms the handling handoff, and only then delivers the wake to the model, which drains, handles, and acknowledges while the successor already supervises.</desc>
+<defs><marker id="ct-b-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">Successor first, then the wake</text>
+<g class="c4-component"><rect x="25" y="46" width="150" height="44" rx="6"/><text class="c4-label" x="100" y="66">Watcher N</text><text class="c4-tech" x="100" y="81">[fm-watch.sh]</text></g>
+<g class="c4-component"><rect x="205" y="46" width="150" height="44" rx="6"/><text class="c4-label" x="280" y="66">Extension</text><text class="c4-tech" x="280" y="81">[fm-primary-pi-watch.ts]</text></g>
+<g class="c4-component"><rect x="385" y="46" width="150" height="44" rx="6"/><text class="c4-label" x="460" y="66">Watcher N+1</text><text class="c4-tech" x="460" y="81">[arm --restart]</text></g>
+<g class="c4-container"><rect x="565" y="46" width="150" height="44" rx="6"/><text class="c4-label" x="640" y="66">Supervisor model</text><text class="c4-tech" x="640" y="81">[Pi main]</text></g>
+<g class="c4-rel c4-rel-async"><path d="M100,90 V400"/></g>
+<g class="c4-rel c4-rel-async"><path d="M280,90 V400"/></g>
+<g class="c4-rel c4-rel-async"><path d="M460,90 V400"/></g>
+<g class="c4-rel c4-rel-async"><path d="M640,90 V400"/></g>
+<g class="c4-rel"><path d="M100,125 H278" marker-end="url(#ct-b-arrow)"/><text class="c4-rel-label" x="190" y="119">1 · reason line, exit</text></g>
+<g class="c4-rel"><path d="M280,165 H458" marker-end="url(#ct-b-arrow)"/><text class="c4-rel-label" x="370" y="159">2 · start successor arm</text></g>
+<g class="c4-rel c4-rel-async"><path d="M460,205 H282" marker-end="url(#ct-b-arrow)"/><text class="c4-rel-label" x="370" y="199">3 · started … recovery-generation=G</text></g>
+<g class="c4-rel"><path d="M280,245 H458" marker-end="url(#ct-b-arrow)"/><text class="c4-rel-label" x="370" y="239">4 · --handling-delivered G</text></g>
+<g class="c4-rel"><path d="M280,290 H638" marker-end="url(#ct-b-arrow)"/><text class="c4-rel-label" x="460" y="284">5 · deliver the original wake</text></g>
+<g class="c4-component"><rect x="570" y="310" width="140" height="56" rx="6"/><text class="c4-label" x="640" y="332">6 · drain,</text><text class="c4-desc" x="640" y="350">handle, acknowledge</text></g>
+<g class="c4-component"><rect x="395" y="310" width="130" height="56" rx="6"/><text class="c4-label" x="460" y="332">supervising</text><text class="c4-desc" x="460" y="350">during step 6</text></g>
+</svg>
+</div>
+<figcaption>"This is deliberate Option B ordering: the fleet is protected before the model handles the wake whenever restoration succeeds, but the model is never left blind when it does not" (<code class="cite">docs/watcher-continuity.md:31-39</code>). A failed confirmation is retried once, then retired with TERM and a bounded exponential retry; after the retry bound the original wake is delivered with a typed continuity-restoration failure.</figcaption>
+</figure>
+<p>Pi adds generation ownership across same-process session replacement (<code>/new</code>, <code>/resume</code>, <code>/fork</code>, reload): shutdown flips the durable extension marker from <code>active</code> to <code>handoff</code> but keeps the arm child alive until the next owning session start commits its replacement, and pending actionable closes ride a state-scoped handoff file, <code>state/extensions/pi-primary-watch/session-replacement-actionable.json</code> (<code class="cite">.pi/extensions/fm-primary-pi-watch.ts:1-24</code>, <code class="cite">docs/watcher-continuity.md:11-14</code>). A follow-up "counts as delivered once Pi accepts it, never once the model reads it" (<code class="cite">docs/watcher-continuity.md:14</code>). omp differs: it retires the predecessor at shutdown and, having no shutdown reason, persists the handoff on every shutdown with a pending close (<code class="cite">docs/watcher-continuity.md:15</code>).</p>
+
+<h3>Claude — successor at the next Stop</h3>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 740 440" role="img" aria-labelledby="ct-c-t ct-c-d">
+<title id="ct-c-t">Claude ordering: rewake first, re-arm at the next Stop</title>
+<desc id="ct-c-d">The watcher prints a reason and exits to the foregrounded arm inside the Stop hook, which exits 2 and rewakes the model. The model drains, handles, and acknowledges with no watcher running. When that handling turn stops, the turn-end guard and the auto-arm hook both fire; the hook claims a new generation and foregrounds the next cycle, and the guard allows the stop because a claim is open or a watcher is healthy.</desc>
+<defs><marker id="ct-c-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">Wake first, successor at the next turn end</text>
+<g class="c4-component"><rect x="25" y="46" width="150" height="44" rx="6"/><text class="c4-label" x="100" y="66">Watcher</text><text class="c4-tech" x="100" y="81">[cycle N, then N+1]</text></g>
+<g class="c4-component"><rect x="205" y="46" width="150" height="44" rx="6"/><text class="c4-label" x="280" y="66">Stop auto-arm</text><text class="c4-tech" x="280" y="81">[asyncRewake hook]</text></g>
+<g class="c4-container"><rect x="385" y="46" width="150" height="44" rx="6"/><text class="c4-label" x="460" y="66">Supervisor model</text><text class="c4-tech" x="460" y="81">[Claude primary]</text></g>
+<g class="c4-component"><rect x="565" y="46" width="150" height="44" rx="6"/><text class="c4-label" x="640" y="66">Turn-end guard</text><text class="c4-tech" x="640" y="81">[--claude]</text></g>
+<g class="c4-rel c4-rel-async"><path d="M100,90 V420"/></g>
+<g class="c4-rel c4-rel-async"><path d="M280,90 V420"/></g>
+<g class="c4-rel c4-rel-async"><path d="M460,90 V420"/></g>
+<g class="c4-rel c4-rel-async"><path d="M640,90 V420"/></g>
+<g class="c4-rel"><path d="M100,125 H278" marker-end="url(#ct-c-arrow)"/><text class="c4-rel-label" x="190" y="119">1 · reason line, exit</text></g>
+<g class="c4-rel"><path d="M280,165 H458" marker-end="url(#ct-c-arrow)"/><text class="c4-rel-label" x="370" y="159">2 · exit 2 + banner</text></g>
+<g class="c4-component"><rect x="395" y="185" width="130" height="70" rx="6"/><text class="c4-label" x="460" y="207">3 · drain,</text><text class="c4-desc" x="460" y="225">handle, ack;</text><text class="c4-desc" x="460" y="241">no watcher runs</text></g>
+<g class="c4-rel"><path d="M460,290 H638" marker-end="url(#ct-c-arrow)"/><text class="c4-rel-label" x="550" y="284">4a · Stop</text></g>
+<g class="c4-rel"><path d="M460,315 H282" marker-end="url(#ct-c-arrow)"/><text class="c4-rel-label" x="370" y="309">4b · Stop (async)</text></g>
+<g class="c4-rel"><path d="M280,355 H102" marker-end="url(#ct-c-arrow)"/><text class="c4-rel-label" x="190" y="349">5 · claim gen, arm N+1</text></g>
+<g class="c4-component"><rect x="570" y="330" width="140" height="70" rx="6"/><text class="c4-label" x="640" y="352">6 · allow stop</text><text class="c4-desc" x="640" y="370">watcher healthy or</text><text class="c4-desc" x="640" y="386">claim open (≤ 800 ms)</text></g>
+</svg>
+</div>
+<figcaption>"Claude's Stop hook starts the successor arm at the next Stop after the handling turn, rather than before notification as Pi, omp, and OpenCode do. The durable wake queue preserves actionable events during the residual active-turn window, and the bounded turn-end guard enforces recovery at Stop when no watcher is live" (<code class="cite">docs/watcher-continuity.md:41-42</code>). Details: <a href="claude-autoarm.html">Claude Stop auto-arm</a>, <a href="turn-end-guards.html">Turn-end guards</a>.</figcaption>
+</figure>
+<p>The gap between steps 1 and 5 is the one window on Claude with no watcher running. It is covered twice: any event in it is detected by the next watcher, because signal detection compares persisted signatures rather than a start time (<a href="watcher.html#schedule">Watcher</a>); and the turn-end guard refuses to let the handling turn end without a watcher or an open claim.</p>
+
+<h2 id="limits">Stated limits</h2>
+<ul>
+<li>"No zero-latency guarantee is claimed because lock verification, watcher startup, and bounded retry delays remain deliberate safety work" (<code class="cite">docs/watcher-continuity.md:135</code>).</li>
+<li>OpenCode support "targets persistent TUI sessions rather than headless <code>opencode run</code>" (<code class="cite">docs/watcher-continuity.md:136</code>).</li>
+<li>"No adapter starts a replacement with shell <code>&amp;</code>" (<code class="cite">docs/watcher-continuity.md:51</code>).</li>
+<li>"Only the watcher process touches <code>state/.last-watcher-beat</code>; no helper process can make a wedged watcher appear healthy" (<code class="cite">docs/watcher-continuity.md:116</code>).</li>
+</ul>
+<div class="callout"><span class="callout-title">An arm that forks with &amp;</span>
+<p>The arm wrapper's own launch is <code>"$WATCH" &gt;"$child_out" &amp;</code> (<code class="cite">bin/fm-watch-arm.sh:481-486</code>). This does not contradict the "never shell &amp;" rule: the child is then verified and waited on for its whole life ("we wait on it, so killing this arm … tears the watcher down too", <code class="cite">bin/fm-watch-arm.sh:445-448</code>). The rule forbids fire-and-forget inside another call, not a tracked child.</p></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Durability argument · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Supervision</p>
+<h1>Durability argument</h1>
+<p class="lede">What survives a crashed watcher, an interrupted handling turn, or a restarted session — and what deliberately does not — follows from four ordering rules that every part of the supervision area obeys.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Supervision</a>. This page assembles the argument from the component pages; each claim cites the code that carries it.</p>
+
+<h2 id="rules">The four rules</h2>
+<ol>
+<li><strong>Enqueue before suppress.</strong> A durable row is written before any marker records the event as reported. The watcher appends and only then advances <code>.seen-*</code>, <code>.stale-*</code>, or surfaced offsets (<code class="cite">bin/fm-watch.sh:2552-2584</code>, <code class="cite">bin/fm-watch.sh:2853-2861</code>); the away daemon relies on exactly this: "a crash/restart/missed injection is recovered on the next fm-wake-drain.sh" (<code class="cite">bin/fm-supervise-daemon.sh:35-40</code>). Where a marker bounds a repeat, it is written after the append succeeds, because "a marker written ahead of a failed append outlives it, and the next sighting would then absorb the retry" (<code class="cite">bin/fm-watch.sh:1219-1224</code>, <code class="cite">bin/fm-watch.sh:1587-1595</code>).</li>
+<li><strong>Evidence before the row.</strong> Every append publishes downtime to the recovery marker before incrementing the sequence and writing the row (<code class="cite">bin/fm-wake-lib.sh:1852-1863</code>); a stolen watch lock publishes downtime before the stale lock is removed (<code class="cite">bin/fm-wake-lib.sh:1010-1016</code>).</li>
+<li><strong>Acknowledge after handling.</strong> Rows leave the queue only through <code>--ack-through</code>, run after handling; "interruption before that acknowledgement deliberately leaves the work durable for idempotent re-handling" (<code class="cite">AGENTS.md:433</code>).</li>
+<li><strong>Detect from persisted state, not from time.</strong> Signal detection compares persisted signatures, "so signals that land while no watcher is running are caught by the next one"; check and heartbeat schedules are file mtimes (<code class="cite">bin/fm-watch.sh:1695-1715</code>).</li>
+</ol>
+<p>Underneath all four: records are replaced with a temp file and <code>mv</code> (<code class="cite">bin/fm-wake-lib.sh:647-663</code>), locks record a pid plus a process identity so a recycled pid never authenticates a dead owner (<code class="cite">bin/fm-wake-lib.sh:139-174</code>), and a dead owner's lock is stolen under a <code>.steal</code> mutex (<code class="cite">bin/fm-wake-lib.sh:933-1031</code>).</p>
+
+<h2 id="timeline">Crash points along one wake</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 740 470" role="img" aria-labelledby="du-t-t du-t-d">
+<title id="du-t-t">Crash points along the life of one wake and how each recovers</title>
+<desc id="du-t-d">Eight steps from detection to acknowledgement, with five crash points. Before the append, nothing was recorded and the next watcher re-detects from signatures. Between append and marker, the row exists and the next watcher may queue a duplicate, which presentation deduplicates. Between marker and delivery, the row waits and the next watcher start resurfaces it once. During handling, the row stays and is presented again. After acknowledgement nothing remains to recover.</desc>
+<defs><marker id="du-t-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">One wake, five places to die</text>
+<g class="c4-component"><rect x="20" y="50" width="160" height="44" rx="6"/><text class="c4-label" x="100" y="70">1 · Detect</text><text class="c4-desc" x="100" y="86">signature changed</text></g>
+<g class="c4-component"><rect x="200" y="50" width="160" height="44" rx="6"/><text class="c4-label" x="280" y="70">2 · Append row</text><text class="c4-desc" x="280" y="86">downtime first</text></g>
+<g class="c4-component"><rect x="380" y="50" width="160" height="44" rx="6"/><text class="c4-label" x="460" y="70">3 · Advance markers</text><text class="c4-desc" x="460" y="86">.seen-* etc.</text></g>
+<g class="c4-component"><rect x="560" y="50" width="160" height="44" rx="6"/><text class="c4-label" x="640" y="70">4 · Print, exit</text><text class="c4-desc" x="640" y="86">delivery ledger</text></g>
+<g class="c4-container"><rect x="560" y="130" width="160" height="44" rx="6"/><text class="c4-label" x="640" y="150">5 · Harness wakes</text><text class="c4-desc" x="640" y="166">rewake or follow-up</text></g>
+<g class="c4-container"><rect x="380" y="130" width="160" height="44" rx="6"/><text class="c4-label" x="460" y="150">6 · Drain</text><text class="c4-desc" x="460" y="166">begin handling</text></g>
+<g class="c4-container"><rect x="200" y="130" width="160" height="44" rx="6"/><text class="c4-label" x="280" y="150">7 · Handle</text><text class="c4-desc" x="280" y="166">idempotent work</text></g>
+<g class="c4-container"><rect x="20" y="130" width="160" height="44" rx="6"/><text class="c4-label" x="100" y="150">8 · Acknowledge</text><text class="c4-desc" x="100" y="166">row deleted</text></g>
+<g class="c4-rel"><path d="M180,72 H198" marker-end="url(#du-t-arrow)"/></g>
+<g class="c4-rel"><path d="M360,72 H378" marker-end="url(#du-t-arrow)"/></g>
+<g class="c4-rel"><path d="M540,72 H558" marker-end="url(#du-t-arrow)"/></g>
+<g class="c4-rel"><path d="M640,94 V128" marker-end="url(#du-t-arrow)"/></g>
+<g class="c4-rel"><path d="M560,152 H542" marker-end="url(#du-t-arrow)"/></g>
+<g class="c4-rel"><path d="M380,152 H362" marker-end="url(#du-t-arrow)"/></g>
+<g class="c4-rel"><path d="M200,152 H182" marker-end="url(#du-t-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="190" cy="72" r="9"/><text x="190" y="76">A</text></g>
+<g class="c4-rel-num"><circle cx="370" cy="72" r="9"/><text x="370" y="76">B</text></g>
+<g class="c4-rel-num"><circle cx="550" cy="72" r="9"/><text x="550" y="76">C</text></g>
+<g class="c4-rel-num"><circle cx="640" cy="112" r="9"/><text x="640" y="116">D</text></g>
+<g class="c4-rel-num"><circle cx="280" cy="192" r="9"/><text x="280" y="196">E</text></g>
+<g class="c4-external"><rect x="20" y="220" width="345" height="70" rx="6"/><text class="c4-label" x="192" y="242">A · before the append</text><text class="c4-desc" x="192" y="260">nothing recorded, markers unchanged;</text><text class="c4-desc" x="192" y="276">the next watcher re-detects the change</text></g>
+<g class="c4-external"><rect x="375" y="220" width="345" height="70" rx="6"/><text class="c4-label" x="547" y="242">B · after append, before markers</text><text class="c4-desc" x="547" y="260">row exists; a repeat append is possible,</text><text class="c4-desc" x="547" y="276">dedupe by kind and key at presentation</text></g>
+<g class="c4-external"><rect x="20" y="300" width="345" height="70" rx="6"/><text class="c4-label" x="192" y="322">C · before the reason reaches anyone</text><text class="c4-desc" x="192" y="340">row waits; next non-successor start</text><text class="c4-desc" x="192" y="356">announces once: check: rearm-resurface</text></g>
+<g class="c4-external"><rect x="375" y="300" width="345" height="70" rx="6"/><text class="c4-label" x="547" y="322">D · harness drops the wake</text><text class="c4-desc" x="547" y="340">row waits; the next drain presents it,</text><text class="c4-desc" x="547" y="356">at the latest at session start</text></g>
+<g class="c4-external"><rect x="20" y="380" width="700" height="70" rx="6"/><text class="c4-label" x="370" y="402">E · handling interrupted, turn ends, or session is replaced</text><text class="c4-desc" x="370" y="420">rows stay; the generation is reused across watcher closes so the printed ack stays valid;</text><text class="c4-desc" x="370" y="436">the next drain presents the same rows again and they are handled again</text></g>
+</svg>
+</div>
+<figcaption>The top row runs in the watcher, the bottom row in the supervisor. Recovery of each point is argued in the table below with its evidence.</figcaption>
+</figure>
+
+<h2 id="scenarios">Scenario by scenario</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>What fails</th><th>What survives, and how</th><th>What is lost or repeated</th></tr></thead>
+<tbody>
+<tr><td>The watcher is killed or crashes mid-cycle</td><td>Queued rows, markers, schedules, and the beacon's last mtime are files. The next watcher steals the dead lock after publishing downtime (<code class="cite">bin/fm-wake-lib.sh:1010-1016</code>); its arm-check sees rows and resurfaces them once (<code class="cite">bin/fm-watch.sh:2109-2127</code>). A merged-PR poll that died between receipt publication and file removal is finished at startup (<code class="cite">bin/fm-watch.sh:2234-2242</code>).</td><td>The in-flight <code>SIGNAL_GRACE</code> linger and any not-yet-queued classification are redone; that is safe because detection re-reads signatures. The in-memory event-path memo is re-probed (<code class="cite">bin/fm-watch.sh:305-316</code>).</td></tr>
+<tr><td>The watcher's reason line never reaches the model</td><td>The row is in the queue; the arm wrapper can still report the delivered reason from <code>state/.watch-deliveries.log</code> (<code class="cite">docs/watcher-continuity.md:106-108</code>); failing all else the next drain presents it.</td><td>Nothing, except latency until the next drain.</td></tr>
+<tr><td>The Claude auto-arm owner dies after committing its outcome</td><td>"the durable wake queue retains the underlying event" (<code class="cite">bin/fm-wake-lib.sh:1461-1466</code>).</td><td>The rewake banner; accepted residual, at most one extra continuation turn.</td></tr>
+<tr><td>A handling turn is interrupted before acknowledgement</td><td>Every presented row. A watcher close inside the handling window republishes downtime with the same generation, so the printed <code>WAKE_ACK_REQUIRED</code> command stays valid (<code class="cite">docs/watcher-continuity.md:60-61</code>).</td><td>The handling may be repeated: the contract requires it to be idempotent (<code class="cite">AGENTS.md:433</code>).</td></tr>
+<tr><td>A new wake arrives while an old one is being handled</td><td>It gets a higher sequence and survives the older acknowledgement: "A concurrently appended wake has a higher sequence, remains queued, and keeps the episode pending" (<code class="cite">docs/watcher-continuity.md:65</code>).</td><td>Nothing.</td></tr>
+<tr><td>The supervisor acknowledges with an old command</td><td>Rows through the cutoff are still consumed; the drain names the exact command for the current row or asks for a re-drain (<code class="cite">bin/fm-wake-drain.sh:738-759</code>).</td><td>Nothing.</td></tr>
+<tr><td>The supervisor session is restarted</td><td>Session start takes the lock, then drains the queue first, while locked, including OPEN DECISIONS folded from the status logs rather than the latest line (<code class="cite">bin/fm-session-start.sh:704-750</code>, <code class="cite">AGENTS.md:192</code>). An announced-but-unacknowledged episode is reopened by the next non-successor watcher start "so buried decisions still resurface once" (<code class="cite">docs/watcher-continuity.md:59</code>). A stale session lock left by a dead harness is reclaimed by the Claude auto-arm through <code>bin/fm-lock.sh</code> (<code class="cite">bin/fm-claude-stop-autoarm.sh:151-158</code>).</td><td>Conversation context. Nothing in supervision depends on it: the drain's sections are rebuilt from files.</td></tr>
+<tr><td>Pi replaces the session in-process (<code>/new</code>, <code>/resume</code>, reload)</td><td>Pending actionable closes ride <code>state/extensions/pi-primary-watch/session-replacement-actionable.json</code>; the predecessor arm stays alive until the replacement commits its own (<code class="cite">.pi/extensions/fm-primary-pi-watch.ts:3-14</code>). Branch outcomes are in the durable store and "re-present on the new main session exactly as they do after a crash" (<code class="cite">docs/pi-supervision-branch.md:42</code>).</td><td>The branch conversation itself, by design: a new one opens per main session.</td></tr>
+<tr><td>The away daemon crashes</td><td>The watcher already queued every wake before suppressing it; buffered escalations live in <code>state/.subsuper-escalations</code>; the return gate <code>state/.afk-return-catchup</code> is written before shutdown so a crash "fails closed" (<code class="cite">bin/fm-supervise-daemon.sh:17-22</code>, <code class="cite">bin/fm-afk-return.sh:45-47</code>).</td><td>The daemon process: nothing relaunches it automatically (see <a href="#open">open questions</a>); the turn-end guard keeps blocking because daemon ownership fails (<code class="cite">docs/turnend-guard.md:55-61</code>).</td></tr>
+<tr><td>A worker's agent dies</td><td>Its status log and worktree. The wedge ladder reports the dead record once per incarnation (<code class="cite">bin/fm-watch.sh:1197-1227</code>); an unacknowledged steer to it surfaces once without typing into a dead pane (<code class="cite">bin/fm-watch.sh:419-432</code>).</td><td>Nothing is cleaned up automatically; "retiring, relaunching, or cleaning it up stays with the supervisor" (<code class="cite">docs/architecture.md:55</code>).</td></tr>
+<tr><td>The queue file is damaged</td><td>Structurally valid rows are still presented and acknowledgeable; unusable rows are retired by main and printed verbatim, bounded to 20 (<code class="cite">bin/fm-wake-drain.sh:80-117</code>). An invalid recovery marker is quarantined, not deleted (<code class="cite">bin/fm-wake-lib.sh:798-816</code>).</td><td>A retired row is gone after that one printing; "the queue was their only durable record" (<code class="cite">docs/watcher-continuity.md:85</code>).</td></tr>
+</tbody>
+</table></div>
+
+<h2 id="not-durable">What is deliberately not durable</h2>
+<ul>
+<li><strong>Absorbed wakes.</strong> A benign wake advances its markers and writes only to <code>state/.watch-triage.log</code>, "never relied on, safe to delete" (<code class="cite">AGENTS.md:157</code>). If the absorb was wrong, the heartbeat backstop re-scans every status log past the surfaced offset (<code class="cite">bin/fm-watch.sh:1954-1963</code>), and a stopped worker's static pane surfaces through the staleness backbone.</li>
+<li><strong>Diagnostic ledgers.</strong> The triage log, the cycle log, and the delivery ledger are size-capped and "not a supervision dependency" (<code class="cite">bin/fm-watch-arm.sh:90-92</code>).</li>
+<li><strong>A routine Pi branch note</strong> may be delivered twice when its cursor write fails; it is not lost (<code class="cite">docs/pi-supervision-branch.md:58-59</code>).</li>
+</ul>
+
+<h2 id="open">Open questions</h2>
+<div class="callout unclear"><span class="callout-title">Host reboot</span>
+<p>No supervision document addresses a machine reboot directly. Everything the watcher needs to resume is under <code>state/</code>, and identity-matched locks cannot be satisfied by a recycled pid after boot, so the file-level argument above carries over. Whether a worker's recorded endpoint survives depends on the backend (a tmux server does not survive a reboot), which is <a href="../crew/index.html">Crew</a>'s area; the source here does not settle it.</p></div>
+<div class="callout unclear"><span class="callout-title">Who restarts a dead away daemon</span>
+<p>The daemon survives its own watcher's crashes, but nothing in the scripts read here relaunches the daemon itself. The path back is the model: at session start "If <code>state/.afk</code> is present, load <code>/afk</code>" (<code class="cite">AGENTS.md:254</code>), the digest "reports the posture … so a restart re-enters the posture from the record, not from memory" (<code class="cite">.agents/skills/afk/SKILL.md:59</code>), and <code>bin/fm-afk-launch.sh start</code> is idempotent and first closes "a recorded-but-dead terminal" by id (<code class="cite">bin/fm-afk-launch.sh:50-54</code>). Mid-session, only the turn-end guard's continued blocking signals the loss. How quickly a dead daemon is noticed between turns is therefore not bounded by anything in the source.</p></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

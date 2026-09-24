@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pi supervision branch · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Supervision</p>
+<h1>Pi supervision branch</h1>
+<p class="lede">An alternative shape for the same loop: on a Pi primary, a second conversation inside the same <code>pi</code> process — the supervision branch — handles eligible wakes itself and merges each outcome back into the captain's transcript, so routine fleet traffic never occupies the captain's conversation.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Supervision</a>. Contract owner: <code class="cite">docs/pi-supervision-branch.md</code>; consume side: <code class="cite">docs/watcher-continuity.md:69-98</code>.</p>
+
+<h2 id="shape">What changes and what does not</h2>
+<p>"Fleet supervision on the Pi primary harness runs on a second conversation - the supervision branch - inside the same <code>pi</code> process as the captain's chat" (<code class="cite">docs/pi-supervision-branch.md:8</code>). The watcher, the queue, the drain, and the acknowledgement contract are unchanged; what changes is <em>which conversation</em> receives a wake and runs the drain. It is Pi-only by construction: the branch lives in <code>.pi/extensions/fm-branch-supervision.ts</code>, "which only a Pi primary ever loads", and the bash-side additions "are inert in a home with no branch state" (<code class="cite">docs/pi-supervision-branch.md:16-21</code>). omp, though Pi-derived, is out of scope: "every actionable wake is delivered to this conversation, exactly as on Claude" (<code class="cite">docs/supervision-protocols/omp.md:26</code>).</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 740 600" role="img" aria-labelledby="pb-c-t pb-c-d">
+<title id="pb-c-t">Pi supervision branch components</title>
+<desc id="pb-c-d">Inside one Pi process: the watch extension receives each watcher close and the dispatcher computes which unread queue rows are branch-eligible. Eligible rows are granted to the branch through the grant script under the queue lock. The branch conversation drains and acknowledges only its grant as the branch actor, reports an outcome to the append-only outcome store, and the extension renders a visible transcript entry and opens one processing turn on main for captain-verdict outcomes. Main-only rows stay queued for main's own drain. Leases stop both actors changing the same task at once.</desc>
+<defs><marker id="pb-c-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">One pi process, two conversations</text>
+<g class="c4-legend"><rect class="c4-legend-frame" x="360" y="8" width="370" height="58" rx="6"/><text class="c4-legend-heading" x="372" y="26">Legend</text>
+<g class="c4-container"><rect x="372" y="38" width="28" height="14" rx="3"/></g><text x="406" y="50">Conversation</text>
+<g class="c4-component"><rect x="500" y="38" width="28" height="14" rx="3"/></g><text x="534" y="50">Extension part</text>
+<g class="c4-datastore"><path d="M634,40 a14,3 0 0,0 28,0 a14,3 0 0,0 -28,0 v9 a14,3 0 0,0 28,0 v-9"/></g><text x="668" y="50">Store</text></g>
+<g class="c4-boundary"><rect x="10" y="100" width="720" height="360" rx="8"/><text x="22" y="452">pi process holding state/.lock</text></g>
+<g class="c4-component"><rect x="30" y="120" width="210" height="64" rx="6"/><text class="c4-label" x="135" y="142">Watch extension</text><text class="c4-tech" x="135" y="158">[fm-primary-pi-watch.ts]</text><text class="c4-desc" x="135" y="174">owns the arm child, dispatches</text></g>
+<g class="c4-component"><rect x="265" y="120" width="210" height="64" rx="6"/><text class="c4-label" x="370" y="142">Dispatcher</text><text class="c4-tech" x="370" y="158">[lib/fm-branch-dispatch.ts]</text><text class="c4-desc" x="370" y="174">row eligibility, offer handshake</text></g>
+<g class="c4-component"><rect x="500" y="120" width="210" height="64" rx="6"/><text class="c4-label" x="605" y="142">Branch runtime</text><text class="c4-tech" x="605" y="158">[fm-branch-supervision.ts]</text><text class="c4-desc" x="605" y="174">serialized queue of deliveries</text></g>
+<g class="c4-container"><rect x="30" y="240" width="210" height="80" rx="8"/><text class="c4-label" x="135" y="264">Main conversation</text><text class="c4-tech" x="135" y="280">[captain's chat]</text><text class="c4-desc" x="135" y="296">main-only rows, alarms,</text><text class="c4-desc" x="135" y="310">processing requests</text></g>
+<g class="c4-container"><rect x="500" y="240" width="210" height="80" rx="8"/><text class="c4-label" x="605" y="264">Supervision branch</text><text class="c4-tech" x="605" y="280">[FM_SUPERVISION_ACTOR=branch]</text><text class="c4-desc" x="605" y="296">drains its grant, handles,</text><text class="c4-desc" x="605" y="310">fm_branch_report</text></g>
+<g class="c4-component"><rect x="265" y="370" width="210" height="64" rx="6"/><text class="c4-label" x="370" y="392">Outcome delivery</text><text class="c4-tech" x="370" y="408">[visible entry · fm-branch-process]</text><text class="c4-desc" x="370" y="424">captain rows open a main turn</text></g>
+<g class="c4-datastore"><path d="M30,500 a105,8 0 0,0 210,0 a105,8 0 0,0 -210,0 v50 a105,8 0 0,0 210,0 v-50"/><text class="c4-label" x="135" y="524">Wake queue + grant</text><text class="c4-tech" x="135" y="538">[.wake-queue · .branch-eligible-*]</text><text class="c4-desc" x="135" y="552">per-actor claims</text></g>
+<g class="c4-datastore"><path d="M265,500 a105,8 0 0,0 210,0 a105,8 0 0,0 -210,0 v50 a105,8 0 0,0 210,0 v-50"/><text class="c4-label" x="370" y="524">Outcome store</text><text class="c4-tech" x="370" y="538">[branch-outcomes.jsonl]</text><text class="c4-desc" x="370" y="552">cursor · processed marker</text></g>
+<g class="c4-datastore"><path d="M500,500 a105,8 0 0,0 210,0 a105,8 0 0,0 -210,0 v50 a105,8 0 0,0 210,0 v-50"/><text class="c4-label" x="605" y="524">Task leases</text><text class="c4-tech" x="605" y="538">[state/.lease-&lt;task&gt;]</text><text class="c4-desc" x="605" y="552">main or branch may act</text></g>
+<g class="c4-rel"><path d="M240,152 H263" marker-end="url(#pb-c-arrow)"/></g>
+<g class="c4-rel"><path d="M475,152 H498" marker-end="url(#pb-c-arrow)"/><text class="c4-rel-label" x="487" y="146">offer</text></g>
+<g class="c4-rel"><path d="M605,184 V238" marker-end="url(#pb-c-arrow)"/><text class="c4-rel-label" x="605" y="214">prompt</text></g>
+<g class="c4-rel c4-rel-async"><path d="M135,184 V238" marker-end="url(#pb-c-arrow)"/><text class="c4-rel-label" x="135" y="214">follow-up</text></g>
+<g class="c4-rel"><path d="M300,184 V220 H253 V466 H120 V490" marker-end="url(#pb-c-arrow)"/><text class="c4-rel-label" x="253" y="350">grant</text></g>
+<g class="c4-rel"><path d="M605,320 V350 H440 V368" marker-end="url(#pb-c-arrow)"/><text class="c4-rel-label" x="540" y="344">report</text></g>
+<g class="c4-rel c4-rel-async"><path d="M265,402 H135 V322" marker-end="url(#pb-c-arrow)"/><text class="c4-rel-label" x="200" y="396">processing request</text></g>
+<g class="c4-rel"><path d="M420,434 V490" marker-end="url(#pb-c-arrow)"/></g>
+<g class="c4-rel"><path d="M680,320 V490" marker-end="url(#pb-c-arrow)"/><text class="c4-rel-label" x="680" y="420">claim</text></g>
+<g class="c4-rel"><path d="M500,305 H487 V482 H175 V490" marker-end="url(#pb-c-arrow)"/></g>
+</svg>
+</div>
+<figcaption>The two arrows into the queue are the dispatcher publishing a grant and the branch draining and acknowledging only that grant. Component owners from <code class="cite">docs/pi-supervision-branch.md:23-70</code>. Every accepted path that cannot reach a working branch "rejects its settlement to the watcher, which retains delivery ownership and routes the wake to main as a follow-up" (<code class="cite">docs/pi-supervision-branch.md:45</code>).</figcaption>
+</figure>
+
+<h2 id="eligibility">Which rows the branch may take (attended)</h2>
+<ul>
+<li>Eligible: task-local <code>signal</code> and <code>stale</code> rows that resolve to a known task, plus fleet-wide heartbeat reviews the cheap bash scan already flagged (<code class="cite">docs/pi-supervision-branch.md:9-11</code>).</li>
+<li>Main-only: every <code>check</code> row ("merge-confirmation polls, Relay mentions, credential/auth failures, and every other legitimately main-only class"), and every watcher-failure alarm, "because only main can repair the watcher cycle" (<code class="cite">docs/pi-supervision-branch.md:26</code>).</li>
+<li>Decision-owned: a row whose payload the watcher marked <code>needs-decision:</code>, and a stale row whose task has an open <code>needs-decision</code> or a current <code>captain-held</code> declaration. "Any signal or stale trigger containing a decision-owned task goes wholly to main", and an unread decision keeps later triggers for that task on main until it is read (<code class="cite">docs/pi-supervision-branch.md:28-32</code>).</li>
+<li>Unsafe: "An unresolvable row makes the scan unsafe and returns the whole wake to main" (<code class="cite">docs/pi-supervision-branch.md:11</code>).</li>
+</ul>
+<p>The branch recomputes eligibility immediately before prompting and publishes the exact row set through <code>bin/fm-wake-grant.sh</code>, refused if main already claimed any requested row (<code class="cite">docs/pi-supervision-branch.md:65-69</code>, <code class="cite">docs/watcher-continuity.md:77</code>). <span id="heartbeat"></span>A heartbeat review is all-or-nothing: the branch "takes every branch-ownable unread row or none of them", but a co-present check row no longer defers it to main (<code class="cite">docs/pi-supervision-branch.md:131-143</code>).</p>
+<p>After rows are claimed, "a branch prompt counts as handled only when <code>fm_branch_report</code> appends a durable outcome before that prompt settles"; a provider error or a settled prompt with no report releases the grant back to the watcher (<code class="cite">docs/pi-supervision-branch.md:46</code>). Reports are scoped to the tasks the prompt's rows resolve to, so "a task remembered from an earlier wake cannot become a delivered outcome" (<code class="cite">docs/pi-supervision-branch.md:47</code>).</p>
+
+<h2 id="outcomes">Two-stage filter and outcome delivery</h2>
+<p>"Stage one is unchanged: the bash watcher absorbs everything provably fine at zero token cost. Stage two is the branch's verdict on each handled event": <code>routine</code> becomes a rendered note with no follow-up turn; <code>captain</code> becomes a versioned <code>fm-branch-visible-outcome</code> custom session entry that "persist[s] in the transcript but do[es] not enter model context", with the store sequence as idempotency key (<code class="cite">docs/pi-supervision-branch.md:108-115</code>). Display is only half of it: every unprocessed captain row is handed to main in one hidden <code>fm-branch-process</code> request, and "Main closes it only by calling <code>fm_branch_processed</code> with the highest sequence the request listed"; "an unrelated reply, an empty reply, or a reply that paraphrases the outcome leaves the sequence unprocessed" (<code class="cite">docs/pi-supervision-branch.md:116-124</code>).</p>
+<p>The durable outcome store, <code>bin/fm-branch-outcome.sh</code>, is append-only; "Outcomes are written to the store before delivery to Pi", and a captain row advances the read cursor only after its matching visible entry exists (<code class="cite">docs/pi-supervision-branch.md:55-59</code>). The drain's <code>STATUS OUTCOME BACKSTOP</code> section catches a task whose newest captain-facing event has no covering outcome (<code class="cite">docs/pi-supervision-branch.md:86-96</code>).</p>
+
+<h2 id="context">What the branch knows</h2>
+<ul>
+<li>Main's captain and assistant text is mirrored into the branch as read-only <code>fm-main-mirror</code> messages; tool calls, operational injections, and the branch's own merged notes are not (<code class="cite">docs/pi-supervision-branch.md:100-106</code>). An authorization addressed to main "does not relax the branch's role limits".</li>
+<li>Each main session start opens a new branch conversation, "That keeps the branch reasoning from the current generated prompt and the current main dialog rather than from weeks of accumulated thread" (<code class="cite">docs/pi-supervision-branch.md:38-42</code>).</li>
+<li>The branch system prompt, <code>bin/fm-branch-prompt.sh</code>, is byte-stable per firstmate version for provider prompt caching; "any later dynamic content in the branch prefix silently removes most of the cache benefit" (<code class="cite">docs/pi-supervision-branch.md:145-152</code>).</li>
+</ul>
+
+<h2 id="failure">Failure behaviour</h2>
+<ul>
+<li>Two consecutive provider errors latch the branch broken; main keeps every wake for a five-minute cooldown, then one wake probes, doubling the cooldown up to one hour on each failed probe (<code class="cite">docs/pi-supervision-branch.md:49-52</code>).</li>
+<li>Delivery runs off Pi's render thread through an explicit serialized queue, with generation and lock-ownership rechecks around every await so "a session replaced mid-delivery fails the next recheck rather than acting into the session that replaced it" (<code class="cite">docs/pi-supervision-branch.md:72-84</code>).</li>
+<li>A known residual: a routine note whose cursor write fails after delivery is sent once more, tracked as a follow-up (<code class="cite">docs/pi-supervision-branch.md:58-59</code>).</li>
+<li>Leases (<code class="cite">bin/fm-lease-lib.sh</code>) stop main and branch changing one task at once; the threat model is deliberately "CONFUSED-AGENT-GRADE", not adversarial (<code class="cite">docs/pi-supervision-branch.md:60-62</code>).</li>
+</ul>
+
+<h2 id="postures">Postures on Pi</h2>
+<p>On Pi the away daemon is never launched; "the watcher is the single owner of supervision in both postures, and a leftover <code>state/.afk</code> flag declines nothing" (<code class="cite">docs/pi-supervision-branch.md:156-158</code>). While <code>state/.afk-contract</code> exists (<code class="cite">docs/pi-supervision-branch.md:160-176</code>):</p>
+<ul>
+<li>every actionable row is branch-eligible, including checks, decision-owned rows, and heartbeats; the broken-queue vetoes stay;</li>
+<li>main is parked and reached only for watcher-failure alarms and wakes the branch declines;</li>
+<li>each wake ends with a fixed <code>POSTURE: AWAY</code> tail plus the record's read-back, so the prompt prefix stays byte-stable;</li>
+<li>captain-verdict outcomes accumulate without a processing turn until the record is archived;</li>
+<li>main's standing authority relocates to the branch "and nothing more", only through scripts that opt in while <code>bin/fm-afk-contract.sh validate</code> succeeds: <code>bin/fm-pr-merge.sh</code> merges only a PR green at its live head and refuses <code>--allow-red</code>, <code>bin/fm-spawn.sh</code> dispatches only queued work within the spend cap, <code>bin/fm-send.sh --resolve-key</code> answers pre-answered decisions, and <code>bin/fm-merge-local.sh</code> is never relocated.</li>
+</ul>
+<p>"Being away changes how the captain is informed and what happens at a captain-owned decision point, never firstmate's authority set" (<code class="cite">docs/pi-supervision-branch.md:178-180</code>). Merge authority itself is owned by <a href="../delivery/index.html">Delivery</a>.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Watcher poll loop · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Supervision</p>
+<h1>Watcher poll loop</h1>
+<p class="lede"><code>bin/fm-watch.sh</code> is a bash process that blocks between supervisor turns, classifies every candidate event itself, absorbs the benign majority without spending a model token, and exits with one reason line the moment something needs judgment.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Supervision</a>.</p>
+
+<h2 id="responsibility">Responsibility</h2>
+<p>The watcher is deliberately <em>one-shot</em>: "one actionable reason closes one watcher cycle" (<code class="cite">docs/watcher-continuity.md:3</code>). Its header states the classification contract it keeps: in normal mode it "absorbs benign wakes and keeps blocking; it queues and exits only for actionable wakes" (<code class="cite">bin/fm-watch.sh:2-4</code>). The rationale is cost: "most wakes during a long crew validation are benign (a working: note or turn-end while a pipeline runs, a no-change heartbeat). Rather than wake firstmate's LLM for each, this watcher classifies every wake in bash and ABSORBS the benign majority" (<code class="cite">bin/fm-watch.sh:247-251</code>).</p>
+<p>It does not decide what to do about an event. Deciding is the supervisor's job after <a href="wake-queue.html">the drain</a> presents the durable row. It does not keep itself alive either: <a href="continuity.html">continuity</a> belongs to the layer above it.</p>
+
+<dl class="defs">
+<dt>Owns</dt><dd><code class="cite">bin/fm-watch.sh</code> (2877 lines), plus the delivery half in <code class="cite">bin/fm-push-transition-lib.sh</code> (<code>wake()</code>, the triage log, the native push handler).</dd>
+<dt>Reads</dt><dd><code>state/*.meta</code>, <code>state/*.status</code>, <code>state/*.turn-ended</code>, <code>state/*.check.sh</code> and their trust bindings, the busy-state records, pane captures through the backend adapter, <code>state/.afk</code> and <code>state/.afk-contract</code>, local secondmate homes' <code>state/.wake-queue</code> (read-only).</dd>
+<dt>Writes</dt><dd>The durable queue (through <code>fm_wake_append</code>), <code>state/.last-watcher-beat</code>, <code>state/.watch.lock/</code>, the per-window markers listed in <code class="cite">AGENTS.md:156</code> (<code>.hash-* .count-* .stale-* .stale-since-* .churn-since-* .paused-* .wedge-escalations-* .dead-reported-* .writing-* .waiting-* .seen-* .hb-surfaced-* .last-* .heartbeat-streak</code>), <code>state/.watch-triage.log</code>, <code>state/.watch-deliveries.log</code>.</dd>
+<dt>Called by</dt><dd><code>bin/fm-watch-arm.sh</code> (every harness's arm path), <code>bin/fm-watch-checkpoint.sh</code> (Codex), and <code>bin/fm-supervise-daemon.sh</code> (away mode).</dd>
+</dl>
+
+<h2 id="cycle">The shape of one cycle</h2>
+<p>The order of the loop body is load-bearing. Each step that can produce a wake calls <code>wake()</code>, which prints and exits, so a later step never runs in a cycle an earlier step closed. The code says so explicitly for checks: they are "Evaluated BEFORE the signal scan: wake() exits the cycle, so a check placed after the signal scan would be starved whenever a chatty sibling crewmate keeps producing signals" (<code class="cite">bin/fm-watch.sh:2364-2370</code>).</p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 740 900" role="img" aria-labelledby="w-cyc-t w-cyc-d">
+<title id="w-cyc-t">Order of one watcher cycle</title>
+<desc id="w-cyc-d">Startup runs once. Then each cycle checks self-eviction, touches the beacon, starts detached side work, ticks pending replies and secondmate queue stalls, repairs process-event sources, resurfaces after downtime, scans inactive outcomes, sweeps checks, scans signals, walks panes, runs the heartbeat, then waits one poll or one native event. Nine steps can exit through wake().</desc>
+<defs><marker id="w-cyc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">fm-watch.sh — one cycle, in order</text>
+<g class="c4-container"><rect x="40" y="46" width="320" height="66" rx="8"/><text class="c4-label" x="200" y="70">Startup (once per process)</text><text class="c4-desc" x="200" y="88">validate knobs · take .watch.lock</text><text class="c4-desc" x="200" y="102">recovery arm-check · receipt recovery</text></g>
+<g class="c4-rel"><path d="M200,112 V148" marker-end="url(#w-cyc-arrow)"/></g>
+<g class="c4-component"><rect x="40" y="150" width="320" height="42" rx="6"/><text class="c4-label" x="200" y="168">1 · Self-eviction check</text><text class="c4-desc" x="200" y="184">lock pid ≠ mine → exit 0</text></g>
+<g class="c4-rel"><path d="M200,192 V204" marker-end="url(#w-cyc-arrow)"/></g>
+<g class="c4-component"><rect x="40" y="206" width="320" height="42" rx="6"/><text class="c4-label" x="200" y="224">2 · Touch liveness beacon</text><text class="c4-desc" x="200" y="240">state/.last-watcher-beat</text></g>
+<g class="c4-rel"><path d="M200,248 V260" marker-end="url(#w-cyc-arrow)"/></g>
+<g class="c4-component"><rect x="40" y="262" width="320" height="42" rx="6"/><text class="c4-label" x="200" y="280">3 · Detached side work</text><text class="c4-desc" x="200" y="296">home summary · reconcile requests</text></g>
+<g class="c4-rel"><path d="M200,304 V316" marker-end="url(#w-cyc-arrow)"/></g>
+<g class="c4-component"><rect x="40" y="318" width="320" height="42" rx="6"/><text class="c4-label" x="200" y="336">4 · Pending-reply tick</text><text class="c4-desc" x="200" y="352">secondmate missed-report guards</text></g>
+<g class="c4-rel"><path d="M200,360 V372" marker-end="url(#w-cyc-arrow)"/></g>
+<g class="c4-component"><rect x="40" y="374" width="320" height="42" rx="6"/><text class="c4-label" x="200" y="392">5 · Secondmate queue stall</text><text class="c4-desc" x="200" y="408">read foreign queue, never mutate</text></g>
+<g class="c4-rel"><path d="M200,416 V428" marker-end="url(#w-cyc-arrow)"/></g>
+<g class="c4-rel"><path d="M360,395 H498" marker-end="url(#w-cyc-arrow)"/><text class="c4-rel-label" x="430" y="390">secondmate stall</text></g>
+<g class="c4-component"><rect x="40" y="430" width="320" height="42" rx="6"/><text class="c4-label" x="200" y="448">6 · Process-event sources</text><text class="c4-desc" x="200" y="464">reconcile, surface queued results</text></g>
+<g class="c4-rel"><path d="M200,472 V484" marker-end="url(#w-cyc-arrow)"/></g>
+<g class="c4-rel"><path d="M360,451 H498" marker-end="url(#w-cyc-arrow)"/><text class="c4-rel-label" x="430" y="446">process-event</text></g>
+<g class="c4-component"><rect x="40" y="486" width="320" height="42" rx="6"/><text class="c4-label" x="200" y="504">7 · Resurface after downtime</text><text class="c4-desc" x="200" y="520">recovery marker says rows wait</text></g>
+<g class="c4-rel"><path d="M200,528 V540" marker-end="url(#w-cyc-arrow)"/></g>
+<g class="c4-rel"><path d="M360,507 H498" marker-end="url(#w-cyc-arrow)"/><text class="c4-rel-label" x="430" y="502">rearm-resurface</text></g>
+<g class="c4-component"><rect x="40" y="542" width="320" height="42" rx="6"/><text class="c4-label" x="200" y="560">8 · Inactive-outcome scan</text><text class="c4-desc" x="200" y="576">bin/fm-inactive-reconcile.sh</text></g>
+<g class="c4-rel"><path d="M200,584 V596" marker-end="url(#w-cyc-arrow)"/></g>
+<g class="c4-rel"><path d="M360,563 H498" marker-end="url(#w-cyc-arrow)"/><text class="c4-rel-label" x="430" y="558">inactive-outcome</text></g>
+<g class="c4-component"><rect x="40" y="598" width="320" height="42" rx="6"/><text class="c4-label" x="200" y="616">9 · Check sweep</text><text class="c4-desc" x="200" y="632">when .last-check ≥ CHECK_INTERVAL</text></g>
+<g class="c4-rel"><path d="M200,640 V652" marker-end="url(#w-cyc-arrow)"/></g>
+<g class="c4-rel"><path d="M360,619 H498" marker-end="url(#w-cyc-arrow)"/><text class="c4-rel-label" x="430" y="614">check: &lt;script&gt;</text></g>
+<g class="c4-component"><rect x="40" y="654" width="320" height="42" rx="6"/><text class="c4-label" x="200" y="672">10 · Signal scan and triage</text><text class="c4-desc" x="200" y="688">SIGNAL_GRACE linger, then triage</text></g>
+<g class="c4-rel"><path d="M200,696 V708" marker-end="url(#w-cyc-arrow)"/></g>
+<g class="c4-rel"><path d="M360,675 H498" marker-end="url(#w-cyc-arrow)"/><text class="c4-rel-label" x="430" y="670">signal:</text></g>
+<g class="c4-component"><rect x="40" y="710" width="320" height="42" rx="6"/><text class="c4-label" x="200" y="728">11 · Per-window walk</text><text class="c4-desc" x="200" y="744">inbox ladder · pane staleness</text></g>
+<g class="c4-rel"><path d="M200,752 V764" marker-end="url(#w-cyc-arrow)"/></g>
+<g class="c4-rel"><path d="M360,731 H498" marker-end="url(#w-cyc-arrow)"/><text class="c4-rel-label" x="430" y="726">stale:</text></g>
+<g class="c4-component"><rect x="40" y="766" width="320" height="42" rx="6"/><text class="c4-label" x="200" y="784">12 · Heartbeat</text><text class="c4-desc" x="200" y="800">backed-off fleet scan</text></g>
+<g class="c4-rel"><path d="M200,808 V820" marker-end="url(#w-cyc-arrow)"/></g>
+<g class="c4-rel"><path d="M360,787 H498" marker-end="url(#w-cyc-arrow)"/><text class="c4-rel-label" x="430" y="782">heartbeat</text></g>
+<g class="c4-component"><rect x="40" y="822" width="320" height="42" rx="6"/><text class="c4-label" x="200" y="840">13 · Terminal wait</text><text class="c4-desc" x="200" y="856">sleep POLL or native event wait</text></g>
+<g class="c4-rel"><path d="M360,843 H498" marker-end="url(#w-cyc-arrow)"/><text class="c4-rel-label" x="430" y="838">stale: (push)</text></g>
+<g class="c4-rel"><path d="M40,843 H22 V171 H38" marker-end="url(#w-cyc-arrow)"/><text class="c4-rel-label" x="22" y="520">loop</text></g>
+<g class="c4-component"><rect x="500" y="150" width="220" height="42" rx="6"/><text class="c4-label" x="610" y="168">Stand down</text><text class="c4-desc" x="610" y="184">no reason line, exit 0</text></g>
+<g class="c4-rel"><path d="M360,171 H498" marker-end="url(#w-cyc-arrow)"/></g>
+<g class="c4-container"><rect x="500" y="374" width="220" height="490" rx="8"/><text class="c4-label" x="610" y="590">wake()</text><text class="c4-tech" x="610" y="608">[fm-push-transition-lib.sh]</text><text class="c4-desc" x="610" y="630">ignore HUP/INT/TERM,</text><text class="c4-desc" x="610" y="646">print one reason line,</text><text class="c4-desc" x="610" y="662">record the delivery,</text><text class="c4-desc" x="610" y="678">exit 0: cycle over</text></g>
+</svg>
+</div>
+<figcaption>Every labelled arrow is an exit: one reason line on stdout, then the process ends. Steps 1 to 4 and 13 never wake except where shown. Line references for each step are in the table below.</figcaption>
+</figure>
+
+<div class="table-wrap"><table>
+<thead><tr><th>Step</th><th>What it does and why it sits here</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>Startup</td><td>Refuses to arm if <code>FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS</code> is unusable, because the per-cycle reconcile would otherwise refuse invisibly every cycle "while presenting as supervised"; the refusal is printed as <code>watcher: FAILED - …</code> so the arm wrapper relays it. Then takes the singleton lock, reopens or arms the <a href="wake-queue.html#recovery">recovery marker</a>, installs the EXIT cleanup, records home, script path, and process identity in the lock, and finishes any merged-PR poll retirement a crash left half done.</td><td><code class="cite">bin/fm-watch.sh:2072-2088</code>, <code class="cite">bin/fm-watch.sh:2090-2127</code>, <code class="cite">bin/fm-watch.sh:2219-2242</code></td></tr>
+<tr><td>1</td><td>If the lock no longer names this pid, a second watcher took over; exit quietly so "any duplicate self-resolve[s] within one poll instead of persisting and doubling every wake".</td><td><code class="cite">bin/fm-watch.sh:2297-2305</code></td></tr>
+<tr><td>2</td><td>The beacon every guard reads. Only the watcher touches it, so "no helper process can make a wedged watcher appear healthy".</td><td><code class="cite">bin/fm-watch.sh:2307-2309</code>, <code class="cite">docs/watcher-continuity.md:116</code></td></tr>
+<tr><td>3</td><td>Summary publication and secondmate reconcile requests run detached, because an inline publication "can starve the guard's grace" between two beacon touches.</td><td><code class="cite">bin/fm-watch.sh:2128-2183</code>, <code class="cite">bin/fm-watch.sh:2311-2320</code></td></tr>
+<tr><td>4</td><td>Parent-owned pending-reply reconciliation for marked secondmate requests; failures are ignored.</td><td><code class="cite">bin/fm-watch.sh:2322-2326</code></td></tr>
+<tr><td>5</td><td>A live secondmate endpoint does not prove its own wake loop is alive, so the oldest actionable row of each local mate's queue is watched without locking or consuming it. A frozen position past <code>FM_SECONDMATE_WAKE_STALL_SECS</code> (default 180) while the mate is not in an active turn queues one keyed check per episode.</td><td><code class="cite">bin/fm-watch.sh:726-865</code></td></tr>
+<tr><td>6</td><td>Repairs registered process-to-event sources, then surfaces any durably captured result not yet surfaced, including one published between cycles.</td><td><code class="cite">bin/fm-watch.sh:1734-1800</code>, <code class="cite">bin/fm-watch.sh:2336-2345</code></td></tr>
+<tr><td>7</td><td>If this is not a handling successor and the recovery marker says a queue exists that nobody was told about, wake once with <code>check: rearm-resurface</code>. It runs after step 6 so a process-event result's "richer adapter-owned wake context" wins.</td><td><code class="cite">bin/fm-watch.sh:2279-2294</code>, <code class="cite">bin/fm-watch.sh:2347-2349</code></td></tr>
+<tr><td>8</td><td>A bounded scan for long-inactive terminal outcomes that still lack a durable receipt; silent unless it finds an obligation.</td><td><code class="cite">bin/fm-watch.sh:2351-2362</code></td></tr>
+<tr><td>9</td><td>Runs authenticated <code>state/*.check.sh</code> scripts under <code>FM_CHECK_TIMEOUT</code>. PR polls run through the validated snapshot path, the Relay shim through its byte-identified path, custom checks from hash-validated private snapshots; anything else is rejected without execution.</td><td><code class="cite">bin/fm-watch.sh:2364-2486</code></td></tr>
+<tr><td>10</td><td>Compares every status and turn-ended file against its persisted <code>.seen-*</code> signature; on any change it sleeps <code>SIGNAL_GRACE</code> and rescans so "a crewmate's final status write and the same turn's turn-end hook" coalesce into one wake. Then triage (<a href="wake-kinds.html#signal">signal</a>).</td><td><code class="cite">bin/fm-watch.sh:2488-2611</code></td></tr>
+<tr><td>11</td><td>For each recorded window: the steering-inbox ladder, then the pane-staleness backbone (<a href="#staleness">below</a>).</td><td><code class="cite">bin/fm-watch.sh:2613-2833</code></td></tr>
+<tr><td>12</td><td>Heartbeat with exponential backoff (<a href="#heartbeat">below</a>).</td><td><code class="cite">bin/fm-watch.sh:2835-2872</code></td></tr>
+<tr><td>13</td><td>For herdr homes, a bounded wait on the backend's native transition stream replaces the blind sleep; otherwise <code>sleep POLL</code>.</td><td><code class="cite">bin/fm-watch.sh:1988-2063</code></td></tr>
+</tbody>
+</table></div>
+
+<h2 id="singleton">Singleton lock and refusal to double-arm</h2>
+<p>The lock is a directory-or-symlink lock from <code>bin/fm-wake-lib.sh</code> with dead-owner stealing serialized by a <code>.steal</code> mutex (<code class="cite">bin/fm-wake-lib.sh:933-1031</code>). When the watch lock is stolen from a dead owner, the library publishes downtime to the recovery marker <em>before</em> removing the stale lock (<code class="cite">bin/fm-wake-lib.sh:1010-1016</code>), so a crash of the previous watcher is always visible to the next one.</p>
+<p>A live holder produces one of three outcomes (<code class="cite">bin/fm-watch.sh:2090-2108</code>):</p>
+<ul>
+<li>a stale beacon beyond <code>WATCHER_STALE_GRACE</code>: refuse with "inspect or stop that watcher before re-arming" and exit 1;</li>
+<li>no beacon at all and a lock older than the grace: refuse the same way;</li>
+<li>otherwise print <code>watcher: already running pid=N</code> and exit 0. The arm wrapper never relies on this line; it verifies health itself (<a href="continuity.html">Continuity</a>).</li>
+</ul>
+<p>The grace defaults to <code>max(300, POLL + 60)</code> through <code>fm_poll_derived_grace</code>, because a healthy beacon can legitimately age up to one full poll between touches (<code class="cite">bin/fm-watch.sh:221-229</code>, <code class="cite">bin/fm-wake-lib.sh:107-124</code>).</p>
+
+<h2 id="evidence">Absorb only on positive evidence</h2>
+<p>The single rule behind every triage branch: a wake is silently absorbed only when there is positive evidence that nothing needs the supervisor. The header states it for the no-verb signal and stale path: "a wake is absorbed only when the crew shows it is still working through an actively running no-mistakes step or a backend busy signal … Every other no-verb wake surfaces, so a crew that finishes (or stops and waits) is never silently swallowed" (<code class="cite">bin/fm-watch.sh:5-10</code>).</p>
+<p>The authoritative proof is <code>crew_is_provably_working</code>, which reads one line from <code>bin/fm-crew-state.sh</code> and answers <code>working</code> only for source <code>run-step</code> or <code>pane</code> (<code class="cite">bin/fm-classify-lib.sh:2104-2146</code>). The second absorb class is a declared bounded wait, covered in <a href="wedge-and-pauses.html#declared">Wedges and declared waits</a>. A third, opt-in proof, pane churn for bare turn-ends, exists only in homes that create <code>config/turnend-churn-absorb</code> (<code class="cite">bin/fm-watch.sh:512-563</code>), because some harnesses have no verified busy source and every turn boundary would otherwise wake the supervisor with nothing to act on.</p>
+<p>Absorbing still records something: the suppression marker advances and a line goes to the size-capped <code>state/.watch-triage.log</code>, which "carries no lifecycle semantics" and is "safe to delete" (<code class="cite">docs/watcher-continuity.md:113</code>, <code class="cite">AGENTS.md:157</code>).</p>
+
+<h2 id="staleness">The pane-staleness backbone</h2>
+<p>Layer 1 of detection needs no cooperation from the worker at all: "Two consecutive identical hashes with no busy signature means the crewmate finished, is waiting, or is wedged" (<code class="cite">bin/fm-watch.sh:2613-2617</code>). Per recorded window, each poll:</p>
+<ol>
+<li>captures the last 40 lines through the backend adapter and hashes them with md5 (<code class="cite">bin/fm-watch.sh:2639-2640</code>);</li>
+<li>reads the busy verdict once and reuses it for the whole cycle (<code class="cite">bin/fm-watch.sh:2648-2653</code>);</li>
+<li>on an unchanged hash, increments <code>.count-&lt;key&gt;</code>; at two or more with a non-busy pane the stale triage runs, once per distinct hash (<code>.stale-&lt;key&gt;</code> remembers which hash was classified) (<code class="cite">bin/fm-watch.sh:2654-2781</code>);</li>
+<li>on a changed hash, records it and resets the count, while a busy pane that has gone <code>BUSY_TURN_MAX_SECS</code> without a completed turn is routed to the wedge bound (<code class="cite">bin/fm-watch.sh:2802-2832</code>).</li>
+</ol>
+<p>A secondmate's idle pane is healthy by design, so a mate enters this path only to serve a status-declared wait's bounded recheck (<code class="cite">bin/fm-watch.sh:2629-2638</code>). The per-window marker key is derived in exactly one place, <code>window_key</code>, because "a second copy is how a future change to it silently orphans a window's markers" (<code class="cite">bin/fm-watch.sh:405-417</code>).</p>
+<p>What the stale triage decides for each case (terminal status, provably working, paused, none) is on <a href="wake-kinds.html#stale">Wake kinds</a>; the timer that follows a provably-working stale is on <a href="wedge-and-pauses.html">Wedges</a>.</p>
+
+<h2 id="heartbeat">Heartbeat and its backoff</h2>
+<p>The interval is <code>FM_HEARTBEAT × 2^streak</code>, the streak capped at 12 and the product at <code>FM_HEARTBEAT_MAX</code> (defaults 600 and 7200 seconds) (<code class="cite">bin/fm-watch.sh:2839-2843</code>). A no-change heartbeat increments the streak; <code>wake()</code> increments it for a surfaced heartbeat and resets it to 0 for any other surfaced wake (<code class="cite">bin/fm-push-transition-lib.sh:88-93</code>). In normal mode the heartbeat surfaces only when <code>heartbeat_scan_finds_actionable</code> finds a captain-relevant status event past the position already surfaced — "the fail-safe backstop" for an event the per-wake path absorbed by mistake (<code class="cite">bin/fm-watch.sh:1954-1986</code>).</p>
+<div class="callout unclear"><span class="callout-title">Header and code differ slightly</span>
+<p>The header lists one heartbeat trigger, "fleet-scan backstop found an unsurfaced captain-relevant status" (<code class="cite">bin/fm-watch.sh:113-114</code>). The code has a second: when the scan finds nothing but the surfaced markers cannot be written, it queues and wakes a heartbeat anyway (<code class="cite">bin/fm-watch.sh:2862-2867</code>). This is the fail-toward-waking direction, but the header does not mention it.</p></div>
+
+<h2 id="schedule">Why cadences survive restarts</h2>
+<p>The watcher is relaunched after every actionable wake, so in-memory counters would never reach a threshold on a busy fleet. The check and heartbeat schedules are therefore file mtimes (<code>.last-check</code>, <code>.last-heartbeat</code>): "Check and heartbeat cadence must survive actionable exits and restarts … Persist the schedule as file mtimes instead" (<code class="cite">bin/fm-watch.sh:1695-1704</code>). A missing file reads as age 999999, "due immediately". Signal detection likewise compares against persisted <code>.seen-*</code> signatures rather than a startup timestamp, "so signals that land while no watcher is running are caught by the next one" (<code class="cite">bin/fm-watch.sh:1706-1715</code>).</p>
+
+<h2 id="push">The native event fast path</h2>
+<p>For windows on a push-capable backend (herdr), <code>event_wait_or_sleep</code> waits on the backend's transition stream for up to one poll instead of sleeping. It "only ever SHORTENS latency; it can never drop an escalation (the poll loop is the permanent fail-closed backstop)", and it is a short-lived subprocess of this watcher, not a second watcher (<code class="cite">bin/fm-watch.sh:1988-1998</code>). Secondmate endpoints are excluded, the capability probe is memoized per backend and session, and three consecutive connect failures disable the path for the rest of the process (<code class="cite">bin/fm-watch.sh:305-316</code>, <code class="cite">bin/fm-watch.sh:2044-2062</code>). An actionable transition becomes <code>stale: &lt;window&gt; (herdr: agent &lt;state&gt; - waiting on human, escalated immediately, not via wedge timer)</code> unless the task's last status declares a wait (<code class="cite">bin/fm-push-transition-lib.sh:141-168</code>).</p>
+
+<h2 id="away">Away mode turns the watcher one-shot</h2>
+<p>While <code>state/.afk</code> exists, "the daemon owns triage and this watcher queues and exits on every wake" (<code class="cite">bin/fm-watch.sh:19-20</code>). <code>afk_present</code> short-circuits the absorb branches so "the daemon's digest/injection layer" sees every wake, and the watcher "never runs the costly provably-working read" (<code class="cite">bin/fm-watch.sh:263-265</code>, <code class="cite">bin/fm-watch.sh:318-322</code>). Two exceptions keep the away window quiet: a captain-held pane is never handed over while the away-posture record exists, and a busy pane's crossed turn bound hands the daemon a plain wake once per declaration (<code class="cite">bin/fm-watch.sh:2665-2676</code>, <code class="cite">bin/fm-watch.sh:1385-1430</code>). See <a href="away-and-quiet.html">Away and quiet postures</a>.</p>
+
+<h2 id="knobs">Configuration knobs</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Variable or file</th><th>Default</th><th>Effect</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><code>FM_POLL</code></td><td>15 s</td><td>Seconds between cycles; also the native-event wait budget.</td><td><code class="cite">bin/fm-watch.sh:220</code></td></tr>
+<tr><td><code>FM_WATCHER_STALE_GRACE</code> / <code>FM_GUARD_GRACE</code></td><td>max(300, POLL+60)</td><td>Beacon age at which a live lock holder is refused.</td><td><code class="cite">bin/fm-watch.sh:229</code></td></tr>
+<tr><td><code>FM_HEARTBEAT</code>, <code>FM_HEARTBEAT_MAX</code></td><td>600, 7200 s</td><td>Heartbeat base and backoff cap.</td><td><code class="cite">bin/fm-watch.sh:230-231</code></td></tr>
+<tr><td><code>FM_CHECK_INTERVAL</code>, <code>FM_CHECK_TIMEOUT</code></td><td>300, 30 s</td><td>Check sweep cadence and per-check time limit.</td><td><code class="cite">bin/fm-watch.sh:232-233</code></td></tr>
+<tr><td><code>FM_SIGNAL_GRACE</code></td><td>30 s</td><td>Linger after the first changed signal so trailing signals coalesce.</td><td><code class="cite">bin/fm-watch.sh:238-240</code></td></tr>
+<tr><td><code>FM_STALE_ESCALATE_SECS</code></td><td>240 s</td><td>Idle time before a provably-working stale escalates as a possible wedge.</td><td><code class="cite">bin/fm-watch.sh:266</code></td></tr>
+<tr><td><code>FM_BUSY_TURN_MAX_SECS</code></td><td>3600 s</td><td>How long a busy pane may go without a completed turn or native progress.</td><td><code class="cite">bin/fm-watch.sh:267-281</code></td></tr>
+<tr><td><code>FM_PAUSE_RESURFACE_SECS</code></td><td>14400 s</td><td>Recheck cadence for declared waits and write deferrals.</td><td><code class="cite">bin/fm-watch.sh:300</code>, <code class="cite">bin/fm-classify-lib.sh:106</code></td></tr>
+<tr><td><code>FM_WEDGE_DEMAND_INSPECT_COUNT</code></td><td>3</td><td>Consecutive escalations on one pane before the reason demands deep inspection.</td><td><code class="cite">bin/fm-watch.sh:877</code></td></tr>
+<tr><td><code>FM_SECONDMATE_WAKE_STALL_SECS</code></td><td>180 s</td><td>No-progress interval before a secondmate queue stall is reported.</td><td><code class="cite">bin/fm-watch.sh:287-288</code></td></tr>
+<tr><td><code>FM_EVENT_CAP_FAIL_MAX</code></td><td>3</td><td>Consecutive event-path failures before falling back to pure polling.</td><td><code class="cite">bin/fm-watch.sh:310</code></td></tr>
+<tr><td><code>FM_TURNEND_CHURN_ABSORB_SECS</code> with <code>config/turnend-churn-absorb</code></td><td>900 s, off</td><td>Opt-in bounded pane-churn absorb for bare turn-ends.</td><td><code class="cite">bin/fm-watch.sh:241-243</code>, <code class="cite">bin/fm-watch.sh:565-566</code></td></tr>
+<tr><td><code>config/wedge-defer-parked-gate</code></td><td>off</td><td>Opt-in deferral for a lane parked at a gate awaiting the supervisor's open decision.</td><td><code class="cite">bin/fm-watch.sh:979-988</code></td></tr>
+<tr><td><code>FM_HOME_SUMMARY_INTERVAL</code></td><td>300 s</td><td>Cadence of the detached home-summary refresh.</td><td><code class="cite">bin/fm-watch.sh:234-237</code></td></tr>
+</tbody>
+</table></div>
+
+<h2 id="refuses">What it deliberately refuses to do</h2>
+<ul>
+<li>It never interrupts, signals, or restarts a worker: escalation is "for human inspection only - never an automatic interrupt, signal, or restart of the worker or its tool process" (<code class="cite">bin/fm-watch.sh:75-78</code>).</li>
+<li>It never executes an unauthenticated state check; rejected paths surface as their own <code>check:</code> wake (<code class="cite">bin/fm-watch.sh:108-109</code>, <code class="cite">bin/fm-watch.sh:2476-2481</code>).</li>
+<li>It never consumes or rewrites a secondmate's queue; "the receiving home owns acknowledgement" (<code class="cite">bin/fm-watch.sh:726-732</code>).</li>
+<li>It never double-triages under away mode (<code class="cite">bin/fm-watch.sh:263-265</code>).</li>
+<li>It uses no associative arrays, so it runs on stock macOS Bash 3.2 (<code class="cite">bin/fm-watch.sh:615-618</code>).</li>
+</ul>
+
+<h2 id="failure">Failure behaviour</h2>
+<ul>
+<li>A failed queue append is fatal (<code>fm_wake_append … || exit 1</code> at every call site), so the watcher never reports a wake it could not make durable. The arm wrapper turns the nonzero exit into <code>watcher: FAILED - watcher cycle exited N without an actionable reason</code> (<code class="cite">bin/fm-watch-arm.sh:528-540</code>).</li>
+<li>On any exit, <code>watcher_cleanup</code> stops a running check's process group, removes snapshots, and, if it still owns the lock, publishes downtime to the recovery marker while releasing the lock (<code class="cite">bin/fm-watch.sh:2198-2218</code>).</li>
+<li><code>wake()</code> ignores HUP, INT, and TERM while it prints, so a signal cannot split "reason printed" from "delivery recorded" (<code class="cite">bin/fm-push-transition-lib.sh:94-108</code>).</li>
+<li>Portable <code>stat</code> is chosen once per platform because the GNU/BSD fallback form "silently kills the watcher mid-cycle" under <code>set -u</code> (<code class="cite">bin/fm-watch.sh:202-215</code>).</li>
+</ul>
+
+<h2 id="notes">Findings worth keeping</h2>
+<ul>
+<li>Not every <code>check:</code> reason is appended by the watcher. <code>check: rearm-resurface</code> and <code>check: inactive-outcome</code> are printed only; their rows already exist or are written by <code>bin/fm-inactive-reconcile.sh</code>. The contributions check appends its own rows under the queue lock (<code class="cite">bin/fm-contributions.sh:283-303</code>) and the watcher only prints its <code>contribution-wake:</code> lines (<code class="cite">bin/fm-watch.sh:2419-2437</code>, <code class="cite">bin/fm-watch.sh:2483-2485</code>).</li>
+<li>The inactive-outcome scan is invoked every cycle (<code class="cite">bin/fm-watch.sh:2355</code>), while the session-start comment speaks of "the watcher's separate 900-second cadence" (<code class="cite">bin/fm-session-start.sh:705-708</code>). The two agree: the gate lives inside the scanner, which evaluates "at most once per <code>FM_INACTIVE_RECONCILE_SECS</code> (default 900 …) per home" (<code class="cite">bin/fm-inactive-reconcile.sh:29-30</code>), so the watcher calls it cheaply every poll.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>
