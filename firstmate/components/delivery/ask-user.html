@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ask-user findings · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Delivery</p>
+<h1>Ask-user findings</h1>
+<p class="lede">An ask-user finding is a pipeline finding that the validation run itself marks as owed a human answer; Firstmate routes every one away from the worker that raised it, decides the unambiguous ones itself, and takes only the genuinely contract-changing ones to the captain.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Delivery overview</a>.</p>
+
+<h2 id="problem">The problem it solves</h2>
+<p>A validation pipeline raises findings as it reviews. Most it fixes itself; some it cannot settle and parks at a gate with the action <code>ask-user</code>. If the implementation worker answered those, the same agent that wrote the change would be ruling on whether its own reviewer's objection matters, and the <code>--yes</code> flag would do that silently for every gate at once. Firstmate closes both routes: "The implementation worker never decides or answers its own ask-user finding" <code class="cite">.agents/skills/ask-user-authority/SKILL.md:20-21</code>, and <code>--yes</code> is banned fleet-wide because "answering your own ask-user finding is a hard rule violation" <code class="cite">bin/fm-dod-lib.sh:305-306</code>.</p>
+<p>The opposite failure is just as real: escalating every finding to the captain would turn the pipeline into a stream of interruptions, and reviewer language such as "security" or "required" would quietly widen the task. The policy therefore gives firstmate the authority to decide, with a narrow list of what must still reach the captain.</p>
+
+<h2 id="worker">What the worker does at an ask-user gate</h2>
+<p>A no-mistakes ship brief, and a no-mistakes promotion, carry a fixed escalation block <code class="cite">bin/fm-brief.sh:234-237</code> <code class="cite">bin/fm-promote.sh:179</code>, rendered by <code>fm_ask_user_escalation_block</code> <code class="cite">bin/fm-dod-lib.sh:238-245</code>:</p>
+<ol>
+<li>Write only the ask-user findings, "verbatim and unparaphrased (id, severity, file, line, description, authority)", to <code>data/&lt;id&gt;/nm-&lt;run&gt;-findings.txt</code>.</li>
+<li>Report the whole gate as one event, even for a single finding:
+<pre><code>needs-decision [at=&lt;epoch&gt;] [key=nm-&lt;run&gt;-&lt;step&gt;]: ask-user findings=&lt;id1&gt;,&lt;id2&gt;,... file=data/&lt;id&gt;/nm-&lt;run&gt;-findings.txt</code></pre>
+The status line "only points at the file; it never restates or summarizes a finding's content."</li>
+<li>Stop. When the decision returns, feed it to the gate with <code>no-mistakes axi respond</code> and let the pipeline apply it, rather than routing the question to "the user" or fixing it by hand <code class="cite">bin/fm-dod-lib.sh:302-304</code>.</li>
+</ol>
+<p>The key shape <code>nm-&lt;run&gt;-&lt;step&gt;</code> is load-bearing beyond the brief: the watcher binds an open <code>needs-decision</code> to the run that crew-state reports by matching exactly that shape, which "buys a lane parked at a human-owed gate the long recheck cadence instead of a wedge escalation. A gate escalated under any other key still reads as a suspected wedge" <code class="cite">bin/fm-dod-lib.sh:230-237</code> <code class="cite">bin/fm-watch.sh:1028-1049</code>.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1000 600" role="img" aria-labelledby="au-t au-d">
+<title id="au-t">The ask-user round trip</title>
+<desc id="au-d">The daemon parks at a gate carrying ask-user findings. The worker writes the verbatim findings file and appends a keyed needs-decision line. The watcher wakes the supervisor, which loads ask-user-authority and either decides or escalates to the captain. The supervisor sends the exact decision through fm-send with resolve-key, which also closes the decision record. The worker responds to the gate without --yes and the pipeline continues.</desc>
+<defs><marker id="au-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">An ask-user gate, from finding to respond</text>
+<g class="c4-external"><rect x="20" y="46" width="160" height="54" rx="8"/><text class="c4-label" x="100" y="70">no-mistakes</text><text class="c4-tech" x="100" y="88">[gate]</text></g>
+<g class="c4-container"><rect x="220" y="46" width="160" height="54" rx="8"/><text class="c4-label" x="300" y="70">Worker</text><text class="c4-tech" x="300" y="88">[implementation]</text></g>
+<g class="c4-datastore"><path d="M420,52 a80,7 0 0,0 160,0 a80,7 0 0,0 -160,0 v42 a80,7 0 0,0 160,0 v-42"/><text class="c4-label" x="500" y="76">Status + watcher</text><text class="c4-tech" x="500" y="92">[state/&lt;id&gt;.status]</text></g>
+<g class="c4-container"><rect x="620" y="46" width="160" height="54" rx="8"/><text class="c4-label" x="700" y="70">Supervisor</text><text class="c4-tech" x="700" y="88">[ask-user-authority]</text></g>
+<g class="c4-person"><circle cx="900" cy="40" r="12"/><rect x="820" y="52" width="160" height="48" rx="12"/><text class="c4-label" x="900" y="82">Captain</text></g>
+<g class="c4-rel c4-rel-async"><path d="M100,100 L100,585"/><path d="M300,100 L300,585"/><path d="M500,102 L500,585"/><path d="M700,100 L700,585"/><path d="M900,100 L900,585"/></g>
+<g class="c4-rel"><path d="M100,132 L300,132" marker-end="url(#au-arrow)"/><text class="c4-rel-label" x="200" y="125">gate: ask-user findings</text></g>
+<g class="c4-rel"><path d="M300,158 C 360,158 360,192 300,192" marker-end="url(#au-arrow)"/><text class="c4-rel-label" x="236" y="182">findings.txt, verbatim</text></g>
+<g class="c4-rel"><path d="M300,226 L500,226" marker-end="url(#au-arrow)"/><text class="c4-rel-label" x="400" y="219">needs-decision [key=nm-&lt;run&gt;-&lt;step&gt;]</text></g>
+<g class="c4-rel c4-rel-async"><path d="M500,266 L700,266" marker-end="url(#au-arrow)"/><text class="c4-rel-label" x="600" y="259">signal wake</text></g>
+<g class="c4-rel"><path d="M700,290 C 760,290 760,324 700,324" marker-end="url(#au-arrow)"/><text class="c4-rel-label" x="600" y="314">decide, or escalate?</text></g>
+<g class="c4-rel"><path d="M700,358 L900,358" marker-end="url(#au-arrow)"/><text class="c4-rel-label" x="800" y="351">escalation (5 elements)</text></g>
+<g class="c4-rel"><path d="M900,396 L700,396" marker-end="url(#au-arrow)"/><text class="c4-rel-label" x="800" y="389">decision</text></g>
+<g class="c4-rel"><path d="M700,436 L300,436" marker-end="url(#au-arrow)"/><text class="c4-rel-label" x="500" y="429">fm-send --resolve-key: exact decision + respond command</text></g>
+<g class="c4-rel"><path d="M700,472 L500,472" marker-end="url(#au-arrow)"/><text class="c4-rel-label" x="600" y="465">resolved [key=…]</text></g>
+<g class="c4-rel"><path d="M300,512 L100,512" marker-end="url(#au-arrow)"/><text class="c4-rel-label" x="200" y="505">axi respond (never --yes)</text></g>
+<g class="c4-rel"><path d="M100,552 L300,552" marker-end="url(#au-arrow)"/><text class="c4-rel-label" x="200" y="545">next gate or outcome</text></g>
+</svg>
+</div>
+<figcaption>The captain appears only when the policy says the finding must escalate; for an unambiguous finding the supervisor answers directly and the two captain arrows are skipped.</figcaption>
+</figure>
+
+<h2 id="policy">Who may answer, and on what criteria</h2>
+<p>The <code>ask-user-authority</code> skill is "the single owner of the decision policy for no-mistakes ask-user findings", and "Finding authority is determined by the criteria below, not by <code>yolo</code>" <code class="cite">.agents/skills/ask-user-authority/SKILL.md:15-18</code>. The supervisor must load it before deciding any finding <code class="cite">AGENTS.md:362</code> <code class="cite">AGENTS.md:382</code>. It is agent-only and not user-invocable <code class="cite">.agents/skills/ask-user-authority/SKILL.md:8-10</code>.</p>
+<dl class="defs">
+<dt>Reconstruct the contract</dt>
+<dd>From the brief's <code>## Captain's intent</code>, later captain words, and the <code>## Firstmate spec</code> and steers. "Reviewer language cannot amend that contract" <code class="cite">.agents/skills/ask-user-authority/SKILL.md:25-27</code>.</dd>
+<dt>Measure what Fix commits to</dt>
+<dd>Judge scope by accepted behaviour, not an anticipated file list. The smallest downstream changes that keep behaviour correct, add behavioural tests, or keep documentation accurate stay in scope, as does correcting stale PR or delivery evidence <code class="cite">.agents/skills/ask-user-authority/SKILL.md:28-30</code>.</dd>
+<dt>Firstmate decides</dt>
+<dd>A finding that is unambiguous toward the accepted design: restoring accepted behaviour a bad fix round broke, completing an approved design, or an in-scope correction required by accepted intent, "even when the correction is technically difficult" <code class="cite">.agents/skills/ask-user-authority/SKILL.md:31</code>.</dd>
+<dt>The captain decides</dt>
+<dd>Only genuinely ambiguous findings: a fix that would add a new guarantee, threat model, subsystem, abstraction, compatibility surface, state machine, continuous monitoring, or broader architecture; a product or architecture call intent does not settle; repeated same-theme findings that are "preserving a questionable abstraction rather than closing independent defects"; and every destructive, irreversible, or genuinely security-sensitive choice <code class="cite">.agents/skills/ask-user-authority/SKILL.md:32-36</code>.</dd>
+<dt>Labels are evidence</dt>
+<dd>"Treat labels such as correctness, security, fail-closed, high-risk, or required as evidence about the finding, never as authority to broaden the task" <code class="cite">.agents/skills/ask-user-authority/SKILL.md:37</code>.</dd>
+</dl>
+<p>An escalation to the captain states, in one concise evidence-first message: the original requirement; the proposed expansion; the smallest compliant alternative; the consequences of accepting and declining; and a recommendation with its reason. Reviewer labels and gate output are not relayed "as if they settled the decision" <code class="cite">.agents/skills/ask-user-authority/SKILL.md:39-49</code>. Such findings are on the supervisor's list of things that reach the captain immediately <code class="cite">AGENTS.md:517</code>.</p>
+
+<h2 id="answer">Sending the answer back</h2>
+<p>The supervisor sends "the same worker one exact decision naming the decision key, step, action, affected finding IDs, instructions where needed, and exact response command", passes <code>--resolve-key</code>, requires the matching <code>resolved</code> event, forbids <code>--yes</code>, and requires the worker to process every synchronous return until completion or a genuinely new escalation <code class="cite">AGENTS.md:383-385</code>. <code>--resolve-key</code> makes <code>bin/fm-send.sh</code> itself append <code>resolved [key=&lt;key&gt;]: answered: …</code> to the task's status file, so the open decision closes at answer time and "never depends on the busy worker writing a matching resolved line" <code class="cite">bin/fm-send.sh:154-170</code>. The steering inbox that carries the message is covered on the <a href="../communication/index.html">Communication</a> pages.</p>
+
+<h2 id="away">While the captain is away</h2>
+<p>Away mode does not widen this authority: "Away and quiet mode never expand approval authority for merges, ask-user findings, destructive actions, irreversible actions, or security-sensitive choices" <code class="cite">AGENTS.md:473</code>. The Pi supervision branch, which takes wakes while the captain is away, may answer a decision only with the captain's own pre-answer from the away words or where the ask-user-authority policy lets firstmate decide; "a finding it says to escalate is reported with verdict captain and left for the return" <code class="cite">bin/fm-branch-prompt.sh:113</code>. Meanwhile the worker sits at the gate, and the watcher gives it the long recheck cadence described above.</p>
+
+<h2 id="failures">How it fails</h2>
+<ul>
+<li>A worker that escalates under a non-<code>nm-</code> key is read as a possible wedge rather than a human-owed wait <code class="cite">bin/fm-dod-lib.sh:235-237</code>.</li>
+<li>A worker that answers its own finding, or passes <code>--yes</code>, violates a hard rule; no script can detect it after the fact, because the pipeline accepts the response. The only mechanical defence is that the flag is absent from every instruction the worker receives.</li>
+<li>A send whose resolve note would be refused or truncated fails before sending, and a delivered close that leaves the key open fails loudly <code class="cite">bin/fm-send.sh:166-170</code>.</li>
+</ul>
+<div class="callout unclear"><span class="callout-title">Open question</span>
+<p>The policy says firstmate decides an unambiguous finding, but the source does not record that decision anywhere durable beyond the steer text and the <code>resolved</code> line's capped excerpt. Whether a later reader can reconstruct why firstmate chose Fix or Skip for a given finding is not settled by the code.</p></div>
+
+<h2 id="related">Related</h2>
+<ul>
+<li><a href="validation-pipeline.html">Validation pipeline</a> for gates and the run-step state line.</li>
+<li><a href="../backlog-and-decisions/index.html">Backlog and decisions</a> for how open decisions and captain holds are recorded.</li>
+<li><a href="../supervision/index.html">Supervision</a> for wakes, wedge detection, and away mode.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

@@ -11,12 +11,204 @@
 <div class="layout">
 <nav id="site-nav" aria-label="Site"></nav>
 <main id="main">
-<article>
+<article class="wide">
 <p class="breadcrumb">Components</p>
 <h1>Delivery</h1>
-<p class="lede">Will cover how work lands: the <code>no-mistakes</code>, <code>direct-PR</code>, and <code>local-only</code> delivery modes, <code>yolo</code> merge authority, validation gates, PR checks and merge polling, merge guards and outcomes, clone refresh, and self-update.</p>
-<div class="callout unclear"><span class="callout-title">Stub</span>
-<p>This section is reserved and not yet written. A follow-up task fills it in under <a href="../../AUTHORING.md">the authoring contract</a>. Until then, the <a href="../../c4/containers.html">Level 2 containers page</a> is the entry point for this area.</p></div>
+<p class="lede">How a change gets from a worker's branch into the project, and who is allowed to authorise each step: a delivery mode fixed per task at intake, an optional external validation pipeline, a registered pull request watched to merged, a merge gate that proves every condition live, and a teardown that refuses until the work has provably landed.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. This is a Level 3 (component) view inside the supervisor's operational home; see <a href="../../c4/containers.html">Level 2: Containers</a> for where it sits.</p>
+
+<div class="callout unclear"><span class="callout-title">In flux</span>
+<p>The code defines three delivery modes and treats the <code>no-mistakes</code> validation pipeline as a standard tool, but at least one estate has withdrawn that pipeline and ships <code>direct-PR</code> instead. This section documents the mechanism as the code defines it. Where the code assumes the tool, and what happens when it is absent, is listed on the <a href="validation-pipeline.html#absent">validation pipeline</a> page.</p></div>
+
+<h2 id="shape">The shape in one paragraph</h2>
+<p>Every ship task leaves by exactly one mode: <code>no-mistakes</code> (the pipeline owns review, fixes, tests, docs, push, PR, and CI), <code>direct-PR</code> (the worker pushes and opens a PR itself), or <code>local-only</code> (no remote; firstmate fast-forwards the local default branch) <code class="cite">AGENTS.md:353-355</code>. The mode is resolved by the supervisor at intake from the captain's instruction and the project's registered posture, then passed explicitly to every command that needs it; no command looks it up <code class="cite">AGENTS.md:315-320</code>. Separately from the mode, the task's <code>yolo</code> flag decides only merge authority: off, the captain approves every merge; on, firstmate merges green, in-scope work itself; and no setting ever merges a red PR without the captain naming the waived check <code class="cite">AGENTS.md:357-361</code>. Workers never merge. Firstmate merges only through two guarded entrypoints, <code>bin/fm-pr-merge.sh</code> and <code>bin/fm-merge-local.sh</code> <code class="cite">AGENTS.md:363</code>, and every confirmed merge leaves a durable outcome that drives clone refresh and teardown.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1400 700" role="img" aria-labelledby="dl-t dl-d">
+<title id="dl-t">Delivery components (C4 level 3)</title>
+<desc id="dl-d">Inside one operational home, delivery components are arranged by stage: intake (registry parser), contract (brief scaffold, spawn, scout promotion), prove (validation state reader, ask-user policy), offer (PR registration, merge poll), authorise and land (PR merge gate, merge-authority record, local landing), and after (outcome publisher, teardown, clone refresh). The captain talks to the supervisor agent, which invokes each component. Externally, the worker drives the no-mistakes daemon and the forge; the validation state reader, PR registration, merge poll, and merge gate read the forge or daemon. Data stores are the project registry, task records and briefs, PR poll artifacts, the project clone, and the wake queue. Numbered arrows are keyed to the interactions table below.</desc>
+<defs><marker id="dl-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">Firstmate — Delivery components (Level 3)</text>
+
+<g class="c4-person"><circle cx="100" cy="186" r="14"/><rect x="20" y="200" width="160" height="54" rx="12"/><text class="c4-label" x="100" y="224">Captain</text><text class="c4-desc" x="100" y="242">asks, approves merges</text></g>
+<g class="c4-container"><rect x="20" y="320" width="160" height="80" rx="8"/><text class="c4-label" x="100" y="346">Supervisor agent</text><text class="c4-tech" x="100" y="362">[firstmate, AGENTS.md §7]</text><text class="c4-desc" x="100" y="380">judges; invokes scripts</text></g>
+
+<g class="c4-external"><rect x="610" y="60" width="175" height="70" rx="8"/><text class="c4-label" x="697" y="88">no-mistakes daemon</text><text class="c4-tech" x="697" y="104">[shared, may be absent]</text></g>
+<g class="c4-external"><rect x="805" y="60" width="370" height="70" rx="8"/><text class="c4-label" x="990" y="88">Forge</text><text class="c4-tech" x="990" y="104">[GitHub via gh / gh-axi · GitLab via glab]</text></g>
+<g class="c4-container"><rect x="1195" y="60" width="175" height="70" rx="8"/><text class="c4-label" x="1282" y="88">Worker agent</text><text class="c4-tech" x="1282" y="104">[ship task, fm/&lt;id&gt;]</text></g>
+
+<g class="c4-boundary"><rect x="200" y="160" width="1190" height="520" rx="10"/><text x="212" y="670">Delivery · inside one operational home (FM_HOME)</text></g>
+<g class="c4-boundary"><text x="222" y="186">1 · Intake</text><text x="417" y="186">2 · Contract</text><text x="612" y="186">3 · Prove</text><text x="807" y="186">4 · Offer</text><text x="1002" y="186">5 · Authorise, land</text><text x="1197" y="186">6 · After</text></g>
+
+<g class="c4-component"><rect x="220" y="200" width="175" height="80" rx="8"/><text class="c4-label" x="307" y="226">Registry parser</text><text class="c4-tech" x="307" y="242">[fm-project-mode.sh]</text><text class="c4-desc" x="307" y="260">standing posture</text></g>
+<g class="c4-component"><rect x="415" y="200" width="175" height="80" rx="8"/><text class="c4-label" x="502" y="226">Brief scaffold</text><text class="c4-tech" x="502" y="242">[fm-brief.sh · fm-dod-lib.sh]</text><text class="c4-desc" x="502" y="260">mode-shaped DoD</text></g>
+<g class="c4-component"><rect x="415" y="310" width="175" height="80" rx="8"/><text class="c4-label" x="502" y="336">Spawn</text><text class="c4-tech" x="502" y="352">[fm-spawn.sh]</text><text class="c4-desc" x="502" y="370">--mode --yolo, checked</text></g>
+<g class="c4-component"><rect x="415" y="420" width="175" height="80" rx="8"/><text class="c4-label" x="502" y="446">Scout promotion</text><text class="c4-tech" x="502" y="462">[fm-promote.sh]</text><text class="c4-desc" x="502" y="480">contract decided late</text></g>
+<g class="c4-component"><rect x="610" y="200" width="175" height="80" rx="8"/><text class="c4-label" x="697" y="226">Validation state</text><text class="c4-tech" x="697" y="242">[fm-crew-state · nm-run-lib]</text><text class="c4-desc" x="697" y="260">run step is the truth</text></g>
+<g class="c4-component"><rect x="610" y="310" width="175" height="80" rx="8"/><text class="c4-label" x="697" y="336">Ask-user policy</text><text class="c4-tech" x="697" y="352">[ask-user-authority skill]</text><text class="c4-desc" x="697" y="370">decide or escalate</text></g>
+<g class="c4-component"><rect x="805" y="200" width="175" height="80" rx="8"/><text class="c4-label" x="892" y="226">PR registration</text><text class="c4-tech" x="892" y="242">[fm-pr-check · fm-pr-lib]</text><text class="c4-desc" x="892" y="260">pr=, non-draft, arm</text></g>
+<g class="c4-component"><rect x="805" y="310" width="175" height="80" rx="8"/><text class="c4-label" x="892" y="336">Merge poll</text><text class="c4-tech" x="892" y="352">[fm-pr-poll.sh in fm-watch]</text><text class="c4-desc" x="892" y="370">"merged" or silence</text></g>
+<g class="c4-component"><rect x="1000" y="200" width="175" height="80" rx="8"/><text class="c4-label" x="1087" y="226">PR merge gate</text><text class="c4-tech" x="1087" y="242">[fm-pr-merge.sh]</text><text class="c4-desc" x="1087" y="260">live green at head</text></g>
+<g class="c4-datastore"><path d="M1000,318 a87,8 0 0,0 175,0 a87,8 0 0,0 -175,0 v62 a87,8 0 0,0 175,0 v-62"/><text class="c4-label" x="1087" y="344">Merge authority</text><text class="c4-tech" x="1087" y="360">[state/&lt;id&gt;.merge-authority]</text><text class="c4-desc" x="1087" y="376">away | attended</text></g>
+<g class="c4-component"><rect x="1000" y="420" width="175" height="80" rx="8"/><text class="c4-label" x="1087" y="446">Local landing</text><text class="c4-tech" x="1087" y="462">[fm-merge-local.sh]</text><text class="c4-desc" x="1087" y="480">guarded ff-only</text></g>
+<g class="c4-component"><rect x="1195" y="200" width="175" height="80" rx="8"/><text class="c4-label" x="1282" y="226">Outcome publisher</text><text class="c4-tech" x="1282" y="242">[fm-merge-outcome-lib.sh]</text><text class="c4-desc" x="1282" y="260">role-routed, deduped</text></g>
+<g class="c4-component"><rect x="1195" y="310" width="175" height="80" rx="8"/><text class="c4-label" x="1282" y="336">Teardown</text><text class="c4-tech" x="1282" y="352">[fm-teardown.sh]</text><text class="c4-desc" x="1282" y="370">proves landed first</text></g>
+<g class="c4-component"><rect x="1195" y="420" width="175" height="80" rx="8"/><text class="c4-label" x="1282" y="446">Clone refresh</text><text class="c4-tech" x="1282" y="462">[fm-fleet-sync.sh]</text><text class="c4-desc" x="1282" y="480">ff default, never force</text></g>
+
+<g class="c4-datastore"><path d="M220,568 a87,8 0 0,0 175,0 a87,8 0 0,0 -175,0 v56 a87,8 0 0,0 175,0 v-56"/><text class="c4-label" x="307" y="594">data/projects.md</text><text class="c4-desc" x="307" y="612">[mode +yolo] per project</text></g>
+<g class="c4-datastore"><path d="M415,568 a185,10 0 0,0 370,0 a185,10 0 0,0 -370,0 v56 a185,10 0 0,0 370,0 v-56"/><text class="c4-label" x="600" y="594">Task records</text><text class="c4-desc" x="600" y="612">data/&lt;id&gt;/brief.md · state/&lt;id&gt;.meta (mode= yolo= pr=)</text></g>
+<g class="c4-datastore"><path d="M805,568 a87,8 0 0,0 175,0 a87,8 0 0,0 -175,0 v56 a87,8 0 0,0 175,0 v-56"/><text class="c4-label" x="892" y="594">PR poll artifacts</text><text class="c4-desc" x="892" y="612">.pr-poll · .check.sh · …</text></g>
+<g class="c4-datastore"><path d="M1000,568 a87,8 0 0,0 175,0 a87,8 0 0,0 -175,0 v56 a87,8 0 0,0 175,0 v-56"/><text class="c4-label" x="1087" y="594">Project clone</text><text class="c4-desc" x="1087" y="612">projects/&lt;name&gt;</text></g>
+<g class="c4-datastore"><path d="M1195,568 a87,8 0 0,0 175,0 a87,8 0 0,0 -175,0 v56 a87,8 0 0,0 175,0 v-56"/><text class="c4-label" x="1282" y="594">Wake queue</text><text class="c4-desc" x="1282" y="612">or parent channel</text></g>
+
+<g class="c4-rel"><path d="M100,254 L100,320" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel"><path d="M180,360 L220,360" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel"><path d="M1195,95 L1175,95" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel"><path d="M1282,60 C 1282,40 697,40 697,60" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M697,200 L697,130" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel"><path d="M892,200 L892,130" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M980,340 L990,340 L990,130" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel"><path d="M1040,200 L1040,130" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel"><path d="M892,280 L892,310" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel"><path d="M1087,280 L1087,310" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel"><path d="M980,372 L1000,372" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel"><path d="M1175,240 L1195,240" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel"><path d="M950,310 L950,296 L1225,296 L1225,280" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel"><path d="M1370,240 L1380,240 L1380,596 L1370,596" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel"><path d="M1282,390 L1282,420" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel"><path d="M1087,500 L1087,560" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel"><path d="M1230,500 L1160,562" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel"><path d="M307,280 L307,560" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M395,262 L415,330" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel"><path d="M502,280 L502,310" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel"><path d="M415,372 L405,372 L405,596 L415,596" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel"><path d="M502,500 L502,558" marker-end="url(#dl-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M892,390 L892,560" marker-end="url(#dl-arrow)"/></g>
+
+<g class="c4-rel-num"><circle cx="100" cy="287" r="9"/><text x="100" y="291">1</text></g>
+<g class="c4-rel-num"><circle cx="200" cy="344" r="9"/><text x="200" y="348">2</text></g>
+<g class="c4-rel-num"><circle cx="1185" cy="116" r="9"/><text x="1185" y="120">3</text></g>
+<g class="c4-rel-num"><circle cx="990" cy="45" r="9"/><text x="990" y="49">4</text></g>
+<g class="c4-rel-num"><circle cx="697" cy="165" r="9"/><text x="697" y="169">5</text></g>
+<g class="c4-rel-num"><circle cx="892" cy="165" r="9"/><text x="892" y="169">6</text></g>
+<g class="c4-rel-num"><circle cx="990" cy="230" r="9"/><text x="990" y="234">7</text></g>
+<g class="c4-rel-num"><circle cx="1040" cy="165" r="9"/><text x="1040" y="169">8</text></g>
+<g class="c4-rel-num"><circle cx="874" cy="295" r="9"/><text x="874" y="299">9</text></g>
+<g class="c4-rel-num"><circle cx="1105" cy="305" r="9"/><text x="1105" y="309">10</text></g>
+<g class="c4-rel-num"><circle cx="990" cy="388" r="9"/><text x="990" y="392">11</text></g>
+<g class="c4-rel-num"><circle cx="1185" cy="224" r="9"/><text x="1185" y="228">12</text></g>
+<g class="c4-rel-num"><circle cx="1150" cy="296" r="9"/><text x="1150" y="300">13</text></g>
+<g class="c4-rel-num"><circle cx="1380" cy="420" r="9"/><text x="1380" y="424">14</text></g>
+<g class="c4-rel-num"><circle cx="1300" cy="405" r="9"/><text x="1300" y="409">15</text></g>
+<g class="c4-rel-num"><circle cx="1105" cy="530" r="9"/><text x="1105" y="534">16</text></g>
+<g class="c4-rel-num"><circle cx="1206" cy="530" r="9"/><text x="1206" y="534">17</text></g>
+<g class="c4-rel-num"><circle cx="307" cy="420" r="9"/><text x="307" y="424">18</text></g>
+<g class="c4-rel-num"><circle cx="385" cy="300" r="9"/><text x="385" y="304">19</text></g>
+<g class="c4-rel-num"><circle cx="484" cy="295" r="9"/><text x="484" y="299">20</text></g>
+<g class="c4-rel-num"><circle cx="405" cy="480" r="9"/><text x="405" y="484">21</text></g>
+<g class="c4-rel-num"><circle cx="520" cy="530" r="9"/><text x="520" y="534">22</text></g>
+<g class="c4-rel-num"><circle cx="910" cy="475" r="9"/><text x="910" y="479">23</text></g>
+
+<g class="c4-legend">
+<rect class="c4-legend-frame" x="20" y="440" width="160" height="200" rx="6"/>
+<text class="c4-legend-heading" x="32" y="460">Legend</text>
+<g class="c4-person"><rect x="32" y="472" width="32" height="14" rx="7"/></g><text x="72" y="484">Person</text>
+<g class="c4-container"><rect x="32" y="494" width="32" height="14" rx="3"/></g><text x="72" y="506">Agent</text>
+<g class="c4-component"><rect x="32" y="516" width="32" height="14" rx="3"/></g><text x="72" y="528">Component</text>
+<g class="c4-datastore"><path d="M32,541 a16,3 0 0,0 32,0 a16,3 0 0,0 -32,0 v9 a16,3 0 0,0 32,0 v-9"/></g><text x="72" y="550">Data store</text>
+<g class="c4-external"><rect x="32" y="562" width="32" height="14" rx="3"/></g><text x="72" y="574">External</text>
+<g class="c4-rel"><path d="M32,592 L64,592"/></g><text x="72" y="596">Calls / writes</text>
+<g class="c4-rel c4-rel-async"><path d="M32,614 L64,614"/></g><text x="72" y="618">Reads / polls</text>
+</g>
+</svg>
+</div>
+<figcaption>Level 3. Columns are delivery stages, left to right. Numbers key into the <a href="#interactions">interactions table</a>. Every component is invoked by the supervisor agent (arrow 2) unless an arrow says otherwise; workers reach firstmate only through status lines and PRs.</figcaption>
+</figure>
+
+<h2 id="interactions">Interactions</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>#</th><th>From → to</th><th>What happens</th><th>Source</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Captain → supervisor</td><td>Asks for work; approves each merge unless the task's <code>yolo</code> is on</td><td><code class="cite">AGENTS.md:358</code></td></tr>
+<tr><td>2</td><td>Supervisor → every component</td><td>Resolves mode at intake and runs each script; never edits projects directly</td><td><code class="cite">AGENTS.md:315-320</code> <code class="cite">AGENTS.md:363</code></td></tr>
+<tr><td>3</td><td>Worker → forge</td><td><code>direct-PR</code>: pushes <code>fm/&lt;id&gt;</code> and opens a non-draft PR with <code>gh-axi</code></td><td><code class="cite">bin/fm-dod-lib.sh:250-262</code></td></tr>
+<tr><td>4</td><td>Worker → no-mistakes</td><td>Drives <code>axi run</code> and <code>axi respond</code>; never <code>--yes</code>; the pipeline pushes and opens the PR</td><td><code class="cite">AGENTS.md:369-370</code> <code class="cite">bin/fm-dod-lib.sh:283-310</code></td></tr>
+<tr><td>5</td><td>Validation state → no-mistakes</td><td>Reads <code>axi status</code>, the overview, the ledger, and <code>daemon status</code>, read-only</td><td><code class="cite">bin/fm-crew-state.sh:855-857</code></td></tr>
+<tr><td>6</td><td>PR registration → forge</td><td>Reads draft state and head commit (GitHub)</td><td><code class="cite">bin/fm-pr-check.sh:71-99</code></td></tr>
+<tr><td>7</td><td>Merge poll → forge</td><td>Reads merged state every check interval; silent on error</td><td><code class="cite">bin/fm-pr-poll.sh:2-6</code></td></tr>
+<tr><td>8</td><td>Merge gate → forge</td><td>Live read of every pre-merge condition, then a merge bound to the verified head</td><td><code class="cite">bin/fm-pr-merge.sh:11-21</code></td></tr>
+<tr><td>9</td><td>PR registration → merge poll</td><td>Publishes the sidecar, byte-static check, and registration record</td><td><code class="cite">bin/fm-pr-check.sh:120-168</code></td></tr>
+<tr><td>10</td><td>Merge gate → merge authority</td><td>Persists <code>away</code> or <code>attended</code> once the forge accepted the merge</td><td><code class="cite">bin/fm-merge-authority-lib.sh:4-13</code></td></tr>
+<tr><td>11</td><td>Merge poll → merge authority</td><td>On merged, reads a matching record, else records the landing as <code>external</code></td><td><code class="cite">bin/fm-watch.sh:2439-2459</code></td></tr>
+<tr><td>12</td><td>Merge gate → outcome publisher</td><td>Publishes the outcome with origin <code>self</code></td><td><code class="cite">bin/fm-pr-merge.sh:1232-1244</code></td></tr>
+<tr><td>13</td><td>Merge poll → outcome publisher</td><td>Publishes the outcome with origin <code>poll</code>; a duplicate is absorbed</td><td><code class="cite">bin/fm-watch.sh:2447-2466</code></td></tr>
+<tr><td>14</td><td>Outcome publisher → wake queue</td><td>Main home: <code>check: merge landed: …</code>; secondmate: parent channel first</td><td><code class="cite">bin/fm-merge-outcome-lib.sh:79-107</code></td></tr>
+<tr><td>15</td><td>Teardown → clone refresh</td><td>After a PR-based ship task's teardown, <code>fm-fleet-sync.sh &lt;project&gt;</code></td><td><code class="cite">bin/fm-teardown.sh:3701-3703</code></td></tr>
+<tr><td>16</td><td>Local landing → project clone</td><td><code>git merge --ff-only fm/&lt;id&gt;</code> after every guard</td><td><code class="cite">bin/fm-merge-local.sh:132-138</code></td></tr>
+<tr><td>17</td><td>Clone refresh → project clone</td><td>Fast-forwards the default branch to origin, or reports <code>STUCK:</code></td><td><code class="cite">bin/fm-fleet-sync.sh:2-13</code></td></tr>
+<tr><td>18</td><td>Registry parser → registry</td><td>Parses <code>[&lt;mode&gt; +yolo]</code>; falls back to <code>no-mistakes off</code></td><td><code class="cite">bin/fm-project-mode.sh:14-36</code></td></tr>
+<tr><td>19</td><td>Registry parser → spawn</td><td>Advisory deviation notice only (<code>--raw</code>)</td><td><code class="cite">bin/fm-spawn.sh:2794-2804</code></td></tr>
+<tr><td>20</td><td>Brief scaffold → spawn</td><td>The <code>Delivery contract: mode=</code> line the spawn checks</td><td><code class="cite">bin/fm-spawn.sh:2782-2792</code></td></tr>
+<tr><td>21</td><td>Spawn → task records</td><td>Records <code>mode=</code>, <code>yolo=</code></td><td><code class="cite">bin/fm-spawn.sh:4468-4469</code></td></tr>
+<tr><td>22</td><td>Promotion → task records</td><td>Rewrites <code>kind=ship mode= yolo=</code>, writes ship instructions</td><td><code class="cite">bin/fm-promote.sh:261-265</code></td></tr>
+<tr><td>23</td><td>Merge poll → poll artifacts</td><td>The watcher snapshots and validates them before each run</td><td><code class="cite">bin/fm-watch.sh:2388-2406</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="pages">Pages in this section</h2>
+<ul class="cards">
+<li><a href="modes-and-posture.html"><strong>Delivery modes and project posture</strong><span>The three modes, the conditional policy, the registry and its parser, and why every command is told the mode rather than looking it up.</span></a></li>
+<li><a href="validation-pipeline.html"><strong>Validation pipeline</strong><span>How a worker drives no-mistakes, the gates it parks at, judging state from the run step, and where the code assumes the tool.</span></a></li>
+<li><a href="ask-user.html"><strong>Ask-user findings</strong><span>The escalation format, who may answer, the decide-or-escalate criteria, and the answer round trip.</span></a></li>
+<li><a href="pull-requests.html"><strong>Pull request flow</strong><span>The non-draft ready signal, PR registration, the canonical identity, and the byte-static merge poll.</span></a></li>
+<li><a href="merge-authority.html"><strong>Merge authority and the PR merge gate</strong><span>Who may authorise each step, every check before a merge, red-merge waivers, away posture, authority records, and outcome publication.</span></a></li>
+<li><a href="local-landing.html"><strong>Local landing</strong><span>The guarded fast-forward for local-only tasks and what it deliberately does not do.</span></a></li>
+<li><a href="after-merge.html"><strong>After the merge</strong><span>Merge detection, clone refresh, teardown's landed-work proof, and landing changes to Firstmate itself.</span></a></li>
+<li><a href="end-to-end.html"><strong>Delivery end to end</strong><span>One realistic ship traced through every component, with how each variant differs.</span></a></li>
+</ul>
+
+<h2 id="guarantees">What the area guarantees, and what it refuses</h2>
+<ul>
+<li><strong>No inferred delivery.</strong> Ship briefs, spawns, and promotions refuse to run without an explicit legal mode, and a spawn refuses a brief whose recorded mode disagrees <a href="modes-and-posture.html#carried">(details)</a>.</li>
+<li><strong>No self-answered findings.</strong> The worker that raised an ask-user finding never answers it, and <code>--yes</code> is banned <a href="ask-user.html">(details)</a>.</li>
+<li><strong>No state from liveness.</strong> Validation is judged from the pipeline's attributed run step, never from a pane, the last status line, or a raw run record <a href="validation-pipeline.html#state">(details)</a>.</li>
+<li><strong>No merge that cannot be proved.</strong> The merge gate reads every condition live, binds the merge to the head it verified, and reports a merge as landed only after reading it back <a href="merge-authority.html#gate">(details)</a>.</li>
+<li><strong>No silent landing.</strong> Every confirmed PR merge publishes one durable, role-routed outcome, at least once <a href="merge-authority.html#outcome">(details)</a>. Local landings are the exception <a href="local-landing.html#findings">(details)</a>.</li>
+<li><strong>No teardown of unlanded work.</strong> Teardown proves landing, including after squash merges, and refuses otherwise <a href="after-merge.html#teardown">(details)</a>.</li>
+</ul>
+
+<h2 id="judgment">What is left to judgment</h2>
+<p>Several delivery decisions are enforced only by the supervisor contract, not by code. They are worth knowing because a Guildmaster designer might choose to mechanise them:</p>
+<ul>
+<li>Classifying a <code>no-mistakes-prod-only</code> task's surface <code class="cite">AGENTS.md:318</code>.</li>
+<li>Whether a merge is authorised: no merge script reads <code>yolo</code> <a href="merge-authority.html#who">(details)</a>.</li>
+<li>Which merge the captain's away words meant <code class="cite">bin/fm-pr-merge.sh:73-78</code>.</li>
+<li>Whether an ask-user finding expands the contract <code class="cite">.agents/skills/ask-user-authority/SKILL.md:31-37</code>.</li>
+<li>Reporting a local landing to the captain <code class="cite">AGENTS.md:364</code>.</li>
+</ul>
+
+<h2 id="files">Files this area owns</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>File</th><th>Role</th></tr></thead>
+<tbody>
+<tr><td><code>bin/fm-project-mode.sh</code></td><td>Registry parser for mechanical consumers</td></tr>
+<tr><td><code>bin/fm-dod-lib.sh</code></td><td>Single owner of each mode's definition of done, rule 1, the <code>--intent</code> contract, and the ask-user block</td></tr>
+<tr><td><code>bin/fm-crew-state.sh</code>, <code>bin/fm-nm-run-lib.sh</code></td><td>Current state from the attributed run step</td></tr>
+<tr><td><code>.agents/skills/ask-user-authority/</code></td><td>Ask-user decision policy</td></tr>
+<tr><td><code>bin/fm-pr-check.sh</code>, <code>bin/fm-pr-lib.sh</code>, <code>bin/fm-pr-poll.sh</code></td><td>PR registration, identity, artifacts, merge poll</td></tr>
+<tr><td><code>bin/fm-pr-merge.sh</code></td><td>Guarded PR/MR merge</td></tr>
+<tr><td><code>bin/fm-merge-local.sh</code></td><td>Guarded local fast-forward</td></tr>
+<tr><td><code>bin/fm-merge-authority-lib.sh</code>, <code>bin/fm-merge-outcome-lib.sh</code></td><td>Merge-authority records and outcome publication</td></tr>
+<tr><td><code>bin/fm-review-diff.sh</code></td><td>PR-aware diff for review</td></tr>
+<tr><td><code>.no-mistakes.yaml</code>, <code>bin/fm-gate-refuse-lib.sh</code></td><td>The pipeline's authority boundary when validating Firstmate itself</td></tr>
+</tbody>
+</table>
+</div>
+<p>Shared with other areas and only summarised here: <code>bin/fm-brief.sh</code> and <code>bin/fm-spawn.sh</code> (<a href="../prompts-and-skills/index.html">Prompts and skills</a>, <a href="../crew/index.html">Crew</a>), <code>bin/fm-watch.sh</code> (<a href="../supervision/index.html">Supervision</a>), <code>bin/fm-teardown.sh</code> (<a href="../crew/index.html">Crew</a>), <code>bin/fm-captain-hold.sh</code> (<a href="../backlog-and-decisions/index.html">Backlog and decisions</a>), <code>bin/fm-send.sh</code> (<a href="../communication/index.html">Communication</a>), and <code>bin/fm-fleet-sync.sh</code> and self-update (<a href="../persistence/index.html">Persistence</a>, <a href="../remote/index.html">Remote</a>).</p>
 </article>
 </main>
 </div>

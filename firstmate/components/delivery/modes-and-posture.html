@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delivery modes and project posture · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Delivery</p>
+<h1>Delivery modes and project posture</h1>
+<p class="lede">Every ship task leaves by exactly one of three delivery modes, chosen per task at intake and written into the brief, the spawn, and the task record, so that nothing downstream ever has to guess how a change is meant to land.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Delivery overview</a>.</p>
+
+<h2 id="modes">The three modes</h2>
+<p>The supervisor contract names three delivery paths and one shared rule for all of them: after the path's own work, each "waits for the configured merge authority" <code class="cite">AGENTS.md:351-355</code>. The mode decides what the worker does before that wait. It does not decide who may merge; that is the separate <code>yolo</code> axis described below.</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Mode</th><th>What the worker does</th><th>Worker's ready line</th><th>Who lands it</th></tr></thead>
+<tbody>
+<tr><td><code>no-mistakes</code></td><td>Implements and commits, reports done, then on firstmate's instruction runs <code>/no-mistakes</code>, which owns review, fixes, tests, documentation, push, PR, and CI <code class="cite">AGENTS.md:347</code></td><td><code>done [at=&lt;epoch&gt;]: PR &lt;url&gt; checks green</code> <code class="cite">bin/fm-dod-lib.sh:310</code></td><td>Firstmate through <code>bin/fm-pr-merge.sh</code>, once merge authority exists</td></tr>
+<tr><td><code>direct-PR</code></td><td>Implements, commits, pushes its <code>fm/&lt;id&gt;</code> branch, opens a non-draft PR with <code>gh-axi</code>; no pipeline <code class="cite">bin/fm-dod-lib.sh:250-262</code></td><td><code>done [at=&lt;epoch&gt;]: PR &lt;url&gt;</code> <code class="cite">bin/fm-dod-lib.sh:259</code></td><td>Firstmate through <code>bin/fm-pr-merge.sh</code></td></tr>
+<tr><td><code>local-only</code></td><td>Implements and commits on <code>fm/&lt;id&gt;</code>, never pushes or opens a PR, keeps the branch a fast-forward of the default branch <code class="cite">bin/fm-dod-lib.sh:264-273</code></td><td><code>done [at=&lt;epoch&gt;]: ready in branch fm/&lt;id&gt;</code> <code class="cite">bin/fm-dod-lib.sh:271</code></td><td>Firstmate through <code>bin/fm-merge-local.sh</code>, a guarded fast-forward (<a href="local-landing.html">Local landing</a>)</td></tr>
+</tbody>
+</table>
+</div>
+<p>The first safety rule of the brief also changes with the mode <code class="cite">bin/fm-dod-lib.sh:62-81</code>: a <code>direct-PR</code> worker may push only its own <code>fm/&lt;id&gt;</code> branch; a <code>local-only</code> worker may push nowhere and open no PR; a <code>no-mistakes</code> worker may not push to the default branch. All three forbid the worker from merging. A no-mistakes brief also gets a setup step that runs <code>no-mistakes doctor</code> and, if the repository is not initialised in the worktree, <code>no-mistakes init</code> <code class="cite">bin/fm-brief.sh:480-491</code>.</p>
+<p>Notice that a <code>no-mistakes</code> worker reports <em>two</em> done lines. The first, <code>done: {summary}</code>, only says the implementation is committed; the definition of done then says "Firstmate will then instruct you to run /no-mistakes" <code class="cite">bin/fm-dod-lib.sh:280-281</code>, and the supervisor triggers validation "on the same worker after its implementation commit" <code class="cite">AGENTS.md:368</code>. The second done line, with <code>checks green</code>, is the PR-ready signal. The <a href="validation-pipeline.html">validation pipeline</a> page follows the run in between.</p>
+
+<h3 id="prod-only">The conditional policy: <code>no-mistakes-prod-only</code></h3>
+<p>A fourth word can appear in the registry but never on a task. <code>no-mistakes-prod-only</code> "is a conditional policy rather than one flat mode": internal-only tooling, automation, contributor or operator process, and release or submission work ships <code>direct-PR</code>, while product-facing, mixed, and uncertain work ships <code>no-mistakes</code> <code class="cite">.agents/skills/project-management/SKILL.md:44</code>. The supervisor applies that classification to each task at intake and must "never infer internal-only from file location or project name" <code class="cite">AGENTS.md:318</code>. Registering the policy is a one-time choice and does not itself classify any change <code class="cite">.agents/skills/project-management/SKILL.md:49</code>.</p>
+<p>Every command that consumes a task mode refuses the policy word outright, with the same message: "no-mistakes-prod-only is a registry policy, not a task mode; classify this task's surface and resolve it to no-mistakes or direct-PR at intake" (<code class="cite">bin/fm-brief.sh:184-186</code>, <code class="cite">bin/fm-spawn.sh:767-770</code>, and the same case in <code class="cite">bin/fm-promote.sh:80-94</code>).</p>
+
+<h3 id="yolo">Mode and <code>yolo</code> are orthogonal</h3>
+<p>"Delivery mode and <code>yolo</code> are orthogonal. <code>yolo</code> governs merge authority only" <code class="cite">AGENTS.md:357-358</code>. With it off, the captain approves every PR merge and every local-only landing; with it on, firstmate merges green, in-scope work itself. The worker is never told its task's <code>yolo</code> value: <code>bin/fm-brief.sh</code> has no <code>--yolo</code> flag, because "the worker never owns merge decisions, so yolo is a spawn-time and firstmate-side input only" <code class="cite">bin/fm-brief.sh:57-58</code>. What <code>yolo</code> does and does not allow is on the <a href="merge-authority.html">merge authority</a> page.</p>
+
+<h2 id="registry">The project registry and its parser</h2>
+<p>Each project's <em>standing</em> posture lives on its line in the home's private registry, <code>data/projects.md</code> <code class="cite">AGENTS.md:97</code>. The registry is the captain's default for the project's work, "rather than any task's answer" <code class="cite">.agents/skills/project-management/SKILL.md:38</code>. Its one mechanical parser is <code>bin/fm-project-mode.sh</code>.</p>
+<h3 id="registry-format">Line format</h3>
+<pre><code>- &lt;name&gt; - &lt;desc&gt; (added &lt;date&gt;)                 -&gt; no-mistakes off   (legacy default)
+- &lt;name&gt; [&lt;mode&gt;] - &lt;desc&gt; (added &lt;date&gt;)          -&gt; &lt;mode&gt; off
+- &lt;name&gt; [&lt;mode&gt; +yolo] - &lt;desc&gt; (added &lt;date&gt;)    -&gt; &lt;mode&gt; on</code></pre>
+<p>That grammar is quoted from the script header <code class="cite">bin/fm-project-mode.sh:14-17</code>. The parser matches the first line whose first two fields are <code>-</code> and the project name, reads a bracketed annotation if the third field opens one, takes the first non-<code>+yolo</code> word as the mode, and sets <code>yolo</code> on when any word is <code>+yolo</code> <code class="cite">bin/fm-project-mode.sh:59-72</code>. It prints two words, <code>&lt;mode&gt; &lt;yolo&gt;</code>.</p>
+<h3 id="registry-fallbacks">What it guarantees when the registry is wrong</h3>
+<p>The parser never fails closed into "no gate". A missing registry, a project not listed, and an unknown mode word each print a warning to standard error and answer <code>no-mistakes off</code>, "so a typo never silently drops the gate" <code class="cite">bin/fm-project-mode.sh:35-36</code> <code class="cite">bin/fm-project-mode.sh:52-56</code> <code class="cite">bin/fm-project-mode.sh:74-85</code>. An unrecognised <code>yolo</code> token cannot occur through the grammar, but any value other than <code>on</code> or <code>off</code> is forced to <code>off</code> <code class="cite">bin/fm-project-mode.sh:86</code>.</p>
+<p>The conditional policy maps to its most rigorous leg, <code>no-mistakes</code>, "so sync, seeding, and init treat such a project as the remote-backed pipeline project it is". Only <code>--raw</code> returns the annotation unmapped, for a caller that must tell the policy apart from a flat mode <code class="cite">bin/fm-project-mode.sh:23-33</code> <code class="cite">bin/fm-project-mode.sh:87-91</code>.</p>
+<h3 id="registry-consumers">Mechanical consumers only</h3>
+<p>The header is explicit that this answers "what posture did the captain register for this project", "never 'how does this task ship'" <code class="cite">bin/fm-project-mode.sh:6-9</code>. Its callers are the ones that have no task in hand:</p>
+<ul>
+<li><code>bin/fm-fleet-sync.sh</code> skips a <code>local-only</code> clone when refreshing project clones <code class="cite">bin/fm-fleet-sync.sh:327-331</code>.</li>
+<li><code>bin/fm-home-seed.sh</code> refuses to route a <code>local-only</code> project to a secondmate ("secondmate routes support only no-mistakes and direct-PR projects") and runs <code>no-mistakes init</code> and <code>no-mistakes doctor</code> for a newly created <code>no-mistakes</code> clone <code class="cite">bin/fm-home-seed.sh:460-470</code> <code class="cite">bin/fm-home-seed.sh:709-730</code>.</li>
+<li><code>bin/fm-spawn.sh</code> reads it with <code>--raw</code> only to print an advisory deviation notice (below) <code class="cite">bin/fm-spawn.sh:2799-2803</code>.</li>
+</ul>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1000 560" role="img" aria-labelledby="dm-t dm-d">
+<title id="dm-t">How a ship task's delivery contract is resolved and carried</title>
+<desc id="dm-d">The captain's current instruction and the registry's standing posture feed the supervisor's intake judgment. Intake records the result in the backlog note and passes the mode to fm-brief.sh, and mode plus yolo to fm-spawn.sh or fm-promote.sh. The brief carries a Delivery contract line that the spawn checks. Spawn and promotion write mode and yolo into the task record, which later scripts read. The registry parser feeds only mechanical consumers and the spawn's deviation notice.</desc>
+<defs><marker id="dm-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">Resolving and carrying a task's delivery contract</text>
+<g class="c4-person">
+<circle cx="130" cy="62" r="16"/>
+<rect x="40" y="76" width="180" height="64" rx="14"/>
+<text class="c4-label" x="130" y="102">Captain</text>
+<text class="c4-desc" x="130" y="120">current explicit instruction</text>
+</g>
+<g class="c4-datastore">
+<path d="M40,196 a90,9 0 0,0 180,0 a90,9 0 0,0 -180,0 v58 a90,9 0 0,0 180,0 v-58"/>
+<text class="c4-label" x="130" y="222">data/projects.md</text>
+<text class="c4-desc" x="130" y="240">standing posture</text>
+</g>
+<g class="c4-container">
+<rect x="290" y="130" width="200" height="90" rx="8"/>
+<text class="c4-label" x="390" y="158">Intake judgment</text>
+<text class="c4-tech" x="390" y="174">[supervisor agent, AGENTS.md §7]</text>
+<text class="c4-desc" x="390" y="192">resolves mode and yolo;</text>
+<text class="c4-desc" x="390" y="206">classifies prod-only surface</text>
+</g>
+<g class="c4-datastore">
+<path d="M290,48 a100,9 0 0,0 200,0 a100,9 0 0,0 -200,0 v44 a100,9 0 0,0 200,0 v-44"/>
+<text class="c4-label" x="390" y="72">Backlog item note</text>
+<text class="c4-desc" x="390" y="88">mode, yolo, deviation reason</text>
+</g>
+<g class="c4-component">
+<rect x="560" y="40" width="200" height="80" rx="8"/>
+<text class="c4-label" x="660" y="66">Brief scaffold</text>
+<text class="c4-tech" x="660" y="82">[fm-brief.sh · fm-dod-lib.sh]</text>
+<text class="c4-desc" x="660" y="100">--mode shapes rules and DoD</text>
+</g>
+<g class="c4-component">
+<rect x="560" y="180" width="200" height="80" rx="8"/>
+<text class="c4-label" x="660" y="206">Spawn</text>
+<text class="c4-tech" x="660" y="222">[fm-spawn.sh]</text>
+<text class="c4-desc" x="660" y="240">--mode --yolo, closed set</text>
+</g>
+<g class="c4-component">
+<rect x="560" y="310" width="200" height="80" rx="8"/>
+<text class="c4-label" x="660" y="336">Scout promotion</text>
+<text class="c4-tech" x="660" y="352">[fm-promote.sh]</text>
+<text class="c4-desc" x="660" y="370">decides the contract late</text>
+</g>
+<g class="c4-datastore">
+<path d="M820,50 a80,9 0 0,0 160,0 a80,9 0 0,0 -160,0 v56 a80,9 0 0,0 160,0 v-56"/>
+<text class="c4-label" x="900" y="76">data/&lt;id&gt;/brief.md</text>
+<text class="c4-desc" x="900" y="94">Delivery contract: mode=</text>
+</g>
+<g class="c4-datastore">
+<path d="M820,190 a80,9 0 0,0 160,0 a80,9 0 0,0 -160,0 v56 a80,9 0 0,0 160,0 v-56"/>
+<text class="c4-label" x="900" y="216">state/&lt;id&gt;.meta</text>
+<text class="c4-desc" x="900" y="234">kind= mode= yolo=</text>
+</g>
+<g class="c4-component">
+<rect x="820" y="330" width="160" height="80" rx="8"/>
+<text class="c4-label" x="900" y="356">Record readers</text>
+<text class="c4-tech" x="900" y="372">[pr-check · merge-local</text>
+<text class="c4-tech" x="900" y="386">· teardown · snapshot]</text>
+</g>
+<g class="c4-component">
+<rect x="40" y="330" width="180" height="80" rx="8"/>
+<text class="c4-label" x="130" y="356">Registry parser</text>
+<text class="c4-tech" x="130" y="372">[fm-project-mode.sh]</text>
+<text class="c4-desc" x="130" y="390">prints "&lt;mode&gt; &lt;yolo&gt;"</text>
+</g>
+<g class="c4-component">
+<rect x="40" y="460" width="180" height="80" rx="8"/>
+<text class="c4-label" x="130" y="486">Mechanical consumers</text>
+<text class="c4-tech" x="130" y="502">[fm-fleet-sync · fm-home-seed]</text>
+<text class="c4-desc" x="130" y="520">skip, refuse, init</text>
+</g>
+<g class="c4-rel"><path d="M220,110 L290,150" marker-end="url(#dm-arrow)"/><text class="c4-rel-label" x="252" y="118">wins</text></g>
+<g class="c4-rel"><path d="M220,220 L290,196" marker-end="url(#dm-arrow)"/><text class="c4-rel-label" x="255" y="222">default</text></g>
+<g class="c4-rel"><path d="M390,130 L390,101" marker-end="url(#dm-arrow)"/><text class="c4-rel-label" x="428" y="120">records</text></g>
+<g class="c4-rel"><path d="M490,150 L560,90" marker-end="url(#dm-arrow)"/><text class="c4-rel-label" x="520" y="112">--mode</text></g>
+<g class="c4-rel"><path d="M490,190 L560,215" marker-end="url(#dm-arrow)"/><text class="c4-rel-label" x="528" y="220">--mode --yolo</text></g>
+<g class="c4-rel"><path d="M470,220 L580,310" marker-end="url(#dm-arrow)"/><text class="c4-rel-label" x="598" y="294">--mode --yolo</text></g>
+<g class="c4-rel"><path d="M760,78 L820,78" marker-end="url(#dm-arrow)"/><text class="c4-rel-label" x="790" y="70">writes</text></g>
+<g class="c4-rel"><path d="M740,180 L850,113" marker-end="url(#dm-arrow)"/><text class="c4-rel-label" x="800" y="162">reads; mismatch refuses</text></g>
+<g class="c4-rel"><path d="M760,222 L820,222" marker-end="url(#dm-arrow)"/><text class="c4-rel-label" x="790" y="214">writes</text></g>
+<g class="c4-rel"><path d="M760,350 L850,255" marker-end="url(#dm-arrow)"/><text class="c4-rel-label" x="810" y="300">rewrites</text></g>
+<g class="c4-rel"><path d="M900,262 L900,330" marker-end="url(#dm-arrow)"/><text class="c4-rel-label" x="930" y="300">read</text></g>
+<g class="c4-rel"><path d="M130,264 L130,330" marker-end="url(#dm-arrow)"/><text class="c4-rel-label" x="160" y="300">parses</text></g>
+<g class="c4-rel"><path d="M130,410 L130,460" marker-end="url(#dm-arrow)"/><text class="c4-rel-label" x="160" y="440">feeds</text></g>
+<g class="c4-rel c4-rel-async"><path d="M220,360 L560,240" marker-end="url(#dm-arrow)"/><text class="c4-rel-label" x="400" y="302">--raw: deviation notice only</text></g>
+<g class="c4-legend">
+<rect class="c4-legend-frame" x="560" y="430" width="240" height="116" rx="6"/>
+<text class="c4-legend-heading" x="572" y="450">Legend</text>
+<g class="c4-person"><rect x="572" y="460" width="32" height="14" rx="7"/></g><text x="614" y="472">Person</text>
+<g class="c4-container"><rect x="572" y="482" width="32" height="14" rx="3"/></g><text x="614" y="494">Agent</text>
+<g class="c4-component"><rect x="690" y="460" width="32" height="14" rx="3"/></g><text x="732" y="472">Script</text>
+<g class="c4-datastore"><path d="M690,485 a16,3 0 0,0 32,0 a16,3 0 0,0 -32,0 v9 a16,3 0 0,0 32,0 v-9"/></g><text x="732" y="494">Record</text>
+<g class="c4-rel"><path d="M572,516 L604,516"/></g><text x="614" y="520">Passes or writes</text>
+<g class="c4-rel c4-rel-async"><path d="M572,534 L604,534"/></g><text x="614" y="538">Advisory only</text>
+</g>
+</svg>
+</div>
+<figcaption>The mode travels by explicit arguments and by one fixed line in the brief. The registry parser never decides a task's mode; its only link to a live task is the advisory notice.</figcaption>
+</figure>
+
+<h2 id="intake">Resolution at intake</h2>
+<p>The whole rule is six sentences in the supervisor contract <code class="cite">AGENTS.md:315-320</code>:</p>
+<ol>
+<li>Resolve every ship task's concrete mode and <code>yolo</code> posture at intake.</li>
+<li>Pass the mode explicitly to the brief, and both values to the spawn and any scout promotion; "each command refuses to guess the values it consumes".</li>
+<li>A current explicit captain instruction wins; otherwise the registry entry is the standing posture, "and dropping below its rigor needs a reason you can state".</li>
+<li>On a <code>no-mistakes-prod-only</code> project, classify the task's surface as above.</li>
+<li>An unregistered project or absent registry resolves to <code>no-mistakes</code> with <code>yolo</code> off, and the registration gap goes to the captain.</li>
+<li>Record the mode, the <code>yolo</code> posture, and a one-line reason for any deviation in the backlog item note.</li>
+</ol>
+<p>This is judgment, not code: no script performs step 3 or 4. The scripts only make sure the result of that judgment is supplied, is one of the legal values, and stays consistent everywhere it is copied.</p>
+
+<h2 id="carried">How the decision is carried, and why nothing infers it</h2>
+<dl class="defs">
+<dt>The brief</dt>
+<dd><code>bin/fm-brief.sh &lt;id&gt; &lt;repo&gt; --mode &lt;mode&gt;</code> is required for a ship brief and refused for a scout or secondmate brief <code class="cite">bin/fm-brief.sh:175-191</code>. The header states that the script "never reads" the registry <code class="cite">bin/fm-brief.sh:41-43</code>. The mode selects the Setup step, rule 1, and the definition of done, all rendered from <code>bin/fm-dod-lib.sh</code> <code class="cite">bin/fm-brief.sh:475-493</code>. The rendered block opens with the fixed line <code>Delivery contract: mode=&lt;mode&gt;</code> <code class="cite">bin/fm-dod-lib.sh:11-12</code>. An include file that tries to carry its own such line is refused, because the mode is "a per-task --mode decision" <code class="cite">bin/fm-brief.sh:214-216</code>.</dd>
+<dt>The spawn</dt>
+<dd><code>--mode</code> and <code>--yolo</code> are "REQUIRED for every ship spawn and refused on --scout and --secondmate spawns" <code class="cite">bin/fm-spawn.sh:7-8</code>; both are closed-set validated <code class="cite">bin/fm-spawn.sh:752-790</code>. Before any endpoint exists, the spawn reads the brief's <code>Delivery contract</code> line and refuses a mismatch with "delivery mismatch for &lt;id&gt;: the brief says mode=… but this spawn passed --mode …" <code class="cite">bin/fm-spawn.sh:2782-2792</code>. A brief older than that line only warns and launches on the flag. The spawn then records <code>mode=</code> and <code>yolo=</code> in the task record <code class="cite">bin/fm-spawn.sh:4468-4469</code> and prints them on its success line <code class="cite">bin/fm-spawn.sh:381-383</code>.</dd>
+<dt>The deviation notice</dt>
+<dd>The spawn ranks modes <code>no-mistakes</code> 3, <code>direct-PR</code> 2, <code>local-only</code> 1 <code class="cite">bin/fm-spawn.sh:2772-2779</code>. If the task's mode ranks below the registered one, it prints "notice: &lt;id&gt; ships mode=… while the standing posture for &lt;project&gt; is … - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state", and continues. A registered <code>no-mistakes-prod-only</code> is excluded, because "both of its legs are legitimate classifications" <code class="cite">bin/fm-spawn.sh:2794-2804</code>.</dd>
+<dt>Relaunch</dt>
+<dd>A <code>--relaunch</code> reuses the recorded mode and <code>yolo</code>; passing either flag is refused <code class="cite">bin/fm-spawn.sh:743-750</code>.</dd>
+<dt>Promotion</dt>
+<dd>A scout records no delivery posture, "so promotion is where this task's delivery contract is decided" <code class="cite">bin/fm-promote.sh:21-26</code>. <code>bin/fm-promote.sh &lt;id&gt; --mode … --yolo …</code> requires both, renders the same definition of done from <code>bin/fm-dod-lib.sh</code> into <code>data/&lt;id&gt;/ship-instructions.md</code>, appends it to the brief for future relaunches, and rewrites <code>kind=</code>, <code>mode=</code>, <code>yolo=</code> in the record <code class="cite">bin/fm-promote.sh:1-14</code> <code class="cite">bin/fm-promote.sh:261-265</code>. The single renderer exists because "a promoted no-mistakes worker that never received the ask-user escalation rule or the <code>--yes</code> ban is the exact delivery hole this single owner exists to close" <code class="cite">bin/fm-dod-lib.sh:2-7</code>.</dd>
+</dl>
+<p>The reason for all this explicitness is stated in each header in slightly different words: the registry is "the captain's standing posture as context, not as this task's answer, so a spawn never looks the mode up" <code class="cite">bin/fm-spawn.sh:9-11</code>, and the brief/spawn agreement exists so "the worker's instructions and the recorded task delivery cannot drift apart" <code class="cite">bin/fm-spawn.sh:12-14</code>. A task that silently inherited its mode from a registry line could change delivery when the registry changed under it, and a brief whose definition of done disagreed with the recorded mode would have the worker stop at one gate while firstmate waited at another.</p>
+
+<h2 id="posture-at-add">Choosing a project's posture</h2>
+<p>The <code>project-management</code> skill owns the choice when a project is added <code class="cite">.agents/skills/project-management/SKILL.md:36-53</code>. A newly added or created remote-backed project defaults to <code>no-mistakes-prod-only</code> when the captain says nothing; a project with no remote defaults to <code>local-only</code>. Existing lines "are never migrated or reinterpreted, so a legacy entry with no bracket stays <code>no-mistakes</code>". The <code>+yolo</code> flag defaults off for every project and is enabled "only on the captain's explicit instruction". A <code>no-mistakes</code> or <code>no-mistakes-prod-only</code> project needs an <code>origin</code> remote and must run <code>no-mistakes init &amp;&amp; no-mistakes doctor</code>; a <code>direct-PR</code> project needs <code>origin</code> but no initialisation; a <code>local-only</code> project may have no remote <code class="cite">.agents/skills/project-management/SKILL.md:57-61</code> <code class="cite">.agents/skills/project-management/SKILL.md:75-81</code>. Per <code class="cite">AGENTS.md:267</code>, <code>local-only</code> work also stays in the main home rather than being routed to a secondmate.</p>
+
+<h2 id="failures">Failure behaviour</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Situation</th><th>What happens</th><th>Source</th></tr></thead>
+<tbody>
+<tr><td>Ship brief or spawn without <code>--mode</code></td><td>Refused, pointing at intake and the registry</td><td><code class="cite">bin/fm-brief.sh:178-181</code> <code class="cite">bin/fm-spawn.sh:757-760</code></td></tr>
+<tr><td>Ship spawn without <code>--yolo</code></td><td>Refused: "it is this task's merge authority, not a project lookup"</td><td><code class="cite">bin/fm-spawn.sh:761-764</code></td></tr>
+<tr><td><code>--mode no-mistakes-prod-only</code></td><td>Refused everywhere</td><td><code class="cite">bin/fm-spawn.sh:767-770</code></td></tr>
+<tr><td><code>--mode</code> on a scout or secondmate</td><td>Refused</td><td><code class="cite">bin/fm-spawn.sh:784-791</code></td></tr>
+<tr><td>Brief line disagrees with spawn flag</td><td>Refused before any endpoint exists</td><td><code class="cite">bin/fm-spawn.sh:2790-2792</code></td></tr>
+<tr><td>Task mode below registered rigor</td><td>Notice only; spawn continues</td><td><code class="cite">bin/fm-spawn.sh:2799-2803</code></td></tr>
+<tr><td>Registry missing, project missing, mode unknown</td><td>Parser warns and answers <code>no-mistakes off</code></td><td><code class="cite">bin/fm-project-mode.sh:52-85</code></td></tr>
+<tr><td>Task record has no <code>mode=</code> at teardown</td><td>Teardown treats it as <code>no-mistakes</code></td><td><code class="cite">bin/fm-teardown.sh:1071-1072</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="findings">Observations</h2>
+<ul>
+<li>The spawn looks the registry up by the basename of the project directory it was given <code class="cite">bin/fm-spawn.sh:2786</code>, while fleet sync uses the clone's label. A clone whose directory name differs from its registry name reads as unregistered, which answers <code>no-mistakes</code> and so can produce a deviation notice for a correctly classified task. The notice is advisory, so the effect is noise rather than a wrong landing.</li>
+<li>Two scripts decide the same "is this local-only" question from different sources. Teardown skips the post-teardown clone refresh from the <em>task</em> record's mode <code class="cite">bin/fm-teardown.sh:3701-3703</code>; fleet sync skips from the <em>registry</em> <code class="cite">bin/fm-fleet-sync.sh:327-331</code>. They agree whenever the task mode matches the registry, and the source does not say which should win when they differ.</li>
+</ul>
+
+<h2 id="related">Related</h2>
+<ul>
+<li><a href="../prompts-and-skills/index.html">Prompts and skills</a> for the rest of the brief scaffold and the launch-brief overlay.</li>
+<li><a href="../crew/index.html">Crew</a> for spawn, relaunch, and scout promotion as lifecycle operations.</li>
+<li><a href="../persistence/index.html">Persistence</a> for the task record and the registry as files.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

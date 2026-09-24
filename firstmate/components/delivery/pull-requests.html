@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pull request flow · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Delivery</p>
+<h1>Pull request flow</h1>
+<p class="lede">When a PR-based task is ready, firstmate registers its PR against the task, which records a validated canonical identity and arms a byte-static merge poll that the watcher runs until the forge reports the PR merged.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Delivery overview</a>.</p>
+
+<h2 id="ready">The ready signal and the non-draft requirement</h2>
+<p>The two PR-based modes signal readiness differently: "<code>no-mistakes</code> reports <code>done [at=&lt;epoch&gt;]: PR &lt;url&gt; checks green</code> after CI is green, while <code>direct-PR</code> reports <code>done [at=&lt;epoch&gt;]: PR &lt;url&gt;</code> after opening the PR, each only for a non-draft PR" <code class="cite">AGENTS.md:394</code>.</p>
+<p>The non-draft rule exists because "a draft cannot be merged, so a done report on one leaves the merge unasked" <code class="cite">bin/fm-dod-lib.sh:258</code>. Both PR-based definitions of done make the worker read the PR back from the forge before reporting (<code>gh pr view &lt;url&gt; --json isDraft</code> must print <code>false</code>), mark a draft ready with <code>gh-axi pr ready</code>, and declare <code>paused: {why the draft is held}</code> instead of done when a draft is kept on purpose <code class="cite">bin/fm-dod-lib.sh:13-16</code> <code class="cite">bin/fm-dod-lib.sh:256-261</code> <code class="cite">bin/fm-dod-lib.sh:308-311</code>. The rule is enforced twice more on firstmate's side: <code>bin/fm-pr-check.sh</code> refuses to arm monitoring on a draft, and <code>bin/fm-pr-merge.sh</code> refuses to merge one. Both read draft state through the one function <code>fm_pr_json_draft_state</code>, which prints <code>true</code>, <code>false</code>, or nothing; the check refuses only on <code>true</code>, the merge proceeds only on <code>false</code> <code class="cite">bin/fm-pr-lib.sh:219-229</code>.</p>
+<p>The supervisor then runs <code>bin/fm-pr-check.sh &lt;id&gt; &lt;PR url&gt;</code> "with the URL copied from that ready signal", and tells the captain the full <code>https://</code> URL copied from the ready line or the task's <code>pr=</code> record, never one assembled from memory <code class="cite">AGENTS.md:395-396</code> <code class="cite">AGENTS.md:529</code>.</p>
+
+<h2 id="identity">The canonical PR identity</h2>
+<p><code>bin/fm-pr-lib.sh</code> is the shared record, validation, and atomic-artifact library for merge polling. Its stored identity is provider-tagged: provider, url, host, path, number. On GitHub the path is <code>owner/repository</code>; on GitLab it is the whole nested group path, and the host is part of the identity because GitLab is often self-hosted. "Every consumer re-derives the identity from the stored URL and refuses any record whose parts do not reconstruct that exact URL" <code class="cite">bin/fm-pr-lib.sh:1-18</code>.</p>
+<p>Two URL shapes are accepted, strictly and per provider <code class="cite">bin/fm-pr-lib.sh:163-211</code>:</p>
+<pre><code>https://github.com/&lt;owner&gt;/&lt;repo&gt;/pull/&lt;n&gt;
+https://&lt;host&gt;/&lt;group&gt;/…/&lt;project&gt;/-/merge_requests/&lt;n&gt;</code></pre>
+<p>GitHub owners follow GitHub's username rules (no leading, trailing, or double hyphen) and repositories may not be <code>.</code> or <code>..</code>; GitLab hosts and namespaces get their own validators rather than "a loosened GitHub rule". Anything else, including a PR number in place of a URL, is refused with the deliberately uninformative "invalid PR check request" and exit status 2 <code class="cite">bin/fm-pr-check.sh:31-40</code>.</p>
+
+<h2 id="check">What <code>bin/fm-pr-check.sh</code> does</h2>
+<p>Its header: "Record a PR-ready task: store one validated canonical pr=&lt;url&gt; and the forge's exact pr_head=&lt;sha&gt; when available, then atomically arm a static merge poll" <code class="cite">bin/fm-pr-check.sh:2-3</code>. In order:</p>
+<ol>
+<li>Validate the task id and URL; require <code>state/&lt;id&gt;.meta</code> to be a regular, non-symlinked, single-link file <code class="cite">bin/fm-pr-check.sh:37-52</code>.</li>
+<li>Finish any interrupted merged-poll retirement for this task before publishing a replacement <code class="cite">bin/fm-pr-check.sh:54-60</code>.</li>
+<li>For a GitLab URL, refuse when <code>glab</code> is not on <code>PATH</code>: the poll is silent on every error, so without the CLI a watch "would be indistinguishable from a merge request that is never merged" <code class="cite">bin/fm-pr-check.sh:62-69</code>.</li>
+<li>For a GitHub URL, when <code>gh</code> and <code>jq</code> exist, refuse a positively draft PR and arm nothing. An unreadable draft state does not refuse <code class="cite">bin/fm-pr-check.sh:71-79</code>.</li>
+<li>For GitHub, read the head commit with <code>gh pr view --json headRefOid</code> and keep it only if it is a full 40- or 64-hex SHA. GitLab records no <code>pr_head</code>, since plain <code>glab</code> exposes it only inside JSON "which would need a JSON processor firstmate does not require"; every consumer treats it as optional <code class="cite">bin/fm-pr-check.sh:83-99</code>.</li>
+<li>Prepare the poll artifacts in temporary files <code class="cite">bin/fm-pr-check.sh:120-121</code>.</li>
+<li>Under the task's metadata lock, rewrite the record with every old <code>pr=</code>/<code>pr_head=</code> line dropped and the new ones appended, as a <code>0600</code> file on the state device, re-parse its identity before and after the atomic <code>mv</code>, and refuse any mismatch <code class="cite">bin/fm-pr-check.sh:123-155</code>.</li>
+<li>Under a per-task publish lock, publish the prepared poll generation <code class="cite">bin/fm-pr-check.sh:157-168</code>.</li>
+<li>Arm the separate contributions observer when <code>jq</code> exists, reporting "coverage is unconfirmed" otherwise <code class="cite">bin/fm-pr-check.sh:169-177</code>.</li>
+<li>In a secondmate home, publish <code>done [key=child-pr-&lt;id&gt;]: child &lt;id&gt; PR ready: &lt;url&gt; mode=… yolo=…</code> on the parent channel; a main home has no channel and this is a no-op <code class="cite">bin/fm-pr-check.sh:178-195</code>.</li>
+<li>Print <code>armed: state/&lt;id&gt;.check.sh</code>.</li>
+</ol>
+<p><code>bin/fm-pr-merge.sh</code> also records through this script before merging, with <code>FM_PR_CHECK_MERGE=1</code> so the draft refusal is skipped in favour of the merge's own authoritative one <code class="cite">bin/fm-pr-check.sh:14-15</code>. That is why a PR can be merged even when no ready line ever arrived: the merge itself arms the poll that later detects its landing.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1000 520" role="img" aria-labelledby="pr-t pr-d">
+<title id="pr-t">PR registration artifacts and the merge poll</title>
+<desc id="pr-d">fm-pr-check.sh validates the URL through fm-pr-lib.sh, reads draft state and head from the forge, rewrites pr= and pr_head= into the task record, and publishes three poll artifacts: the data sidecar, the byte-static check file, and a registration record. Every check interval the watcher snapshots and validates those artifacts, runs the repository copy of fm-pr-poll.sh with the validated identity, and on a merged answer hands off to outcome publication and a retirement receipt.</desc>
+<defs><marker id="pr-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">Registering a PR and polling it to merged</text>
+<g class="c4-container"><rect x="20" y="60" width="190" height="70" rx="8"/><text class="c4-label" x="115" y="88">Supervisor agent</text><text class="c4-desc" x="115" y="108">copies URL from ready line</text></g>
+<g class="c4-component"><rect x="270" y="60" width="200" height="70" rx="8"/><text class="c4-label" x="370" y="88">PR registration</text><text class="c4-tech" x="370" y="104">[fm-pr-check.sh]</text></g>
+<g class="c4-component"><rect x="270" y="190" width="200" height="70" rx="8"/><text class="c4-label" x="370" y="218">Identity and artifacts</text><text class="c4-tech" x="370" y="234">[fm-pr-lib.sh]</text></g>
+<g class="c4-external"><rect x="780" y="60" width="200" height="70" rx="8"/><text class="c4-label" x="880" y="88">Forge CLI</text><text class="c4-tech" x="880" y="104">[gh · glab]</text></g>
+<g class="c4-datastore"><path d="M540,66 a90,8 0 0,0 180,0 a90,8 0 0,0 -180,0 v52 a90,8 0 0,0 180,0 v-52"/><text class="c4-label" x="630" y="92">state/&lt;id&gt;.meta</text><text class="c4-desc" x="630" y="110">pr= · pr_head=</text></g>
+<g class="c4-datastore"><path d="M540,196 a90,8 0 0,0 180,0 a90,8 0 0,0 -180,0 v52 a90,8 0 0,0 180,0 v-52"/><text class="c4-label" x="630" y="222">&lt;id&gt;.pr-poll</text><text class="c4-desc" x="630" y="240">provider·url·host·path·number</text></g>
+<g class="c4-datastore"><path d="M540,296 a90,8 0 0,0 180,0 a90,8 0 0,0 -180,0 v52 a90,8 0 0,0 180,0 v-52"/><text class="c4-label" x="630" y="322">&lt;id&gt;.check.sh</text><text class="c4-desc" x="630" y="340">byte copy of fm-pr-poll.sh</text></g>
+<g class="c4-datastore"><path d="M540,396 a90,8 0 0,0 180,0 a90,8 0 0,0 -180,0 v52 a90,8 0 0,0 180,0 v-52"/><text class="c4-label" x="630" y="422">.pr-poll-registration</text><text class="c4-desc" x="630" y="440">v2 · hashes · identities</text></g>
+<g class="c4-component"><rect x="20" y="300" width="200" height="80" rx="8"/><text class="c4-label" x="120" y="328">Watcher check sweep</text><text class="c4-tech" x="120" y="344">[fm-watch.sh · every 300 s]</text><text class="c4-desc" x="120" y="362">snapshot, validate, lock</text></g>
+<g class="c4-component"><rect x="780" y="300" width="200" height="80" rx="8"/><text class="c4-label" x="880" y="328">Merge poll</text><text class="c4-tech" x="880" y="344">[bin/fm-pr-poll.sh --validated]</text><text class="c4-desc" x="880" y="362">prints "merged" or nothing</text></g>
+<g class="c4-component"><rect x="20" y="430" width="200" height="70" rx="8"/><text class="c4-label" x="120" y="458">Merged handling</text><text class="c4-desc" x="120" y="478">outcome, then retirement</text></g>
+<g class="c4-rel"><path d="M210,95 L270,95" marker-end="url(#pr-arrow)"/><text class="c4-rel-label" x="240" y="87">&lt;id&gt; &lt;url&gt;</text></g>
+<g class="c4-rel"><path d="M370,130 L370,190" marker-end="url(#pr-arrow)"/><text class="c4-rel-label" x="400" y="165">parse</text></g>
+<g class="c4-rel"><path d="M470,80 C 620,30 700,30 780,80" marker-end="url(#pr-arrow)"/><text class="c4-rel-label" x="640" y="40">isDraft · headRefOid (GitHub)</text></g>
+<g class="c4-rel"><path d="M470,105 L540,95" marker-end="url(#pr-arrow)"/><text class="c4-rel-label" x="505" y="92">rewrite</text></g>
+<g class="c4-rel"><path d="M470,225 L540,225" marker-end="url(#pr-arrow)"/><text class="c4-rel-label" x="505" y="217">publish</text></g>
+<g class="c4-rel"><path d="M450,260 L540,320" marker-end="url(#pr-arrow)"/></g>
+<g class="c4-rel"><path d="M420,260 L540,420" marker-end="url(#pr-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M220,330 L540,322" marker-end="url(#pr-arrow)"/><text class="c4-rel-label" x="380" y="318">validates all three</text></g>
+<g class="c4-rel c4-rel-async"><path d="M220,370 C 380,510 780,510 860,380" marker-end="url(#pr-arrow)"/><text class="c4-rel-label" x="520" y="500">runs repo copy with validated identity</text></g>
+<g class="c4-rel c4-rel-async"><path d="M880,300 L880,130" marker-end="url(#pr-arrow)"/><text class="c4-rel-label" x="930" y="215">state</text></g>
+<g class="c4-rel"><path d="M120,380 L120,430" marker-end="url(#pr-arrow)"/><text class="c4-rel-label" x="150" y="410">merged</text></g>
+</svg>
+</div>
+<figcaption>The check file in <code>state/</code> is bound by hash, but the watcher executes the repository's own <code>bin/fm-pr-poll.sh</code> with arguments it validated itself, so state-file bytes are never run.</figcaption>
+</figure>
+
+<h2 id="poll">The merge poll</h2>
+<p><code>bin/fm-pr-poll.sh</code> is a "Static watcher program for a validated PR/MR poll sidecar. It emits exactly one merged line for a merged PR or MR and stays silent otherwise, including on every error, so a failed lookup can never be read as a merge" <code class="cite">bin/fm-pr-poll.sh:2-6</code>. Its bytes are "identical for every task"; the identity is data in the sidecar, never interpolated into shell source. It revalidates every component and requires the stored URL to be reconstructible from them, "so a doctored sidecar cannot redirect this poll at another host or project" <code class="cite">bin/fm-pr-poll.sh:7-11</code>. GitHub is read with <code>gh pr view &lt;url&gt; --json state</code> and prints <code>merged</code> only for <code>MERGED</code>; GitLab is read with <code>glab</code> and prints only for <code>merged</code> <code class="cite">bin/fm-pr-poll.sh:66</code> <code class="cite">bin/fm-pr-poll.sh:105-106</code>.</p>
+<p>The watcher sweeps <code>state/*.check.sh</code> every <code>FM_CHECK_INTERVAL</code> seconds (default 300), each check bounded by <code>FM_CHECK_TIMEOUT</code> (default 30) <code class="cite">bin/fm-watch.sh:232-233</code>. The sweep runs before the signal scan, because otherwise "the slow poll (e.g. merge detection) would then never run until the fleet went quiet" <code class="cite">bin/fm-watch.sh:2364-2371</code>. For a PR poll it captures a snapshot of the three artifacts, takes the task's control lock, rechecks the snapshot, and then runs the repository's <code>fm-pr-poll.sh --validated &lt;provider&gt; &lt;url&gt; &lt;host&gt; &lt;path&gt; &lt;number&gt;</code> rather than the state file <code class="cite">bin/fm-watch.sh:2388-2406</code>. Any check file that is neither a validated PR poll nor a registered custom check is rejected without execution <code class="cite">bin/fm-watch.sh:2407-2415</code> <code class="cite">AGENTS.md:117</code>. What happens on <code>merged</code> is on <a href="after-merge.html">After the merge</a>.</p>
+
+<h2 id="artifacts">Artifacts, as data formats</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>File under <code>state/</code></th><th>Content</th><th>Owner</th></tr></thead>
+<tbody>
+<tr><td><code>&lt;id&gt;.meta</code> lines <code>pr=</code>, <code>pr_head=</code></td><td>Canonical URL; full head SHA when GitHub supplied it</td><td><code class="cite">bin/fm-pr-check.sh:132-139</code></td></tr>
+<tr><td><code>&lt;id&gt;.pr-poll</code></td><td>Five lines: provider, url, host, path, number. A pre-provider sidecar has one line fewer and is refused</td><td><code class="cite">bin/fm-pr-lib.sh:355-389</code></td></tr>
+<tr><td><code>&lt;id&gt;.check.sh</code></td><td>Byte copy of <code>bin/fm-pr-poll.sh</code></td><td><code class="cite">bin/fm-pr-check.sh:4-5</code></td></tr>
+<tr><td><code>&lt;id&gt;.pr-poll-registration</code></td><td><code>fm-pr-poll-registration-v2</code>, task id, the five identity fields, data hash, template hash, and the two file identities</td><td><code class="cite">bin/fm-pr-lib.sh:390-446</code></td></tr>
+<tr><td><code>&lt;id&gt;.pr-poll-retirement</code></td><td>Identity-bound crash-recovery receipt for one merged result, removed once the poll artifacts retire</td><td><code class="cite">bin/fm-pr-lib.sh:15-18</code> <code class="cite">AGENTS.md:121</code></td></tr>
+<tr><td><code>&lt;id&gt;.pr-poll-merge-notified</code></td><td>Canonical identity of the last merge outcome delivered for the task</td><td><code class="cite">AGENTS.md:123</code></td></tr>
+<tr><td><code>&lt;id&gt;.merge-authority</code></td><td>Authority under which firstmate's own merge was accepted (<a href="merge-authority.html#records">format</a>)</td><td><code class="cite">bin/fm-merge-authority-lib.sh:4-13</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>All of these are private (<code>0600</code>), single-link, and required to live on the state filesystem; the parsers refuse symlinks and extra lines.</p>
+
+<h2 id="review">Reviewing the PR's diff</h2>
+<p>When a delivery path calls for a diff, <code>bin/fm-review-diff.sh &lt;id&gt;</code> compares against a freshly fetched <code>origin/&lt;default&gt;</code> (the local default branch for <code>local-only</code>), and with <code>pr=</code> recorded "the compare side is ALWAYS a freshly fetched refs/pull/&lt;n&gt;/head by default so review stays current after no-mistakes fix rounds push to the PR". A recorded <code>pr_head=</code> is only an offline fallback <code class="cite">bin/fm-review-diff.sh:2-14</code>.</p>
+
+<h2 id="failures">Failure behaviour</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Situation</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td>Malformed URL, bare number, bad id</td><td><code>error: invalid PR check request</code>, exit 2</td></tr>
+<tr><td>Missing or symlinked task record</td><td><code>error: task metadata is unavailable</code>, exit 1</td></tr>
+<tr><td>GitLab URL without <code>glab</code></td><td>Refused, nothing armed</td></tr>
+<tr><td>GitHub PR is a draft</td><td>Refused naming the draft state, nothing recorded</td></tr>
+<tr><td>Draft state unreadable, or <code>gh</code>/<code>jq</code> missing</td><td>Arms anyway; the merge's own draft check still applies</td></tr>
+<tr><td>Forge read fails during a poll</td><td>Silence: the task simply is not yet merged</td></tr>
+<tr><td>Poll artifacts changed between snapshot and run</td><td>Skipped this cycle as stale <code class="cite">bin/fm-watch.sh:2399-2403</code></td></tr>
+<tr><td>Secondmate parent channel cannot be written</td><td>Poll stays armed; an <code>actionable:</code> line is printed <code class="cite">bin/fm-pr-check.sh:192-195</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="findings">Observations</h2>
+<ul>
+<li>The draft refusal at registration is GitHub-only by its own header <code class="cite">bin/fm-pr-check.sh:8-13</code>. A GitLab draft merge request is armed normally; whether the merge-time GitLab gate (<code>detailed_merge_status</code> must be <code>mergeable</code>) rejects a draft is a property of GitLab's API that the Firstmate source does not state.</li>
+<li>A silent poll cannot distinguish "not merged yet" from "closed without merging" or "credentials expired". The poll never wakes on a closed PR; that case surfaces only through the heartbeat's whole-fleet PR review <code class="cite">AGENTS.md:443</code> or crew-state's bounded forge read for a passed run <code class="cite">bin/fm-crew-state.sh:17-21</code>.</li>
+</ul>
+
+<h2 id="related">Related</h2>
+<ul>
+<li><a href="merge-authority.html">Merge authority</a> for what happens when firstmate merges the PR.</li>
+<li><a href="../supervision/index.html">Supervision</a> for the watcher, wake queue, and check registration in general.</li>
+<li><a href="../observability/index.html">Observability</a> for the contributions observer armed alongside the poll.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

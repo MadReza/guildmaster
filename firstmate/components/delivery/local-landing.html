@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local landing · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Delivery</p>
+<h1>Local landing</h1>
+<p class="lede">A <code>local-only</code> task never touches a remote; once its landing is approved, firstmate fast-forwards the project clone's default branch to the worker's branch through <code>bin/fm-merge-local.sh</code>, the one narrow place where firstmate itself changes a project's git state.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Delivery overview</a>.</p>
+
+<h2 id="why">What it is for</h2>
+<p>Some projects have no remote at all, and the registry defaults such a project to <code>local-only</code> <code class="cite">.agents/skills/project-management/SKILL.md:46</code>. With no forge there is no PR to merge and no poll to watch, so the ordinary "firstmate never edits projects" rule needs one exception. The script header names it: "This is firstmate's merge gate-action (the captain's merge authority applied locally instead of via a GitHub PR). It is the one sanctioned exception to hard rule #1 'never run state-changing git in projects/', and it is narrow: it only runs for mode=local-only tasks, only after the captain approves (or yolo=on auto-approves), and only as a clean fast-forward" <code class="cite">bin/fm-merge-local.sh:5-11</code>. Hard rule 1 lists "approved <code>local-only</code> merge paths" among its few exceptions <code class="cite">AGENTS.md:29</code>.</p>
+
+<h2 id="worker-side">The worker's side</h2>
+<p>The <code>local-only</code> definition of done: commit on <code>fm/&lt;id&gt;</code>; do not push, open a PR, or merge; "Keep your branch a clean fast-forward onto the current default branch - if <code>main</code> has advanced, rebase onto it so the eventual merge stays a fast-forward"; then report <code>done [at=&lt;epoch&gt;]: ready in branch fm/&lt;id&gt;</code> <code class="cite">bin/fm-dod-lib.sh:264-273</code>. The brief's rule 1 for this mode forbids pushing to any remote at all <code class="cite">bin/fm-dod-lib.sh:68-69</code>. Because the task worktree shares its object store and branches with the project clone under <code>projects/</code>, the branch the worker commits is directly visible to the landing script.</p>
+
+<h2 id="guards">The guards, in order</h2>
+<p>Usage: <code>bin/fm-merge-local.sh &lt;task-id&gt;</code> <code class="cite">bin/fm-merge-local.sh:17</code>.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 900 560" role="img" aria-labelledby="ll-t ll-d">
+<title id="ll-t">Guards in fm-merge-local.sh</title>
+<desc id="ll-d">The script validates the task id and state directory, refuses the Pi supervision branch, checks the task record and its spawn incarnation, takes the task control lock and rechecks the incarnation, requires mode local-only and an existing fm branch, resolves the default branch, requires the project clone to be on that branch and clean, requires a fast-forward, requires any captain hold released, and only then runs git merge --ff-only.</desc>
+<defs><marker id="ll-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">fm-merge-local.sh: from request to fast-forward</text>
+<g class="c4-component"><rect x="30" y="50" width="250" height="60" rx="8"/><text class="c4-label" x="155" y="74">1 · Request and home</text><text class="c4-desc" x="155" y="94">valid id · state dir present</text></g>
+<g class="c4-component"><rect x="30" y="140" width="250" height="60" rx="8"/><text class="c4-label" x="155" y="164">2 · Actor role</text><text class="c4-desc" x="155" y="184">supervision branch refused</text></g>
+<g class="c4-component"><rect x="30" y="230" width="250" height="60" rx="8"/><text class="c4-label" x="155" y="254">3 · Task record</text><text class="c4-desc" x="155" y="274">meta exists · spawn_gen read</text></g>
+<g class="c4-component"><rect x="30" y="320" width="250" height="60" rx="8"/><text class="c4-label" x="155" y="344">4 · Control lock</text><text class="c4-desc" x="155" y="364">incarnation unchanged</text></g>
+<g class="c4-component"><rect x="30" y="410" width="250" height="60" rx="8"/><text class="c4-label" x="155" y="434">5 · Mode and branch</text><text class="c4-desc" x="155" y="454">mode=local-only · fm/&lt;id&gt; exists</text></g>
+<g class="c4-component"><rect x="340" y="50" width="250" height="60" rx="8"/><text class="c4-label" x="465" y="74">6 · Default branch</text><text class="c4-desc" x="465" y="94">origin/HEAD, else main, else master</text></g>
+<g class="c4-component"><rect x="340" y="140" width="250" height="60" rx="8"/><text class="c4-label" x="465" y="164">7 · Clone state</text><text class="c4-desc" x="465" y="184">on default branch · clean tree</text></g>
+<g class="c4-component"><rect x="340" y="230" width="250" height="60" rx="8"/><text class="c4-label" x="465" y="254">8 · Fast-forward only</text><text class="c4-desc" x="465" y="274">default is an ancestor of fm/&lt;id&gt;</text></g>
+<g class="c4-component"><rect x="340" y="320" width="250" height="60" rx="8"/><text class="c4-label" x="465" y="344">9 · Captain hold</text><text class="c4-desc" x="465" y="364">released, or refuse</text></g>
+<g class="c4-datastore"><path d="M340,418 a125,9 0 0,0 250,0 a125,9 0 0,0 -250,0 v46 a125,9 0 0,0 250,0 v-46"/><text class="c4-label" x="465" y="442">projects/&lt;name&gt; default</text><text class="c4-desc" x="465" y="460">git merge --ff-only fm/&lt;id&gt;</text></g>
+<g class="c4-rel"><path d="M155,110 L155,140" marker-end="url(#ll-arrow)"/><path d="M155,200 L155,230" marker-end="url(#ll-arrow)"/><path d="M155,290 L155,320" marker-end="url(#ll-arrow)"/><path d="M155,380 L155,410" marker-end="url(#ll-arrow)"/><path d="M280,440 C 310,440 310,80 340,80" marker-end="url(#ll-arrow)"/><path d="M465,110 L465,140" marker-end="url(#ll-arrow)"/><path d="M465,200 L465,230" marker-end="url(#ll-arrow)"/><path d="M465,290 L465,320" marker-end="url(#ll-arrow)"/><path d="M465,380 L465,409" marker-end="url(#ll-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M590,80 L640,80" marker-end="url(#ll-arrow)"/><path d="M590,170 L640,170" marker-end="url(#ll-arrow)"/><path d="M590,260 L640,260" marker-end="url(#ll-arrow)"/><path d="M590,350 L640,350" marker-end="url(#ll-arrow)"/></g>
+<g class="c4-rel"><text class="c4-rel-label" x="765" y="84">refuse: cannot determine</text><text class="c4-rel-label" x="765" y="174">refuse: wrong branch or dirty</text><text class="c4-rel-label" x="765" y="264">REFUSED: diverged, rebase</text><text class="c4-rel-label" x="765" y="354">refuse: still held / cannot tell</text><text class="c4-rel-label" x="465" y="510">prints: merged fm/&lt;id&gt; into local &lt;default&gt; (before -&gt; after)</text></g>
+</svg>
+</div>
+<figcaption>Every guard runs before the fast-forward; the control lock is held from step 4 until <code>git merge --ff-only</code> returns.</figcaption>
+</figure>
+
+<dl class="defs">
+<dt>Actor role</dt>
+<dd>"Landing local-only work is MAIN-owned; the Pi supervision branch reports readiness and never lands." It is deliberately not relocated under the away-posture record, "unlike the PR merge it has no record-side grant gate of its own, so a parked main keeps it held for the captain's return" <code class="cite">bin/fm-merge-local.sh:42-51</code>. <code>fm_lease_forbid_branch</code> exits with the lease refusal status for the branch actor <code class="cite">bin/fm-lease-lib.sh:245-255</code>, and the branch prompt restates that the script "still refuses you: local-only landing waits for the captain in both postures" <code class="cite">bin/fm-branch-prompt.sh:114</code>.</dd>
+<dt>Incarnation</dt>
+<dd>The task record's spawn generation is read, the per-task control lock <code>state/.control-&lt;id&gt;.lock</code> is taken, and the generation is read again; "task &lt;id&gt; changed incarnation while waiting to merge" refuses <code class="cite">bin/fm-merge-local.sh:53-74</code>.</dd>
+<dt>Mode</dt>
+<dd>A task whose record is not <code>mode=local-only</code> is refused with a pointer to <code>bin/fm-pr-merge.sh</code> <code class="cite">bin/fm-merge-local.sh:76-78</code>.</dd>
+<dt>Clone state</dt>
+<dd>The project clone must have <code>fm/&lt;id&gt;</code>, a resolvable default branch (<code>origin/HEAD</code>, else <code>main</code>, else <code>master</code>), be checked out on that branch, and be clean, "so the fast-forward lands predictably (firstmate never writes here otherwise)" <code class="cite">bin/fm-merge-local.sh:80-108</code>.</dd>
+<dt>Fast-forward</dt>
+<dd>"Clean fast-forward only: DEFAULT must be an ancestor of BRANCH." A diverged branch is refused with "Have the crewmate rebase … then retry" <code class="cite">bin/fm-merge-local.sh:110-115</code>.</dd>
+<dt>Captain hold</dt>
+<dd>The same open-hold check as the PR merge, under the same lock: a still-held or unreadable row refuses, "so a captain approval must be recorded as an <code>answer --release</code> before this entrypoint is invoked" <code class="cite">bin/fm-merge-local.sh:12-16</code> <code class="cite">bin/fm-merge-local.sh:117-131</code>.</dd>
+<dt>Landing</dt>
+<dd><code>git -C &lt;project&gt; merge --ff-only fm/&lt;id&gt;</code>; the lock is released; the script prints <code>merged fm/&lt;id&gt; into local &lt;default&gt; (&lt;before&gt; -&gt; &lt;after&gt;) in &lt;project&gt;</code> <code class="cite">bin/fm-merge-local.sh:132-138</code>.</dd>
+</dl>
+
+<h2 id="after">After a local landing</h2>
+<ul>
+<li>Teardown accepts local-only work as landed when it is merged into the local default branch, "as a fallback for the common case where there is no remote at all" <code class="cite">bin/fm-teardown.sh:69-71</code>. Otherwise it refuses with "local-only worktree … has work not yet merged into &lt;default&gt; and not on any remote" and names the landing script as the remedy <code class="cite">bin/fm-teardown.sh:1808-1824</code>.</li>
+<li>The backlog item is closed with the note <code>local main</code> instead of a PR link <code class="cite">bin/fm-teardown.sh:1517-1536</code>, and <code>bin/fm-landed-lib.sh</code> counts "finished local-only merges" as deliveries in Recently Landed <code class="cite">bin/fm-landed-lib.sh:19-27</code>.</li>
+<li>No clone refresh runs, because there is no origin to follow <code class="cite">bin/fm-teardown.sh:3701-3703</code>.</li>
+</ul>
+
+<h2 id="findings">Observations</h2>
+<ul>
+<li>Unlike the PR merge, a local landing publishes no durable outcome: <code>bin/fm-merge-local.sh</code> does not call <code>fm_merge_outcome_report</code> and writes no merge-authority record. The only record of the landing is the git history itself, the script's stdout, and the backlog note teardown writes later. The supervisor's one-line "local-main outcome" to the captain <code class="cite">AGENTS.md:364</code> therefore depends on the agent remembering to send it.</li>
+<li>The header's "or yolo=on auto-approves" is not implemented in the script; no line reads <code>yolo=</code>. The approval check is the supervisor's, and the only mechanical approval signal is a released captain hold, which the script requires to be absent or released rather than present.</li>
+<li>Local-only work is kept in the main home rather than routed to a secondmate <code class="cite">AGENTS.md:267</code>, and home seeding refuses to route a <code>local-only</code> project <code class="cite">bin/fm-home-seed.sh:466-470</code>.</li>
+</ul>
+
+<h2 id="related">Related</h2>
+<ul>
+<li><a href="merge-authority.html">Merge authority</a> for who may approve a landing.</li>
+<li><a href="after-merge.html">After the merge</a> for teardown's landed-work proofs.</li>
+<li><a href="../supervision/index.html">Supervision</a> for the Pi supervision branch and its lease.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

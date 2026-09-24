@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Validation pipeline · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Delivery</p>
+<h1>Validation pipeline</h1>
+<p class="lede">For a <code>no-mistakes</code> task, an external pipeline reviews, tests, documents, fixes, pushes, and opens the PR; Firstmate's part is to start it on the right worker, keep that worker answering gates instead of editing, and read the pipeline's own run step as the truth about where validation stands.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Delivery overview</a>.</p>
+
+<div class="callout unclear"><span class="callout-title">In flux: the pipeline may be absent</span>
+<p>The code treats <code>no-mistakes</code> as a standard tool, but at least one estate has withdrawn it: an operator-private, git-excluded home-local skill in the studied home records that one work estate ships <code>direct-PR</code> because the pipeline was removed organisation-wide. Firstmate's tracked code has no switch for "pipeline withdrawn"; the supported way to live without it is to register projects and resolve tasks as <code>direct-PR</code> or <code>local-only</code>. The section <a href="#absent">Where the code assumes the tool</a> lists every place that breaks, degrades, or keeps working when the binary is missing.</p></div>
+
+<h2 id="what">What no-mistakes is, as Firstmate describes it</h2>
+<p>No-mistakes is a separate project, not part of this repository. Firstmate's own contributing guide describes it: it "puts a local git proxy in front of your real remote. Pushing through it runs an AI-driven review/test/lint pipeline in an isolated worktree, forwards the push upstream only after every check passes, and opens a clean PR automatically" <code class="cite">CONTRIBUTING.md:8-9</code>. Initialising a repository adds a git remote named <code>no-mistakes</code>, which is what <code>bin/fm-home-seed.sh</code> checks for to decide a clone is already initialised <code class="cite">bin/fm-home-seed.sh:714</code>. Bootstrap installs it with the upstream install script <code class="cite">bin/fm-bootstrap.sh:880</code>.</p>
+<p>The pipeline is driven through a CLI surface Firstmate calls <code>axi</code>: <code>no-mistakes axi run</code>, <code>axi respond</code>, <code>axi status</code>, <code>axi abort --run &lt;id&gt;</code>, plus <code>no-mistakes daemon status</code> and the ledger <code>no-mistakes runs</code>. Everything Firstmate knows about those commands' output shapes is encoded in <code>bin/fm-nm-run-lib.sh</code> and <code>bin/fm-crew-state.sh</code>. The mechanics of each gate are deliberately not restated by Firstmate: a worker is told to follow "the guidance no-mistakes itself provides", with <code>no-mistakes axi run --help</code> and each response's <code>help</code> lines "authoritative and version-matched to the installed binary" <code class="cite">bin/fm-dod-lib.sh:284</code>.</p>
+<p>One shared daemon serves every lane and every home. The brief's rule 7 forbids a worker to stop, restart, or update it, "because restarting it kills other lanes' in-flight pipeline runs; only firstmate manages the daemon" <code class="cite">bin/fm-brief.sh:538-540</code>.</p>
+
+<h2 id="drive">How a worker drives a run</h2>
+<p>Ownership is single and explicit: "The task worker that starts a no-mistakes run drives the pipeline and owns every <code>no-mistakes axi run</code> and <code>no-mistakes axi respond</code> call through the next gate or outcome. Firstmate never invokes <code>no-mistakes axi respond</code> for a crew-owned run" <code class="cite">AGENTS.md:369-370</code>. The definition of done a no-mistakes worker receives spells out the rest <code class="cite">bin/fm-dod-lib.sh:275-311</code>:</p>
+<dl class="defs">
+<dt>Trigger</dt>
+<dd>The worker first reports <code>done: {summary}</code> for the committed implementation and stops. Firstmate then triggers validation on the same worker with the harness's skill invocation <code class="cite">AGENTS.md:368</code>, which is <code>/no-mistakes</code> on Claude and most harnesses and <code>$no-mistakes</code> on Codex (the <code>harness-adapters</code> skill's <code>references/harness/codex.md</code>, line 12). Rovo cannot invoke Firstmate skills at all, so a no-mistakes-mode Rovo ship worker is blocked (<code>references/harness/rovo.md</code>, lines 69-70) <code class="cite">.agents/skills/harness-adapters/</code>.</dd>
+<dt><code>--intent</code></dt>
+<dd>The run's intent is only the brief's <code>## Captain's intent</code> body plus later words the captain actually said: never the Firstmate spec, never the worker's own tradeoffs, and self-sufficient enough that "that string plus the codebase must let a reader reconstruct roughly the same specification" <code class="cite">bin/fm-dod-lib.sh:285-292</code>. A legacy brief with no provenance-marked captain words stops and asks instead of starting the run <code class="cite">bin/fm-dod-lib.sh:288</code>. The launch overlay repeats this as a superseding section <code class="cite">bin/fm-dod-lib.sh:187-202</code>.</dd>
+<dt>Gates, not edits</dt>
+<dd>"You drive no-mistakes by responding to its gates, not by implementing fixes." "Do not hand-edit, commit, or fix findings yourself while a run is active - the pipeline applies every fix" <code class="cite">bin/fm-dod-lib.sh:283</code> <code class="cite">bin/fm-dod-lib.sh:293</code>. Firstmate treats a worker that hand-edits, commits, aborts, or restarts during a run as duplicating pipeline ownership, and steers it back to the gate response <code class="cite">AGENTS.md:388-389</code>.</dd>
+<dt>Background and poll</dt>
+<dd>"One drive call blocks until the next gate or outcome", and a fix round is capped around thirty minutes with up to three chained, while Claude Code kills a command at ten minutes. So the worker backgrounds the drive call and polls <code>no-mistakes axi status</code>. "A killed or timed-out call is never evidence the daemon died" <code class="cite">bin/fm-dod-lib.sh:295-299</code>.</dd>
+<dt>The <code>--yes</code> ban</dt>
+<dd>"NEVER pass <code>--yes</code> (or <code>-y</code>) … It is banned fleet-wide. It auto-resolves every gate including ask-user findings with no escalation" <code class="cite">bin/fm-dod-lib.sh:305-306</code>.</dd>
+<dt>Return point</dt>
+<dd>"After /no-mistakes reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge)", the worker confirms the PR is not a draft and reports <code>done: PR {url} checks green</code> <code class="cite">bin/fm-dod-lib.sh:308-310</code>. The supervisor contract says the same: "The worker reports the PR when CI first becomes green rather than waiting for merge monitoring to finish" <code class="cite">AGENTS.md:390</code>.</dd>
+</dl>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 960 640" role="img" aria-labelledby="vp-t vp-d">
+<title id="vp-t">A no-mistakes validation run over time</title>
+<desc id="vp-d">The worker reports its implementation done; the supervisor steers it to run no-mistakes. The worker starts a backgrounded axi run and polls axi status. The daemon runs its steps, parks at a gate, and the worker responds without --yes. Meanwhile the supervisor reads axi status read-only through fm-crew-state. The daemon pushes, opens the PR, waits for CI, and returns to the worker at checks green; the worker reports the PR ready.</desc>
+<defs><marker id="vp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">One no-mistakes run, supervisor's and worker's view</text>
+<g class="c4-container"><rect x="40" y="46" width="180" height="54" rx="8"/><text class="c4-label" x="130" y="70">Supervisor agent</text><text class="c4-tech" x="130" y="88">[firstmate]</text></g>
+<g class="c4-container"><rect x="280" y="46" width="180" height="54" rx="8"/><text class="c4-label" x="370" y="70">Worker agent</text><text class="c4-tech" x="370" y="88">[ship, mode=no-mistakes]</text></g>
+<g class="c4-external"><rect x="520" y="46" width="180" height="54" rx="8"/><text class="c4-label" x="610" y="70">no-mistakes daemon</text><text class="c4-tech" x="610" y="88">[shared, external]</text></g>
+<g class="c4-external"><rect x="760" y="46" width="180" height="54" rx="8"/><text class="c4-label" x="850" y="70">Forge</text><text class="c4-tech" x="850" y="88">[GitHub · GitLab]</text></g>
+<g class="c4-rel c4-rel-async"><path d="M130,100 L130,625"/><path d="M370,100 L370,625"/><path d="M610,100 L610,625"/><path d="M850,100 L850,625"/></g>
+<g class="c4-rel"><path d="M370,132 L130,132" marker-end="url(#vp-arrow)"/><text class="c4-rel-label" x="250" y="125">done: {summary}</text></g>
+<g class="c4-rel"><path d="M130,174 L370,174" marker-end="url(#vp-arrow)"/><text class="c4-rel-label" x="250" y="167">steer: /no-mistakes</text></g>
+<g class="c4-rel"><path d="M370,216 L610,216" marker-end="url(#vp-arrow)"/><text class="c4-rel-label" x="490" y="209">axi run --intent … (backgrounded)</text></g>
+<g class="c4-rel c4-rel-async"><path d="M370,258 L610,258" marker-end="url(#vp-arrow)"/><text class="c4-rel-label" x="490" y="251">axi status (poll)</text></g>
+<g class="c4-rel"><path d="M610,284 C 680,284 680,318 610,318" marker-end="url(#vp-arrow)"/><text class="c4-rel-label" x="752" y="306">review · test · document · lint · fix</text></g>
+<g class="c4-rel"><path d="M610,350 L370,350" marker-end="url(#vp-arrow)"/><text class="c4-rel-label" x="490" y="343">parked: awaiting_approval / fix_review</text></g>
+<g class="c4-rel"><path d="M370,392 L610,392" marker-end="url(#vp-arrow)"/><text class="c4-rel-label" x="490" y="385">axi respond (never --yes)</text></g>
+<g class="c4-rel c4-rel-async"><path d="M130,434 L610,434" marker-end="url(#vp-arrow)"/><text class="c4-rel-label" x="250" y="427">fm-crew-state: axi status, read-only</text></g>
+<g class="c4-rel"><path d="M610,476 L850,476" marker-end="url(#vp-arrow)"/><text class="c4-rel-label" x="730" y="469">push, open PR, watch CI</text></g>
+<g class="c4-rel c4-rel-async"><path d="M850,518 L610,518" marker-end="url(#vp-arrow)"/><text class="c4-rel-label" x="730" y="511">checks green</text></g>
+<g class="c4-rel"><path d="M610,560 L370,560" marker-end="url(#vp-arrow)"/><text class="c4-rel-label" x="490" y="553">CI-ready return</text></g>
+<g class="c4-rel"><path d="M370,602 L130,602" marker-end="url(#vp-arrow)"/><text class="c4-rel-label" x="250" y="595">done: PR &lt;url&gt; checks green</text></g>
+</svg>
+</div>
+<figcaption>Solid arrows are commands or reports; dashed arrows are polls or observations. An ask-user finding at the gate takes the detour shown on the <a href="ask-user.html">ask-user findings</a> page instead of a direct respond.</figcaption>
+</figure>
+
+<h2 id="gates">The gates a run can park at</h2>
+<p>Firstmate recognises a parked run by one shared set of patterns so that the two readers can never disagree <code class="cite">bin/fm-nm-run-lib.sh:329-347</code>:</p>
+<ul>
+<li>a <code>gate:</code> line;</li>
+<li>an <code>awaiting_agent:</code> field;</li>
+<li>a <code>status:</code> or <code>state:</code> scalar of <code>awaiting_approval</code> or <code>fix_review</code>;</li>
+<li>a steps-table row whose status column is <code>awaiting_approval</code> or <code>fix_review</code>.</li>
+</ul>
+<p>The run's top-level <code>status:</code> word does not decide it: "the CLI leaves it at <code>running</code> while a run waits at a gate, so the word and the gate markers routinely disagree" <code class="cite">bin/fm-nm-run-lib.sh:340-343</code>. Who owes the answer is a separate question. A gate is reported <code>parked</code> in every case; only a findings row whose <code>action</code> column is exactly <code>ask-user</code> marks the gate as owed by a human, and crew-state then appends the fixed component <code>ask-user: authority decision</code> <code class="cite">bin/fm-crew-state.sh:500-505</code> <code class="cite">bin/fm-classify-lib.sh:2159</code>. That column is located positionally from the table header and guarded by a whitelist of the columns before it, because the free-text <code>description</code> column routinely quotes other findings' actions <code class="cite">bin/fm-crew-state.sh:507-537</code>. <a href="ask-user.html">Ask-user findings</a> are the one gate outcome a worker may never answer itself.</p>
+
+<h2 id="supersede">Replacing a run the captain invalidated</h2>
+<p>Once validation starts, new requirements normally go to follow-up work <code class="cite">AGENTS.md:373</code>. Only "a current, explicit captain instruction that completely invalidates the work being validated" keeps the task on the same worker, and then the order is fixed <code class="cite">AGENTS.md:375-380</code>:</p>
+<ol>
+<li>The worker cancels the active run through axi's supported abort and confirms through <code>axi status</code> that it stopped, before changing any code.</li>
+<li>It follows <code>branch_sync.next_action</code> from structured status: axi sync's guarded recovery only when the code is <code>recover_custody</code>, otherwise proceed only when status confirms branch ownership is back.</li>
+<li>Custody recovery "settles branch ownership, not content": the replacement is built from the correct pre-invalidation base, keeping the obsolete run's own fix commits out.</li>
+<li>Nothing else is hand-edited, committed, restarted, or re-run while the obsolete run owns the branch; then validation runs exactly once against the final head.</li>
+</ol>
+
+<h2 id="state">Judging validation state from the run step</h2>
+<p>The supervisor must "Judge validation by the resolved state line from <code>bin/fm-crew-state.sh</code> … never by shell liveness, the last status event, or a raw run record" <code class="cite">AGENTS.md:387</code>. The helper's header explains why: the task's <code>.status</code> file is an append-only event log, and crews append nothing when they silently resume, "so <code>tail -1</code> of that log reports the last EVENT, not the current STATE" <code class="cite">bin/fm-crew-state.sh:4-12</code>. The pane is no better: a worker whose pipeline is fixing in the daemon's own checkout looks idle.</p>
+<p>Its output is one line <code class="cite">bin/fm-crew-state.sh:25</code>:</p>
+<pre><code>state: &lt;working|parked|done|blocked|paused|failed|unknown&gt; · source: &lt;run-step|pane|status-log|remote-endpoint|none&gt; · &lt;detail&gt;</code></pre>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1000 450" role="img" aria-labelledby="cs-t cs-d">
+<title id="cs-t">How fm-crew-state decides a ship task's current state</title>
+<desc id="cs-d">If the task is a ship with a known branch and no-mistakes is installed, the helper reads axi status and the run overview, selects and attributes a run to this worktree, maps its step to a state, and reconciles the status log against it. If there is no attributable run, it falls back to the pane busy state and then the status declaration. An ambiguous or unreadable selection reports unknown.</desc>
+<defs><marker id="cs-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">fm-crew-state: which source answers</text>
+<g class="c4-component"><rect x="20" y="60" width="190" height="84" rx="8"/><text class="c4-label" x="115" y="86">Eligible for a run?</text><text class="c4-desc" x="115" y="106">kind=ship, branch known,</text><text class="c4-desc" x="115" y="122">no-mistakes on PATH</text></g>
+<g class="c4-component"><rect x="250" y="60" width="190" height="84" rx="8"/><text class="c4-label" x="345" y="86">Read and select</text><text class="c4-tech" x="345" y="102">[axi status · axi overview]</text><text class="c4-desc" x="345" y="122">fm_nm_select_run</text></g>
+<g class="c4-component"><rect x="480" y="60" width="190" height="84" rx="8"/><text class="c4-label" x="575" y="86">Attribute to worktree</text><text class="c4-desc" x="575" y="106">executing · pipeline-owned ·</text><text class="c4-desc" x="575" y="122">head match · ledger anchor</text></g>
+<g class="c4-component"><rect x="710" y="60" width="190" height="84" rx="8"/><text class="c4-label" x="805" y="86">Map the run step</text><text class="c4-desc" x="805" y="106">working · parked ·</text><text class="c4-desc" x="805" y="122">done · failed</text></g>
+<g class="c4-component"><rect x="20" y="230" width="190" height="84" rx="8"/><text class="c4-label" x="115" y="256">Fallback</text><text class="c4-desc" x="115" y="276">pane busy state, then</text><text class="c4-desc" x="115" y="292">status declaration</text></g>
+<g class="c4-component"><rect x="710" y="230" width="190" height="84" rx="8"/><text class="c4-label" x="805" y="256">Reconcile status log</text><text class="c4-tech" x="805" y="272">[status_current_line]</text><text class="c4-desc" x="805" y="292">flag stale decisions</text></g>
+<g class="c4-datastore"><path d="M440,240 a100,9 0 0,0 200,0 a100,9 0 0,0 -200,0 v64 a100,9 0 0,0 200,0 v-64"/><text class="c4-label" x="540" y="266">State line</text><text class="c4-desc" x="540" y="284">state · source · detail</text></g>
+<g class="c4-component"><rect x="250" y="360" width="190" height="70" rx="8"/><text class="c4-label" x="345" y="388">unknown · run-step</text><text class="c4-desc" x="345" y="408">ambiguous or unreadable</text></g>
+<g class="c4-rel"><path d="M210,102 L250,102" marker-end="url(#cs-arrow)"/><text class="c4-rel-label" x="230" y="94">yes</text></g>
+<g class="c4-rel"><path d="M115,144 L115,230" marker-end="url(#cs-arrow)"/><text class="c4-rel-label" x="140" y="190">no</text></g>
+<g class="c4-rel"><path d="M440,102 L480,102" marker-end="url(#cs-arrow)"/></g>
+<g class="c4-rel"><path d="M670,102 L710,102" marker-end="url(#cs-arrow)"/><text class="c4-rel-label" x="690" y="94">bound</text></g>
+<g class="c4-rel"><path d="M540,144 L540,190 L160,190 L160,230" marker-end="url(#cs-arrow)"/><text class="c4-rel-label" x="400" y="184">not provably this worktree's</text></g>
+<g class="c4-rel"><path d="M345,144 L345,360" marker-end="url(#cs-arrow)"/><text class="c4-rel-label" x="345" y="344">ambiguous</text></g>
+<g class="c4-rel"><path d="M805,144 L805,230" marker-end="url(#cs-arrow)"/></g>
+<g class="c4-rel"><path d="M710,272 L640,272" marker-end="url(#cs-arrow)"/></g>
+<g class="c4-rel"><path d="M210,290 L440,290" marker-end="url(#cs-arrow)"/></g>
+</svg>
+</div>
+<figcaption>The run step answers whenever a run can be proved to belong to this worktree; otherwise the helper says so rather than guessing.</figcaption>
+</figure>
+
+<h3 id="attribution">Which run belongs to this task</h3>
+<p>A branch name is not enough, because a reused branch can carry historical runs whose heads were rewritten <code class="cite">bin/fm-crew-state.sh:36-40</code>. The rules, owned by <code>bin/fm-nm-run-lib.sh</code>:</p>
+<ul>
+<li>An <strong>executing</strong> run (pending, running, fixing, or ci) on the task's branch is authoritative regardless of head, because "the pipeline rebases the branch and commits fix rounds in its own checkout, so a live run's head routinely differs from the task worktree's local head" <code class="cite">bin/fm-nm-run-lib.sh:349-371</code>. That exemption is withdrawn once an explicit probe has <em>answered</em> that the daemon is down, because a record still saying <code>running</code> after its daemon died "is evidence from a dead instrument" <code class="cite">bin/fm-crew-state.sh:44-53</code>.</li>
+<li>While <code>branch_sync.state=pipeline_owned</code>, any active run, executing or parked, binds on the pipeline's own custody attribution, never a terminal one <code class="cite">bin/fm-nm-run-lib.sh:315-324</code>.</li>
+<li>Every other run matches only when its head equals the worktree HEAD or the worktree HEAD is its ancestor; local work that advanced past the run head, or diverged, invalidates it <code class="cite">bin/fm-nm-run-lib.sh:79-94</code>.</li>
+<li>A parked run whose head commit the task copy never fetched is recognised only as a provable continuation anchored in the runs ledger <code class="cite">bin/fm-crew-state.sh:66-72</code>.</li>
+<li>More than one run can bind at once (a crashed run at the worktree's commit and its live successor), so <code>fm_nm_select_run</code> takes the newest same-branch row and reports all candidate ids as <code>unknown</code> when two live runs compete <code class="cite">bin/fm-nm-run-lib.sh:95-103</code> <code class="cite">bin/fm-nm-run-lib.sh:145-158</code>.</li>
+</ul>
+
+<h3 id="mapping">Run step to state</h3>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Run evidence</th><th>State · detail</th><th>Source</th></tr></thead>
+<tbody>
+<tr><td>outcome <code>passed</code> or <code>passed-with-override</code></td><td><code>done</code>, with the PR detail</td><td><code class="cite">bin/fm-crew-state.sh:1018</code></td></tr>
+<tr><td>outcome <code>checks-passed</code></td><td><code>done</code> · checks green: PR ready for review</td><td><code class="cite">bin/fm-crew-state.sh:1019</code></td></tr>
+<tr><td>outcome <code>failed</code> / <code>cancelled</code></td><td><code>failed</code>, except the held-green case below</td><td><code class="cite">bin/fm-crew-state.sh:1020-1024</code></td></tr>
+<tr><td>any gate marker</td><td><code>parked</code> · parked at &lt;gate&gt;: N finding(s), plus the ask-user component when owed by a human</td><td><code class="cite">bin/fm-crew-state.sh:1027-1044</code></td></tr>
+<tr><td>status <code>running</code> / <code>fixing</code></td><td><code>working</code> · validating (…)</td><td><code class="cite">bin/fm-crew-state.sh:1048</code></td></tr>
+<tr><td>status <code>ci</code></td><td><code>working</code> · ci running, overridden to <code>done</code> once the ci log reads checks green</td><td><code class="cite">bin/fm-crew-state.sh:1047</code> <code class="cite">bin/fm-crew-state.sh:100-104</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Two deliberate exceptions keep an instrument from reading as work. While the step is <code>ci</code>, <code>axi status</code> alone cannot tell "still waiting on checks" from "checks green, waiting on merge", so a green ci log turns <code>working</code> into <code>done</code>. And a terminal failed run whose only failure is the ci monitor step, after every substantive step completed and the ci log's last marker reads green, reads <code>done</code> (held for merge), because "a monitor whose only remaining job is to observe a human merge decision must not convert the absence of that decision into a failure verdict" <code class="cite">bin/fm-crew-state.sh:100-110</code> <code class="cite">bin/fm-crew-state.sh:660-705</code>.</p>
+
+<h3 id="daemon">Daemon trouble versus work trouble</h3>
+<p>The daemon probe is <code>no-mistakes daemon status</code>, bounded like every other call <code class="cite">bin/fm-crew-state.sh:708-717</code>. Crew-state separates two questions: "not provably up", which is enough to downgrade a terminal record to <code>unknown</code>, and "answered down", which alone may suppress a live record, so a slow probe cannot make a working crew flap to failed <code class="cite">bin/fm-crew-state.sh:719-729</code>. The status log reconciliation then keeps a genuine daemon blocker: a <code>blocked:</code> line reporting a refused or missing daemon socket stays blocked for as long as it is the latest event, while other "daemon, timeout, or unreachability claims are superseded BECAUSE THE RUN IS ALIVE" and answered by steering the worker to reattach <code class="cite">bin/fm-crew-state.sh:115-132</code>. The same line is drawn in the worker's own rule 7: a refused or missing socket, or a run failed with a daemon error, is a real block; "a drive-call error, timeout, slow read, or generic unreachability is NOT a daemon error" <code class="cite">bin/fm-brief.sh:538-548</code>. A live worker that claims its pipeline is dead or unreachable is a <code>stuck-crewmate-recovery</code> trigger for the supervisor <code class="cite">AGENTS.md:588</code>.</p>
+
+<h3 id="teardown-abort">Concluding a parked run at teardown</h3>
+<p>A worker can be torn down while its run is still parked at a gate that nobody will ever answer; such runs were observed holding a fleet slot for hours. Teardown therefore aborts the task's own run with <code>no-mistakes axi abort --run &lt;id&gt;</code> when, and only when, it can prove the run is this worktree's and parked; a run with an autonomous step under way is left alone because the daemon works against its own clone <code class="cite">bin/fm-teardown.sh:229-254</code>. If the run is still parked after the abort, teardown refuses <code class="cite">bin/fm-teardown.sh:1935-1958</code>.</p>
+
+<h2 id="boundary">The gate's own authority boundary</h2>
+<p>When no-mistakes validates Firstmate itself, its gate agents run inside a checkout whose <code>AGENTS.md</code> installs the fleet-captain identity. Two independent layers stop a gate agent from acting as firstmate <code class="cite">docs/architecture.md:280-286</code>:</p>
+<ul>
+<li>The tracked <code>.no-mistakes.yaml</code> sets <code>disable_project_settings: true</code>, honoured only from the trusted default-branch copy so "a pushed branch cannot turn this off" <code class="cite">.no-mistakes.yaml:3-10</code>. The same file pins lint to <code>bin/fm-lint.sh</code> and stores test evidence on an orphan evidence branch.</li>
+<li><code>bin/fm-gate-refuse-lib.sh</code>, sourced by <code>fm-spawn.sh</code>, <code>fm-send.sh</code>, <code>fm-control.sh</code>, and <code>fm-teardown.sh</code>, exits with status 3 before any fleet mutation when <code>NO_MISTAKES_GATE</code> is set or the checkout's git common directory lies under a gate repository <code class="cite">bin/fm-gate-refuse-lib.sh:1-29</code>.</li>
+</ul>
+<p>Firstmate's own repository also requires the pipeline of its human contributors: a <code>Require no-mistakes</code> Actions check demands a structured attestation from no-mistakes v1.46.0 or newer, bound to the current PR head <code class="cite">CONTRIBUTING.md:5-14</code>.</p>
+
+<h2 id="absent">Where the code assumes the tool</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Place</th><th>Assumption</th><th>Behaviour without <code>no-mistakes</code></th></tr></thead>
+<tbody>
+<tr><td>Bootstrap tool check</td><td><code>no-mistakes</code> is in <code>COMMON_TOOLS</code> with a 1.46.0 floor <code class="cite">bin/fm-bootstrap.sh:909</code> <code class="cite">bin/fm-bootstrap.sh:917</code></td><td>Every session start prints <code>MISSING: no-mistakes (install: …)</code> <code class="cite">bin/fm-bootstrap.sh:1469-1481</code>, which the <code>bootstrap-diagnostics</code> skill turns into an install request to the captain <code class="cite">.agents/skills/bootstrap-diagnostics/SKILL.md:19</code>. Nothing in the tracked code suppresses it for an estate that withdrew the tool.</td></tr>
+<tr><td>no-mistakes ship brief</td><td>Setup step 2 runs <code>no-mistakes doctor</code> / <code>init</code> <code class="cite">bin/fm-brief.sh:487-490</code></td><td>The worker cannot validate; no fallback path is described. Choosing <code>direct-PR</code> at intake avoids it.</td></tr>
+<tr><td>Home seeding</td><td>A newly created <code>no-mistakes</code> clone is initialised <code class="cite">bin/fm-home-seed.sh:709-730</code></td><td>Refuses: "no-mistakes command not found; cannot initialize …". <code>direct-PR</code> and <code>local-only</code> projects are skipped.</td></tr>
+<tr><td>Registry fallback</td><td>Unknown or unregistered projects answer <code>no-mistakes</code> <code class="cite">bin/fm-project-mode.sh:52-85</code></td><td>Mechanical consumers treat such a project as a pipeline project; home seeding then tries to initialise it.</td></tr>
+<tr><td>Current-state read</td><td>Run lookup only when <code>command -v no-mistakes</code> succeeds <code class="cite">bin/fm-crew-state.sh:855-857</code></td><td>Degrades cleanly to pane and status log.</td></tr>
+<tr><td>Teardown</td><td>Parked-run abort only when the command exists <code class="cite">bin/fm-teardown.sh:1944</code></td><td>Skipped; teardown proceeds.</td></tr>
+<tr><td>Merge, PR check, local landing</td><td>None: they speak only to forges and git</td><td>Unaffected.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="related">Related</h2>
+<ul>
+<li><a href="ask-user.html">Ask-user findings</a> for the one gate outcome the worker must escalate.</li>
+<li><a href="../supervision/index.html">Supervision</a> for the watcher's wedge handling of a lane parked at a human-owed gate.</li>
+<li><a href="../crew/index.html">Crew</a> for harness adapters and teardown as a lifecycle step.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>
