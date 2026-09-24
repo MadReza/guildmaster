@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Status events and the keyed fold · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Observability</p>
+<h1>Status events and the keyed fold</h1>
+<p class="lede">Every task reports through one append-only file of event lines; <code>bin/fm-classify-lib.sh</code> owns the grammar of those lines, decides which of them firstmate must see, and folds the whole stream into the set of decisions that are still open.</p>
+
+<h2>What the status log is</h2>
+<p>Each task has one file, <code>state/&lt;id&gt;.status</code>, described in the home layout as "append-only wake events, not current-state truth; bin/fm-classify-lib.sh owns their syntax" (<code class="cite">AGENTS.md:103</code>). A worker appends a line with a plain shell redirect. The launch brief gives the exact shape, <code>echo "{state} [at=&lt;epoch&gt;]: {one short line}" &gt;&gt; $STATUS_FILE</code>, and tells the worker to report only phase changes a supervisor would act on (<code class="cite">bin/fm-brief.sh:516</code>).</p>
+<p>The worker is not the only writer. Each of these appends into the same stream:</p>
+<ul>
+<li><code>bin/fm-send.sh --resolve-key &lt;key&gt;</code> appends the closing <code>resolved</code> line when firstmate answers a decision (<code class="cite">bin/fm-send.sh:154-176</code>).</li>
+<li><code>bin/fm-captain-hold.sh</code>, inside a secondmate home, publishes <code>needs-decision [key=captain-hold-&lt;task&gt;-&lt;n&gt;]</code> and the matching <code>resolved</code> line on the parent channel (<code class="cite">bin/fm-captain-hold.sh:194-201</code>).</li>
+<li><code>bin/fm-secondmate-report.sh</code> writes the bracketed <code>[corr=&lt;16 hex&gt;]</code> form, and a remote secondmate's lines are mirrored into the parent stream verbatim (<code class="cite">bin/fm-classify-lib.sh:452-454</code>, <code class="cite">bin/fm-classify-lib.sh:624-627</code>).</li>
+</ul>
+<p>The file is never rewritten. The incremental fold below relies on that: "every one is created once (<code>&gt;</code>) and only ever appended to (<code>&gt;&gt;</code>) - never replaced, renamed, or rewritten in place" (<code class="cite">bin/fm-classify-lib.sh:941-944</code>). How lines travel to firstmate, and how the watcher notices an append, belongs to <a href="../communication/index.html">Communication</a> and <a href="../supervision/index.html">Supervision</a>.</p>
+
+<h2>Line grammar</h2>
+<p>A status line is <code>&lt;verb&gt; [&lt;tags&gt;...]: &lt;note&gt;</code>. The verb is the text before the first colon, cut at the first <code>[</code>, so any number of bracketed <code>[name=value]</code> tags may sit before the colon in any order (<code class="cite">bin/fm-classify-lib.sh:447-449</code>, <code class="cite">bin/fm-classify-lib.sh:506-535</code>). Lines that carry no recognised verb, such as continuation prose or blanks, are skipped by the event scan, which returns the last recognised event rather than the last line (<code class="cite">bin/fm-classify-lib.sh:155-181</code>).</p>
+<pre><code>needs-decision [key=api-shape] [at=1788576000]: REST or gRPC for the new endpoint?
+resolved [key=api-shape] [at=1788576300]: answered: use REST
+needs-decision corr=0123456789abcdef [key=texte-du-mur]: wording for the banner
+paused [at=1788577000]: waiting on upstream release until 2026-09-24T15:00Z</code></pre>
+
+<h3>Verbs</h3>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Verb</th><th>What it declares</th><th>Captain-relevant</th><th>Effect on the decision fold</th></tr></thead>
+<tbody>
+<tr><td><code>working</code></td><td>Progress, or the start of a keyed phase</td><td>Never, even if its prose says "merged" (<code class="cite">bin/fm-classify-lib.sh:72-77</code>)</td><td>None</td></tr>
+<tr><td><code>paused</code></td><td>A deliberate idle on a known external wait (<code class="cite">bin/fm-classify-lib.sh:80-90</code>)</td><td>No</td><td>None</td></tr>
+<tr><td><code>needs-decision</code></td><td>A question someone above the worker must answer</td><td>Yes</td><td>Opens its key</td></tr>
+<tr><td><code>blocked</code></td><td>The worker is stuck and needs help</td><td>Yes</td><td>Opens its key</td></tr>
+<tr><td><code>done</code></td><td>The task finished</td><td>Yes</td><td>On a ship or scout task, clears every open key</td></tr>
+<tr><td><code>failed</code></td><td>The task failed</td><td>Yes</td><td>On a ship or scout task, clears every open key</td></tr>
+<tr><td><code>resolved</code></td><td>A keyed decision or blocker is settled</td><td>No</td><td>Closes its key</td></tr>
+<tr><td><code>captain-held</code></td><td>The decision was handed to a verified captain-held backlog task</td><td>No</td><td>Closes its key</td></tr>
+<tr><td><code>note</code></td><td>Informational text, often a routed answer</td><td>No</td><td>None; surfaced once as UNREAD STATUS instead</td></tr>
+</tbody>
+</table>
+</div>
+<p>The captain-relevant set is the regular expression <code>done:|needs-decision:|blocked:|failed:|PR ready|checks green|ready in branch|merged</code> (<code class="cite">bin/fm-classify-lib.sh:78</code>). The free-text tokens exist only for legacy lines that lack a standard verb, and <code>status_is_captain_relevant</code> refuses them when the line leads with <code>working</code>, <code>resolved</code>, <code>captain-held</code> or <code>paused</code> (<code class="cite">bin/fm-classify-lib.sh:204-228</code>). A home can replace the whole set with <code>FM_CAPTAIN_RE</code>; the verbs <code>paused</code>, <code>resolved</code> and <code>captain-held</code> each have their own override variable (<code class="cite">bin/fm-classify-lib.sh:67-71</code>, <code class="cite">bin/fm-classify-lib.sh:128-129</code>).</p>
+
+<h3>The emission-time tag <code>[at=&lt;epoch&gt;]</code></h3>
+<p>New writers may put <code>[at=&lt;epoch&gt;]</code> before the first colon. The value must be canonical unsigned decimal of at most 12 digits; anything missing, malformed or duplicated means the time is unknown (<code class="cite">bin/fm-classify-lib.sh:284-297</code>). The same header states the rule this whole area rests on: "never infer emission time from file mtime, a wake, or observation time", and "Time describes event history only and must never decide current state or decision closure" (<code class="cite">bin/fm-classify-lib.sh:291-294</code>).</p>
+<p>Two different strippers exist on purpose. <code>_fm_status_untimed</code> removes only a well-formed tag, so a retry of an event is recognised as the same bytes (<code class="cite">bin/fm-classify-lib.sh:348-370</code>, <code class="cite">bin/fm-classify-lib.sh:398-411</code>). <code>_fm_status_unstamped</code> removes every tag-shaped run before the first real colon however malformed, so a worker who wrote <code>[at=10:30]</code> or left the placeholder <code>&lt;epoch&gt;</code> unsubstituted cannot move the head/note boundary and cannot hide a terminal event from its supervisor (<code class="cite">bin/fm-classify-lib.sh:372-396</code>). <code>status_stamp_line</code> stamps only a newly emitted line and never a copied historical one (<code class="cite">bin/fm-classify-lib.sh:317-331</code>); <code>status_stamp_width</code> tells a writer that caps a line how many characters the stamp will add (<code class="cite">bin/fm-classify-lib.sh:334-346</code>).</p>
+
+<h3>Decision keys <code>[key=&lt;slug&gt;]</code></h3>
+<p>An optional key names a decision. It is accepted in two positions: between the verb and the colon, or as the first thing in the note. The second position exists because "that misplaced-colon shape is common real worker output whose stated key must never silently collapse into the shared 'default' bucket (issue #2109)" (<code class="cite">bin/fm-classify-lib.sh:430-438</code>). When both positions carry a token the before-colon one wins; a token deeper in the note is prose and can neither open nor close anything (<code class="cite">bin/fm-classify-lib.sh:439-442</code>). A line with no key uses the key <code>default</code>, which keeps the old one-open-decision-per-task behaviour. A stated slug outside <code>A-Za-z0-9._-</code> is rejected, and the line is skipped by the folds rather than rewritten to <code>default</code> (<code class="cite">bin/fm-classify-lib.sh:443-446</code>, <code class="cite">bin/fm-classify-lib.sh:560-566</code>).</p>
+
+<h3>Correlation tokens</h3>
+<p>A secondmate answering a marked request echoes an unbracketed <code>corr=&lt;16 hex&gt;</code> token between the verb and the key, for example <code>resolved corr=&lt;16 hex&gt; [key=texte-du-mur]: ...</code>. Without special handling the verb would parse as <code>resolved corr=...</code>, match no fold rule, and "a captain decision goes silently missing" (<code class="cite">bin/fm-classify-lib.sh:454-465</code>). <code>status_line_verb</code> therefore drops exactly that token shape, and nothing else, after the first word (<code class="cite">bin/fm-classify-lib.sh:506-535</code>). The recognition is deliberately narrow: skipping any <code>name=value</code> word would let prose such as <code>resolved x=1 [key=k]: ...</code> impersonate a transition (<code class="cite">bin/fm-classify-lib.sh:473-484</code>). The token grammar is owned by <code>bin/fm-pending-reply-lib.sh</code>; this file states the shape a second time and a test pins the two together (<code class="cite">bin/fm-classify-lib.sh:467-471</code>).</p>
+
+<h3>Reserved key namespaces</h3>
+<p>A key beginning <code>pending-reply-</code> belongs to one library that alone may open and close it. Because every writer, local or remote, reaches the same stream, a foreign line could otherwise take the key over and "permanently block the owner's close" or clear the owner's decision with a bare resolution (<code class="cite">bin/fm-classify-lib.sh:622-630</code>). The fold accepts a transition on a reserved key only when its note begins with <code>&lt;namespace&gt;...:</code>; any other line is ordinary status (<code class="cite">bin/fm-classify-lib.sh:631-656</code>). The rule is consumer-side on purpose, so it "can never fail a whole delta or wedge a stream the way a writer-side rejection would" (<code class="cite">bin/fm-classify-lib.sh:632-638</code>).</p>
+
+<h2>The keyed open/resolved fold</h2>
+<p>Reading the log "last-event-wins" cannot represent "an earlier decision is still open after a later, unrelated event": a later <code>done</code>, <code>paused</code> or <code>working</code> line "silently masks a still-open needs-decision" (<code class="cite">bin/fm-classify-lib.sh:413-419</code>). <code>status_open_decisions</code> is "the ONE authoritative statement of the status-fold contract that fixes this" (<code class="cite">bin/fm-classify-lib.sh:417-420</code>). The per-line rule lives only in <code>_fm_decision_fold_line</code>, which both the whole-file fold and the incremental fold call (<code class="cite">bin/fm-classify-lib.sh:615-621</code>).</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 780 460" role="img" aria-labelledby="se-fold-t">
+<title id="se-fold-t">State of one decision key under the status fold</title>
+<defs>
+<marker id="se-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs>
+<text class="c4-diagram-title" x="20" y="28">One key through _fm_decision_fold_line</text>
+<g class="c4-component"><rect x="500" y="70" width="230" height="70" rx="8"/><text class="c4-label" x="615" y="100">Open: needs-decision</text><text class="c4-desc" x="615" y="120">record key · verb · note</text></g>
+<g class="c4-component"><rect x="40" y="170" width="190" height="70" rx="8"/><text class="c4-label" x="135" y="200">No record</text><text class="c4-desc" x="135" y="220">key closed or never opened</text></g>
+<g class="c4-component"><rect x="500" y="270" width="230" height="70" rx="8"/><text class="c4-label" x="615" y="300">Open: blocked</text><text class="c4-desc" x="615" y="320">record key · verb · note</text></g>
+<g class="c4-rel"><path d="M230,190 L498,110" marker-end="url(#se-arrow)"/><text class="c4-rel-label" x="365" y="138">needs-decision [key=k]</text></g>
+<g class="c4-rel"><path d="M230,220 L498,300" marker-end="url(#se-arrow)"/><text class="c4-rel-label" x="365" y="274">blocked [key=k]</text></g>
+<g class="c4-rel"><path d="M500,85 C400,50 250,110 187,168" marker-end="url(#se-arrow)"/><text class="c4-rel-label" x="340" y="70">resolved or captain-held [key=k]</text></g>
+<g class="c4-rel"><path d="M500,325 C400,360 250,300 187,242" marker-end="url(#se-arrow)"/><text class="c4-rel-label" x="340" y="352">resolved or captain-held [key=k]</text></g>
+<g class="c4-rel"><path d="M590,140 L590,268" marker-end="url(#se-arrow)"/><text class="c4-rel-label" x="540" y="208">blocked [key=k]</text></g>
+<g class="c4-rel"><path d="M640,270 L640,142" marker-end="url(#se-arrow)"/><text class="c4-rel-label" x="700" y="208">needs-decision</text></g>
+<g class="c4-external"><rect x="30" y="370" width="260" height="70" rx="8"/><text class="c4-label" x="160" y="398">done: or failed:</text><text class="c4-desc" x="160" y="418">on a ship or scout task</text></g>
+<g class="c4-rel c4-rel-async"><path d="M120,370 L120,244" marker-end="url(#se-arrow)"/><text class="c4-rel-label" x="120" y="312">clears every key</text></g>
+<g class="c4-external"><rect x="460" y="370" width="300" height="70" rx="8"/><text class="c4-label" x="610" y="392">No transition</text><text class="c4-desc" x="610" y="410">working, paused, note, prose, bad slug,</text><text class="c4-desc" x="610" y="426">foreign reserved key, secondmate done</text></g>
+</svg>
+</div>
+<figcaption>A same-key opener replaces the existing record (drop, then append), so a key holds at most one record. The dashed arrow is the terminal-supersede rule, which empties the whole set at once. Source: <code class="cite">bin/fm-classify-lib.sh:678-723</code>.</figcaption>
+</figure>
+
+<p>The rule, in the order the code applies it (<code class="cite">bin/fm-classify-lib.sh:678-723</code>):</p>
+<ol>
+<li><strong>Declaration guard.</strong> A line with neither a colon nor a complete <code>[key=...]</code> token is continuation prose and cannot move the set. The test runs on the unstamped copy, so a worker-written <code>[at=10:30]</code> cannot make prose look like a transition.</li>
+<li><strong>Terminal supersede.</strong> A <code>done:</code> or <code>failed:</code> line on a ship or scout task returns an empty set: every open key closes. The task kind comes from <code>kind=</code> in the sibling <code>.meta</code>, defaulting to <code>ship</code>; a missing or unreadable meta yields <code>unknown</code>, which does not supersede (<code class="cite">bin/fm-classify-lib.sh:666-676</code>). A secondmate's terminal event "may describe other work and cannot close an unrelated decision" (<code class="cite">bin/fm-classify-lib.sh:422-423</code>).</li>
+<li><strong>Verb filter.</strong> Only <code>needs-decision</code>, <code>blocked</code>, <code>resolved</code> and <code>captain-held</code> continue.</li>
+<li><strong>Key.</strong> An invalid stated slug drops the line. A reserved key without its namespace vocabulary drops the line.</li>
+<li><strong>Transition.</strong> An opener drops any record for the key and appends <code>key TAB verb TAB note</code>; a closer drops the record.</li>
+</ol>
+<p>Output is one tab-separated <code>&lt;key&gt;\t&lt;verb&gt;\t&lt;summary&gt;</code> line per open decision, most recently opened last (<code class="cite">bin/fm-classify-lib.sh:725-754</code>). The set is plain text, not an associative array, so the fold runs on bash 3.2 (<code class="cite">bin/fm-classify-lib.sh:601</code>).</p>
+
+<div class="callout unclear"><span class="callout-title">Finding: the worker brief and the fold disagree about <code>done</code></span>
+<p>The ship brief tells every worker: "A decision or blocker you opened stays open until a <code>resolved</code> line carrying its exact key lands; a later <code>done:</code> or <code>working:</code> line never closes it, even when the answer is what started that work" (<code class="cite">bin/fm-brief.sh:536</code>; the scout brief carries the same sentence at <code class="cite">bin/fm-brief.sh:445</code>). The fold does close it: a <code>done:</code> or <code>failed:</code> line on a ship or scout task empties the open set (<code class="cite">bin/fm-classify-lib.sh:700-702</code>), and <code>bin/fm-crew-state.sh</code> repeats "Ship/scout terminal declarations supersede stale log decisions" (<code class="cite">bin/fm-crew-state.sh:115-118</code>). The <code>working:</code> half of the brief's sentence matches the code; the <code>done:</code> half does not. The practical effect is that a ship worker who writes <code>done:</code> without first resolving an open question removes that question from OPEN DECISIONS. Whether the brief or the fold states the intended contract is not settled by the source; the fold's version history records the terminal rule as a deliberate change (version 6, <code class="cite">bin/fm-classify-lib.sh:985-987</code>).</p></div>
+
+<h3>Readers built on the fold</h3>
+<dl class="defs">
+<dt><code>status_current_line &lt;file&gt; &lt;kind&gt;</code></dt>
+<dd>Returns the most recently opened still-open decision as <code>&lt;verb&gt; [key=&lt;key&gt;]: &lt;note&gt;</code>, or the latest event when nothing is open. <code>bin/fm-crew-state.sh</code> uses it so "open decisions survive unrelated events and continuation prose cannot hide a declaration" (<code class="cite">bin/fm-classify-lib.sh:756-771</code>, <code class="cite">bin/fm-crew-state.sh:115-117</code>).</dd>
+<dt><code>status_has_open_needs_decision &lt;file&gt; [&lt;run-id&gt;]</code></dt>
+<dd>True only while a <code>needs-decision</code> (not <code>blocked</code>) is open. With a run id it matches only the key <code>nm-&lt;run-id&gt;-&lt;step&gt;</code>, so an unrelated earlier question is never read as this validation gate's escalation (<code class="cite">bin/fm-classify-lib.sh:773-802</code>).</dd>
+<dt><code>status_key_closing_verb &lt;file&gt; &lt;key&gt;</code></dt>
+<dd>Prints the verb that last moved a key: the opener while open, <code>resolved</code> or <code>captain-held</code> once closed, nothing if never stated. The difference between the two closers is what the RECORD DIVERGENCE surface tests. A <code>grep</code> pre-selects candidate lines so the cost is the log's transitions, not its lifetime length (<code class="cite">bin/fm-classify-lib.sh:824-887</code>).</dd>
+<dt><code>scan_open_decisions &lt;state&gt;</code></dt>
+<dd>Walks every <code>*.status</code> in a state directory, rejecting symlinks, and prefixes each open decision with its task id (<code class="cite">bin/fm-classify-lib.sh:889-911</code>). The fleet snapshot publishes the same fold as <code>hints.open_decisions</code> (<code class="cite">bin/fm-fleet-snapshot.sh:63-66</code>).</dd>
+</dl>
+
+<h3>The incremental, cursor-backed fold</h3>
+<p>The whole-file fold re-reads a task's whole lifetime on every call. The drain runs a fleet-wide scan on every wake, so it uses <code>status_open_decisions_incremental</code>, which folds only the bytes appended since its own last call into a persisted open set (<code class="cite">bin/fm-classify-lib.sh:913-927</code>). Its correctness invariant: "cursor advancement, age, and being buried under later appends never drop an open decision" (<code class="cite">bin/fm-classify-lib.sh:928-932</code>).</p>
+<p>The cursor is a hidden sibling file, <code>state/.&lt;task&gt;.open-decisions-cursor</code>, holding <code>version=&lt;fold-version&gt;:&lt;kind&gt;</code>, <code>offset=</code>, <code>ident=</code> (device and inode), then the folded set. It is written atomically by temp file and rename (<code class="cite">bin/fm-classify-lib.sh:934-937</code>, <code class="cite">bin/fm-classify-lib.sh:1172-1180</code>). It is thrown away and rebuilt from byte 0 when the fold version or task kind changes, when the file shrank, or when device and inode differ. A same-inode, same-size in-place edit is not detected, "a deliberately accepted gap because no code path in this repo ever does that to a status file" (<code class="cite">bin/fm-classify-lib.sh:941-953</code>). If its own <code>stat</code>, <code>wc</code> or read fails, it returns the already-trusted set unchanged rather than an empty set (<code class="cite">bin/fm-classify-lib.sh:954-959</code>, <code class="cite">bin/fm-classify-lib.sh:1120-1127</code>).</p>
+<p><code>FM_OPEN_DECISIONS_FOLD_VERSION</code> is currently 9, and the comment above it is a changelog of fold semantics: bracketed tags ending the verb (4), correlation tokens (5), terminal supersede and kind in the version (6), terminal rule only with a colon (7), colonless lines without a key are not transitions (8), colon tests on the unstamped copy (9) (<code class="cite">bin/fm-classify-lib.sh:977-997</code>). The number must be bumped with any semantic change so persisted state from an older interpretation is discarded.</p>
+<p>This is the library's second documented exception to its pure-read rule, after the absorb classification (<code class="cite">bin/fm-classify-lib.sh:30-40</code>). A test-only seam, <code>FM_OPEN_DECISIONS_READ_PROBE</code>, records how many bytes each call folded, so a test can prove the cost stays bounded by new appends (<code class="cite">bin/fm-classify-lib.sh:1156-1161</code>).</p>
+
+<h2>Classifying events for wakes</h2>
+<p>The library header says it is sourced by both the always-on watcher and the away-mode daemon "so the overlapping triage policy lives in one place instead of two copies that can drift apart" (<code class="cite">bin/fm-classify-lib.sh:1-8</code>). The watcher and daemon themselves are documented under <a href="../supervision/index.html">Supervision</a>; the classification primitives are these.</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Function</th><th>Question it answers</th><th>Cost</th></tr></thead>
+<tbody>
+<tr><td><code>last_status_line</code></td><td>What is the latest recognised event? Reads the last 200 lines, widening to the whole file only when the tail holds none (<code class="cite">bin/fm-classify-lib.sh:131-153</code>)</td><td>Bounded read</td></tr>
+<tr><td><code>status_is_terminal_verb</code>, <code>status_is_captain_relevant</code></td><td>Must firstmate see this line? (<code class="cite">bin/fm-classify-lib.sh:191-228</code>)</td><td>Pure</td></tr>
+<tr><td><code>status_is_paused</code>, <code>status_is_captain_held</code></td><td>Is this a declared wait, and on which human? A pause waits on an external party; a captain-held transfer waits on the captain (<code class="cite">bin/fm-classify-lib.sh:231-266</code>)</td><td>Pure</td></tr>
+<tr><td><code>status_paused_until</code></td><td>Did the pause name when it clears, as <code>until YYYY-MM-DDTHH:MM[:SS]Z</code>? A malformed time falls back to the cadence rather than silencing the wait (<code class="cite">bin/fm-classify-lib.sh:267-282</code>)</td><td>Pure</td></tr>
+<tr><td><code>crew_absorb_class</code></td><td>Is an idle-looking crew <code>working</code>, <code>paused</code>, or <code>none</code>? Read from <code>bin/fm-crew-state.sh</code>, not the log, so "a crew that appended paused: but then STARTED a run reports working, never paused" (<code class="cite">bin/fm-classify-lib.sh:2104-2120</code>)</td><td>May make a bounded no-mistakes call; run only on no-verb signals and first sighting of a stale pane</td></tr>
+<tr><td><code>crew_gate_awaits_human_decision</code></td><td>Is a parked validation gate owed by a human? Only a findings row whose <code>action</code> is exactly <code>ask-user</code> counts (<code class="cite">bin/fm-classify-lib.sh:2155-2182</code>)</td><td>Same as above</td></tr>
+<tr><td><code>crew_worktree_written_since</code></td><td>Has the crew written any file since its quiet window opened? The third liveness input, added after "eight consecutive possible-wedge escalations against a crew that was demonstrably working" (<code class="cite">bin/fm-classify-lib.sh:2232-2263</code>)</td><td>One pruned, depth- and time-bounded walk, only at the moment of escalation</td></tr>
+<tr><td><code>signal_crew_provably_working</code></td><td>May a no-verb signal wake be absorbed? Never for a secondmate's <code>.status</code>, because "every append is parent-directed content the supervisor must read" (<code class="cite">bin/fm-classify-lib.sh:2292-2304</code>)</td><td>As absorb class</td></tr>
+<tr><td><code>stale_is_terminal</code></td><td>Is a stale pane's latest event captain-relevant? A no answer means only "non-terminal" (<code class="cite">bin/fm-classify-lib.sh:2331-2335</code>)</td><td>Bounded read</td></tr>
+</tbody>
+</table>
+</div>
+<p>The absorb rule is positive-evidence-only: absence of evidence always leaves the caller's escalation schedule untouched (<code class="cite">bin/fm-classify-lib.sh:2134-2143</code>, <code class="cite">bin/fm-classify-lib.sh:2240-2243</code>). A declared pause is re-surfaced once every <code>FM_PAUSE_RESURFACE_SECS</code>, four hours by default, because an hourly recheck "only produced nagging (the 2026-09-07 away-window audit)" (<code class="cite">bin/fm-classify-lib.sh:93-106</code>).</p>
+
+<h3>Span classification and the presentation marker</h3>
+<p>For a wake, the question is not "what is the latest line" but "what did this append say". <code>status_span_first_actionable_record</code> captures one size-and-identity endpoint and reports every actionable event from a start offset up to it, joined in source order with <code> ; </code>, so the caller reports the complete span before committing its endpoint (<code class="cite">bin/fm-classify-lib.sh:1919-1942</code>). A keyed opener is included only if the whole-file fold still names it as live; a reserved-key transition the fold rejects is surfaced as a reconciliation signal instead. Return codes separate "actionable" (0), "nothing actionable" (1) and "could not classify" (2, no committable endpoint).</p>
+<p>The library header states the marker discipline that goes with it: a presentation marker stores the last reported file signature and the last successfully classified position separately. After a failure only the reported signature advances, "so the same observed state alarms once while every unclassified byte remains for recovery", and a missing or suspect position reads from byte 0, "preferring a bounded duplicate over a lost event" (<code class="cite">bin/fm-classify-lib.sh:15-28</code>).</p>
+
+<h3>The phase fold, which is evidence only</h3>
+<p><code>status_open_activities</code> runs a second fold over the same stream: a <code>working</code> or <code>paused</code> event opens a phase for its key, and a later terminal, decision or <code>resolved</code> event with that key closes it. Its own comment limits it: "It is never authoritative current crew state, and consumers must not let an open phase outrank a structured home snapshot or fm-crew-state result" (<code class="cite">bin/fm-classify-lib.sh:1852-1860</code>). The secondmate charter's matching rule is to close a keyed phase with <code>resolved [key=&lt;work-slug&gt;]</code> when it ends without another reportable state (<code class="cite">bin/fm-brief.sh:339</code>).</p>
+
+<h2>What this component refuses to do</h2>
+<ul>
+<li>It never infers current state from a tail of the log; that is <code>bin/fm-crew-state.sh</code>'s job (<code class="cite">bin/fm-crew-state.sh:1-12</code>). See <a href="event-vs-state.html">Event is not state</a>.</li>
+<li>It never lets a time tag decide state or closure (<code class="cite">bin/fm-classify-lib.sh:293-294</code>).</li>
+<li>It never widens token recognition beyond what a firstmate library actually writes (<code class="cite">bin/fm-classify-lib.sh:473-484</code>).</li>
+<li>It never rejects a writer's line; bad lines are simply not transitions, so one malformed append cannot wedge a stream (<code class="cite">bin/fm-classify-lib.sh:632-638</code>).</li>
+</ul>
+
+<h2>Who depends on it</h2>
+<ul>
+<li><a href="wake-drain.html">Wake-drain surfaces</a>: OPEN DECISIONS, UNREAD STATUS, the outcome backstop and record divergence are all built from these readers.</li>
+<li><code>bin/fm-crew-state.sh</code>, the current-state reader, reconciles the log through <code>status_current_line</code>.</li>
+<li><code>bin/fm-fleet-snapshot.sh</code> and so <a href="bearings.html">Bearings</a> publish the fold as <code>hints.open_decisions</code>.</li>
+<li><code>bin/fm-captain-hold.sh diverged</code> uses <code>status_key_closing_verb</code>.</li>
+<li>The watcher and the away-mode daemon (<a href="../supervision/index.html">Supervision</a>) use the classification and absorb primitives.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

@@ -92,7 +92,17 @@ window.FM_NAV = [
   // end backlog-and-decisions
 
   // begin observability
-  { section: "observability", title: "Observability", href: "components/observability/index.html", stub: true },
+  { section: "observability", title: "Observability", href: "components/observability/index.html" },
+  { section: "observability", title: "Status events and the keyed fold", href: "components/observability/status-events.html" },
+  { section: "observability", title: "Wake-drain surfaces", href: "components/observability/wake-drain.html" },
+  { section: "observability", title: "Event is not state", href: "components/observability/event-vs-state.html" },
+  { section: "observability", title: "Bearings snapshot and board", href: "components/observability/bearings.html" },
+  { section: "observability", title: "Scout reports", href: "components/observability/scout-reports.html" },
+  { section: "observability", title: "Learnings and captain preferences", href: "components/observability/knowledge-files.html" },
+  { section: "observability", title: "Dispatch audit", href: "components/observability/dispatch-audit.html" },
+  { section: "observability", title: "Contribution tracking", href: "components/observability/contributions.html" },
+  { section: "observability", title: "Process-event sources", href: "components/observability/process-events.html" },
+  { section: "observability", title: "Trace context propagation", href: "components/observability/trace-context.html" },
   // end observability
 
   // begin remote

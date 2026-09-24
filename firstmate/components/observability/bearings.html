@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bearings snapshot and board · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Observability</p>
+<h1>Bearings snapshot and board</h1>
+<p class="lede">Bearings is the captain's "pick up where I left off" report: one bounded, deterministic command produces the fleet facts, the agent ranks and words them into four fixed sections, and an optional interactive board lets the captain answer decisions in place.</p>
+
+<h2>The problem it solves</h2>
+<p>After a break, a night or a context reset, the captain needs the whole fleet in one read. The skill's goal is a "complete current snapshot from the fleet's current state, so the captain can resume in one read" (<code class="cite">.agents/skills/bearings/SKILL.md:16</code>). The risk is an agent that stitches that picture together from whatever it remembers, recent chat, or old reports. Bearings removes that by making the fact-gathering one command and forbidding every other source: "Do not create or consult a second fleet-state reader, parser contract, status-event-tail interpretation, visible-session recap, ad-hoc project probe, or ad-hoc <code>gh-axi</code>/<code>gh</code> query" (<code class="cite">.agents/skills/bearings/SKILL.md:42-43</code>).</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 940 430" role="img" aria-labelledby="br-t">
+<title id="br-t">Bearings data flow from durable records to digest and board</title>
+<defs>
+<marker id="br-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs>
+<text class="c4-diagram-title" x="20" y="28">Bearings: one read, one projection, three renderings</text>
+<g class="c4-datastore"><path d="M20,78 a85,8 0 0,0 170,0 a85,8 0 0,0 -170,0 v62 a85,8 0 0,0 170,0 v-62"/><text class="c4-label" x="105" y="106">Durable records</text><text class="c4-desc" x="105" y="124">meta, status, backlog,</text><text class="c4-desc" x="105" y="138">contribution records</text></g>
+<g class="c4-component"><rect x="230" y="70" width="190" height="76" rx="8"/><text class="c4-label" x="325" y="96">fm-fleet-snapshot.sh</text><text class="c4-tech" x="325" y="112">[fm-fleet-snapshot.v1]</text><text class="c4-desc" x="325" y="130">complete, canonical</text></g>
+<g class="c4-component"><rect x="460" y="70" width="200" height="76" rx="8"/><text class="c4-label" x="560" y="96">fm-bearings-snapshot.sh</text><text class="c4-tech" x="560" y="112">[fm-bearings.v1]</text><text class="c4-desc" x="560" y="130">bounded projection</text></g>
+<g class="c4-container"><rect x="710" y="70" width="210" height="76" rx="8"/><text class="c4-label" x="815" y="96">Firstmate agent</text><text class="c4-tech" x="815" y="112">[bearings skill]</text><text class="c4-desc" x="815" y="130">ranks and words facts</text></g>
+<g class="c4-rel"><path d="M190,108 L228,108" marker-end="url(#br-arrow)"/><text class="c4-rel-label" x="209" y="96">reads</text></g>
+<g class="c4-rel"><path d="M420,108 L458,108" marker-end="url(#br-arrow)"/><text class="c4-rel-label" x="439" y="96">--json</text></g>
+<g class="c4-rel"><path d="M660,108 L708,108" marker-end="url(#br-arrow)"/><text class="c4-rel-label" x="684" y="96">JSON</text></g>
+<g class="c4-external"><rect x="230" y="230" width="190" height="60" rx="8"/><text class="c4-label" x="325" y="256">Secondmate homes</text><text class="c4-desc" x="325" y="274">local and remote ledgers</text></g>
+<g class="c4-rel c4-rel-async"><path d="M325,230 L325,148" marker-end="url(#br-arrow)"/><text class="c4-rel-label" x="325" y="192">budgeted reads</text></g>
+<g class="c4-external"><rect x="460" y="230" width="200" height="60" rx="8"/><text class="c4-label" x="560" y="256">GitHub</text><text class="c4-desc" x="560" y="274">open PRs and checks</text></g>
+<g class="c4-rel c4-rel-async"><path d="M560,230 L560,148" marker-end="url(#br-arrow)"/><text class="c4-rel-label" x="560" y="192">--include-prs only</text></g>
+<g class="c4-component"><rect x="710" y="230" width="210" height="64" rx="8"/><text class="c4-label" x="815" y="256">fm-bearings-board.sh</text><text class="c4-desc" x="815" y="276">validate, inject, serve, arm</text></g>
+<g class="c4-rel"><path d="M815,146 L815,228" marker-end="url(#br-arrow)"/><text class="c4-rel-label" x="815" y="192">board payload</text></g>
+<g class="c4-external"><rect x="710" y="350" width="210" height="60" rx="8"/><text class="c4-label" x="815" y="376">Lavish session</text><text class="c4-desc" x="815" y="394">captain answers here</text></g>
+<g class="c4-rel"><path d="M815,294 L815,348" marker-end="url(#br-arrow)"/><text class="c4-rel-label" x="815" y="326">prove live</text></g>
+<g class="c4-component"><rect x="460" y="350" width="200" height="60" rx="8"/><text class="c4-label" x="560" y="376">Keyed-answer intake</text><text class="c4-desc" x="560" y="394">fm-captain-hold.sh</text></g>
+<g class="c4-rel c4-rel-async"><path d="M710,380 L662,380" marker-end="url(#br-arrow)"/><text class="c4-rel-label" x="686" y="368">answers</text></g>
+<g class="c4-legend">
+<rect class="c4-legend-frame" x="20" y="230" width="180" height="130" rx="6"/>
+<text class="c4-legend-heading" x="32" y="250">Legend</text>
+<g class="c4-datastore"><path d="M32,262 a14,3 0 0,0 28,0 a14,3 0 0,0 -28,0 v10 a14,3 0 0,0 28,0 v-10"/></g><text x="68" y="273">Durable files</text>
+<g class="c4-component"><rect x="32" y="284" width="28" height="16" rx="3"/></g><text x="68" y="297">Script</text>
+<g class="c4-container"><rect x="32" y="308" width="28" height="16" rx="3"/></g><text x="68" y="321">Agent session</text>
+<g class="c4-external"><rect x="32" y="332" width="28" height="16" rx="3"/></g><text x="68" y="345">External</text>
+</g>
+</svg>
+</div>
+<figcaption>The agent's judgment starts only after the projection: it ranks facts and writes prose, and it never gathers facts itself. File mode additionally writes <code>data/status-report-&lt;date&gt;.md</code>. A board answer returns as an ordinary process-event wake (<a href="process-events.html">Process-event sources</a>).</figcaption>
+</figure>
+
+<h2>The canonical fleet snapshot</h2>
+<p><code>bin/fm-fleet-snapshot.sh --json</code> prints one <code>fm-fleet-snapshot.v1</code> object. It "does not acquire the session lock, drain wakes, arm watchers, mutate backlog state, or write reports"; its only fleet-state mutation is atomically refreshing cached copies of remote home summaries under <code>state/secondmate-summary-cache</code> (<code class="cite">bin/fm-fleet-snapshot.sh:1-10</code>). Its header is the field contract: backlog records with normalised captain-hold fields, one <code>tasks[]</code> row per meta record, <code>scout_reports[]</code>, <code>main_inventory</code>, <code>secondmate_current</code>, <code>secondmate_landed</code>, and <code>contributions</code> (<code class="cite">bin/fm-fleet-snapshot.sh:12-118</code>). "Human views must render this output instead of parsing state files again" (<code class="cite">bin/fm-fleet-snapshot.sh:118</code>).</p>
+<p>How it stays honest about time and identity:</p>
+<ul>
+<li>A task's current state comes from <code>bin/fm-crew-state.sh &lt;id&gt;</code>; its last status event is kept as <code>paths.status_log.last_event</code>, "historical wake-event data only, never current state", with <code>age_seconds</code> derived only from the <code>[at=]</code> tag and null when that is unknown (<code class="cite">bin/fm-fleet-snapshot.sh:54-62</code>).</li>
+<li><code>hints.open_decisions</code> is the output of the keyed fold (<a href="status-events.html">Status events</a>), reconciled against current state (<code class="cite">bin/fm-fleet-snapshot.sh:63-66</code>).</li>
+<li>Task records are captured at start. If a task's <code>spawn_gen</code> changes while observations run, the mutable evidence is discarded "rather than attributed to the replacement generation" (<code class="cite">bin/fm-fleet-snapshot.sh:50-53</code>).</li>
+<li>For a secondmate, structured facts from its own home win; parent status and terminal reads are "historical, untrusted supplements only" (<code class="cite">bin/fm-fleet-snapshot.sh:78-82</code>).</li>
+</ul>
+<p>Every cross-home read has an explicit bound "so one broken or unexpectedly large home cannot hang or explode the parent snapshot" (<code class="cite">bin/fm-fleet-snapshot.sh:152-153</code>). The main ones: all concurrent remote ledger reads share one <code>FM_SNAPSHOT_BUDGET</code> of 5 seconds; each crew-state read has 10 seconds; at most 20 secondmates, 20 children and 20 decisions per home; terminal reads are capped at 8 lines, 4096 bytes and 2 seconds (<code class="cite">bin/fm-fleet-snapshot.sh:155-174</code>, <code class="cite">docs/configuration.md:1116</code>). An observation date can be pinned with <code>FM_SNAPSHOT_NOW</code> (<code class="cite">bin/fm-fleet-snapshot.sh:135</code>).</p>
+
+<h3>Captain-hold buckets</h3>
+<p>Every captain-held backlog row gets exactly one <code>hold_bucket</code>, decided "only from structured fields" and never from hold reason or body prose: <code>blocked</code> if any blocker is unresolved, else <code>dated</code> while <code>hold_until</code> is in the future, else <code>aged</code> once an undated hold is at least <code>FM_SNAPSHOT_UNDATED_HOLD_AGE_DAYS</code> old (default 14), else <code>live</code>. <code>captain_actionable</code> is exactly <code>hold_bucket == "live"</code> (<code class="cite">bin/fm-fleet-snapshot.sh:28-45</code>). Aging "is a projection safety net only: the durable deferral remains re-holding with --until".</p>
+
+<h2>The Bearings projection</h2>
+<p><code>bin/fm-bearings-snapshot.sh</code> is "a thin wrapper OVER the canonical bin/fm-fleet-snapshot.sh. It does not parse fleet state itself" (<code class="cite">bin/fm-bearings-snapshot.sh:1-12</code>). It projects the complete snapshot down to what a resume read needs and renders TOON by default, with <code>--json</code> as the parity form. The projection drops fields from its own output only; it never weakens the canonical snapshot.</p>
+<h3>How the read stays bounded and deterministic</h3>
+<dl class="defs">
+<dt>One source</dt><dd>It shells out once to <code>fm-fleet-snapshot.sh --json</code> (<code class="cite">bin/fm-bearings-snapshot.sh:234-241</code>) and fails with "invalid canonical snapshot" if that output is not usable (<code class="cite">bin/fm-bearings-snapshot.sh:243-244</code>).</dd>
+<dt>A pinned clock</dt><dd><code>NOW</code> comes from <code>FM_BEARINGS_NOW</code> or the current UTC time, and is passed down as <code>FM_SNAPSHOT_NOW</code>, so both layers observe the same instant (<code class="cite">bin/fm-bearings-snapshot.sh:233</code>).</dd>
+<dt>Explicit bounds</dt><dd>Each surface has a positive-integer cap validated at start: 6 landed rows (and per home), 20 in-flight, decisions, secondmates, gates, reports, recorded PRs and unhealthy endpoints (<code class="cite">bin/fm-bearings-snapshot.sh:106-132</code>).</dd>
+<dt>Disclosed omissions</dt><dd>Anything cut by a bound, or not requested, is listed in <code>omitted[]</code> with the flag that reveals it, "so an absence is never ambiguous" (<code class="cite">bin/fm-bearings-snapshot.sh:17-21</code>, <code class="cite">bin/fm-bearings-snapshot.sh:654-680</code>).</dd>
+<dt>No forge by default</dt><dd>Live GitHub discovery and checks run only under <code>--include-prs</code>; "all gh coupling lives in that branch and never in the canonical snapshot" (<code class="cite">bin/fm-bearings-snapshot.sh:14-21</code>).</dd>
+<dt>No writes</dt><dd>"No locks or reports; the underlying snapshot's parent-side remote-ledger cache refresh is the only default fleet-state mutation" (<code class="cite">bin/fm-bearings-snapshot.sh:92-93</code>).</dd>
+</dl>
+<p>Default fields are <code>schema, home, generated, prs, in_flight, secondmates, secondmate_reconcile, decisions_open, landed, gates, reports, recorded_prs, unhealthy_endpoints, omitted</code> (<code class="cite">bin/fm-bearings-snapshot.sh:148-155</code>). Opt-in flags reveal more: <code>--fields bodies,paths,actions,endpoints</code> and the <code>--all-*</code> family (<code class="cite">bin/fm-bearings-snapshot.sh:76-90</code>).</p>
+<h3>Projection rules worth knowing</h3>
+<ul>
+<li>Each Underway row's name is the durable task title, or the task id when the title is blank, never the run status (<code class="cite">bin/fm-bearings-snapshot.sh:28-32</code>).</li>
+<li>A <code>live</code> hold is a Captain's Call entry. <code>blocked</code>, <code>dated</code> and <code>aged</code> holds become Charted Next gates stating why, counted in <code>omitted[]</code>; <code>--all-decisions</code> moves them back and drops the gate, so no hold is in both (<code class="cite">bin/fm-bearings-snapshot.sh:36-46</code>).</li>
+<li>Gates are ordered newest filed first before the bound is applied (<code class="cite">bin/fm-bearings-snapshot.sh:49-51</code>).</li>
+<li>A broken main inventory, such as an in-flight backlog row with no meta, becomes an <code>omitted[]</code> entry and a <code>(main-inventory)</code> gate, "so the four-section chat cannot claim an empty fleet while main current state is broken" (<code class="cite">bin/fm-bearings-snapshot.sh:54-58</code>).</li>
+<li>Landed work merges this home's Done rows with each secondmate's own Done rows, balanced across homes by default (<code class="cite">bin/fm-bearings-snapshot.sh:66-75</code>).</li>
+<li>Only scout reports belonging to live or recently landed tasks are shown by default; <code>--all-reports</code> shows the full inventory (<code class="cite">bin/fm-bearings-snapshot.sh:450</code>, <code class="cite">bin/fm-bearings-snapshot.sh:578-581</code>). See <a href="scout-reports.html">Scout reports</a>.</li>
+<li>Contributions contribute only their captain rows, with counts for the other actors (<code class="cite">bin/fm-bearings-snapshot.sh:24-26</code>). See <a href="contributions.html">Contribution tracking</a>.</li>
+</ul>
+<h3>Away mode</h3>
+<p>Before collecting, the projection asks <code>bin/fm-afk-return.sh guard</code>. An active away window refuses the whole read, "because the right answer there is to run the return first". An open return catch-up (exit 4) is reported as content: a single action-free <code>(return-catchup)</code> gate naming the blockers left (<code class="cite">bin/fm-bearings-snapshot.sh:209-231</code>). Away mode itself is <a href="../supervision/index.html">Supervision</a> material.</p>
+
+<h2>The four-section digest</h2>
+<p>The bearings skill is "the one owner of the <code>/bearings</code> chat-response format" (<code class="cite">.agents/skills/bearings/SKILL.md:147</code>). Every response has exactly these sections in this order, each always present with a fixed empty-state sentence:</p>
+<ol>
+<li><strong>Captain's Call</strong>: only items needing the captain's own action now. "Nothing needs your action right now" is allowed only when <code>contributions.proven_clear</code> is true and no decision is recorded.</li>
+<li><strong>Recently Landed</strong>: the bounded current baseline, rendered in full every time.</li>
+<li><strong>Underway</strong>: one line of current state per direct report.</li>
+<li><strong>Charted Next</strong>: queued or gated work and action-free integrity warnings.</li>
+</ol>
+<p>(<code class="cite">.agents/skills/bearings/SKILL.md:148-161</code>.) "Every chat digest and file-mode report is a complete current snapshot, never a delta against a prior report", and file mode must never read an earlier <code>data/status-report-*.md</code> to decide what to include (<code class="cite">.agents/skills/bearings/SKILL.md:166</code>, <code class="cite">.agents/skills/bearings/SKILL.md:81</code>). The strict boundary keeps action-free items, such as a validating task, a declared <code>paused:</code> wait, or a completed scout's report pointer, out of Captain's Call (<code class="cite">.agents/skills/bearings/SKILL.md:171</code>).</p>
+<p>Modes: plain <code>/bearings</code> is chat only; <code>/bearings file</code> replaces today's <code>data/status-report-&lt;YYYY-MM-DD&gt;.md</code> from scratch; <code>/bearings lavish</code> also builds the board. Natural-language requests such as "save this" do not switch modes (<code class="cite">.agents/skills/bearings/SKILL.md:26-33</code>). During an invocation the skill never tears down, merges, dispatches, steers, answers a decision or mutates backlog state (<code class="cite">.agents/skills/bearings/SKILL.md:21-22</code>). The one side effect it may record is a reconcile request for a secondmate whose own books disagree, through <code>bin/fm-secondmate-reconcile.sh request --snapshot -</code>, which records and returns without sending (<code class="cite">.agents/skills/bearings/SKILL.md:64-71</code>).</p>
+
+<h2>The interactive board</h2>
+<p><code>bin/fm-bearings-board.sh build &lt;data.json&gt;</code> owns every board mechanic, so the agent's per-run work is only "compose the JSON, run build" (<code class="cite">bin/fm-bearings-board.sh:1-8</code>). The payload schema is <code>fm-bearings-board.v1</code>; the template is <code>.agents/skills/bearings/assets/board-template.html</code>; the board always lives at <code>$FM_HOME/.lavish/bearings-board.html</code>, so a rebuild keeps the same session URL and the same process-event source id (<code class="cite">bin/fm-bearings-board.sh:82-87</code>, <code class="cite">bin/fm-bearings-board.sh:112</code>).</p>
+<p>What <code>build</code> guarantees, in order (<code class="cite">bin/fm-bearings-board.sh:14-47</code>):</p>
+<ol>
+<li><strong>Fail-closed validation.</strong> Every renderer-consumed field must satisfy the schema, including an explicit <code>repo</code> on every row and a non-empty <code>name</code> on every Underway row; anything else "refuses before the existing board is touched" (<code class="cite">bin/fm-bearings-board.sh:66-80</code>).</li>
+<li><strong>Captain's Call hygiene.</strong> A card is dropped when its task, PR or versioned artifact appears among the payload's own landed rows, or when <code>fm-captain-hold.sh open</code> says it is no longer an open call. A task whose state cannot be established is kept, "because a call wrongly hidden is worse than a card wrongly shown". Each drop is named on stderr as <code>dropped-landed-card:</code> (<code class="cite">bin/fm-bearings-board.sh:49-55</code>, <code class="cite">bin/fm-bearings-board.sh:321</code>).</li>
+<li><strong>The reconcile choice.</strong> Every decision card gets a standard <code>reconcile</code> option injected by the script, and the validator reserves that value on every card type (<code class="cite">bin/fm-bearings-board.sh:57-64</code>).</li>
+<li><strong>Serve first, then prove live.</strong> <code>lavish-axi &lt;file&gt;</code> exits 0 even when it refuses to reopen a session the captain ended, "so exit status alone cannot tell a live board from a dead one". <code>build</code> requires the server's fresh session listing to show the board open and refuses otherwise (<code class="cite">bin/fm-bearings-board.sh:39-47</code>).</li>
+<li><strong>Bind before arm.</strong> The board is bound to the keyed-answer intake in <code>bin/fm-captain-hold.sh</code> before its listener is armed, "so the board can never produce an answer that has nowhere to go" (<code class="cite">bin/fm-bearings-board.sh:21-25</code>).</li>
+</ol>
+<p>Injection escapes every <code>&lt;</code> in the JSON as <code><</code>, so a string containing <code>&lt;/script&gt;</code> cannot end the data block (<code class="cite">bin/fm-bearings-board.sh:82-86</code>).</p>
+<h3>When the captain answers</h3>
+<p>An answer arrives as a <code>procevent lavish &lt;source-id&gt; &lt;sequence&gt;</code> wake. The runner has already fed decision answers into the keyed-answer intake, which closes or releases each captain-held task at answer time; the agent handles <code>skipped:</code> keys, merge orders and dispatch picks itself, then rebuilds the board from a fresh snapshot (<code class="cite">.agents/skills/bearings/SKILL.md:122-137</code>). A <code>merge</code> click is the captain's explicit merge word for that one PR, but only after re-verifying at wake time that the PR (resolved from the task's own meta, never from board bytes) is still open and green, and recording the answer before merging through <code>bin/fm-pr-merge.sh</code> (<code class="cite">.agents/skills/bearings/SKILL.md:139-143</code>). A Reconcile selection closes nothing; it becomes a durable re-check request (<code class="cite">.agents/skills/bearings/SKILL.md:126-128</code>). Captain-hold semantics belong to <a href="../backlog-and-decisions/index.html">Backlog and decisions</a>; the merge path to <a href="../delivery/index.html">Delivery</a>.</p>
+
+<h2>Failure behaviour</h2>
+<ul>
+<li>Missing <code>jq</code>: the projection exits 1 (<code class="cite">bin/fm-bearings-snapshot.sh:207</code>). A non-positive bound exits 2 (<code class="cite">bin/fm-bearings-snapshot.sh:119-121</code>).</li>
+<li>A guard failure other than the catch-up code is passed through unchanged (<code class="cite">bin/fm-bearings-snapshot.sh:219-222</code>).</li>
+<li>A <code>gh</code> call under <code>--include-prs</code> is bounded by <code>FM_BEARINGS_PR_TIMEOUT</code> (default 20 s) (<code class="cite">bin/fm-bearings-snapshot.sh:117-118</code>).</li>
+<li>An unreadable secondmate home is reported as unreadable with provenance, never as empty (<code class="cite">bin/fm-bearings-snapshot.sh:161-165</code>).</li>
+<li>A board whose session cannot be proven live is not armed (<code class="cite">bin/fm-bearings-board.sh:39-47</code>).</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

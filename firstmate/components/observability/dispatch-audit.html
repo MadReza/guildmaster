@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dispatch audit · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Observability</p>
+<h1>Dispatch audit</h1>
+<p class="lede">What Firstmate keeps so that someone can later check which agent, model and effort a task was dispatched with, and why; there is no dedicated audit log, so the trail is assembled from the task record, the spawn output and the optional resolver's evidence block.</p>
+
+<div class="callout unclear"><span class="callout-title">No single "dispatch audit" artefact</span>
+<p>A search of <code>bin/</code>, <code>docs/</code>, <code>.agents/</code> and <code>AGENTS.md</code> at the pinned commit finds no file, log or command named as a dispatch audit. The source uses the word once in this sense: unsupported effort values are recorded in task meta "while preserving the requested profile for later audit" (<code class="cite">docs/architecture.md:302</code>). This page therefore documents the pieces that together make a dispatch auditable, and says where each one stops.</p></div>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 820 330" role="img" aria-labelledby="da-t">
+<title id="da-t">The records a dispatch leaves behind, and how long each lasts</title>
+<defs>
+<marker id="da-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs>
+<text class="c4-diagram-title" x="20" y="28">Dispatch trail</text>
+<g class="c4-datastore"><path d="M20,66 a80,8 0 0,0 160,0 a80,8 0 0,0 -160,0 v50 a80,8 0 0,0 160,0 v-50"/><text class="c4-label" x="100" y="94">brief.md</text><text class="c4-desc" x="100" y="112">data/&lt;id&gt;/, survives</text></g>
+<g class="c4-component"><rect x="230" y="60" width="200" height="70" rx="8"/><text class="c4-label" x="330" y="86">fm-dispatch-resolve.sh</text><text class="c4-desc" x="330" y="106">opt-in; evidence on stdout</text></g>
+<g class="c4-container"><rect x="480" y="60" width="160" height="70" rx="8"/><text class="c4-label" x="560" y="86">Firstmate agent</text><text class="c4-desc" x="560" y="106">chooses, may override</text></g>
+<g class="c4-component"><rect x="480" y="210" width="160" height="70" rx="8"/><text class="c4-label" x="560" y="236">fm-spawn.sh</text><text class="c4-desc" x="560" y="256">validates, launches</text></g>
+<g class="c4-datastore"><path d="M670,216 a70,8 0 0,0 140,0 a70,8 0 0,0 -140,0 v50 a70,8 0 0,0 140,0 v-50"/><text class="c4-label" x="740" y="244">&lt;id&gt;.meta</text><text class="c4-desc" x="740" y="262">removed at teardown</text></g>
+<g class="c4-rel"><path d="M180,95 L228,95" marker-end="url(#da-arrow)"/><text class="c4-rel-label" x="204" y="83">reads</text></g>
+<g class="c4-rel"><path d="M430,95 L478,95" marker-end="url(#da-arrow)"/><text class="c4-rel-label" x="454" y="83">profile</text></g>
+<g class="c4-rel"><path d="M560,130 L560,208" marker-end="url(#da-arrow)"/><text class="c4-rel-label" x="560" y="170">--harness --model --effort</text></g>
+<g class="c4-rel"><path d="M640,245 L668,245" marker-end="url(#da-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M480,250 C380,250 330,250 300,250" marker-end="url(#da-arrow)"/><text class="c4-rel-label" x="390" y="238">spawned &lt;id&gt; harness=...</text></g>
+<g class="c4-datastore"><path d="M150,226 a75,8 0 0,0 150,0 a75,8 0 0,0 -150,0 v50 a75,8 0 0,0 150,0 v-50"/><text class="c4-label" x="225" y="254">Session transcript</text><text class="c4-desc" x="225" y="272">only home of an override</text></g>
+</svg>
+</div>
+<figcaption>The meta holds the launched profile until teardown; the brief survives it; the resolver's evidence and any override reason exist only in the agent's session unless someone copies them elsewhere. Sources: <code class="cite">bin/fm-spawn.sh:4461-4474</code>, <code class="cite">bin/fm-dispatch-resolve.sh:34-55</code>, <code class="cite">AGENTS.md:235</code>.</figcaption>
+</figure>
+
+<h2>The pieces</h2>
+<h3>1. The task record</h3>
+<p>Every fresh spawn or relaunch writes <code>state/&lt;id&gt;.meta</code> with <code>window</code>, <code>endpoint_task_id</code>, <code>worktree</code>, <code>project</code>, <code>harness</code>, <code>kind</code>, <code>mode</code> and <code>yolo</code> for ship tasks, <code>tasktmp</code>, <code>model</code> (or <code>default</code>), <code>effort</code> (or <code>default</code>), <code>spawn_gen</code>, and <code>backend</code> for a non-tmux backend (<code class="cite">bin/fm-spawn.sh:4461-4479</code>). <code>spawn_gen</code> is "a new spawn_gen= incarnation token so durable consumers can distinguish a replacement worker that reuses the same task id" (<code class="cite">bin/fm-spawn.sh:385-386</code>), and when trace context is on, <code>traceparent=</code> ties the task to one trace (<a href="trace-context.html">Trace context</a>).</p>
+<p>The record keeps what was <em>asked for</em>, not only what the harness accepted: "an effort value the chosen harness does not accept is recorded as <code>effort=</code> in task meta for traceability but omitted from the launch flags" (<code class="cite">docs/configuration.md:504</code>). Publishing the record and moving the backlog item to In flight "are one step, not two", and a dispatch refuses up front unless the backlog holds an eligible item for that id (<code class="cite">bin/fm-spawn.sh:366-379</code>), so every record corresponds to a tracked work item.</p>
+
+<h3>2. The spawn line</h3>
+<p>On success <code>fm-spawn.sh</code> prints <code>spawned &lt;id&gt; harness=&lt;name&gt; kind=&lt;ship|scout|secondmate&gt; [mode=&lt;mode&gt; yolo=&lt;on|off&gt;] window=&lt;backend-target&gt; worktree=&lt;path&gt;</code> (<code class="cite">bin/fm-spawn.sh:381-384</code>). It goes to the calling session's output.</p>
+
+<h3>3. The brief</h3>
+<p><code>data/&lt;id&gt;/brief.md</code> is the per-task brief (<code class="cite">AGENTS.md:99</code>). It is the input both firstmate's own rule matching and the resolver read. No teardown code path found removes <code>data/&lt;id&gt;/</code>, so the brief survives the task; it does not itself record the chosen profile.</p>
+
+<h3>4. The resolver's evidence block</h3>
+<p>When a home opts in with <code>TYPESAFE_API_KEY</code>, <code>bin/fm-dispatch-resolve.sh &lt;brief&gt; --project &lt;name&gt;</code> asks a model one Choice question over the rules' <code>when</code> texts, then does every eligibility and ranking step in <code>jq</code> (<code class="cite">bin/fm-dispatch-resolve.sh:16-31</code>). Its output is built to be inspected: status, model, latency and tokens, the matched rule and confidence, every option's probability, the reason when the status is not clear, and one <code>candidate:</code> line per profile with provider, scope, remaining percentage, spendPriority, runway and an eligibility verdict (<code class="cite">bin/fm-dispatch-resolve.sh:34-44</code>). Its authority line: "this tool never replaces firstmate's judgment ... it publishes one inspectable answer plus every candidate's evidence, in code" (<code class="cite">bin/fm-dispatch-resolve.sh:53-55</code>). The model "never sees quota, catalogs, approvals, <code>why</code>, or <code>use</code>" (<code class="cite">bin/fm-dispatch-resolve.sh:28-29</code>).</p>
+<p>Every outcome exits 0 so an intake is never blocked, and only a usage or configuration error exits 2 (<code class="cite">bin/fm-dispatch-resolve.sh:45-48</code>). The key is never written or logged; it reaches <code>curl</code> through a file descriptor, never on argv (<code class="cite">bin/fm-dispatch-resolve.sh:12-14</code>).</p>
+<p>The agent contract: run it on the written brief "and on <code>clear</code> pass its <code>profile:</code> line to <code>fm-spawn</code> unless you state a reason to override" (<code class="cite">AGENTS.md:235</code>). The rule matching and profile-array selection it can replace are owned by <code>config/crew-dispatch.json</code> and the <code>quota-array-dispatch</code> skill, documented under <a href="../crew/index.html">Crew</a>.</p>
+
+<h2>Where the trail stops</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Question an auditor might ask</th><th>Where the answer lives</th><th>How long</th></tr></thead>
+<tbody>
+<tr><td>Which harness, model and effort was this task launched with?</td><td><code>state/&lt;id&gt;.meta</code></td><td>Until teardown removes it (<code class="cite">bin/fm-teardown.sh:986</code>)</td></tr>
+<tr><td>Was this the same worker or a replacement?</td><td><code>spawn_gen=</code> in the meta</td><td>Until teardown</td></tr>
+<tr><td>What was the worker told?</td><td><code>data/&lt;id&gt;/brief.md</code></td><td>Survives teardown</td></tr>
+<tr><td>Which rule matched, and why was a candidate ineligible?</td><td>The resolver's stdout block</td><td>Only the session transcript; the tool writes nothing</td></tr>
+<tr><td>Why did firstmate override a <code>clear</code> answer?</td><td>The stated reason, in conversation</td><td>Only the session transcript</td></tr>
+</tbody>
+</table>
+</div>
+<div class="callout unclear"><span class="callout-title">Open question</span>
+<p>Nothing read for this page persists the resolver's evidence or an override reason beyond the session, and the task record is deleted at teardown. Whether a finished task's dispatch profile is recoverable later, for example from the backlog's Done row, is not settled by the source examined here.</p></div>
+
+<h2>Configuration</h2>
+<dl class="defs">
+<dt><code>config/crew-dispatch.json</code></dt><dd>Natural-language rules and profiles; when present, <code>fm-spawn.sh</code> refuses a crewmate or scout without an explicit harness (<code class="cite">docs/configuration.md:453-456</code>).</dd>
+<dt><code>TYPESAFE_API_KEY</code></dt><dd>Environment or <code>.env</code>; absent means one <code>dispatch-resolve: off</code> line and no network call (<code class="cite">bin/fm-dispatch-resolve.sh:8-13</code>).</dd>
+</dl>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

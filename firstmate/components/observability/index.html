@@ -11,12 +11,213 @@
 <div class="layout">
 <nav id="site-nav" aria-label="Site"></nav>
 <main id="main">
-<article>
+<article class="wide">
 <p class="breadcrumb">Components</p>
 <h1>Observability</h1>
-<p class="lede">Will cover how Firstmate is inspected and audited: fleet snapshot, Bearings, home summaries, current-state reads, watcher and cycle logs, contribution tracking, trace-context propagation, documentation-audience checks, and the test and CI verification surface.</p>
-<div class="callout unclear"><span class="callout-title">Stub</span>
-<p>This section is reserved and not yet written. A follow-up task fills it in under <a href="../../AUTHORING.md">the authoring contract</a>. Until then, the <a href="../../c4/containers.html">Level 2 containers page</a> is the entry point for this area.</p></div>
+<p class="lede">How Firstmate knows what happened and reports it: an append-only event log per task, a classifier that folds it into what is still owed, surfaces that make sure nothing owed is lost between wakes, a bounded fleet snapshot for the captain, and a few durable records that outlive the tasks that made them.</p>
+<p class="meta-line">Read against Firstmate commit ada21f5b. Terms are Firstmate's own (captain, crewmate, scout, secondmate, status log), because this site documents Firstmate as it is.</p>
+
+<h2>Pages in this area</h2>
+<ul class="cards">
+<li><a href="status-events.html"><strong>Status events and the keyed fold</strong><span>Line grammar, verbs, keys, time tags, the open/resolved fold, classification for wakes</span></a></li>
+<li><a href="wake-drain.html"><strong>Wake-drain surfaces</strong><span>UNREAD STATUS, outcome backstop, OPEN DECISIONS, RECORD DIVERGENCE</span></a></li>
+<li><a href="event-vs-state.html"><strong>Event is not state</strong><span>The repeated principle, and where confusing the two causes a wrong action</span></a></li>
+<li><a href="bearings.html"><strong>Bearings snapshot and board</strong><span>The bounded deterministic fleet read, the four-section digest, the interactive board</span></a></li>
+<li><a href="scout-reports.html"><strong>Scout reports</strong><span>Durable deliverables that outlive their workspace</span></a></li>
+<li><a href="knowledge-files.html"><strong>Learnings and captain preferences</strong><span>Curated memory files and the inspect-then-update discipline</span></a></li>
+<li><a href="dispatch-audit.html"><strong>Dispatch audit</strong><span>What a dispatch leaves behind, and where the trail stops</span></a></li>
+<li><a href="contributions.html"><strong>Contribution tracking</strong><span>Watching owned upstream PRs and issues after the task ends</span></a></li>
+<li><a href="process-events.html"><strong>Process-event sources</strong><span>Turning a blocking external process into a durable wake</span></a></li>
+<li><a href="trace-context.html"><strong>Trace context propagation</strong><span>One W3C traceparent per task, for outside observers</span></a></li>
+</ul>
+
+<h2>Component view (C4 Level 3)</h2>
+<p>Inside one Firstmate home, observability is not one program but a set of scripts and records around a single primitive, the per-task status log. The view below shows the main parts and the flows between them; each numbered flow is described in the table after it.</p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1000 640" role="img" aria-labelledby="ob-l3-t">
+<title id="ob-l3-t">Observability components inside one Firstmate home</title>
+<defs>
+<marker id="ob-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs>
+<text class="c4-diagram-title" x="20" y="28">Observability, component view</text>
+<g class="c4-boundary"><rect x="190" y="46" width="610" height="494" rx="6"/><text x="202" y="66">One Firstmate home</text></g>
+<g class="c4-external"><rect x="20" y="84" width="150" height="62" rx="8"/><text class="c4-label" x="95" y="110">Workers</text><text class="c4-desc" x="95" y="128">crewmates, scouts, mates</text></g>
+<g class="c4-external"><rect x="20" y="326" width="150" height="62" rx="8"/><text class="c4-label" x="95" y="352">Trace observer</text><text class="c4-desc" x="95" y="370">outside Firstmate</text></g>
+<g class="c4-datastore"><path d="M210,94 a80,8 0 0,0 160,0 a80,8 0 0,0 -160,0 v50 a80,8 0 0,0 160,0 v-50"/><text class="c4-label" x="290" y="122">Status logs</text><text class="c4-desc" x="290" y="140">state/&lt;id&gt;.status</text></g>
+<g class="c4-datastore"><path d="M210,214 a80,8 0 0,0 160,0 a80,8 0 0,0 -160,0 v50 a80,8 0 0,0 160,0 v-50"/><text class="c4-label" x="290" y="242">Scout reports</text><text class="c4-desc" x="290" y="260">data/&lt;id&gt;/report.md</text></g>
+<g class="c4-datastore"><path d="M210,334 a80,8 0 0,0 160,0 a80,8 0 0,0 -160,0 v50 a80,8 0 0,0 160,0 v-50"/><text class="c4-label" x="290" y="362">Task meta</text><text class="c4-desc" x="290" y="380">profile, traceparent</text></g>
+<g class="c4-datastore"><path d="M210,454 a80,8 0 0,0 160,0 a80,8 0 0,0 -160,0 v50 a80,8 0 0,0 160,0 v-50"/><text class="c4-label" x="290" y="482">Curated memory</text><text class="c4-desc" x="290" y="500">learnings, captain</text></g>
+<g class="c4-component"><rect x="410" y="80" width="170" height="70" rx="8"/><text class="c4-label" x="495" y="106">fm-classify-lib.sh</text><text class="c4-desc" x="495" y="126">grammar, fold, classify</text></g>
+<g class="c4-component"><rect x="410" y="200" width="170" height="70" rx="8"/><text class="c4-label" x="495" y="226">fm-fleet-snapshot.sh</text><text class="c4-desc" x="495" y="246">canonical fleet facts</text></g>
+<g class="c4-component"><rect x="410" y="320" width="170" height="70" rx="8"/><text class="c4-label" x="495" y="346">Bearings</text><text class="c4-desc" x="495" y="366">projection and board</text></g>
+<g class="c4-component"><rect x="410" y="440" width="170" height="70" rx="8"/><text class="c4-label" x="495" y="466">fm-contributions.sh</text><text class="c4-desc" x="495" y="486">owned upstream work</text></g>
+<g class="c4-component"><rect x="620" y="80" width="160" height="70" rx="8"/><text class="c4-label" x="700" y="106">fm-wake-drain.sh</text><text class="c4-desc" x="700" y="126">status sections</text></g>
+<g class="c4-component"><rect x="620" y="200" width="160" height="70" rx="8"/><text class="c4-label" x="700" y="226">fm-crew-state.sh</text><text class="c4-desc" x="700" y="246">current state</text></g>
+<g class="c4-component"><rect x="620" y="440" width="160" height="70" rx="8"/><text class="c4-label" x="700" y="466">fm-procevent.sh</text><text class="c4-desc" x="700" y="486">process to wake</text></g>
+<g class="c4-container"><rect x="820" y="80" width="160" height="70" rx="8"/><text class="c4-label" x="900" y="106">Firstmate agent</text><text class="c4-desc" x="900" y="126">acts on what it reads</text></g>
+<g class="c4-person"><circle cx="900" cy="300" r="16"/><rect x="830" y="318" width="140" height="56" rx="12"/><text class="c4-label" x="900" y="342">Captain</text><text class="c4-desc" x="900" y="360">decides, reviews</text></g>
+<g class="c4-external"><rect x="410" y="566" width="170" height="56" rx="8"/><text class="c4-label" x="495" y="590">GitHub</text><text class="c4-desc" x="495" y="608">read-only</text></g>
+<g class="c4-external"><rect x="620" y="566" width="160" height="56" rx="8"/><text class="c4-label" x="700" y="590">Lavish</text><text class="c4-desc" x="700" y="608">review boards</text></g>
+<g class="c4-rel"><path d="M170,118 L208,118" marker-end="url(#ob-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="189" cy="104" r="9"/><text x="189" y="108">1</text></g>
+<g class="c4-rel"><path d="M370,118 L408,115" marker-end="url(#ob-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="389" cy="102" r="9"/><text x="389" y="106">2</text></g>
+<g class="c4-rel"><path d="M580,115 L618,115" marker-end="url(#ob-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="599" cy="101" r="9"/><text x="599" y="105">3</text></g>
+<g class="c4-rel"><path d="M780,115 L818,115" marker-end="url(#ob-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="799" cy="101" r="9"/><text x="799" y="105">4</text></g>
+<g class="c4-rel"><path d="M570,150 L650,198" marker-end="url(#ob-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="618" cy="168" r="9"/><text x="618" y="172">5</text></g>
+<g class="c4-rel"><path d="M495,150 L495,198" marker-end="url(#ob-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="480" cy="174" r="9"/><text x="480" y="178">6</text></g>
+<g class="c4-rel"><path d="M620,235 L582,235" marker-end="url(#ob-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="601" cy="221" r="9"/><text x="601" y="225">7</text></g>
+<g class="c4-rel"><path d="M370,239 L408,239" marker-end="url(#ob-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="389" cy="225" r="9"/><text x="389" y="229">8</text></g>
+<g class="c4-rel"><path d="M370,350 L420,272" marker-end="url(#ob-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="392" cy="302" r="9"/><text x="392" y="306">9</text></g>
+<g class="c4-rel"><path d="M495,270 L495,318" marker-end="url(#ob-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="480" cy="294" r="9"/><text x="480" y="298">10</text></g>
+<g class="c4-rel"><path d="M580,355 L828,346" marker-end="url(#ob-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="700" cy="340" r="9"/><text x="700" y="344">11</text></g>
+<g class="c4-rel"><path d="M495,440 L495,392" marker-end="url(#ob-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="480" cy="416" r="9"/><text x="480" y="420">12</text></g>
+<g class="c4-rel"><path d="M495,510 L495,564" marker-end="url(#ob-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="480" cy="538" r="9"/><text x="480" y="542">13</text></g>
+<g class="c4-rel c4-rel-async"><path d="M700,564 L700,512" marker-end="url(#ob-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="715" cy="538" r="9"/><text x="715" y="542">14</text></g>
+<g class="c4-rel c4-rel-async"><path d="M780,470 L792,470 L792,160 L760,152" marker-end="url(#ob-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="792" cy="300" r="9"/><text x="792" y="304">15</text></g>
+<g class="c4-rel c4-rel-async"><path d="M900,374 L760,564" marker-end="url(#ob-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="830" cy="470" r="9"/><text x="830" y="474">16</text></g>
+<g class="c4-rel"><path d="M210,360 L172,360" marker-end="url(#ob-arrow)"/></g>
+<g class="c4-rel-num"><circle cx="191" cy="346" r="9"/><text x="191" y="350">17</text></g>
+<g class="c4-legend">
+<rect class="c4-legend-frame" x="12" y="412" width="168" height="170" rx="6"/>
+<text class="c4-legend-heading" x="24" y="432">Legend</text>
+<g class="c4-person"><rect x="24" y="442" width="28" height="14" rx="6"/></g><text x="60" y="454">Person</text>
+<g class="c4-container"><rect x="24" y="464" width="28" height="14" rx="3"/></g><text x="60" y="476">Agent session</text>
+<g class="c4-component"><rect x="24" y="486" width="28" height="14" rx="3"/></g><text x="60" y="498">Component</text>
+<g class="c4-datastore"><path d="M24,510 a14,3 0 0,0 28,0 a14,3 0 0,0 -28,0 v8 a14,3 0 0,0 28,0 v-8"/></g><text x="60" y="520">Durable record</text>
+<g class="c4-external"><rect x="24" y="530" width="28" height="14" rx="3"/></g><text x="60" y="542">External</text>
+<g class="c4-rel c4-rel-async"><path d="M24,562 L52,562"/></g><text x="60" y="566">Event-driven</text>
+</g>
+</svg>
+</div>
+<figcaption>Level 3 inside one home. Curated memory has no arrow because it is read by the session-start digest, which belongs to <a href="../supervision/index.html">Supervision</a>. The watcher that turns status appends into wakes is also Supervision's; this view starts where a line is appended and ends where firstmate or the captain reads a surface.</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>#</th><th>From → to</th><th>What flows</th><th>Detail</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Workers → status logs</td><td>One appended event line per phase change</td><td><a href="status-events.html">Status events</a></td></tr>
+<tr><td>2</td><td>Status logs → classifier</td><td>Byte spans and whole-file folds</td><td><a href="status-events.html">Status events</a></td></tr>
+<tr><td>3</td><td>Classifier → wake drain</td><td>Open decisions, unread notes, latest events</td><td><a href="wake-drain.html">Wake-drain surfaces</a></td></tr>
+<tr><td>4</td><td>Wake drain → firstmate</td><td>Queued rows plus four status sections, printed once per turn</td><td><a href="wake-drain.html">Wake-drain surfaces</a></td></tr>
+<tr><td>5</td><td>Classifier → current-state reader</td><td><code>status_current_line</code>, reconciled against run and pane evidence</td><td><a href="event-vs-state.html">Event is not state</a></td></tr>
+<tr><td>6</td><td>Classifier → fleet snapshot</td><td><code>hints.open_decisions</code></td><td><a href="bearings.html">Bearings</a></td></tr>
+<tr><td>7</td><td>Current-state reader → fleet snapshot</td><td>One <code>state · source · detail</code> line per task</td><td><a href="bearings.html">Bearings</a></td></tr>
+<tr><td>8</td><td>Scout reports → fleet snapshot</td><td><code>scout_reports[]</code>, found by path</td><td><a href="scout-reports.html">Scout reports</a></td></tr>
+<tr><td>9</td><td>Task meta → fleet snapshot</td><td>One task row per meta record</td><td><a href="dispatch-audit.html">Dispatch audit</a></td></tr>
+<tr><td>10</td><td>Fleet snapshot → Bearings</td><td>Complete JSON, projected and bounded</td><td><a href="bearings.html">Bearings</a></td></tr>
+<tr><td>11</td><td>Bearings → captain</td><td>Four-section digest, optional file report and board</td><td><a href="bearings.html">Bearings</a></td></tr>
+<tr><td>12</td><td>Contributions → Bearings</td><td>Coverage and captain rows, through the fleet snapshot</td><td><a href="contributions.html">Contribution tracking</a></td></tr>
+<tr><td>13</td><td>Contributions → GitHub</td><td>Budgeted read-only observation</td><td><a href="contributions.html">Contribution tracking</a></td></tr>
+<tr><td>14</td><td>Lavish → process-event runner</td><td>A blocking poll completes with the captain's feedback</td><td><a href="process-events.html">Process-event sources</a></td></tr>
+<tr><td>15</td><td>Process-event runner → wake drain</td><td>A durable <code>check</code> wake naming the captured result</td><td><a href="process-events.html">Process-event sources</a></td></tr>
+<tr><td>16</td><td>Captain → Lavish</td><td>Answers on the Bearings board or another review surface</td><td><a href="bearings.html">Bearings</a></td></tr>
+<tr><td>17</td><td>Task meta → trace observer</td><td>The <code>traceparent=</code> the agent received</td><td><a href="trace-context.html">Trace context</a></td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Components and their owners</h3>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Component</th><th>Owning file</th><th>Guarantee it provides</th></tr></thead>
+<tbody>
+<tr><td>Status grammar and fold</td><td><code class="cite">bin/fm-classify-lib.sh</code></td><td>A decision stays open until its key is explicitly closed, however much unrelated text follows (<code class="cite">bin/fm-classify-lib.sh:413-420</code>)</td></tr>
+<tr><td>Current-state reader</td><td><code class="cite">bin/fm-crew-state.sh</code></td><td>Current state from authoritative sources, never from a log tail (<code class="cite">bin/fm-crew-state.sh:4-12</code>)</td></tr>
+<tr><td>Drain surfaces</td><td><code class="cite">bin/fm-wake-drain.sh</code></td><td>Owed items are re-presented every drain; one-shot items are committed only after they print (<code class="cite">bin/fm-wake-drain.sh:551-578</code>)</td></tr>
+<tr><td>Fleet snapshot</td><td><code class="cite">bin/fm-fleet-snapshot.sh</code></td><td>One complete, bounded, read-mostly fleet read that human views must render (<code class="cite">bin/fm-fleet-snapshot.sh:1-10</code>)</td></tr>
+<tr><td>Bearings</td><td><code class="cite">bin/fm-bearings-snapshot.sh</code>, <code class="cite">bin/fm-bearings-board.sh</code></td><td>A bounded projection whose omissions are always disclosed (<code class="cite">bin/fm-bearings-snapshot.sh:14-21</code>)</td></tr>
+<tr><td>Contributions</td><td><code class="cite">bin/fm-contributions.sh</code></td><td>Upstream signals persisted before any wake; no forge writes (<code class="cite">bin/fm-contributions.sh:57-65</code>)</td></tr>
+<tr><td>Process-event runner</td><td><code class="cite">bin/fm-procevent.sh</code></td><td>Capture before announcement, re-announcement until handled (<code class="cite">bin/fm-procevent.sh:216-218</code>)</td></tr>
+<tr><td>Trace context</td><td><code class="cite">bin/fm-trace-context-lib.sh</code></td><td>Injected carrier equals recorded carrier (<code class="cite">bin/fm-trace-context-lib.sh:1-11</code>)</td></tr>
+<tr><td>Curated memory</td><td><code class="cite">.agents/skills/stow/SKILL.md</code></td><td>Inspect-then-update, bounded by a per-home token budget (<code class="cite">docs/architecture.md:448</code>)</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>The principle running through all of it</h2>
+<p>Every part of this area repeats one rule: a status line records that something happened; it does not say what is true now. The home layout states it for the log itself, "append-only wake events, not current-state truth" (<code class="cite">AGENTS.md:103</code>), and the operating contract repeats it where it matters most, before re-escalating: "use <code>bin/fm-crew-state.sh</code> when current state matters, especially before re-escalating an old decision, blocker, or pause" (<code class="cite">AGENTS.md:434</code>). The fold, the drain sections, the snapshot's history fields, the away-mode checks and the contribution classifier each exist partly to stop an event being mistaken for a state. <a href="event-vs-state.html">Event is not state</a> collects every instance with the concrete wrong action each one prevents.</p>
+
+<h2>End to end: one decision, from question to landed work</h2>
+<p>A realistic path through the area. A crewmate on a ship task needs the captain to choose an API shape, gets an answer, and finishes.</p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 940 600" role="img" aria-labelledby="ob-seq-t">
+<title id="ob-seq-t">Sequence of one keyed decision through the status log, drain, answer and completion</title>
+<defs>
+<marker id="ob-seq-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs>
+<text class="c4-diagram-title" x="20" y="28">A keyed decision, end to end</text>
+<g class="c4-external"><rect x="12" y="46" width="116" height="40" rx="6"/><text class="c4-label" x="70" y="71">Crewmate</text></g>
+<g class="c4-datastore"><path d="M142,50 a58,6 0 0,0 116,0 a58,6 0 0,0 -116,0 v30 a58,6 0 0,0 116,0 v-30"/><text class="c4-label" x="200" y="74">Status log</text></g>
+<g class="c4-component"><rect x="272" y="46" width="116" height="40" rx="6"/><text class="c4-label" x="330" y="71">Watcher</text></g>
+<g class="c4-component"><rect x="402" y="46" width="116" height="40" rx="6"/><text class="c4-label" x="460" y="71">Wake drain</text></g>
+<g class="c4-container"><rect x="532" y="46" width="116" height="40" rx="6"/><text class="c4-label" x="590" y="71">Firstmate</text></g>
+<g class="c4-component"><rect x="662" y="46" width="116" height="40" rx="6"/><text class="c4-label" x="720" y="71">fm-send.sh</text></g>
+<g class="c4-person"><rect x="802" y="46" width="116" height="40" rx="10"/><text class="c4-label" x="860" y="71">Captain</text></g>
+<g class="c4-rel c4-rel-async"><path d="M70,88 L70,580"/></g>
+<g class="c4-rel c4-rel-async"><path d="M200,88 L200,580"/></g>
+<g class="c4-rel c4-rel-async"><path d="M330,88 L330,580"/></g>
+<g class="c4-rel c4-rel-async"><path d="M460,88 L460,580"/></g>
+<g class="c4-rel c4-rel-async"><path d="M590,88 L590,580"/></g>
+<g class="c4-rel c4-rel-async"><path d="M720,88 L720,580"/></g>
+<g class="c4-rel c4-rel-async"><path d="M860,88 L860,580"/></g>
+<g class="c4-rel"><path d="M70,120 L198,120" marker-end="url(#ob-seq-arrow)"/><text class="c4-rel-label" x="135" y="112">1 needs-decision [key=api-shape]</text></g>
+<g class="c4-rel c4-rel-async"><path d="M200,160 L328,160" marker-end="url(#ob-seq-arrow)"/><text class="c4-rel-label" x="265" y="152">2 captain-relevant span</text></g>
+<g class="c4-rel"><path d="M330,200 L458,200" marker-end="url(#ob-seq-arrow)"/><text class="c4-rel-label" x="395" y="192">3 queue signal: row</text></g>
+<g class="c4-rel"><path d="M460,240 L588,240" marker-end="url(#ob-seq-arrow)"/><text class="c4-rel-label" x="525" y="232">4 row + OPEN DECISIONS</text></g>
+<g class="c4-rel"><path d="M590,280 L858,280" marker-end="url(#ob-seq-arrow)"/><text class="c4-rel-label" x="725" y="272">5 asks, in plain words</text></g>
+<g class="c4-rel c4-rel-async"><path d="M860,320 L592,320" marker-end="url(#ob-seq-arrow)"/><text class="c4-rel-label" x="725" y="312">6 "use REST"</text></g>
+<g class="c4-rel"><path d="M590,360 L718,360" marker-end="url(#ob-seq-arrow)"/><text class="c4-rel-label" x="655" y="352">7 --resolve-key api-shape</text></g>
+<g class="c4-rel"><path d="M720,400 L202,400" marker-end="url(#ob-seq-arrow)"/><text class="c4-rel-label" x="460" y="392">8 resolved [key=api-shape]: answered: use REST</text></g>
+<g class="c4-rel"><path d="M720,440 L72,440" marker-end="url(#ob-seq-arrow)"/><text class="c4-rel-label" x="395" y="432">9 answer delivered to the crewmate</text></g>
+<g class="c4-rel"><path d="M70,480 L198,480" marker-end="url(#ob-seq-arrow)"/><text class="c4-rel-label" x="135" y="472">10 done: PR https://...</text></g>
+<g class="c4-rel"><path d="M330,520 L458,520" marker-end="url(#ob-seq-arrow)"/><text class="c4-rel-label" x="395" y="512">11 queue signal: row</text></g>
+<g class="c4-rel"><path d="M460,560 L588,560" marker-end="url(#ob-seq-arrow)"/><text class="c4-rel-label" x="525" y="552">12 done event; no open item</text></g>
+</svg>
+</div>
+<figcaption>Steps 1 to 4 make the question impossible to miss, steps 7 and 8 close it at the moment it is answered, and step 12 shows the fold agreeing that nothing is owed. If the step 11 wake were lost after acknowledgement, the drain's outcome backstop would still surface the done event on a supervision-branch home.</figcaption>
+</figure>
+<ol>
+<li><strong>The worker asks.</strong> Following its brief, it appends <code>needs-decision [key=api-shape] [at=1788576000]: REST or gRPC?</code> and stops (<code class="cite">bin/fm-brief.sh:534-536</code>). The fold now holds <code>api-shape</code> open (<code class="cite">bin/fm-classify-lib.sh:678-723</code>).</li>
+<li><strong>The watcher classifies the append.</strong> A span containing a captain-relevant event is surfaced as a <code>signal:</code> wake; a no-verb append would need positive evidence before being absorbed (<code class="cite">bin/fm-watch.sh:21-23</code>, <code class="cite">bin/fm-classify-lib.sh:1919-1942</code>). The watcher itself is <a href="../supervision/index.html">Supervision</a>.</li>
+<li><strong>The wake is queued durably</strong> and firstmate is woken.</li>
+<li><strong>The drain presents it twice over:</strong> the queued row with its unread status annotation, and the fleet-wide OPEN DECISIONS section listing <code>&lt;task&gt; [key=api-shape] needs-decision: REST or gRPC?</code> with the closing command hint (<code class="cite">bin/fm-wake-drain.sh:444-489</code>). Even if a later <code>working</code> line followed, the section would keep listing it.</li>
+<li><strong>Firstmate asks the captain</strong>, who answers (6).</li>
+<li><strong>Firstmate answers and closes in one act:</strong> <code>bin/fm-send.sh &lt;task&gt; --resolve-key api-shape 'use REST'</code>.</li>
+<li><strong><code>fm-send.sh</code> appends</strong> <code>resolved [key=api-shape]: answered: use REST</code> to the task's status log, then re-folds and fails loudly if the key is still open (<code class="cite">bin/fm-send.sh:154-176</code>).</li>
+<li><strong>The answer reaches the worker.</strong> On the inbox plane the close happens at enqueue time, because the durable enqueue is delivery (<code class="cite">bin/fm-send.sh:170-172</code>).</li>
+<li><strong>The worker finishes</strong> and appends <code>done: PR https://...</code>. On a ship task this terminal line would also have cleared any key still open (<code class="cite">bin/fm-classify-lib.sh:700-702</code>), which is where the brief's wording and the fold disagree (see the finding on <a href="status-events.html">Status events</a>).</li>
+<li><strong>The next drain</strong> presents the done event; OPEN DECISIONS prints nothing. Before re-escalating anything, firstmate reads <code>bin/fm-crew-state.sh &lt;task&gt;</code> rather than trusting the last line (<code class="cite">AGENTS.md:434</code>).</li>
+<li><strong>Afterwards</strong>, the landed PR appears under Recently Landed in <a href="bearings.html">Bearings</a>; if the PR is upstream work the home owns, <a href="contributions.html">contribution tracking</a> keeps watching it after teardown.</li>
+</ol>
+
+<h2>Where this area meets its siblings</h2>
+<ul>
+<li><a href="../communication/index.html">Communication</a>: how status lines, steering messages and inbox deliveries travel. This area covers what the lines mean once written.</li>
+<li><a href="../supervision/index.html">Supervision</a>: the watcher, the wake queue and its acknowledgement protocol, away mode, and the session-start digest.</li>
+<li><a href="../backlog-and-decisions/index.html">Backlog and decisions</a>: the captain-hold lifecycle that RECORD DIVERGENCE and the Bearings board depend on.</li>
+<li><a href="../persistence/index.html">Persistence</a>: the <code>data/</code> and <code>state/</code> trees these records live in.</li>
+<li><a href="../delivery/index.html">Delivery</a>: teardown, merge and PR checks.</li>
+<li><a href="../crew/index.html">Crew</a>: dispatch profiles and harness selection behind the dispatch audit.</li>
+<li><a href="../prompts-and-skills/index.html">Prompts and skills</a>: the bearings, stow and process-event-sources skills as prompt artefacts.</li>
+</ul>
 </article>
 </main>
 </div>

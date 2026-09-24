@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contribution tracking · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Observability</p>
+<h1>Contribution tracking</h1>
+<p class="lede"><code>bin/fm-contributions.sh</code> keeps watching the pull requests and issues this home filed upstream after the task that filed them is gone, and tells the fleet who has to act next on each one.</p>
+
+<h2>The problem it solves</h2>
+<p>A ship task ends when its PR is opened or merged, and teardown removes the task's state. Upstream work does not end there: a maintainer may comment, request changes, or mark a filed issue ready for a PR days later. Without a durable record, nobody would notice. The script's one-line purpose: "Observe published contributions owned by this home's durable task records" (<code class="cite">bin/fm-contributions.sh:2</code>). Its records survive teardown: "Previously observed URLs remain in data/&lt;task&gt;/contributions.json after endpoint teardown" (<code class="cite">bin/fm-contributions.sh:15-16</code>).</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 920 470" role="img" aria-labelledby="ct-t">
+<title id="ct-t">Contribution observation, wake and projection flow</title>
+<defs>
+<marker id="ct-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs>
+<text class="c4-diagram-title" x="20" y="28">fm-contributions.sh: observe, persist, wake, project</text>
+<g class="c4-datastore"><path d="M20,78 a90,8 0 0,0 180,0 a90,8 0 0,0 -180,0 v60 a90,8 0 0,0 180,0 v-60"/><text class="c4-label" x="110" y="104">Owned URLs</text><text class="c4-desc" x="110" y="122">backlog links, task pr=,</text><text class="c4-desc" x="110" y="136">earlier records</text></g>
+<g class="c4-component"><rect x="250" y="70" width="190" height="76" rx="8"/><text class="c4-label" x="345" y="96">poll</text><text class="c4-tech" x="345" y="112">[20 s budget, 5 s per read]</text><text class="c4-desc" x="345" y="130">oldest checked first</text></g>
+<g class="c4-external"><rect x="500" y="70" width="180" height="76" rx="8"/><text class="c4-label" x="590" y="100">GitHub</text><text class="c4-desc" x="590" y="120">read-only API calls</text></g>
+<g class="c4-rel"><path d="M200,108 L248,108" marker-end="url(#ct-arrow)"/><text class="c4-rel-label" x="224" y="96">owns</text></g>
+<g class="c4-rel"><path d="M440,108 L498,108" marker-end="url(#ct-arrow)"/><text class="c4-rel-label" x="469" y="96">reads</text></g>
+<g class="c4-container"><rect x="20" y="222" width="180" height="70" rx="8"/><text class="c4-label" x="110" y="246">Firstmate agent</text><text class="c4-tech" x="110" y="262">[bearings skill]</text><text class="c4-desc" x="110" y="280">triage, verdict, ack</text></g>
+<g class="c4-datastore"><path d="M250,236 a95,8 0 0,0 190,0 a95,8 0 0,0 -190,0 v54 a95,8 0 0,0 190,0 v-54"/><text class="c4-label" x="345" y="262">contributions.json</text><text class="c4-desc" x="345" y="280">data/&lt;task&gt;/</text><text class="c4-desc" x="345" y="294">fm-contributions.v1</text></g>
+<g class="c4-rel"><path d="M345,146 L345,226" marker-end="url(#ct-arrow)"/><text class="c4-rel-label" x="345" y="188">atomic write</text></g>
+<g class="c4-rel"><path d="M200,258 L248,258" marker-end="url(#ct-arrow)"/><text class="c4-rel-label" x="224" y="246">verdict, ack</text></g>
+<g class="c4-datastore"><path d="M500,236 a90,8 0 0,0 180,0 a90,8 0 0,0 -180,0 v54 a90,8 0 0,0 180,0 v-54"/><text class="c4-label" x="590" y="262">Wake queue</text><text class="c4-desc" x="590" y="280">check: contributions</text></g>
+<g class="c4-rel"><path d="M425,146 L545,226" marker-end="url(#ct-arrow)"/><text class="c4-rel-label" x="500" y="190">enqueue after persist</text></g>
+<g class="c4-rel c4-rel-async"><path d="M590,298 C590,352 110,352 110,294" marker-end="url(#ct-arrow)"/><text class="c4-rel-label" x="560" y="340">delivered</text></g>
+<g class="c4-component"><rect x="250" y="380" width="190" height="64" rx="8"/><text class="c4-label" x="345" y="406">snapshot</text><text class="c4-desc" x="345" y="426">read-only, no forge</text></g>
+<g class="c4-rel"><path d="M345,300 L345,378" marker-end="url(#ct-arrow)"/></g>
+<g class="c4-component"><rect x="500" y="380" width="180" height="64" rx="8"/><text class="c4-label" x="590" y="406">Fleet snapshot</text><text class="c4-desc" x="590" y="426">then Bearings</text></g>
+<g class="c4-rel"><path d="M440,412 L498,412" marker-end="url(#ct-arrow)"/><text class="c4-rel-label" x="469" y="400">coverage</text></g>
+<g class="c4-legend">
+<rect class="c4-legend-frame" x="720" y="70" width="180" height="120" rx="6"/>
+<text class="c4-legend-heading" x="732" y="90">Legend</text>
+<g class="c4-datastore"><path d="M732,102 a14,3 0 0,0 28,0 a14,3 0 0,0 -28,0 v10 a14,3 0 0,0 28,0 v-10"/></g><text x="768" y="113">Durable record</text>
+<g class="c4-component"><rect x="732" y="124" width="28" height="16" rx="3"/></g><text x="768" y="137">Subcommand</text>
+<g class="c4-container"><rect x="732" y="148" width="28" height="16" rx="3"/></g><text x="768" y="161">Agent session</text>
+<g class="c4-external"><rect x="732" y="170" width="28" height="12" rx="3"/></g><text x="768" y="181">External</text>
+</g>
+</svg>
+</div>
+<figcaption>Signals are written as pending into the record before any wake is queued, so a crash can duplicate a wake but never lose the signal. Only <code>ack</code> removes a pending token. Source: <code class="cite">bin/fm-contributions.sh:57-66</code>.</figcaption>
+</figure>
+
+<h2>What counts as owned</h2>
+<p>"Every URL explicitly linked by a structured backlog row or a task's pr= is owned", plus every URL already recorded. "Repository-wide PR discovery never establishes ownership" (<code class="cite">bin/fm-contributions.sh:14-16</code>). The jq projection computes the owned set as the union of those three sources (<code class="cite">bin/fm-contributions.jq:27-33</code>). GitHub PRs and issues are measured; "other forges remain visibly unmeasured" (<code class="cite">bin/fm-contributions.sh:17</code>).</p>
+
+<h2>Subcommands</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Command</th><th>What it does</th><th>Writes</th></tr></thead>
+<tbody>
+<tr><td><code>snapshot &lt;input.json&gt; [--all]</code></td><td>Projects coverage from the fleet snapshot's backlog and task pair plus saved records. "read-only and never contacts a forge" (<code class="cite">bin/fm-contributions.sh:12-13</code>)</td><td>Nothing</td></tr>
+<tr><td><code>poll</code></td><td>Observes owned URLs under a time budget and enqueues wakes for new signals (<code class="cite">bin/fm-contributions.sh:33-56</code>)</td><td>Records, wake queue</td></tr>
+<tr><td><code>pending</code></td><td>Lists pending signals; refuses when any record is unreadable, because "pending signals are unverified" (<code class="cite">bin/fm-contributions.sh:423-426</code>)</td><td>Nothing</td></tr>
+<tr><td><code>verdict &lt;task&gt; &lt;url&gt; &lt;judged-head&gt; &lt;source-url&gt; &lt;actor&gt; &lt;summary&gt;</code></td><td>Records a maintainer verdict bound to an exact commit</td><td>Record</td></tr>
+<tr><td><code>ack &lt;task&gt; &lt;url&gt; &lt;event-token&gt;</code></td><td>Removes exactly one pending token</td><td>Record</td></tr>
+<tr><td><code>arm [--if-owned]</code></td><td>Writes <code>state/contributions.check.sh</code> and registers it as a custom watcher check (<code class="cite">bin/fm-contributions.sh:392-413</code>)</td><td>Check script, trust record</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>arm</code> is called at startup by bootstrap with <code>--if-owned</code>, so a home that owns nothing registers nothing (<code class="cite">bin/fm-bootstrap.sh:1662-1663</code>), and when a PR is registered for checks (<code class="cite">bin/fm-pr-check.sh:173</code>). The header also asks for it when filing a linked upstream issue (<code class="cite">bin/fm-contributions.sh:67-68</code>). The custom-check mechanism itself is <a href="../supervision/index.html">Supervision</a> material.</p>
+
+<h2>The record: fm-contributions.v1</h2>
+<p>One file per durable task, <code>data/&lt;task&gt;/contributions.json</code>, holding <code>task</code> and <code>records[]</code>. Each record has <code>url</code>, <code>kind</code> (<code>pr</code> or <code>issue</code>), <code>checked_at</code>, <code>error</code>, <code>observation</code>, <code>verdict</code>, <code>seen</code> event tokens, <code>pending</code> events, and <code>notified</code> tokens (<code class="cite">bin/fm-contributions.sh:19-21</code>). The validator in <code>bin/fm-contributions.jq</code> spells out every field type (<code class="cite">bin/fm-contributions.jq:6-26</code>). A file is read only if it is a regular non-symlink file under 1 MiB whose <code>task</code> matches its directory name, because "A file's task identity must match its durable directory, not arbitrary JSON" (<code class="cite">bin/fm-contributions.sh:112-127</code>). All writes serialise on <code>state/.contributions.lock</code>, refuse symlinks and publish by rename (<code class="cite">bin/fm-contributions.sh:64-65</code>).</p>
+
+<h3>Observation</h3>
+<p>An observation is "one coherent forge read": for a PR the head is re-read after fetching checks and reviews, so all facts belong to one commit. Checks are normalised by name, id, start time, status and conclusion, and the newest attempt per check name wins; a check lane that disappears from the next head is disclosed rather than forgotten (<code class="cite">bin/fm-contributions.sh:21-25</code>).</p>
+
+<h3>Verdicts are bound to a commit</h3>
+<p>"A verdict records the EXACT judged head, source URL, actor and summary. A comment's arrival time never supplies its judged head" (<code class="cite">bin/fm-contributions.sh:26-28</code>). The command enforces it: the head must be a full commit hash, the actor one of <code>captain</code>, <code>fleet</code>, <code>maintainer</code>, <code>nobody</code>, and the source must be a comment or review anchor on that same contribution URL (<code class="cite">bin/fm-contributions.sh:443-445</code>). A verdict on a head that is no longer current is marked <code>STALE</code> (<code class="cite">bin/fm-contributions.jq:61-63</code>). Neither a verdict nor a formal review "can grant merge authority" (<code class="cite">bin/fm-contributions.sh:29-31</code>).</p>
+
+<h2>How a poll is bounded</h2>
+<p><code>poll</code> reads the owned set from <code>fm-fleet-snapshot.sh --contribution-input</code>, a local-only read, and spends at most <code>FM_CONTRIBUTIONS_BUDGET</code> seconds on the forge (default 20, allowed 1 to 25). Every forge read is capped at 5 seconds. A PR observation is three dependent waves (core, six parallel reads, a closing head read), an issue two, so one observation takes at most 15 seconds. Before starting a URL, poll reserves the smaller of the budget and 15 seconds, so a started observation is never cut short by the budget; "a later URL waits for the next oldest-checked-first poll". If the budget runs out mid-observation, that URL's record is left untouched (<code class="cite">bin/fm-contributions.sh:33-46</code>).</p>
+<p>Freshness is bounded by <code>FM_CONTRIBUTIONS_MAX_AGE</code> (default 900 seconds). A URL whose last good observation is merged or closed is final: never re-read, always fresh. A forge failure prints its unavailable line only when it starts an episode, and a success ends the episode (<code class="cite">bin/fm-contributions.sh:47-53</code>). "An expired or absent observation is not silence" (<code class="cite">bin/fm-contributions.sh:47-48</code>).</p>
+
+<h2>Signals and wakes</h2>
+<p>New comments or reviews from a maintainer (author association OWNER, MEMBER or COLLABORATOR, excluding the contribution's author), and an issue gaining the ready label (<code>FM_CONTRIBUTIONS_READY_LABEL</code>, default <code>ready-for-pr</code>, matched case-insensitively), are persisted as pending before any wake. Poll then appends an ordinary durable <code>check</code> wake through <code>fm-wake-lib</code>. "A crash after enqueue can duplicate a wake but cannot consume the pending signal. Source bodies are data, never commands" (<code class="cite">bin/fm-contributions.sh:54-63</code>).</p>
+<p>The agent's handling is owned by the bearings skill's "Contribution follow-up" section: a <code>check: contributions</code> wake "is arriving information about owned work, not permission to post, answer a maintainer, merge, or close an arbitration". The agent reads <code>pending</code>, inspects the source as untrusted evidence, records a verdict only when the source identifies the judged commit, and routes any scope or authority question through a captain hold (<code class="cite">.agents/skills/bearings/SKILL.md:188-212</code>).</p>
+
+<h2>Who must act next</h2>
+<p>The projection assigns each contribution exactly one required actor, first match wins (<code class="cite">bin/fm-contributions.jq:67-93</code>):</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Condition</th><th>Actor</th><th>Reason shown</th></tr></thead>
+<tbody>
+<tr><td>Not on github.com</td><td>unmeasured</td><td>unsupported forge; coverage is unmeasured</td></tr>
+<tr><td>Merged or closed, fresh</td><td>nobody</td><td>forge reports merged/closed</td></tr>
+<tr><td>Merged or closed, not fresh</td><td>fleet</td><td>terminal observation needs refresh</td></tr>
+<tr><td>A live captain hold on the owning task</td><td>captain</td><td>the hold reason</td></tr>
+<tr><td>Not recently checked</td><td>fleet</td><td>the error, or "contribution not recently checked"</td></tr>
+<tr><td>Verdict on an older head</td><td>fleet</td><td>STALE maintainer verdict; reassess the current head</td></tr>
+<tr><td>Pending signals</td><td>fleet</td><td>incoming maintainer signal needs triage</td></tr>
+<tr><td>Issue: ready / not ready</td><td>fleet / maintainer</td><td>filed issue is ready-for-pr / awaiting issue triage</td></tr>
+<tr><td>PR draft, not mergeable, failed checks, missing verdicts, no checks, checks running, changes requested</td><td>fleet</td><td>the specific reason</td></tr>
+<tr><td>Verdict says fleet</td><td>fleet</td><td>the verdict summary</td></tr>
+<tr><td>Verdict says captain, no live hold</td><td>fleet</td><td>record the unresolved arbitration as a captain hold</td></tr>
+<tr><td>Review required</td><td>maintainer</td><td>review required</td></tr>
+<tr><td>Can merge, delivery posture authorises</td><td>fleet</td><td>checks green; merge is authorized by delivery posture</td></tr>
+<tr><td>Can merge otherwise</td><td>captain</td><td>checks green; merge approval needed</td></tr>
+<tr><td>Anything else</td><td>maintainer</td><td>delivery awaits the maintainer</td></tr>
+</tbody>
+</table>
+</div>
+<p>A captain verdict never becomes a captain row by itself: the fleet is told to create the missing hold, because "The classifier does not infer a captain decision from comment prose" (<code class="cite">.agents/skills/bearings/SKILL.md:200</code>). When several tasks own one URL it is counted once, and a captain row wins over action-free duplicates (<code class="cite">bin/fm-contributions.jq:100-104</code>).</p>
+<h3>The summary Bearings reads</h3>
+<p><code>summary</code> reports <code>known</code>, <code>checked</code>, per-actor <code>counts</code>, <code>unmeasured</code>, <code>complete</code>, <code>proven_clear</code>, stale and missing verdict counts, <code>unreadable_records</code>, <code>valid_until</code>, and the <code>captain</code> rows (<code class="cite">bin/fm-contributions.jq:106-120</code>). <code>proven_clear</code> is true only when no record is unreadable and every contribution is checked and not owed by the captain (<code class="cite">bin/fm-contributions.jq:114</code>). Bearings may say "Nothing needs your action right now" only when that is true (<code class="cite">.agents/skills/bearings/SKILL.md:154-155</code>). See <a href="bearings.html">Bearings</a>.</p>
+
+<h2>What it refuses to do</h2>
+<ul>
+<li>It never writes to a forge (<code class="cite">bin/fm-contributions.sh:65</code>).</li>
+<li>It never adopts a URL it merely discovered (<code class="cite">bin/fm-contributions.sh:16</code>).</li>
+<li>It never records evidence for a URL the task does not own, or one it has not observed yet: "contribution is not owned by this durable task", "observe the contribution before recording evidence" (<code class="cite">bin/fm-contributions.sh:434-437</code>).</li>
+<li>It never binds prose to a head just because that head was current when the comment arrived (<code class="cite">.agents/skills/bearings/SKILL.md:196-197</code>).</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trace context propagation · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Observability</p>
+<h1>Trace context propagation</h1>
+<p class="lede">When enabled, every spawned agent receives one W3C <code>traceparent</code> value in its environment and the same value is recorded in its task metadata, so an outside observer can treat each task as exactly one trace.</p>
+
+<h2>Why it exists, and why so little</h2>
+<p>Firstmate's durable records already let an observer work out task identity and lifecycle after the fact. The one thing an observer cannot reconstruct is "a task-scoped trace id delivered in the agent's environment before launch and recorded under the same identity in task metadata. This feature adds only that carrier seam" (<code class="cite">docs/trace-context.md:8-12</code>). It is "default-off, source-owned, vendor-neutral, and deliberately narrow" (<code class="cite">docs/trace-context.md:5</code>). Lifecycle-event emission, extra ids and any embedded OTLP export are "deliberately deferred until a running observer demonstrates a concrete fidelity gap" (<code class="cite">docs/trace-context.md:113-114</code>).</p>
+<p>Ownership of the contract is split three ways: <code>docs/configuration.md</code> owns the configuration schema, the header of <code>bin/fm-trace-context-lib.sh</code> owns the mechanics, and <code>docs/trace-context.md</code> is the rationale (<code class="cite">docs/trace-context.md:6</code>).</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 760 500" role="img" aria-labelledby="tc-t">
+<title id="tc-t">How one spawn resolves, injects and records its trace carrier</title>
+<defs>
+<marker id="tc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs>
+<text class="c4-diagram-title" x="20" y="28">One carrier per task</text>
+<g class="c4-component"><rect x="40" y="56" width="230" height="70" rx="8"/><text class="c4-label" x="155" y="84">fm-session-start.sh</text><text class="c4-desc" x="155" y="104">resolve on/off once per session</text></g>
+<g class="c4-datastore"><path d="M330,62 a105,8 0 0,0 210,0 a105,8 0 0,0 -210,0 v52 a105,8 0 0,0 210,0 v-52"/><text class="c4-label" x="435" y="90">Frozen decision</text><text class="c4-desc" x="435" y="108">state/.trace-context-effective</text></g>
+<g class="c4-rel"><path d="M270,91 L328,91" marker-end="url(#tc-arrow)"/></g>
+<g class="c4-component"><rect x="40" y="170" width="230" height="64" rx="8"/><text class="c4-label" x="155" y="196">fm-spawn.sh</text><text class="c4-desc" x="155" y="216">reads the frozen decision</text></g>
+<g class="c4-rel"><path d="M380,124 L240,168" marker-end="url(#tc-arrow)"/><text class="c4-rel-label" x="320" y="152">on or off</text></g>
+<g class="c4-component"><rect x="40" y="274" width="230" height="76" rx="8"/><text class="c4-label" x="155" y="300">Resolve carrier</text><text class="c4-desc" x="155" y="320">valid traceparent= in meta: reuse</text><text class="c4-desc" x="155" y="336">otherwise: mint random root, 01</text></g>
+<g class="c4-rel"><path d="M155,234 L155,272" marker-end="url(#tc-arrow)"/><text class="c4-rel-label" x="190" y="257">on</text></g>
+<g class="c4-component"><rect x="40" y="394" width="230" height="64" rx="8"/><text class="c4-label" x="155" y="420">Export into pane</text><text class="c4-desc" x="155" y="440">TRACEPARENT, beside GOTMPDIR</text></g>
+<g class="c4-rel"><path d="M155,350 L155,392" marker-end="url(#tc-arrow)"/></g>
+<g class="c4-datastore"><path d="M330,400 a95,8 0 0,0 190,0 a95,8 0 0,0 -190,0 v50 a95,8 0 0,0 190,0 v-50"/><text class="c4-label" x="425" y="428">Task metadata</text><text class="c4-desc" x="425" y="446">state/&lt;id&gt;.meta traceparent=</text></g>
+<g class="c4-rel"><path d="M270,426 L328,426" marker-end="url(#tc-arrow)"/><text class="c4-rel-label" x="299" y="414">record</text></g>
+<g class="c4-external"><rect x="570" y="394" width="170" height="64" rx="8"/><text class="c4-label" x="655" y="420">Agent launch</text><text class="c4-desc" x="655" y="440">any harness, any backend</text></g>
+<g class="c4-rel"><path d="M520,426 L568,426" marker-end="url(#tc-arrow)"/><text class="c4-rel-label" x="544" y="480">unset if record failed</text></g>
+<g class="c4-rel c4-rel-async"><path d="M270,202 L620,392" marker-end="url(#tc-arrow)"/><text class="c4-rel-label" x="480" y="290">off: nothing injected or recorded</text></g>
+</svg>
+</div>
+<figcaption>The value injected and the value recorded are the same string, so reading the metadata tells an observer exactly what the agent received. The spawning process's own <code>TRACEPARENT</code> is never read. Sources: <code class="cite">bin/fm-spawn.sh:4424-4434</code>, <code class="cite">bin/fm-spawn.sh:4739-4755</code>, <code class="cite">bin/fm-trace-context-lib.sh:1-60</code>.</figcaption>
+</figure>
+
+<h2>What a spawn does when enabled</h2>
+<ol>
+<li><strong>Read the frozen decision.</strong> <code>fm_trace_context_session_effective</code> returns <code>on</code> only when the effective-state record's session binding matches the current lock; absent, stale or invalid state reads as off (<code class="cite">bin/fm-trace-context-lib.sh:35-37</code>, <code class="cite">bin/fm-spawn.sh:4428</code>).</li>
+<li><strong>Resolve the carrier.</strong> <code>fm_trace_context_resolve</code> reuses a valid <code>traceparent=</code> already in the task's meta, otherwise mints <code>00-&lt;32 hex&gt;-&lt;16 hex&gt;-01</code> from <code>/dev/urandom</code>. It always returns 0 and prints nothing on failure: "telemetry is omitted safely and never aborts the spawn" (<code class="cite">bin/fm-trace-context-lib.sh:38-43</code>).</li>
+<li><strong>Export, then record.</strong> The value is sent into the pane as <code>export TRACEPARENT=...</code> through the same channel that ships <code>GOTMPDIR</code>, then written to the meta. If the record fails, the launch command is prefixed with <code>unset TRACEPARENT</code> "so the child never receives an identity absent from its metadata". If the export fails in a way the backend cannot clear, the launch is refused rather than risk a partial carrier (<code class="cite">bin/fm-spawn.sh:4739-4755</code>, <code class="cite">docs/trace-context.md:98-105</code>).</li>
+</ol>
+<p>Because the export sits at the unconditional pre-launch site, coverage is every ship and scout spawn on every harness and backend, and every secondmate spawn on the backends that accept one (<code class="cite">docs/trace-context.md:26-28</code>). On a relaunch, <code>traceparent=</code> is one of the keys the new meta regenerates rather than copies (<code>preserve_relaunch_meta</code> excludes it, <code class="cite">bin/fm-spawn.sh:4452-4459</code>); the identity survives because resolution reads the carrier from the existing meta before that rewrite (<code class="cite">bin/fm-spawn.sh:4430</code>), and a disabled relaunch therefore drops it.</p>
+
+<h2>One trace per task</h2>
+<p>"The point of these rules is one trace per task: never merge unrelated tasks, and never mint a second identity for the same task" (<code class="cite">docs/trace-context.md:42</code>).</p>
+<dl class="defs">
+<dt>Root</dt><dd>A task with no valid recorded carrier gets a fresh trace id, span id and sampled flag. The spawner's ambient <code>TRACEPARENT</code> is never adopted: a persistent secondmate keeps its own launch carrier for life, and adopting it "would chain every routed task into one ever-growing trace per Secondmate" (<code class="cite">docs/trace-context.md:44-47</code>).</dd>
+<dt>Recovery</dt><dd>A valid recorded carrier is reused verbatim, flags included, so a relaunched task keeps its identity. A corrupt one is re-minted as a fresh root, not propagated (<code class="cite">docs/trace-context.md:48-49</code>).</dd>
+<dt>Boundary</dt><dd>Disabling is an intentional trace boundary: a disabled home injects nothing even when the meta already holds a carrier, and a disabled relaunch regenerates the meta without <code>traceparent=</code>, so a later enabled relaunch starts a new trace (<code class="cite">docs/trace-context.md:52-53</code>).</dd>
+</dl>
+
+<h2>Enablement is frozen per home session</h2>
+<p>Inputs: the presence flag <code>config/trace-context</code>, and <code>FM_TRACE_CONTEXT</code>, where <code>1</code>, <code>on</code>, <code>true</code> or <code>yes</code> enables, any other non-empty value disables, and unset or empty defers to the file (<code class="cite">bin/fm-trace-context-lib.sh:46-49</code>). Each locked <code>bin/fm-session-start.sh</code> run resolves them once into <code>state/.trace-context-effective</code>, published atomically and bound to <code>state/.lock</code> (<code class="cite">bin/fm-session-start.sh:658</code>, <code class="cite">bin/fm-trace-context-lib.sh:50-55</code>). Later edits take effect only at the next session start (<code class="cite">docs/trace-context.md:55-62</code>).</p>
+<p>A secondmate inherits the decision, not the identity. The primary copies <code>config/trace-context</code> into the secondmate home and passes its frozen decision as a non-empty <code>FM_TRACE_CONTEXT=on|off</code> at launch; the secondmate agent gets its own task carrier, and each worker it spawns roots its own trace (<code class="cite">docs/trace-context.md:63-70</code>). For a remote secondmate the parent, which holds the task's metadata, resolves the carrier and passes it with <code>--traceparent</code>; the remote host validates it, exports it, and reports back what the endpoint actually holds, which the parent records (<code class="cite">docs/trace-context.md:30-38</code>, <code class="cite">bin/fm-spawn.sh:973-978</code>, <code class="cite">bin/fm-spawn.sh:1029-1030</code>). <code>--traceparent</code> is refused for any other kind of spawn (<code class="cite">bin/fm-spawn.sh:711-720</code>).</p>
+<p>"Changing the setting across the whole fleet requires a manual full fleet restart"; Firstmate does not detect drift, refuse launches, or restart homes itself (<code class="cite">docs/trace-context.md:71-72</code>).</p>
+
+<h2>Sampling and exposure</h2>
+<p>A new root sets flags <code>01</code> (sampled), because the feature is opt-in and an unsampled root "would produce a trace id that most downstream parent-based samplers drop". Firstmate emits no spans of its own; it only sets the flag (<code class="cite">docs/trace-context.md:74-86</code>). A minted root reads no prompt, path, prose, credential or environment key, and the carrier is fixed-width, so it cannot carry a <code>tracestate</code> or an <code>OTEL_*</code> variable (<code class="cite">docs/trace-context.md:88-97</code>).</p>
+<div class="callout"><span class="callout-title">A convention, not a standard</span>
+<p>"W3C Trace Context standardizes the traceparent HTTP header, not an env var, and OpenTelemetry SDKs do not read it from the environment automatically". An observer must read the environment variable or the meta field explicitly (<code class="cite">docs/trace-context.md:22-24</code>, <code class="cite">bin/fm-trace-context-lib.sh:13-18</code>).</p></div>
+
+<h2>Relationship to the rest of this area</h2>
+<p>The carrier lives only in the ephemeral pane shell and in <code>state/&lt;id&gt;.meta</code>; teardown removes it with the rest of the task's state, so "there is no new durable surface" (<code class="cite">docs/trace-context.md:106-107</code>). Unlike <a href="contributions.html">contribution records</a> or <a href="scout-reports.html">scout reports</a>, it does not outlive the task. It is the one observability feature aimed at an outside observer rather than at firstmate or the captain.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

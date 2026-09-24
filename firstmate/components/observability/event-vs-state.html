@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Event is not state · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Observability</p>
+<h1>Event is not state</h1>
+<p class="lede">The rule Firstmate repeats more than any other in this area: a line that says something happened is history, and deciding what to do next needs a separate read of what is true now.</p>
+
+<h2>The rule as the source states it</h2>
+<ul>
+<li>"A <code>state/&lt;id&gt;.status</code> line is a wake event, not current-state truth; <code>bin/fm-crew-state.sh</code> owns current-state reconciliation" (<code class="cite">AGENTS.md:163</code>).</li>
+<li>"A status line is a wake event, not current state; use <code>bin/fm-crew-state.sh</code> when current state matters, especially before re-escalating an old decision, blocker, or pause" (<code class="cite">AGENTS.md:434</code>).</li>
+<li>"Crew status files are append-only wake-event logs, not current-state fields" (<code class="cite">docs/architecture.md:102</code>).</li>
+<li>The current-state reader explains why: crews "append only wake-worthy transitions ... and nothing when they silently resume, so <code>tail -1</code> of that log reports the last EVENT, not the current STATE" (<code class="cite">bin/fm-crew-state.sh:4-9</code>).</li>
+</ul>
+<p>The same caveat is printed on every surface that shows raw events: the session-start digest labels each status tail "wake-EVENT history, not current state" (<code class="cite">bin/fm-session-start.sh:529</code>), drain annotations say "wake-EVENT observed at drain, not current state" (<code class="cite">bin/fm-wake-lib.sh:2432</code>), and the inbox view ends with "the last event line is history, not current state" (<code class="cite">bin/fm-inbox.sh:1072</code>).</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 760 360" role="img" aria-labelledby="evs-t">
+<title id="evs-t">Events are reconciled against authoritative current-state sources</title>
+<defs>
+<marker id="evs-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs>
+<text class="c4-diagram-title" x="20" y="28">Where current state comes from</text>
+<g class="c4-datastore"><path d="M30,70 a90,10 0 0,0 180,0 a90,10 0 0,0 -180,0 v70 a90,10 0 0,0 180,0 v-70"/><text class="c4-label" x="120" y="104">Status log</text><text class="c4-desc" x="120" y="124">append-only events</text><text class="c4-desc" x="120" y="140">possibly stale</text></g>
+<g class="c4-component"><rect x="290" y="80" width="190" height="80" rx="8"/><text class="c4-label" x="385" y="108">fm-crew-state.sh</text><text class="c4-tech" x="385" y="124">[bash, deterministic]</text><text class="c4-desc" x="385" y="142">one current-state line</text></g>
+<g class="c4-external"><rect x="560" y="50" width="180" height="56" rx="8"/><text class="c4-label" x="650" y="74">Validation run step</text><text class="c4-desc" x="650" y="92">no-mistakes</text></g>
+<g class="c4-external"><rect x="560" y="122" width="180" height="56" rx="8"/><text class="c4-label" x="650" y="146">Pane busy signature</text><text class="c4-desc" x="650" y="164">session backend</text></g>
+<g class="c4-external"><rect x="560" y="194" width="180" height="56" rx="8"/><text class="c4-label" x="650" y="218">Forge or receipt</text><text class="c4-desc" x="650" y="236">for a finished run</text></g>
+<g class="c4-rel c4-rel-async"><path d="M210,112 L288,116" marker-end="url(#evs-arrow)"/><text class="c4-rel-label" x="249" y="100">reconciled</text></g>
+<g class="c4-rel"><path d="M558,80 L482,104" marker-end="url(#evs-arrow)"/></g>
+<g class="c4-rel"><path d="M558,150 L482,130" marker-end="url(#evs-arrow)"/></g>
+<g class="c4-rel"><path d="M558,220 L482,150" marker-end="url(#evs-arrow)"/></g>
+<g class="c4-component"><rect x="240" y="250" width="290" height="80" rx="8"/><text class="c4-label" x="385" y="278">state · source · detail</text><text class="c4-desc" x="385" y="298">working, parked, done, blocked,</text><text class="c4-desc" x="385" y="314">paused, failed, unknown</text></g>
+<g class="c4-rel"><path d="M385,160 L385,248" marker-end="url(#evs-arrow)"/><text class="c4-rel-label" x="385" y="210">emits</text></g>
+</svg>
+</div>
+<figcaption>The log is an input to reconciliation, never the answer. The authoritative sources win, the log fills in only where no run or pane evidence exists, and a verb with no run-state meaning (such as <code>resolved</code>) is never a state at all. Source: <code class="cite">bin/fm-crew-state.sh:1-26</code>, <code class="cite">bin/fm-crew-state.sh:1217-1234</code>.</figcaption>
+</figure>
+
+<h2>Where confusing the two would cause a wrong action</h2>
+<p>Each row is a place in the source that guards against treating an event as a state, and the concrete mistake the guard prevents.</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Place</th><th>The event</th><th>What is actually true</th><th>Wrong action if confused</th></tr></thead>
+<tbody>
+<tr><td>Re-escalation</td><td>The log still ends in <code>needs-decision</code> or <code>blocked</code></td><td>Firstmate answered, the crew resumed and appended nothing (<code class="cite">bin/fm-crew-state.sh:4-9</code>)</td><td>Asking the captain again for a decision already made</td></tr>
+<tr><td>Last-event-wins</td><td>A later <code>working</code>, <code>paused</code> or <code>done</code> line</td><td>An earlier decision is still open (<code class="cite">bin/fm-classify-lib.sh:413-419</code>)</td><td>A captain decision silently disappears; OPEN DECISIONS exists to prevent it</td></tr>
+<tr><td>Closing verbs</td><td>A trailing <code>resolved:</code> line</td><td>It only closes a key; "is NOT a state" (<code class="cite">bin/fm-crew-state.sh:1217-1226</code>)</td><td>Reporting a just-resolved idle crew as <code>unknown</code> with the resolution prose as what it is doing</td></tr>
+<tr><td>Declared pause</td><td><code>paused:</code> was appended</td><td>The crew then started a validation run, which reports <code>working</code> (<code class="cite">bin/fm-classify-lib.sh:2114-2116</code>)</td><td>Treating an active run as an idle wait and deferring attention for hours</td></tr>
+<tr><td>Stale pane</td><td>A captain-relevant line written before validation started</td><td>The run is active; provably-working is checked first (<code class="cite">bin/fm-classify-lib.sh:2134-2143</code>)</td><td>Escalating a wedge for a crew that is mid-run</td></tr>
+<tr><td>Daemon claims</td><td><code>blocked:</code> citing a daemon timeout</td><td>The run is still running with recent activity (<code class="cite">bin/fm-crew-state.sh:126-132</code>)</td><td>Escalating instead of steering the crew to reattach</td></tr>
+<tr><td>Emission time</td><td><code>[at=&lt;epoch&gt;]</code> on a line</td><td>"Time describes event history only and must never decide current state or decision closure" (<code class="cite">bin/fm-classify-lib.sh:293-294</code>)</td><td>Closing or aging a decision because its line looks old</td></tr>
+<tr><td>Fleet snapshot</td><td><code>paths.status_log.last_event</code></td><td>"historical wake-event data only, never current state"; freshness is the snapshot's own observation time, "never when a worker emitted the event" (<code class="cite">bin/fm-fleet-snapshot.sh:58-62</code>, <code class="cite">bin/fm-fleet-snapshot.sh:84-86</code>)</td><td>Reporting a stale event as a secondmate's current work</td></tr>
+<tr><td>Bearings</td><td>A parent-side event about a secondmate</td><td>The secondmate's own structured home state (<code class="cite">bin/fm-bearings-snapshot.sh:161-164</code>)</td><td>A captain digest that contradicts the home that owns the work</td></tr>
+<tr><td>Phase fold</td><td>An open <code>working [key=...]</code> phase</td><td>"never authoritative current crew state" (<code class="cite">bin/fm-classify-lib.sh:1852-1860</code>)</td><td>Letting a stale phase outrank a structured snapshot</td></tr>
+<tr><td>Record divergence</td><td><code>resolved [key=...]</code> in the log</td><td>The backlog task is still held; the resolution "is not proof the captain ruled" (<code class="cite">bin/fm-wake-drain.sh:543-548</code>)</td><td>Closing a captain call nobody answered</td></tr>
+<tr><td>Process events</td><td>No wake has arrived from a review board</td><td>The source may have ended; "ask the source, not the queue" (<code class="cite">.agents/skills/process-event-sources/SKILL.md:123</code>)</td><td>Waiting forever on a review that closed</td></tr>
+<tr><td>Contributions</td><td>No new forge signal</td><td>"an expired or absent observation is not silence" (<code class="cite">bin/fm-contributions.sh:47-48</code>)</td><td>Telling the captain nothing needs attention when nothing was checked</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>The general shape of the guard</h2>
+<p>Every guard above follows one of three patterns.</p>
+<dl class="defs">
+<dt>Fold, do not tail</dt>
+<dd>Where the question is "what is still owed", the answer is a fold over the whole stream with explicit open and close verbs, not the last line: the <a href="status-events.html">keyed decision fold</a>.</dd>
+<dt>Reconcile against a source that cannot go stale</dt>
+<dd>Where the question is "what is this worker doing", the log is reconciled against evidence that changes by itself when the world changes: a run step, a pane, a worktree write, a forge read. <code>bin/fm-crew-state.sh</code> is the owner, and it reports which source won (<code class="cite">bin/fm-crew-state.sh:22-24</code>).</dd>
+<dt>Label the history</dt>
+<dd>Where raw events must be shown, the surface says so in its own text, as the digest, annotations and inbox view do.</dd>
+</dl>
+<p>The captain-facing version of the rule is in the process-event skill: "A wake is not news by itself. Report what the source actually produced and what it changes, never the event line, the result path, or the runner" (<code class="cite">.agents/skills/process-event-sources/SKILL.md:166-167</code>).</p>
+
+<div class="callout unclear"><span class="callout-title">An inconsistency worth knowing</span>
+<p>The inbox view reads the last event with <code>tail -1</code> (<code class="cite">bin/fm-inbox.sh:1067</code>), which is the raw last line, not <code>last_status_line</code>'s last recognised event. A trailing line of continuation prose would therefore be shown as the "last event". The view does label it as history, so no decision is taken from it, but it is the one place found in this area that reads the log by raw tail rather than through the classifier.</p></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>
