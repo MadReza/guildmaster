@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fm-remote session and guard · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Remote</p>
+<h1>fm-remote session and guard</h1>
+<p class="lede">Every remote secondmate agent runs in one dedicated Herdr session, <code>fm-remote</code>, whose server must be born in the account's GUI login session; <code>fm-remote-herdr-guard.sh</code> is the launchd program that makes that true and keeps it true.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>.</p>
+
+<h2 id="session">The dedicated session</h2>
+<p>"The remote second-mate agent itself always runs on the Herdr backend in the shared <code>fm-remote</code> session, and every path that provisions or launches one refuses a host that is not ready for it. <code>fm-remote</code> is reserved for remote fleet work and must not be used for personal work. The user's interactive Herdr session remains <code>default</code> and is not a remote-secondmate prerequisite" <code class="cite">docs/remote-secondmates.md:7-9</code>. All remote secondmates on one host share <code>fm-remote</code> and keep separate <code>2ndmate-&lt;id&gt;</code> workspaces inside it <code class="cite">docs/remote-secondmates.md:163</code>. The dedicated launch agent "owns only the remote-secondmate <code>fm-remote</code> server and does not inspect, rewrite, start, stop, or require the user's interactive <code>default</code> session or its <code>dev.firstmate.herdr</code> launch agent" <code class="cite">docs/remote-secondmates.md:107</code>.</p>
+<p>Only the remote secondmate agent itself is pinned to Herdr. The workers that the remote secondmate supervises inside its own home keep their ordinary backend and session selection <code class="cite">docs/remote-secondmates.md:11</code> <code class="cite">bin/fm-remote-secondmate-control.sh:17-22</code>.</p>
+
+<h3 id="enforcement">How the control plane enforces the session</h3>
+<ul>
+<li><strong>Launch.</strong> <code>launch</code> refuses any backend but <code>herdr</code>, runs the host-local <code>fm-spawn.sh</code> with <code>HERDR_SESSION=fm-remote</code>, and verifies the endpoint it recorded is in <code>fm-remote</code> <code class="cite">bin/fm-remote-secondmate-control.sh:168-211</code>. The primary checks the returned session and target prefix again before recording anything <code class="cite">bin/fm-spawn.sh:1016-1022</code>.</li>
+<li><strong>Every later access.</strong> An endpoint record whose backend is not <code>herdr</code>, whose <code>herdr_session</code> is not <code>fm-remote</code>, or whose target is outside <code>fm-remote:</code> is refused "until it is explicitly migrated" <code class="cite">bin/fm-remote-secondmate-control.sh:86-112</code>. <code>state</code> reports such an endpoint as <code>unverified</code> rather than alive or dead <code class="cite">bin/fm-remote-secondmate-control.sh:118-128</code>.</li>
+<li><strong>No live cutover.</strong> An existing remote endpoint recorded in another Herdr session, including <code>default</code>, "is classified as unverified and left untouched; launch, liveness recovery, control, and retirement refuse it until an operator explicitly migrates it instead of attempting a live cutover" <code class="cite">docs/remote-secondmates.md:165</code>.</li>
+<li><strong>Retirement scope.</strong> Retirement "closes only the retiring secondmate's panes or <code>2ndmate-&lt;id&gt;</code> workspace in <code>fm-remote</code>; it never stops the shared session or removes a sibling secondmate's workspace or panes" <code class="cite">docs/remote-secondmates.md:258</code>.</li>
+</ul>
+
+<h2 id="birth">Why the server's birth matters</h2>
+<p>This is a macOS-specific constraint that the source records with dated evidence. "A herdr server, and every pane and agent it later spawns, keeps the macOS audit session of whatever started it. Only the Aqua login session (the gui/&lt;uid&gt; launchd domain) can read the login keychain without a UI prompt." A server started over SSH runs in sshd's audit session, where <code>security find-generic-password -w</code> exits 36, "and every claude pane silently falls back to a stale plaintext credentials file and reports 'Login expired'" <code class="cite">bin/fm-remote-herdr-owner-lib.sh:10-20</code> <code class="cite">docs/remote-secondmates.md:102</code>. The evidence is in <code class="cite">docs/verification/runtime-backends.md:1049</code>.</p>
+<p>The race that makes a guard necessary: "Herdr's own SSH remote attach starts such a server when it finds none, and at boot it wins the <code>fm-remote</code> socket because sshd accepts connections before the login session exists" <code class="cite">docs/remote-secondmates.md:103</code>.</p>
+
+<h2 id="agent">The launch agent</h2>
+<p>The doctor renders <code>~/Library/LaunchAgents/dev.firstmate.herdr.fm-remote.plist</code> <code class="cite">bin/fm-remote-doctor.sh:271-307</code>:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Key</th><th>Value</th><th>Why, per the source</th></tr></thead>
+<tbody>
+<tr><td><code>ProgramArguments</code></td><td><code>&lt;login shell&gt; -l -c "exec '&lt;root&gt;/bin/fm-remote-herdr-guard.sh' '&lt;herdr&gt;' 'fm-remote'"</code></td><td>The login shell gives the server "the account's own environment"; separate <code>-l</code> and <code>-c</code> so fish accepts them <code class="cite">bin/fm-remote-doctor.sh:222-224</code> <code class="cite">bin/fm-remote-herdr-guard.sh:8-14</code></td></tr>
+<tr><td><code>LimitLoadToSessionType</code></td><td><code>Aqua</code></td><td>Loaded only into the GUI login session</td></tr>
+<tr><td><code>RunAtLoad</code></td><td>true</td><td>Starts at login</td></tr>
+<tr><td><code>KeepAlive</code></td><td><code>{SuccessfulExit=false}</code></td><td>"load-bearing": an unconditional KeepAlive would respawn forever while a foreign server holds the socket, and would never let the guard's "nothing to do" verdict rest <code class="cite">bin/fm-remote-doctor.sh:253-259</code></td></tr>
+<tr><td><code>ThrottleInterval</code></td><td>10</td><td>Retry spacing after a non-zero exit</td></tr>
+<tr><td><code>StandardOutPath</code>, <code>StandardErrorPath</code></td><td><code>~/Library/Logs/dev.firstmate.herdr.fm-remote.log</code></td><td>Every guard decision prints one line there <code class="cite">bin/fm-remote-herdr-guard.sh:37-38</code></td></tr>
+</tbody></table></div>
+<p>The login shell is resolved as: <code>FM_LAUNCH_AGENT_SHELL</code> if executable, else the Directory Services <code>UserShell</code> read with <code>dscl</code> under a 2-second alarm, else <code>$SHELL</code>, else <code>/bin/sh</code> <code class="cite">bin/fm-remote-doctor.sh:225-251</code>. The domain, not the shell, is what grants keychain access: "The <code>gui/&lt;uid&gt;</code> domain, not the login shell, is what gives that server and every pane it spawns the Aqua audit session and login-keychain access" <code class="cite">docs/remote-secondmates.md:102</code>.</p>
+
+<h2 id="guard">The guard's decision</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 940 540" role="img" aria-labelledby="rmg-title rmg-desc">
+<title id="rmg-title">fm-remote Herdr guard decision</title>
+<desc id="rmg-desc">When launchd starts the guard, it checks whether any server is running for the session. If none, it execs the Herdr server in the foreground. If one is running, it identifies the socket owner and classifies its birth. A launchd- or worker-born owner is left alone and the guard exits 0. Any other birth, including an unprovable one, is stopped; if the socket is released within the wait, the guard execs a new server at once; otherwise it exits 1 so launchd retries.</desc>
+<defs><marker id="rmg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">fm-remote-herdr-guard.sh, once per launch</text>
+
+<g class="c4-component"><rect x="300" y="50" width="260" height="60" rx="8"/>
+<text class="c4-label" x="430" y="76">launchd starts the guard</text>
+<text class="c4-desc" x="430" y="95">gui/&lt;uid&gt; · login shell -l -c exec</text></g>
+<g class="c4-component"><rect x="300" y="150" width="260" height="60" rx="8"/>
+<text class="c4-label" x="430" y="176">Server running?</text>
+<text class="c4-desc" x="430" y="195">herdr status --json --session</text></g>
+<g class="c4-component"><rect x="300" y="250" width="260" height="70" rx="8"/>
+<text class="c4-label" x="430" y="276">Classify the socket owner</text>
+<text class="c4-desc" x="430" y="295">lsof owner → environment →</text>
+<text class="c4-desc" x="430" y="309">launchctl proof → ancestry</text></g>
+<g class="c4-component"><rect x="300" y="360" width="260" height="70" rx="8"/>
+<text class="c4-label" x="430" y="386">Take the session over</text>
+<text class="c4-desc" x="430" y="405">herdr server stop; poll status</text>
+<text class="c4-desc" x="430" y="419">up to 50 tenths of a second</text></g>
+
+<g class="c4-container"><rect x="640" y="145" width="260" height="70" rx="8"/>
+<text class="c4-label" x="770" y="171">exec herdr server</text>
+<text class="c4-desc" x="770" y="190">--session fm-remote, foreground;</text>
+<text class="c4-desc" x="770" y="204">launchd supervises it</text></g>
+<g class="c4-container"><rect x="640" y="250" width="260" height="70" rx="8"/>
+<text class="c4-label" x="770" y="276">exit 0</text>
+<text class="c4-desc" x="770" y="295">leave the Aqua-born server alone;</text>
+<text class="c4-desc" x="770" y="309">KeepAlive lets this rest</text></g>
+<g class="c4-container"><rect x="300" y="460" width="260" height="60" rx="8"/>
+<text class="c4-label" x="430" y="486">exit 1</text>
+<text class="c4-desc" x="430" y="505">launchd retries after ThrottleInterval</text></g>
+
+<g class="c4-rel"><path d="M430,110 L430,148" marker-end="url(#rmg-arrow)"/></g>
+<g class="c4-rel"><path d="M560,180 L638,180" marker-end="url(#rmg-arrow)"/><text class="c4-rel-label" x="598" y="172">no</text></g>
+<g class="c4-rel"><path d="M430,210 L430,248" marker-end="url(#rmg-arrow)"/><text class="c4-rel-label" x="455" y="233">yes</text></g>
+<g class="c4-rel"><path d="M560,285 L638,285" marker-end="url(#rmg-arrow)"/><text class="c4-rel-label" x="598" y="270">launchd</text><text class="c4-rel-label" x="598" y="300">or worker</text></g>
+<g class="c4-rel"><path d="M430,320 L430,358" marker-end="url(#rmg-arrow)"/><text class="c4-rel-label" x="520" y="343">ssh · unknown · unproven</text></g>
+<g class="c4-rel"><path d="M560,395 L925,395 L925,180 L902,180" marker-end="url(#rmg-arrow)"/><text class="c4-rel-label" x="740" y="388">socket released: exec at once</text></g>
+<g class="c4-rel"><path d="M430,430 L430,458" marker-end="url(#rmg-arrow)"/><text class="c4-rel-label" x="500" y="449">not released</text></g>
+<text class="c4-rel-label" x="150" y="390">closes every pane in the session;</text>
+<text class="c4-rel-label" x="150" y="405">the parent relaunches its mates</text>
+</svg>
+</div>
+<figcaption>The guard's decision table, from its header <code class="cite">bin/fm-remote-herdr-guard.sh:18-34</code> and implementation <code class="cite">bin/fm-remote-herdr-guard.sh:72-108</code>. Rounded blue boxes are the guard's terminal outcomes.</figcaption>
+</figure>
+<p>Details the diagram compresses:</p>
+<ul>
+<li>After stopping a foreign server, the guard execs the new server "at once so the socket is rebound before a reconnecting SSH attach can start another foreign server" <code class="cite">bin/fm-remote-herdr-guard.sh:25-31</code>.</li>
+<li>The release wait is <code>FM_REMOTE_HERDR_GUARD_STOP_WAIT_TENTHS</code> tenths of a second, default 50 <code class="cite">bin/fm-remote-herdr-guard.sh:36-37</code> <code class="cite">bin/fm-remote-herdr-guard.sh:55</code>.</li>
+<li>The guard itself needs an executable <code>herdr</code> path and <code>jq</code>; otherwise it exits 1 <code class="cite">bin/fm-remote-herdr-guard.sh:52-54</code>.</li>
+<li>A takeover "closes every pane in that session; the parent firstmate's secondmate liveness sweep relaunches its mates into the Aqua-born server" <code class="cite">bin/fm-remote-herdr-guard.sh:33-34</code>. The doctor's action text warns the operator of this before a <code>--fix</code> that would trigger one <code class="cite">bin/fm-remote-doctor.sh:682-687</code>.</li>
+</ul>
+
+<h2 id="owner">Owner discovery and birth classification</h2>
+<p><code>bin/fm-remote-herdr-owner-lib.sh</code> is "the single owner of the socket-owner discovery and birth classification shared by" the guard and the doctor <code class="cite">bin/fm-remote-herdr-owner-lib.sh:5-8</code>.</p>
+<ul>
+<li><strong>Owner.</strong> Read <code>lsof -U -a -c herdr -F pn</code> and match the socket path, literal or physical. When several herdr processes list it, the one whose argv contains <code>server</code> wins. On macOS <code>pgrep -f</code> cannot see the server's argv, which is why <code>lsof</code> is the source; without <code>lsof</code> the function returns 2 and the caller decides <code class="cite">bin/fm-remote-herdr-owner-lib.sh:23-29</code> <code class="cite">bin/fm-remote-herdr-owner-lib.sh:53-78</code>.</li>
+<li><strong>Environment.</strong> <code>ps -Eww</code> on macOS (own-uid processes only), <code>/proc/&lt;pid&gt;/environ</code> elsewhere <code class="cite">bin/fm-remote-herdr-owner-lib.sh:30-34</code>.</li>
+<li><strong>Birth, strongest marker first</strong> <code class="cite">bin/fm-remote-herdr-owner-lib.sh:37-51</code> <code class="cite">bin/fm-remote-herdr-owner-lib.sh:124-150</code>:
+<ol>
+<li><code>ssh</code> if <code>SSH_CONNECTION</code>, <code>SSH_CLIENT</code>, or <code>SSH_TTY</code> is in the environment;</li>
+<li><code>launchd</code> if <code>XPC_SERVICE_NAME=&lt;label&gt;</code> and <code>launchctl</code> proves that job owns the pid in <code>gui/&lt;uid&gt;</code>, or is loaded only in that domain;</li>
+<li><code>worker</code> if <code>FM_REMOTE_JOB_ACTIVE=1</code> and <code>dev.firstmate.remote-job</code> is loaded only in <code>gui/&lt;uid&gt;</code>;</li>
+<li><code>ssh</code> if an ancestor's argv[0] is <code>sshd</code> or <code>sshd-session</code>, or is <code>herdr</code> with the whole argument <code>remote-client-bridge</code>. Only argv[0] and whole arguments count, so an agent whose brief merely mentions those words does not match <code class="cite">bin/fm-remote-herdr-owner-lib.sh:152-171</code>;</li>
+<li>otherwise <code>unknown</code>. <code>XPC_SERVICE_NAME</code> alone, including value 0, proves nothing.</li>
+</ol></li>
+<li><strong>Aqua test.</strong> Only <code>launchd</code> and <code>worker</code> are Aqua. "<code>unknown</code> is deliberately not Aqua: a server that cannot prove its birth is treated like a foreign one, because leaving it in place silently reproduces the keychain failure" <code class="cite">bin/fm-remote-herdr-owner-lib.sh:48-51</code> <code class="cite">bin/fm-remote-herdr-owner-lib.sh:173-176</code>.</li>
+</ul>
+<p>On Linux the doctor treats any running server as ready, since there is no Aqua session to be born in <code class="cite">bin/fm-remote-doctor.sh:194-202</code>. The guard itself is only installed as a macOS launch agent; on Linux the doctor starts the server through the Herdr adapter <code class="cite">bin/fm-remote-doctor.sh:863-874</code>.</p>
+
+<div class="callout unclear"><span class="callout-title">Open on Linux</span>
+<p>The document says <code>--fix</code> "starts the same workers directly on Linux" <code class="cite">docs/remote-secondmates.md:105</code>. For the Herdr server that means the adapter's <code>fm_backend_herdr_server_ensure</code>, which starts <code>herdr server</code> as a plain background job of whoever called it, with no <code>nohup</code> or session detach <code class="cite">bin/backends/herdr.sh:1656-1672</code>. Called from the doctor's <code>--fix</code>, that caller is the SSH bootstrap; called during a launch, it is a worker job. The source does not say how such a server is meant to outlive the SSH session on Linux, or whether a job-worker process-group stop on timeout could reach it. The survival argument in the document is stated only in terms of the macOS GUI login session.</p></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

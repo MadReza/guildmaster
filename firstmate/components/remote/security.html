@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Remote security posture · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Remote</p>
+<h1>Security posture</h1>
+<p class="lede">What the remote link switches off on every call, what it re-verifies at every hop, what it confines and bounds, and what it deliberately never does on its own.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>.</p>
+
+<h2 id="model">The trust model the source states</h2>
+<p>The primary trusts the operator's own OpenSSH configuration for authentication: "The SSH alias keeps normal public-key and strict host-key policy in <code>~/.ssh</code>" <code class="cite">bin/fm-on.sh:23</code>. The operator is asked to use "ordinary public-key authentication, strict host-key verification, and a dedicated remote account where practical", and not to enable agent forwarding <code class="cite">docs/remote-secondmates.md:16-17</code>. Firstmate adds its own controls on top of SSH rather than replacing it. One risk is recorded as accepted: "The captain accepts this config/data parent TOCTOU within Firstmate's single-user trust boundary" <code class="cite">bin/fm-remote-inherit.sh:63</code>.</p>
+
+<h2 id="disabled">Disabled on every call</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>What</th><th>How</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>SSH agent forwarding</td><td><code>-o ForwardAgent=no</code></td><td rowspan="3"><code class="cite">bin/fm-on.sh:24-25</code> <code class="cite">bin/fm-on.sh:114-117</code> <code class="cite">docs/remote-secondmates.md:18</code></td></tr>
+<tr><td>Port, socket, and dynamic forwardings</td><td><code>-o ClearAllForwardings=yes</code></td></tr>
+<tr><td>Sending local environment variables</td><td><code>-o 'SendEnv=-*'</code> clears configured patterns</td></tr>
+<tr><td>Interpretation of options in the route</td><td>Route must not start with <code>-</code>; <code>--</code> precedes the host</td><td><code class="cite">bin/fm-on.sh:64</code> <code class="cite">bin/fm-on.sh:120</code></td></tr>
+<tr><td>A shell command string</td><td>Only a protocol number and three base64 values are sent; the entrypoint "never accepts a shell command string"</td><td><code class="cite">bin/fm-remote-entrypoint.sh:4-8</code> <code class="cite">bin/fm-on.sh:103-105</code></td></tr>
+<tr><td>Inherited environment in the remote command</td><td>Doctor and every job child run under <code>env -i</code> with a fixed list of variables</td><td><code class="cite">bin/fm-remote-entrypoint.sh:156-163</code> <code class="cite">bin/fm-remote-job-worker.sh:746-753</code></td></tr>
+<tr><td>Shell startup files</td><td>Never evaluated; PATH is composed from the filesystem</td><td><code class="cite">docs/remote-secondmates.md:46-47</code></td></tr>
+<tr><td>Caller stdin</td><td><code>/dev/null</code> unless <code>--stdin</code> is passed</td><td><code class="cite">bin/fm-on.sh:14-17</code></td></tr>
+<tr><td>Automatic retry</td><td>OpenSSH is never told to retry; 255 goes to the semantic caller</td><td><code class="cite">bin/fm-on.sh:18-21</code></td></tr>
+</tbody></table></div>
+
+<h2 id="verified">Verified, and verified again</h2>
+<ul>
+<li><strong>Command identity, three times.</strong> A genuine, non-symlink, git-tracked <code>bin/fm-*.sh</code> in the primary checkout <code class="cite">bin/fm-on.sh:65-74</code>; the same in the remote root, tracked according to an operator git that cannot be a checkout-local shim <code class="cite">bin/fm-remote-entrypoint.sh:130-153</code>; and again in the worker, which also requires the staged root to equal its own configured root <code class="cite">bin/fm-remote-job-worker.sh:683-725</code>.</li>
+<li><strong>The doctor without git.</strong> Accepted only when its SHA-256 equals the digest pinned in the entrypoint <code class="cite">bin/fm-remote-entrypoint.sh:34</code> <code class="cite">bin/fm-remote-entrypoint.sh:146-150</code>.</li>
+<li><strong>Protocol version.</strong> Both sides must agree on <code>1</code> <code class="cite">bin/fm-remote-entrypoint.sh:84</code>.</li>
+<li><strong>Paths.</strong> Root and home are absolute, free of control bytes, traversal, and empty components, canonicalised, separate, and non-overlapping, on both sides <code class="cite">bin/fm-on.sh:94-101</code> <code class="cite">bin/fm-remote-entrypoint.sh:117-128</code>.</li>
+<li><strong>Home identity.</strong> Every control verb requires the <code>.fm-secondmate-home</code> marker to name the requested id <code class="cite">bin/fm-remote-secondmate-control.sh:73-82</code>.</li>
+<li><strong>Endpoint identity.</strong> Backend must be <code>herdr</code>, session <code>fm-remote</code>, target inside that session; otherwise access is refused <code class="cite">bin/fm-remote-secondmate-control.sh:86-112</code>. The primary re-checks the launch reply <code class="cite">bin/fm-spawn.sh:998-1022</code>.</li>
+<li><strong>Route identity.</strong> Spawn and teardown refuse metadata whose host, root, or home disagree with the registry <code class="cite">bin/fm-spawn.sh:891-903</code> <code class="cite">bin/fm-teardown.sh:931-940</code>.</li>
+<li><strong>Project origins, twice.</strong> Validated by the origin library on the primary and again on the host before cloning <code class="cite">docs/remote-secondmates.md:137</code>.</li>
+<li><strong>Worker code identity.</strong> A running worker whose <code>git hash-object</code> identity no longer matches the checkout is reloaded <code class="cite">bin/fm-remote-job-lib.sh:1048-1077</code>.</li>
+<li><strong>Process identity.</strong> Every recorded pid is paired with its start time; a recycled pid never passes <code class="cite">bin/fm-remote-job-lib.sh:1005-1020</code>.</li>
+<li><strong>Herdr server birth.</strong> On macOS only a server proven born in the Aqua session is accepted; an unprovable one is treated as foreign <code class="cite">bin/fm-remote-herdr-owner-lib.sh:48-51</code>.</li>
+<li><strong>Readiness after repair.</strong> A repair is never trusted on its own word; a final read-only run decides <code class="cite">bin/fm-remote-readiness-lib.sh:7-10</code>.</li>
+</ul>
+
+<h2 id="confined">Confined and bounded</h2>
+<ul>
+<li><strong>No generic write or delete.</strong> "Remote writes are confined to inherited allowlist files and backlog handoff scratch files, and remote home removal is reachable only through guarded secondmate retirement" <code class="cite">docs/remote-secondmates.md:261</code>. <code>fm-remote-file.sh put</code> can replace only <code>state/handoff/&lt;id&gt;.outbox.md</code> and has no delete <code class="cite">bin/fm-remote-file.sh:10-12</code>; <code>fm-remote-inherit.sh</code> writes only allowlisted paths <code class="cite">bin/fm-remote-inherit.sh:8-10</code>.</li>
+<li><strong>Reads stay inside the home.</strong> <code>get</code> resolves through ordinary directories to one non-symlink regular file inside <code>FM_HOME</code> <code class="cite">bin/fm-remote-file.sh:8-9</code>; the delta reader opens its log with <code>O_NOFOLLOW</code> and refuses a parent outside the home <code class="cite">bin/fm-remote-delta-read.sh:45-97</code>. The reply adapter only fetches <code>data/*.md</code> paths without traversal <code class="cite">bin/fm-procevent-remote-reply.sh:269-277</code>.</li>
+<li><strong>Size bounds.</strong> Job argv, stdin, stdout, and stderr at most 1&nbsp;MiB each <code class="cite">bin/fm-remote-job-lib.sh:29-30</code>; provisioning manifest 1&nbsp;MiB <code class="cite">bin/fm-remote-home-seed.sh:34</code>; delta payload 64&nbsp;KiB <code class="cite">bin/fm-remote-delta-read.sh:9</code>; fetched document 256&nbsp;KiB <code class="cite">bin/fm-procevent-remote-reply.sh:76</code>; pane capture 100 lines and 64&nbsp;KiB <code class="cite">bin/fm-remote-secondmate-control.sh:312-315</code>.</li>
+<li><strong>Time bounds.</strong> Queue deadline and execution timeout default to 360 s and cannot exceed 3600 s <code class="cite">bin/fm-remote-job-lib.sh:123-131</code>; send attempts are capped by <code>FM_SEND_REMOTE_BUDGET</code> <code class="cite">bin/fm-send.sh:141-144</code>; dead peers surface within about interval × count seconds <code class="cite">bin/fm-on.sh:28-34</code>.</li>
+<li><strong>Private state.</strong> Job records are mode 0700 with 0600 files <code class="cite">bin/fm-remote-job-lib.sh:631-663</code>; the remote charter is written mode 600 <code class="cite">bin/fm-remote-home-provision.sh:242-244</code>.</li>
+<li><strong>Byte hygiene.</strong> Control bytes from the remote log are rewritten to <code>?</code> before they enter the parent's status file <code class="cite">bin/fm-procevent-remote-reply.sh:398-407</code>.</li>
+<li><strong>Nothing secret copied.</strong> Seeding "does not copy project trees or the primary process environment"; the parent's filesystem path is never sent <code class="cite">docs/remote-secondmates.md:144</code> <code class="cite">bin/fm-remote-home-seed.sh:207-213</code>.</li>
+</ul>
+
+<h2 id="never">Deliberately never automated</h2>
+<p>These are reported with an exact <code>action:</code> step and left to a person at the remote machine <code class="cite">docs/remote-secondmates.md:110-119</code> <code class="cite">bin/fm-remote-doctor.sh:48-54</code>:</p>
+<ul>
+<li>Creating a GUI login session, or configuring automatic login; "SSH cannot create a GUI session from nothing".</li>
+<li>Writing an auto-login password, changing FileVault, or storing any account password.</li>
+<li>Installing packages, including any missing required tool that no safe wrapper can resolve.</li>
+<li>Each worker runtime's own <code>/login</code> and keychain prompts.</li>
+<li>Overwriting a non-Firstmate file at a wrapper path or at <code>~/.local/bin/fm-remote-entrypoint.sh</code>.</li>
+<li>Migrating an endpoint recorded outside <code>fm-remote</code>; there is no live cutover <code class="cite">docs/remote-secondmates.md:165</code>.</li>
+<li>Failing a remote route over to a local replacement <code class="cite">docs/remote-secondmates.md:5</code>.</li>
+<li>Discarding a remote mate with outstanding work: <code>--force</code> "requires the same captain authority as local secondmate discard" <code class="cite">docs/remote-secondmates.md:260</code>.</li>
+</ul>
+
+<h2 id="surface">What the posture does not narrow</h2>
+<p>These are properties of the design as written, stated here so a reader does not assume more than the source provides.</p>
+<ul>
+<li><strong>The whole tracked namespace is callable.</strong> "No per-command table exists": any genuine, tracked <code>bin/fm-*.sh</code> in the remote root can be run by a caller who can reach the entrypoint <code class="cite">bin/fm-on.sh:10-11</code>. The controls are about <em>which code</em> runs (tracked, unmodified-by-shim, from the configured root), not <em>which verbs</em> are exposed.</li>
+<li><strong>"No generic write surface" is a property of the purpose-built verbs, not of the transport.</strong> The document's statement that remote writes are confined to allowlist and handoff files <code class="cite">docs/remote-secondmates.md:261</code> holds for the remote-specific scripts (<code>fm-remote-file.sh</code>, <code>fm-remote-inherit.sh</code>). Because the transport accepts any tracked <code>fm-*.sh</code>, other tracked scripts that write in their <code>FM_HOME</code> are equally reachable through <code>fm-on.sh</code>. This page reads the two statements together; the source does not reconcile them.</li>
+<li><strong>SSH access equals authority.</strong> The entrypoint does no authentication of its own; anyone who can log in to the remote account and run the entrypoint is treated as the parent. The source relies on OpenSSH and a dedicated account for that boundary <code class="cite">docs/remote-secondmates.md:15-17</code>.</li>
+<li><strong>The remote account is trusted.</strong> Wrappers in <code>~/.local/bin</code> come first on the tool PATH <code class="cite">bin/fm-remote-job-lib.sh:258-261</code>, so whoever controls that account controls which tools jobs run, apart from <code>git</code>, which must sit in the operator PATH but can itself be a <code>~/.local/bin</code> wrapper <code class="cite">docs/remote-secondmates.md:60-62</code>.</li>
+</ul>
+<div class="callout unclear"><span class="callout-title">Not settled by the source</span>
+<p>The source does not say whether a dedicated remote account is required or only recommended beyond "where practical", nor whether the SSH key is expected to carry a forced command or other <code>authorized_keys</code> restrictions pointing at the entrypoint. Neither is mentioned in the remote documents or scripts.</p></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

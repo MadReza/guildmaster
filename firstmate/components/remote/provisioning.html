@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Provisioning and launch · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Remote</p>
+<h1>Provisioning and launch</h1>
+<p class="lede">How a remote route is registered, how the remote host builds the secondmate home itself from a bounded manifest, and how every launch converges that home on the primary's code and inherited settings before the agent starts.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>.</p>
+
+<h2 id="prereqs">Operator prerequisites</h2>
+<ol>
+<li>An SSH alias in the primary account's normal OpenSSH configuration, with public-key authentication, strict host-key verification, a dedicated remote account where practical, and no agent forwarding <code class="cite">docs/remote-secondmates.md:15-17</code>.</li>
+<li>A Firstmate clone on the remote host at an absolute code-root path, with its entrypoint symlinked onto the non-interactive SSH PATH <code class="cite">docs/remote-secondmates.md:20-26</code>.</li>
+<li>The toolchain, runtime, backend, and credentials that work on that host, and project origins the remote account can reach, "because projects are cloned on that host rather than copied from the primary" <code class="cite">docs/remote-secondmates.md:41-42</code>.</li>
+<li>A filled secondmate charter in the primary home <code class="cite">docs/remote-secondmates.md:123</code>. Charter authoring belongs to the <a href="../prompts-and-skills/index.html">secondmate-provisioning skill</a>.</li>
+</ol>
+
+<h2 id="seed">Seeding a route</h2>
+<pre><code>bin/fm-remote-home-seed.sh &lt;id&gt; &lt;ssh-alias&gt; &lt;remote-root&gt; &lt;remote-home&gt; {&lt;project&gt;[=&lt;origin-url&gt;]...|--no-projects}</code></pre>
+<p><code>&lt;remote-root&gt;</code> is the remote Firstmate code clone that supplies tracked scripts; <code>&lt;remote-home&gt;</code> is a separate absolute path for the persistent home and "must not overlap the code root" <code class="cite">docs/remote-secondmates.md:126-130</code>. The seed enforces: a safe id, a safe alias, absolute paths without the registry delimiters <code>;</code> or <code>)</code>, no control characters, no traversal, no empty components, and neither path inside the other <code class="cite">bin/fm-remote-home-seed.sh:70-80</code>.</p>
+
+<h3 id="origins">Project origins</h3>
+<p>Each project is named as <code>&lt;project&gt;=&lt;origin-url&gt;</code>. "Resolve the concrete origin from the captain, the project registry, an existing clone anywhere, the forge, or an explicit paste rather than imposing one URL template." A bare <code>&lt;project&gt;</code> is accepted only when this machine already has <code>projects/&lt;project&gt;</code>, whose origin is then read <code class="cite">docs/remote-secondmates.md:132-135</code> <code class="cite">bin/fm-remote-home-seed.sh:183-190</code>. <code>bin/fm-project-origin-lib.sh</code> owns which URLs are accepted, "on structure and safety alone, so no forge, domain, or host is privileged"; the primary validates every origin before transport and the remote host validates it again before cloning <code class="cite">docs/remote-secondmates.md:136-137</code> <code class="cite">bin/fm-remote-home-provision.sh:221</code>. The project's delivery mode still comes from this machine's <code>data/projects.md</code>: <code>no-mistakes</code> and <code>direct-PR</code> are provisioned, <code>local-only</code> and any unregistered project are refused <code class="cite">bin/fm-remote-home-seed.sh:174-194</code>. Seeding "writes nothing under projects/ and needs no fleet sync first" <code class="cite">bin/fm-remote-home-seed.sh:21</code>.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 960 600" role="img" aria-labelledby="rms-title rms-desc">
+<title id="rms-title">Seeding a remote secondmate home</title>
+<desc id="rms-desc">The operator runs the seed. It locks the registry, builds a remote charter and a bounded manifest, and writes the route line. It then runs the readiness gate through fm-on. On ready, it sends the manifest to fm-remote-home-provision.sh over fm-on with stdin. The remote job clones the code root into the home, clones each project origin, and publishes the charter, project registry, parent record, and home marker last. The seed prints the provisioned home.</desc>
+<defs><marker id="rms-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">fm-remote-home-seed.sh, one successful run</text>
+
+<g class="c4-person"><circle cx="70" cy="56" r="12"/><rect x="15" y="68" width="110" height="36" rx="10"/><text class="c4-label" x="70" y="91">Operator</text></g>
+<g class="c4-component"><rect x="175" y="58" width="110" height="46" rx="8"/><text class="c4-label" x="230" y="80">Seed</text><text class="c4-tech" x="230" y="95">[primary]</text></g>
+<g class="c4-datastore"><rect x="335" y="58" width="110" height="46" rx="8"/><text class="c4-label" x="390" y="80">Registry</text><text class="c4-tech" x="390" y="95">[secondmates.md]</text></g>
+<g class="c4-component"><rect x="495" y="58" width="110" height="46" rx="8"/><text class="c4-label" x="550" y="80">Readiness gate</text><text class="c4-tech" x="550" y="95">[lib]</text></g>
+<g class="c4-external"><rect x="655" y="58" width="110" height="46" rx="8"/><text class="c4-label" x="710" y="80">fm-on / SSH</text><text class="c4-tech" x="710" y="95">[transport]</text></g>
+<g class="c4-component"><rect x="815" y="58" width="130" height="46" rx="8"/><text class="c4-label" x="880" y="80">Provision job</text><text class="c4-tech" x="880" y="95">[remote worker]</text></g>
+
+<g class="c4-rel c4-rel-async"><line x1="70" y1="104" x2="70" y2="580"/><line x1="230" y1="104" x2="230" y2="580"/><line x1="390" y1="104" x2="390" y2="580"/><line x1="550" y1="104" x2="550" y2="580"/><line x1="710" y1="104" x2="710" y2="580"/><line x1="880" y1="104" x2="880" y2="580"/></g>
+
+<g class="c4-rel"><path d="M70,135 L228,135" marker-end="url(#rms-arrow)"/><text class="c4-rel-label" x="150" y="128">seed id alias root home p=origin</text></g>
+<g class="c4-rel"><path d="M230,170 L388,170" marker-end="url(#rms-arrow)"/><text class="c4-rel-label" x="310" y="163">lock; refuse a different route</text></g>
+<text class="c4-rel-label" x="330" y="205">build remote charter, project records, manifest ≤ 1 MiB</text>
+<g class="c4-rel"><path d="M230,240 L388,240" marker-end="url(#rms-arrow)"/><text class="c4-rel-label" x="310" y="233">write route; validate</text></g>
+<g class="c4-rel"><path d="M230,280 L548,280" marker-end="url(#rms-arrow)"/><text class="c4-rel-label" x="390" y="273">fm_remote_readiness_ensure</text></g>
+<g class="c4-rel"><path d="M550,315 L708,315" marker-end="url(#rms-arrow)"/><text class="c4-rel-label" x="630" y="308">doctor · --fix · doctor</text></g>
+<g class="c4-rel c4-rel-async"><path d="M550,350 L232,350" marker-end="url(#rms-arrow)"/><text class="c4-rel-label" x="390" y="343">0: ready (else restore registry)</text></g>
+<g class="c4-rel"><path d="M230,390 L708,390" marker-end="url(#rms-arrow)"/><text class="c4-rel-label" x="470" y="383">fm-on --stdin id fm-remote-home-provision.sh &lt; manifest</text></g>
+<g class="c4-rel"><path d="M710,425 L878,425" marker-end="url(#rms-arrow)"/><text class="c4-rel-label" x="795" y="418">stage; worker runs it</text></g>
+<text class="c4-rel-label" x="775" y="460">clone code root → home; clone origins;</text>
+<text class="c4-rel-label" x="775" y="475">publish charter, projects, parent record,</text>
+<text class="c4-rel-label" x="775" y="490">and the home marker last</text>
+<g class="c4-rel c4-rel-async"><path d="M880,520 L232,520" marker-end="url(#rms-arrow)"/><text class="c4-rel-label" x="555" y="513">provisioned: &lt;home&gt; projects=N</text></g>
+<g class="c4-rel c4-rel-async"><path d="M230,555 L72,555" marker-end="url(#rms-arrow)"/><text class="c4-rel-label" x="150" y="548">home=alias:home</text></g>
+</svg>
+</div>
+<figcaption>The seed's order of effects. Nothing is created on the remote host until the readiness gate says ready. Dashed horizontal arrows are results.</figcaption>
+</figure>
+
+<h3 id="seed-steps">What the seed does, in order</h3>
+<ol>
+<li>Acquire the secondmate registry lock; refuse if the id is already registered to a different local or remote home <code class="cite">bin/fm-remote-home-seed.sh:107-123</code>.</li>
+<li>Use <code>data/&lt;id&gt;/brief.md</code>, or scaffold one with <code>fm-brief.sh --secondmate</code> when <code>FM_SECONDMATE_CHARTER</code> is set; refuse a charter still containing <code>{TASK}</code>, or with an empty summary or scope <code class="cite">bin/fm-remote-home-seed.sh:125-143</code>.</li>
+<li><strong>Rewrite the charter for the far side.</strong> The parent's <code>state/&lt;id&gt;.status</code> becomes <code>&lt;remote-home&gt;/state/parent-replies.status</code>, and the parent's <code>state/&lt;id&gt;.inbox</code> becomes <code>&lt;remote-home&gt;/state/parent-route/&lt;id&gt;.inbox</code>, as two whole-string substitutions so every mention lands host-local <code class="cite">bin/fm-remote-home-seed.sh:149-166</code>. This is how the remote agent learns where to write replies and where steers arrive.</li>
+<li>Build one base64 record per project (name, origin, registry line, mode) and the manifest; refuse a manifest over 1&nbsp;MiB <code class="cite">bin/fm-remote-home-seed.sh:168-219</code>.</li>
+<li>Write the route line <code>- &lt;id&gt; - &lt;summary&gt; (host: …; root: …; home: …; scope: …; projects: …; added YYYY-MM-DD)</code> and validate the registry's home bindings, keyed as <code>ssh:&lt;host&gt;:&lt;home&gt;</code> for remote routes <code class="cite">bin/fm-remote-home-seed.sh:221-230</code> <code class="cite">bin/fm-secondmate-registry-lib.sh:219</code>.</li>
+<li>Run the readiness gate. On a known failure restore the registry and remove a newly scaffolded brief; on 255 keep both <code class="cite">bin/fm-remote-home-seed.sh:237-253</code>.</li>
+<li>Send the manifest: <code>fm-on.sh --stdin &lt;id&gt; fm-remote-home-provision.sh &lt; manifest</code>. Same failure split: a known failure rolls back, 255 preserves the route "because remote completion is unknown and must be reconciled on the same host" <code class="cite">bin/fm-remote-home-seed.sh:255-270</code> <code class="cite">docs/remote-secondmates.md:145</code>.</li>
+</ol>
+<p>In the primary home the durable effects are limited to the route line and the charter brief under <code>data/&lt;id&gt;</code>; launch records appear only at launch. The seed "does not copy project trees or the primary process environment" <code class="cite">docs/remote-secondmates.md:141-144</code>.</p>
+
+<h3 id="manifest">Manifest <code>fm-remote-home-provision.v1</code></h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Key</th><th>Content</th></tr></thead>
+<tbody>
+<tr><td><code>schema</code></td><td><code>fm-remote-home-provision.v1</code></td></tr>
+<tr><td><code>id_b64</code></td><td>The secondmate id</td></tr>
+<tr><td><code>charter_b64</code></td><td>The rewritten remote charter</td></tr>
+<tr><td><code>parent_host_b64</code></td><td>The parent's SSH alias for this host, carried "only so the remote-provisioned home can record durably that its parent lives on another machine"; never a route back, and the parent's own filesystem path is never sent <code class="cite">bin/fm-remote-home-seed.sh:207-213</code></td></tr>
+<tr><td><code>project_count</code></td><td>Number of project records, checked against the records actually present</td></tr>
+<tr><td><code>project=</code></td><td><code>&lt;name_b64&gt;|&lt;origin_b64&gt;|&lt;registry_line_b64&gt;|&lt;mode_b64&gt;</code>, one per project</td></tr>
+</tbody></table></div>
+<p>Each key must appear exactly once; <code>parent_host_b64</code> is optional so a manifest from an older parent still provisions <code class="cite">bin/fm-remote-home-provision.sh:38-43</code> <code class="cite">bin/fm-remote-home-provision.sh:97-119</code>.</p>
+
+<h2 id="provision">What the remote host does</h2>
+<p><code>fm-remote-home-provision.sh</code> runs as a worker job with <code>FM_HOME</code> set to the configured remote home <code class="cite">bin/fm-remote-home-provision.sh:2-19</code>:</p>
+<ol>
+<li><strong>Serialize.</strong> A lock keyed by the SHA-256 of the home path, under a <code>.firstmate-provision-locks</code> directory next to the home; the home's parent must already exist and be canonical <code class="cite">bin/fm-remote-home-provision.sh:121-146</code>.</li>
+<li><strong>Existing or new.</strong> An existing home must be a real Firstmate checkout with real operational directories; its owned files are snapshotted; its <code>.fm-secondmate-home</code> marker must name this id, and an unmarked home that already holds operational data is refused. An absent home is created by <code>git clone</code> of the remote <em>code root</em>, not of any forge origin <code class="cite">bin/fm-remote-home-provision.sh:148-178</code>.</li>
+<li><strong>Layout.</strong> Create <code>data</code>, <code>state</code>, <code>config</code>, <code>projects</code>, and an empty backlog skeleton with <code>## In flight</code>, <code>## Queued</code>, <code>## Done</code> <code class="cite">bin/fm-remote-home-provision.sh:179-194</code>.</li>
+<li><strong>Projects.</strong> Re-validate each origin and mode; an existing clone must have the same origin; a new one is cloned, and a <code>no-mistakes</code> project gets <code>no-mistakes init</code> and <code>no-mistakes doctor</code> on that host <code class="cite">bin/fm-remote-home-provision.sh:196-240</code>.</li>
+<li><strong>Publish.</strong> Atomically write <code>data/charter.md</code> (mode 600), <code>data/projects.md</code>, <code>.fm-secondmate-parent</code>, and finally <code>.fm-secondmate-home</code>, which "commits the complete seed last" <code class="cite">bin/fm-remote-home-provision.sh:242-255</code>.</li>
+</ol>
+<p>On any failure before that last write, a newly created home is removed entirely; an existing home has newly cloned projects removed and its owned files restored from the snapshot <code class="cite">bin/fm-remote-home-provision.sh:72-93</code>. Rerunning the seed for the same route converges, which is what makes preserving the route on 255 safe <code class="cite">bin/fm-remote-home-seed.sh:23-24</code>.</p>
+
+<h3 id="parent-record">The parent record</h3>
+<p><code>.fm-secondmate-parent</code> holds <code>schema=fm-secondmate-parent.v1</code>, <code>route=remote</code>, and <code>parent_host=&lt;alias&gt;</code> when known <code class="cite">bin/fm-remote-home-provision.sh:247-252</code>. Its purpose: "The promised-public-reply subsystem is same-filesystem by construction, so a remote route can never carry a delegated public-reply promise; <code>bin/fm-teardown.sh</code>'s cleanup gate reads this record to treat a remote parent as out of scope rather than an unresolved binding" <code class="cite">docs/remote-secondmates.md:147-148</code>.</p>
+
+<h2 id="launch">Launching or recovering the agent</h2>
+<p>Launch and recovery use the same command as a local route, <code>bin/fm-spawn.sh &lt;id&gt; --secondmate</code> <code class="cite">docs/remote-secondmates.md:156-162</code>. For a remote route <code>fm-spawn.sh</code>:</p>
+<ol>
+<li>Resolves the verified harness and optional model and effort; refuses an invalid configured effort <code class="cite">bin/fm-spawn.sh:880-890</code>.</li>
+<li>Refuses when existing task metadata does not identify this exact remote route (kind, host, root, home) <code class="cite">bin/fm-spawn.sh:891-903</code>.</li>
+<li>Runs the <a href="readiness-doctor.html#gate">readiness gate</a> "before anything is published or transferred" <code class="cite">bin/fm-spawn.sh:904-924</code>.</li>
+<li>Syncs the remote home to <em>this primary's</em> default-branch commit; a skipped sync warns and launches the home unchanged <code class="cite">bin/fm-spawn.sh:925-939</code>.</li>
+<li>Pushes the inherited-material allowlist under a per-route lock with a fresh generation; a failure refuses the launch, and 255 preserves the route <code class="cite">bin/fm-spawn.sh:940-968</code>.</li>
+<li>Resolves a trace-context carrier against this home's own task metadata when tracing is on <code class="cite">bin/fm-spawn.sh:969-979</code>.</li>
+<li>Calls <code>fm-on.sh &lt;id&gt; fm-remote-secondmate-control.sh launch &lt;id&gt; &lt;harness&gt; &lt;model&gt; &lt;effort&gt; herdr [traceparent]</code> <code class="cite">bin/fm-spawn.sh:980-997</code>.</li>
+<li>Rejects a reply whose backend is not <code>herdr</code>, whose harness differs, or whose session is not <code>fm-remote</code> <code class="cite">bin/fm-spawn.sh:998-1022</code>.</li>
+<li>Writes the parent's task record with <code>window=remote:&lt;id&gt;</code>, <code>kind=secondmate</code>, <code>home</code>, <code>remote_host</code>, <code>remote_root</code>, <code>remote_backend</code>, <code>remote_herdr_session</code>, <code>remote_target</code>, and the carrier the endpoint actually holds <code class="cite">bin/fm-spawn.sh:1023-1050</code>.</li>
+</ol>
+<p>"Raw launch commands are not accepted for remote secondmates", an explicit request for any other backend is refused on both sides, and backends that already refuse secondmate launch (currently Orca and cmux) stay unsupported <code class="cite">docs/remote-secondmates.md:164-168</code>.</p>
+
+<h3 id="host-launch">The host-local half</h3>
+<p><code>fm-remote-secondmate-control.sh launch</code> validates the home marker, the harness (<code>claude codex opencode pi pi-signed grok kimi cursor</code>), the effort, and the backend <code class="cite">bin/fm-remote-secondmate-control.sh:154-171</code>. If an endpoint record exists it asks the backend for the agent's state: <code>alive</code> returns the existing route without relaunching, <code>dead</code> removes the agent-less endpoint first, <code>missing</code> proceeds, and anything else refuses a duplicate launch <code class="cite">bin/fm-remote-secondmate-control.sh:174-189</code>. It then runs the ordinary <code>fm-spawn.sh … --secondmate --backend herdr</code> on that host with <code>HERDR_SESSION=fm-remote</code>, state and data redirected into the home's private <code>state/parent-route</code> and <code>data/.parent-route</code>, the home's own <code>config</code>, and inheritance and sync skipped, because "the parent owns both convergence legs before it asks for this launch" <code class="cite">bin/fm-remote-secondmate-control.sh:190-205</code>. Keeping the agent's own endpoint record under <code>state/parent-route</code> leaves the home's <code>state/*.meta</code> for the workers the secondmate supervises <code class="cite">bin/fm-remote-secondmate-control.sh:35-37</code>.</p>
+
+<h2 id="sync">Code convergence</h2>
+<p>"Session start and every remote launch converge the persistent remote home on the primary's own default-branch commit rather than on the Firstmate copy that host keeps" <code class="cite">docs/remote-secondmates.md:246</code>. <code>sync &lt;id&gt; &lt;40-hex commit&gt;</code> first makes the commit readable in the home's own object store, cheapest first: already present, then a read-only fetch of that one commit from the host's code root (which never moves that copy's HEAD), then a fetch from the home's origin <code class="cite">bin/fm-remote-secondmate-control.sh:328-345</code>. The fast-forward itself is the shared <code>ff_target</code>, so the clean, ancestry, and branch guards have one owner <code class="cite">bin/fm-remote-secondmate-control.sh:26-34</code>. The result line is <code>synced: &lt;commit&gt; instr=&lt;changed watched instruction paths&gt;</code> or <code>current: &lt;commit&gt;</code> <code class="cite">bin/fm-remote-secondmate-control.sh:347-375</code>; the <code>instr=</code> suffix exists because "the primary cannot diff a checkout it cannot read" and must decide whether the running agent needs replacing to reload <code class="cite">docs/remote-secondmates.md:249</code>. An older host omits it, which a parent must read as unknown rather than "nothing changed" <code class="cite">bin/fm-remote-secondmate-control.sh:360-363</code>.</p>
+<p><code>/updatefirstmate</code> is the one path that follows the host's own copy: <code>update</code> runs <code>fm-update.sh</code> on the remote code root, requires a safe origin update, then syncs the home to that refreshed code-root HEAD <code class="cite">bin/fm-remote-secondmate-control.sh:377-395</code>. The guarded convergence contract belongs to the <code>secondmate-provisioning</code> skill <code class="cite">docs/remote-secondmates.md:247-248</code>.</p>
+
+<h2 id="inherit">Inherited material</h2>
+<p>Only a declared allowlist crosses the link. <code>FM_INHERITABLE_CONFIG</code> is the single declaration: <code>crew-dispatch.json crew-harness backlog-backend backend herdr-presentation-spaces startup-memory-budget trace-context launch-env-allowlist claude-permission-mode lavish-axi-host</code> under <code>config/</code>, plus the shared captain file under <code>data/</code> <code class="cite">bin/fm-config-inherit-lib.sh:71</code> <code class="cite">bin/fm-config-inherit-lib.sh:89-99</code>. The sender derives its item set from that declaration, "the same declaration the receiving bin/fm-remote-inherit.sh enforces", and different local and remote revisions fail closed <code class="cite">bin/fm-remote-inherit-push.sh:5-11</code>. The receiver takes <code>put &lt;path&gt; &lt;bytes&gt; &lt;sha256&gt; &lt;generation&gt;</code> or <code>absent …</code>, writes only allowlisted paths by atomic replacement, quarantines divergent <code>data/captain-shared.md</code> bytes before replacing them, and leaves the converged copy read-only <code class="cite">bin/fm-remote-inherit.sh:2-10</code>. <code>trace-context</code> is session-scoped and skipped by a live push into a running home <code class="cite">bin/fm-config-inherit-lib.sh:73-78</code>.</p>
+<p>Locked startup convergence and <code>bin/fm-config-push.sh</code> transfer the same allowlist; changed live routes receive a marked instruction to re-read the files, recorded before delivery and retried during locked startup convergence after a failed send <code class="cite">docs/remote-secondmates.md:237-240</code>. The receiver's header records one accepted risk: "The captain accepts this config/data parent TOCTOU within Firstmate's single-user trust boundary" <code class="cite">bin/fm-remote-inherit.sh:63</code>. Config inheritance itself is documented under <a href="../persistence/index.html">Persistence</a>.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

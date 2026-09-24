@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Non-interactive tool contract · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Remote</p>
+<h1>Non-interactive tool contract</h1>
+<p class="lede">Remote jobs never run a login or interactive shell, so the job library composes the runtime PATH itself by looking at the filesystem, in one fixed order, and every remote child sees exactly that PATH and nothing else.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>.</p>
+
+<h2 id="problem">The problem</h2>
+<p>A remote Firstmate home needs <code>git</code>, <code>jq</code>, <code>herdr</code>, <code>tasks-axi</code>, <code>treehouse</code>, and at least one agent harness <code class="cite">docs/remote-secondmates.md:115</code>. On a developer account those usually come from version managers (nvm, asdf, mise), Nix, or Homebrew, which a person's interactive shell puts on PATH through startup files and shell hooks. The job worker is launched by launchd or a detached supervisor, and each child runs under <code>env -i</code> <code class="cite">bin/fm-remote-job-worker.sh:746-753</code>, so none of that happens: "Remote job execution never runs a login or interactive shell, so <code>~/.profile</code>, <code>~/.bashrc</code>, and <code>~/.zshrc</code> never contribute to the job worker's runtime PATH" <code class="cite">docs/remote-secondmates.md:46</code>.</p>
+<p>Firstmate's answer is not to source those files but to discover the tools' directories directly: "<code>bin/fm-remote-job-lib.sh</code> is the single owner of the worker PATH and builds it by filesystem discovery rather than by evaluating shell startup files" <code class="cite">docs/remote-secondmates.md:47</code> <code class="cite">bin/fm-remote-job-lib.sh:58-66</code>. The result is the same on every call, independent of what an account's dotfiles do, and it never executes account-controlled startup code inside a Firstmate job.</p>
+<div class="callout unclear"><span class="callout-title">Why not source the startup files</span>
+<p>The source states the rule and its determinism benefit (the composed order, not the filesystem or shell, decides which install wins <code class="cite">bin/fm-remote-job-lib.sh:63-66</code>). It does not spell out a further rationale, such as avoiding arbitrary code in startup files or interactive prompts under launchd. Those would be reasonable readings but are not stated.</p></div>
+
+<h2 id="order">The composed order</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 760 640" role="img" aria-labelledby="rmp2-title rmp2-desc">
+<title id="rmp2-title">Remote runtime PATH composition order</title>
+<desc id="rmp2-desc">The child PATH is the remote root's bin directory followed by the operator PATH. The operator PATH is, in order: the account's local bin, the nvm default version bin, asdf and mise shims and install bins, the three Nix directories, the two Homebrew directories, and the system tail. git is resolved only from the operator PATH.</desc>
+<defs><marker id="rmp2-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">Runtime PATH, first to last</text>
+
+<g class="c4-boundary"><rect x="20" y="45" width="720" height="580" rx="6"/><text x="32" y="64">Child PATH — what every remote job sees</text></g>
+<g class="c4-boundary"><rect x="40" y="150" width="680" height="460" rx="6"/><text x="52" y="169">Operator PATH — git and required tools resolve only here</text></g>
+
+<g class="c4-component"><rect x="120" y="76" width="520" height="56" rx="8"/>
+<text class="c4-label" x="380" y="99">&lt;remote-root&gt;/bin</text>
+<text class="c4-desc" x="380" y="118">prepended for the child only, after git has been resolved</text></g>
+
+<g class="c4-component"><rect x="120" y="182" width="520" height="50" rx="8"/>
+<text class="c4-label" x="380" y="203">~/.local/bin</text>
+<text class="c4-desc" x="380" y="221">only if a real directory, not a symlink; wrappers live here</text></g>
+<g class="c4-component"><rect x="120" y="248" width="520" height="50" rx="8"/>
+<text class="c4-label" x="380" y="269">nvm default version bin</text>
+<text class="c4-desc" x="380" y="287">alias/default chain → highest matching installed version</text></g>
+<g class="c4-component"><rect x="120" y="314" width="520" height="62" rx="8"/>
+<text class="c4-label" x="380" y="335">asdf, then mise</text>
+<text class="c4-desc" x="380" y="352">~/.asdf/shims, ~/.asdf/installs/*/*/bin, mise shims (two roots),</text>
+<text class="c4-desc" x="380" y="366">mise installs/*/*/bin (two roots), each glob in sorted order</text></g>
+<g class="c4-component"><rect x="120" y="392" width="520" height="62" rx="8"/>
+<text class="c4-label" x="380" y="413">Nix</text>
+<text class="c4-desc" x="380" y="430">~/.nix-profile/bin, /etc/profiles/per-user/&lt;account&gt;/bin,</text>
+<text class="c4-desc" x="380" y="444">/run/current-system/sw/bin — a final bin symlink is resolved</text></g>
+<g class="c4-component"><rect x="120" y="470" width="520" height="50" rx="8"/>
+<text class="c4-label" x="380" y="491">Homebrew</text>
+<text class="c4-desc" x="380" y="509">/opt/homebrew/bin, then /usr/local/bin</text></g>
+<g class="c4-component"><rect x="120" y="536" width="520" height="50" rx="8"/>
+<text class="c4-label" x="380" y="557">System tail</text>
+<text class="c4-desc" x="380" y="575">/usr/bin:/bin:/usr/sbin:/sbin, always present</text></g>
+
+<g class="c4-rel"><path d="M380,132 L380,180" marker-end="url(#rmp2-arrow)"/></g>
+<g class="c4-rel"><path d="M380,232 L380,246" marker-end="url(#rmp2-arrow)"/></g>
+<g class="c4-rel"><path d="M380,298 L380,312" marker-end="url(#rmp2-arrow)"/></g>
+<g class="c4-rel"><path d="M380,376 L380,390" marker-end="url(#rmp2-arrow)"/></g>
+<g class="c4-rel"><path d="M380,454 L380,468" marker-end="url(#rmp2-arrow)"/></g>
+<g class="c4-rel"><path d="M380,520 L380,534" marker-end="url(#rmp2-arrow)"/></g>
+</svg>
+</div>
+<figcaption>Exact repeated entries are omitted. Directories that do not exist are skipped. Source: <code class="cite">bin/fm-remote-job-lib.sh:258-296</code>.</figcaption>
+</figure>
+
+<h3 id="rules">Rules that shape the list</h3>
+<ul>
+<li><strong>Existence and symlinks.</strong> A directory is added only if it exists and is not itself a symlink; that excludes a symlinked <code>~/.local/bin</code> too <code class="cite">bin/fm-remote-job-lib.sh:153-156</code> <code class="cite">docs/remote-secondmates.md:54</code>. The three Nix locations are the exception: a final <code>bin</code> symlink is resolved to its physical directory, while a path reached through symlinked ancestors stays in its documented position <code class="cite">bin/fm-remote-job-lib.sh:158-169</code> <code class="cite">docs/remote-secondmates.md:53</code>.</li>
+<li><strong>Deduplication.</strong> An entry already present is not appended again <code class="cite">bin/fm-remote-job-lib.sh:148-151</code>.</li>
+<li><strong>Sorted globs.</strong> Multi-version install directories are passed as already-expanded globs, because only the shell's own pathname expansion sorts matches. The comment records the bug this avoids: <code>compgen -G</code> on macOS's bash 3.2 returned raw readdir order, so which install of a multi-version tool a job resolved depended on the filesystem <code class="cite">bin/fm-remote-job-lib.sh:171-183</code>.</li>
+<li><strong>The system tail is unconditional</strong> <code class="cite">bin/fm-remote-job-lib.sh:278-281</code>.</li>
+</ul>
+
+<h3 id="nvm">nvm version selection without nvm</h3>
+<p>nvm is never run. The library follows the filesystem <code>~/.nvm/alias/default</code> chain (up to 8 hops, rejecting absolute paths, <code>..</code>, and unsafe characters, allowing <code>lts/&lt;name&gt;</code>) to a selector <code class="cite">bin/fm-remote-job-lib.sh:185-207</code>. Then it scans <code>~/.nvm/versions/node/*/bin</code>:</p>
+<ul>
+<li><code>system</code> adds no nvm directory, so Node comes from later system directories <code class="cite">bin/fm-remote-job-lib.sh:214</code> <code class="cite">docs/remote-secondmates.md:50</code>.</li>
+<li><code>node</code>, <code>stable</code>, <code>unstable</code> match every installed version; a version selector matches installed versions it prefixes on a dot boundary, so <code>20</code> matches <code>20.11.1</code>.</li>
+<li>The highest matching semantic version wins; if the alias is absent or matches nothing installed, the highest installed version is used <code class="cite">bin/fm-remote-job-lib.sh:209-256</code> <code class="cite">docs/remote-secondmates.md:49</code>.</li>
+</ul>
+
+<h2 id="two-paths">Operator PATH and child PATH</h2>
+<p>There are two lists. The operator PATH is everything above except the remote root's <code>bin</code>. The child PATH is <code>&lt;remote-root&gt;/bin</code> followed by the operator PATH <code class="cite">bin/fm-remote-job-lib.sh:285-296</code>. <code>git</code> and other required tools are resolved only from the operator portion, and the resolved path must sit in a directory of that portion <code class="cite">bin/fm-remote-job-lib.sh:298-308</code>. That is the property the entrypoint relies on: "a checkout-local <code>bin/git</code> therefore cannot authorize an untracked command, and a host with no operator <code>git</code> receives an install-or-wrapper diagnostic before command execution" <code class="cite">docs/remote-secondmates.md:56-57</code>.</p>
+<p>The doctor prints the child PATH its own entrypoint launch produced as its <code>path=</code> line, and reports <code>entrypoint=yes</code> only when the first PATH entry is the configured root's <code>bin</code> <code class="cite">bin/fm-remote-doctor.sh:888-895</code>. It then runs its required-tool probe as a worker job, so the tool report reflects what the worker actually resolves <code class="cite">bin/fm-remote-doctor.sh:452-496</code> <code class="cite">docs/remote-secondmates.md:89</code>.</p>
+
+<h3 id="shadowing">A consequence the source calls out</h3>
+<p>Because <code>~/.local/bin</code> precedes the package-manager directories, a stale self-updated <code>herdr</code> there shadows the one the account's login shell would find. The Herdr adapter steps around a client the running server refuses, and the doctor names which client it selected <code class="cite">docs/remote-secondmates.md:55</code> <code class="cite">bin/fm-remote-doctor.sh:565-581</code>. Client selection belongs to the Herdr backend adapter, documented under <a href="../crew/index.html">Crew</a>.</p>
+
+<h2 id="wrappers">When discovery is not enough: wrappers</h2>
+<p>If a required tool is discoverable only in a version-manager directory that is not on the composed PATH (for example an unselected nvm version), <code>fm-remote-doctor.sh --fix</code> may create a Firstmate-owned wrapper in <code>~/.local/bin</code> <code class="cite">docs/remote-secondmates.md:59-61</code>. The mechanics:</p>
+<ul>
+<li>A tool that already resolves is left alone <code class="cite">bin/fm-remote-doctor.sh:509-510</code>.</li>
+<li>The target is the first regular, non-symlink executable of that name found under the nvm version bins, asdf shims and installs, and mise shims and installs, scanned in glob order <code class="cite">bin/fm-remote-job-lib.sh:310-327</code>.</li>
+<li>An existing file at the wrapper path is replaced only if its first two lines are exactly <code>#!/usr/bin/env bash</code> and <code># Firstmate remote tool wrapper v1</code>; anything else is reported as a failed fix and left untouched <code class="cite">bin/fm-remote-doctor.sh:498-518</code>.</li>
+<li>The wrapper body is a single <code>exec &lt;quoted target&gt; "$@"</code>, written to a temporary file, made mode 0700, and renamed into place <code class="cite">bin/fm-remote-doctor.sh:525-536</code>.</li>
+<li>All five required tools are attempted; for harnesses, the fix stops as soon as one harness resolves or one wrapper lands, satisfying "at least one" <code class="cite">bin/fm-remote-doctor.sh:539-552</code>.</li>
+<li>It "never installs a package" <code class="cite">docs/remote-secondmates.md:61</code>.</li>
+</ul>
+<p>The document also gives a manual wrapper recipe for tools that need a hand-picked version: it sets <code>tool_bin</code> to the selected version's absolute bin, prepends it to PATH, and <code>exec</code>s the absolute target, never re-resolving its own name through <code>~/.local/bin</code> <code class="cite">docs/remote-secondmates.md:62-77</code>.</p>
+<div class="callout unclear"><span class="callout-title">Two differences between the automatic and manual wrappers</span>
+<p>First, the doctor's target is the first match in glob order across all nvm versions <code class="cite">bin/fm-remote-job-lib.sh:312-319</code>, not the nvm default selection used for PATH, so it is lexical order of version directory names that picks the version. Second, the doctor's wrapper does not prepend the tool's bin directory to PATH <code class="cite">bin/fm-remote-doctor.sh:529</code>, while the documented manual recipe does <code class="cite">docs/remote-secondmates.md:68-70</code>. The source does not say whether either difference is deliberate or what it means for tools whose own interpreter must come from the same directory.</p></div>
+
+<h2 id="doctor-self">The doctor must work on a bare host</h2>
+<p>The doctor resolves its own directory with shell builtins only, because "a host missing a required tool must still reach the report that names it, not die on a bare PATH" <code class="cite">bin/fm-remote-doctor.sh:57-62</code>, and it loads the Herdr adapter only when both <code>herdr</code> and <code>jq</code> resolve <code class="cite">bin/fm-remote-doctor.sh:149-161</code>. The same concern explains the entrypoint's git-less doctor bootstrap on the <a href="transport.html#doctor-bootstrap">transport</a> page.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

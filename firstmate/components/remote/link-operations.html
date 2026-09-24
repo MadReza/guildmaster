@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Link operations · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Remote</p>
+<h1>Link operations</h1>
+<p class="lede">What actually crosses the link once a remote home is running: steers delivered as durable records, replies mirrored from an append-only log, bounded reads, backlog handoff through a confined scratch file, relaunch, and guarded retirement.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>.</p>
+
+<p>Every operation here uses the same commands a local secondmate uses; the remote case diverges only inside them. The shared models (steering inbox, doorbell, marked requests, pending replies, open decisions) are owned by <a href="../communication/index.html">Communication</a> and <a href="../backlog-and-decisions/index.html">Backlog and decisions</a>; this page covers what the machine boundary adds.</p>
+
+<h2 id="steer">Steering a remote mate</h2>
+<pre><code>FM_HOME=&lt;primary-home&gt; bin/fm-send.sh fm-&lt;id&gt; '&lt;request&gt;'</code></pre>
+<p>"A routed request is delivered as a durable record in the remote home's steering inbox plus a best-effort doorbell, never by typing the payload into the pane; exit 0 means the record durably exists" <code class="cite">docs/remote-secondmates.md:178-182</code>. The parent's leg runs <code>fm-on.sh &lt;id&gt; fm-remote-secondmate-control.sh send &lt;id&gt; &lt;message&gt; [fire-and-forget]</code>; on the host, <code>cmd_send</code> locks the endpoint metadata, re-validates the endpoint, and writes the message idempotently into <code>&lt;home&gt;/state/parent-route/&lt;id&gt;.inbox</code> <code class="cite">bin/fm-remote-secondmate-control.sh:256-282</code>. That inbox is the one the rewritten remote charter names, "so a steer never lands on a parent-home path the remote host cannot reach" <code class="cite">docs/remote-secondmates.md:194</code>.</p>
+<ul>
+<li>If deduplication lands on a record the mate already moved to <code>handled/</code>, the send succeeds without ringing again <code class="cite">bin/fm-remote-secondmate-control.sh:283-290</code>.</li>
+<li>Otherwise the constant doorbell is rung into the recorded pane, best-effort. Outcomes 1 (composer holds pending text), 2 (did not reach the pane), and 3 (agent exited) only print notices; the record is the delivery <code class="cite">bin/fm-remote-secondmate-control.sh:291-296</code>.</li>
+<li>Every remote attempt is bounded by <code>FM_SEND_REMOTE_BUDGET</code> seconds, default 30, validated as a positive integer <code class="cite">bin/fm-send.sh:141-144</code> <code class="cite">bin/fm-send.sh:775-782</code>.</li>
+<li>An unconfirmed transport (255) is retried identically once, safe because the remote write deduplicates. A budget expiry is not retried, since completion is unknown. Either outcome keeps a reply-bearing request's pending-reply expectation <code class="cite">docs/remote-secondmates.md:183-184</code> <code class="cite">bin/fm-send.sh:133-144</code>.</li>
+<li>If delivery stays unconfirmed, only the printed <code>FM_PENDING_REPLY_EXISTING_CORR=&lt;id&gt;</code> resend is safe: it keeps the body and lets the remote enqueue deduplicate onto the same record. "A plain rerun mints a different correlation and is not idempotent." An unconfirmed fire-and-forget request exits 3 and names its delivery id <code class="cite">docs/remote-secondmates.md:185-186</code> <code class="cite">bin/fm-send.sh:137-141</code>.</li>
+<li>"The remote host runs no doorbell re-ring ladder of its own"; a swallowed doorbell for an ordinary request surfaces through the parent's pending-reply recovery, whose recovery request rings again <code class="cite">docs/remote-secondmates.md:187</code>.</li>
+</ul>
+
+<h2 id="replies">Mirroring replies back</h2>
+<p>The remote charter appends replies to <code>state/parent-replies.status</code> in the remote home, and the remote home's own outcome publishers append there too <code class="cite">docs/remote-secondmates.md:192-193</code>. <code>bin/fm-procevent-remote-reply.sh</code> turns that log into the parent's <code>state/&lt;id&gt;.status</code>. It is explicitly "a status-stream MIRROR, not a correlated-reply channel": a remote mate must present the same model as a local one, whose whole status stream lands in the parent's status file, so ingest leaves every semantic judgement to the parent's shared consumers <code class="cite">bin/fm-procevent-remote-reply.sh:38-50</code>. The machine boundary adds only cursor continuity, explicitly offered documents, replay deduplication, control-byte normalization, and a caught-up watermark <code class="cite">bin/fm-procevent-remote-reply.sh:52-65</code>.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 960 600" role="img" aria-labelledby="rmy-title rmy-desc">
+<title id="rmy-title">A remote reply reaching the parent's status stream</title>
+<desc id="rmy-desc">The remote agent appends a line to the remote log. The process-event runner holds a blocking delta read open over fm-on. The reader verifies the cursor's prefix digest, waits for a complete new line, and returns it. The runner hands the capture to the reply adapter at once. The adapter normalizes control bytes, skips source lines already recorded, fetches any document offered by a report pointer through the confined file reader, appends the mirrored lines to the parent's status file, settles pending replies by correlation, commits the cursor, and re-arms. A window that closes empty returns 75, which records a caught-up watermark.</desc>
+<defs><marker id="rmy-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">Reply mirror, one captured line</text>
+
+<g class="c4-container"><rect x="15" y="48" width="130" height="46" rx="8"/><text class="c4-label" x="80" y="70">Remote agent</text><text class="c4-tech" x="80" y="85">[fm-remote pane]</text></g>
+<g class="c4-datastore"><rect x="175" y="48" width="130" height="46" rx="8"/><text class="c4-label" x="240" y="70">Remote log</text><text class="c4-tech" x="240" y="85">[parent-replies.status]</text></g>
+<g class="c4-component"><rect x="335" y="48" width="130" height="46" rx="8"/><text class="c4-label" x="400" y="70">Delta read</text><text class="c4-tech" x="400" y="85">[remote job]</text></g>
+<g class="c4-component"><rect x="495" y="48" width="130" height="46" rx="8"/><text class="c4-label" x="560" y="70">Event runner</text><text class="c4-tech" x="560" y="85">[primary]</text></g>
+<g class="c4-component"><rect x="655" y="48" width="130" height="46" rx="8"/><text class="c4-label" x="720" y="70">Reply adapter</text><text class="c4-tech" x="720" y="85">[primary]</text></g>
+<g class="c4-datastore"><rect x="815" y="48" width="130" height="46" rx="8"/><text class="c4-label" x="880" y="70">Parent status</text><text class="c4-tech" x="880" y="85">[state/&lt;id&gt;.status]</text></g>
+
+<g class="c4-rel c4-rel-async"><line x1="80" y1="94" x2="80" y2="585"/><line x1="240" y1="94" x2="240" y2="585"/><line x1="400" y1="94" x2="400" y2="585"/><line x1="560" y1="94" x2="560" y2="585"/><line x1="720" y1="94" x2="720" y2="585"/><line x1="880" y1="94" x2="880" y2="585"/></g>
+
+<g class="c4-rel"><path d="M80,130 L238,130" marker-end="url(#rmy-arrow)"/><text class="c4-rel-label" x="160" y="123">append line</text></g>
+<g class="c4-rel"><path d="M560,165 L402,165" marker-end="url(#rmy-arrow)"/><text class="c4-rel-label" x="480" y="158">fm-on … offset prefix 55</text></g>
+<g class="c4-rel"><path d="M400,200 L242,200" marker-end="url(#rmy-arrow)"/><text class="c4-rel-label" x="320" y="193">verify prefix sha256</text></g>
+<text class="c4-rel-label" x="320" y="225">wait for a whole new line</text>
+<g class="c4-rel c4-rel-async"><path d="M400,255 L558,255" marker-end="url(#rmy-arrow)"/><text class="c4-rel-label" x="480" y="248">status=delta, ≤ 64 KiB</text></g>
+<g class="c4-rel"><path d="M560,290 L718,290" marker-end="url(#rmy-arrow)"/><text class="c4-rel-label" x="640" y="283">autohandle at once</text></g>
+<text class="c4-rel-label" x="810" y="320">normalize control bytes;</text>
+<text class="c4-rel-label" x="810" y="334">skip recorded source lines</text>
+<g class="c4-rel"><path d="M720,360 L242,360" marker-end="url(#rmy-arrow)"/><text class="c4-rel-label" x="480" y="353">fm-remote-file.sh get data/x.md (only report= offers)</text></g>
+<g class="c4-rel c4-rel-async"><path d="M240,395 L718,395" marker-end="url(#rmy-arrow)"/><text class="c4-rel-label" x="480" y="388">bytes, or a refusal → fail-open note</text></g>
+<g class="c4-rel"><path d="M720,430 L878,430" marker-end="url(#rmy-arrow)"/><text class="c4-rel-label" x="800" y="423">append, pointer rewritten</text></g>
+<text class="c4-rel-label" x="640" y="465">settle corr=; commit cursor;</text>
+<text class="c4-rel-label" x="640" y="479">register the next source</text>
+<text class="c4-rel-label" x="835" y="510">one ordinary wake</text>
+<text class="c4-rel-label" x="835" y="524">via the signal scan</text>
+<text class="c4-rel-label" x="320" y="565">window closes empty → exit 75 → caught-up watermark = window start</text>
+</svg>
+</div>
+<figcaption>The whole path is non-destructive: the remote log is never truncated or consumed <code class="cite">docs/remote-secondmates.md:213</code>. Dashed horizontal arrows are results.</figcaption>
+</figure>
+
+<h3 id="delta-read">The delta-read protocol</h3>
+<p><code>fm-remote-delta-read.sh &lt;relative-log&gt; &lt;offset&gt; &lt;prefix-sha256&gt; [wait-seconds]</code> "validates continuity by hashing the exact prefix represented by the caller's cursor. It then blocks until at least one complete appended line is available, returns at most 65536 payload bytes, and never truncates or consumes the source" <code class="cite">bin/fm-remote-delta-read.sh:2-11</code>. It opens the log with <code>O_NOFOLLOW</code>, confined to <code>FM_HOME</code> <code class="cite">bin/fm-remote-delta-read.sh:45-97</code>. Output is a <code>schema=fm-remote-delta.v1</code> header block (<code>status</code>, <code>path</code>, <code>from_offset</code>, <code>to_offset</code>, <code>from_prefix_sha256</code>, <code>to_prefix_sha256</code>, <code>payload_sha256</code>, <code>payload_bytes</code>, <code>reason</code>), a blank line, then the payload <code class="cite">bin/fm-remote-delta-read.sh:164-174</code>. <code>status=continuity-broken</code> carries a reason of <code>truncated</code>, <code>prefix-changed</code>, <code>missing</code>, or <code>line-exceeds-bound</code> <code class="cite">bin/fm-remote-delta-read.sh:139-184</code>. The wait is capped at 300 s; exit 75 means the window closed with no complete line <code class="cite">bin/fm-remote-delta-read.sh:13-17</code> <code class="cite">bin/fm-remote-delta-read.sh:122</code>. This is the one preemptible job class on the <a href="job-worker.html#preemption">worker</a>.</p>
+
+<h3 id="ingest">What ingest guarantees</h3>
+<ul>
+<li><strong>Applied at capture.</strong> <code>autohandle</code> is the runner's own entry into <code>handle</code>, "so applying a reply never depends on a handler remembering to run it" <code class="cite">bin/fm-procevent-remote-reply.sh:21-25</code> <code class="cite">docs/remote-secondmates.md:208</code>.</li>
+<li><strong>One announcement.</strong> Bytes it applies land in the parent's status stream, whose ordinary signal-scan announcement wakes firstmate once; only a capture it could not fully apply is published as a separate <code>check</code> wake <code class="cite">bin/fm-procevent-remote-reply.sh:27-36</code>.</li>
+<li><strong>Replay identity.</strong> Each normalized source line, before its pointers are rewritten, is recorded as delivered; a retry or whole-log recapture never appends a second spelling <code class="cite">docs/remote-secondmates.md:197-200</code> <code class="cite">bin/fm-procevent-remote-reply.sh:421-425</code>. The document is candid that the first recapture after upgrading can append one duplicate of a legacy line, which can read as reopening a resolved decision <code class="cite">docs/remote-secondmates.md:199-200</code>.</li>
+<li><strong>Correlation is per line, never a gate.</strong> Progress lines and newly raised decisions carry no <code>corr=</code> and travel the same path; "no single line can stop or wedge the relay or hold the cursor back" <code class="cite">docs/remote-secondmates.md:201-202</code>. A mirrored line with a correlation token settles its pending-reply record and closes that request's escalation <code class="cite">docs/remote-secondmates.md:209</code>.</li>
+<li><strong>Normalization.</strong> NUL, every other C0 control except tab and newline, and DEL become <code>?</code>; printable ASCII and high bytes (UTF-8) pass unchanged; blank separators are dropped <code class="cite">bin/fm-procevent-remote-reply.sh:398-407</code>.</li>
+<li><strong>Documents only on offer.</strong> Only a structured <code>report=data/….md</code> pointer (or its bracketed form), bounded at a token boundary, offers a document; a bare path in prose is a mention <code class="cite">bin/fm-procevent-remote-reply.sh:279-299</code> <code class="cite">docs/remote-secondmates.md:196</code>. It is fetched with <code>fm-remote-file.sh get</code>, capped at 262144 bytes by default <code class="cite">bin/fm-procevent-remote-reply.sh:76</code>.</li>
+<li><strong>Fail open on a refused document.</strong> The line is mirrored with its original pointer, the cursor advances, and one unkeyed note records the reader's reason. The note never enters the open-decision fold, because the reader cannot tell "a report that is still being written from one that will never exist" <code class="cite">docs/remote-secondmates.md:204-206</code> <code class="cite">bin/fm-procevent-remote-reply.sh:555-561</code>. A 255 while fetching instead leaves the delta uncommitted for the runner's retry <code class="cite">docs/remote-secondmates.md:207</code>.</li>
+<li><strong>Continuity break.</strong> A shortened or changed prefix appends <code>blocked [key=remote-reply-continuity-&lt;id&gt;]</code> and the source is not re-armed; the cursor is never silently reset <code class="cite">bin/fm-procevent-remote-reply.sh:19</code> <code class="cite">bin/fm-procevent-remote-reply.sh:530-540</code> <code class="cite">docs/remote-secondmates.md:214</code>.</li>
+<li><strong>Caught-up watermark.</strong> When the reader exits 75, the adapter records the window's <em>start</em> time as the moment the parent is proven to have read through the end of the remote log <code class="cite">bin/fm-procevent-remote-reply.sh:247-267</code>. The pending-reply logic treats a missing correlated report as missed only after that, so an answering mate is never asked to repost while its answer is in flight, and a genuinely missing answer gets exactly one repost <code class="cite">docs/remote-secondmates.md:210-211</code>.</li>
+</ul>
+<p>Cursor state lives in <code>state/remote-replies/</code>; the default wait window is <code>FM_REMOTE_REPLY_WAIT_SECONDS=55</code> <code class="cite">bin/fm-procevent-remote-reply.sh:73-76</code>. The process-event runner itself is documented under <a href="../supervision/index.html">Supervision</a>.</p>
+
+<h2 id="reads">Reads: peek, state, observe, summary</h2>
+<ul>
+<li><strong>Peek.</strong> For a selector whose metadata has <code>remote_host=</code>, <code>fm-peek.sh</code> routes the capture to the host's <code>capture</code> verb, clamped to 100 lines; the host output is capped at 64&nbsp;KiB. An unreachable host "fails loudly naming the host; the local backend adapters are never asked to read a remote target", and the error says the mate "is not thereby dead" <code class="cite">bin/fm-peek.sh:6-10</code> <code class="cite">bin/fm-peek.sh:26-39</code> <code class="cite">bin/fm-remote-secondmate-control.sh:308-316</code>.</li>
+<li><strong>State.</strong> <code>fm-crew-state.sh</code> asks the host's <code>state</code> verb. <code>alive</code> reports activity from the routed status log; <code>dead</code> or <code>missing</code> is reported as the host's own verdict; an unreachable or unreadable endpoint is <code>unknown-remote … (not proof of death)</code> <code class="cite">bin/fm-crew-state.sh:245-281</code>.</li>
+<li><strong>Observe.</strong> <code>observe</code> returns the pending-reply backend observation of the remote pane for the parent's reply recovery <code class="cite">bin/fm-remote-secondmate-control.sh:318-326</code> <code class="cite">bin/fm-pending-reply-lib.sh:1533</code>.</li>
+<li><strong>Home summary.</strong> The fleet snapshot fetches <code>state/home-summary.json</code> with <code>fm-remote-file.sh get</code> <code class="cite">bin/fm-fleet-snapshot.sh:1448</code>. <code>get</code> resolves a home-relative path through ordinary directories to one non-symlink regular file inside the home, bounded before output <code class="cite">bin/fm-remote-file.sh:8-9</code>. Fleet views belong to <a href="../observability/index.html">Observability</a>.</li>
+</ul>
+
+<h2 id="handoff">Backlog handoff</h2>
+<pre><code>bin/fm-backlog-handoff.sh &lt;id&gt; &lt;item-key&gt;...</code></pre>
+<p>For a remote route, <code>tasks-axi mv</code> first moves the dependency-closed set atomically from the primary backlog into <code>data/handoff/&lt;id&gt;.outbox.md</code>; the outbox is copied to the remote handoff scratch directory, and <code>fm-backlog-receive.sh</code> ingests every destination-absent key under the remote backlog's own lock <code class="cite">docs/remote-secondmates.md:229-230</code>. Concretely <code class="cite">bin/fm-backlog-handoff.sh:664-730</code>:</p>
+<ol>
+<li>A handoff generation is advanced and the outbox snapshot is sent with <code>fm-on.sh --stdin &lt;id&gt; fm-remote-file.sh put state/handoff/&lt;id&gt;.outbox.md 1048576 &lt;bytes&gt; &lt;sha256&gt; &lt;generation&gt;</code>. <code>put</code> is "deliberately narrower" than <code>get</code>: it can only atomically replace that one scratch file, and there is no delete <code class="cite">bin/fm-remote-file.sh:10-12</code>.</li>
+<li><code>fm-on.sh &lt;id&gt; fm-backlog-receive.sh &lt;rel&gt; &lt;bytes&gt; &lt;sha256&gt; &lt;generation&gt;</code> checks every item is Queued, skips keys already present, and moves the rest in one dependency-closed <code>tasks-axi mv</code>; it is idempotent on an ambiguous retry, may clear only its own dead lock at least 30 s old, and removes the scratch file on confirmed receipt <code class="cite">bin/fm-backlog-receive.sh:2-16</code>.</li>
+<li>Only then is the local outbox deleted and a best-effort receiver wake attempted; a wake that cannot be sent stays pending for a later resume or handoff <code class="cite">bin/fm-backlog-handoff.sh:701-729</code>.</li>
+</ol>
+<p>Either transport step failing keeps the outbox: "handoff transfer to &lt;id&gt; was unavailable or completion is unknown; outbox preserved" <code class="cite">bin/fm-backlog-handoff.sh:689-700</code>. Bootstrap retries pending outboxes and wakes and emits <code>SECONDMATE_HANDOFF:</code> only when an outbox remains; there is no two-phase journal <code class="cite">docs/remote-secondmates.md:232-233</code>.</p>
+
+<h2 id="relaunch">Relaunch</h2>
+<p>A live remote mate is restarted with the ordinary <code>relaunch</code> of the <a href="../crew/index.html">control plane</a>, executed on that host: "the endpoint record there was written by a host-local launch and carries no remote placement, so the transaction, its checkpoint, and its postconditions are the local ones" <code class="cite">docs/remote-secondmates.md:242</code>. The host verb <code>relaunch &lt;id&gt; &lt;harness&gt; &lt;model|default|-&gt; &lt;effort|default|-&gt;</code> runs <code>fm-control.sh &lt;id&gt; relaunch</code> with the same session and skip-convergence overrides as launch <code class="cite">bin/fm-remote-secondmate-control.sh:213-254</code>. The primary always passes the profile explicitly, using <code>default</code> for an unpinned axis, because <code>config/secondmate-harness</code> is not inherited and "letting the far side re-resolve it would silently move the mate onto another runtime" <code class="cite">docs/remote-secondmates.md:243</code>. The parent side is <code>fm-secondmate-restart.sh</code> <code class="cite">bin/fm-secondmate-restart.sh:46</code> <code class="cite">bin/fm-secondmate-restart.sh:166</code>.</p>
+
+<h2 id="retire">Retirement</h2>
+<pre><code>bin/fm-teardown.sh &lt;id&gt;          # guarded
+bin/fm-teardown.sh &lt;id&gt; --force  # explicit discard, captain authority</code></pre>
+<p>The parent-side remote path <code class="cite">bin/fm-teardown.sh:923-990</code>:</p>
+<ol>
+<li>Refuse unless the task metadata is a secondmate and its host, root, and home match the registry route exactly.</li>
+<li>Without <code>--force</code>, refuse while a backlog outbox is pending or a routed reply is unresolved; refuse while the reply source still holds an unhandled capture.</li>
+<li>Call <code>fm-on.sh &lt;id&gt; fm-remote-secondmate-control.sh retire &lt;id&gt; [--force]</code>. On the host this runs <code>fm-guard.sh</code> for the home and then the ordinary <code>fm-teardown.sh</code> against the private parent-route state, which refuses while the remote home has child work <code class="cite">bin/fm-remote-secondmate-control.sh:397-420</code> <code class="cite">docs/remote-secondmates.md:257</code>.</li>
+<li>On 255: "remote retirement completion is unknown; preserving the route and local records for same-host reconciliation". On another failure, re-arm the reply source.</li>
+<li>On success: finalize the reply source, clean the outbox (force only), pending replies, and receiver wake, then remove the registry line and task record.</li>
+</ol>
+<p>Retirement closes only that mate's panes or <code>2ndmate-&lt;id&gt;</code> workspace, never the shared session or a sibling's <code class="cite">docs/remote-secondmates.md:258</code>. A home already absent reports <code>already-retired</code> <code class="cite">bin/fm-remote-secondmate-control.sh:400-404</code>. "No generic remote delete or write surface exists: remote writes are confined to inherited allowlist files and backlog handoff scratch files, and remote home removal is reachable only through guarded secondmate retirement" <code class="cite">docs/remote-secondmates.md:261</code>.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>
