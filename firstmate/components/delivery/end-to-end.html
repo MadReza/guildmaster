@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delivery end to end · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">Components › Delivery</p>
+<h1>Delivery end to end</h1>
+<p class="lede">One realistic path traced through every delivery component: a product-facing fix on a GitHub project registered <code>no-mistakes-prod-only</code>, <code>yolo</code> off, with one ask-user finding on the way, followed by how the direct-PR, local-only, <code>yolo</code>-on, and away variants differ.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Delivery overview</a>. The task id <code>fix-login</code>, project <code>myapp</code>, and PR number are illustrative; every command and line shape is taken from the cited source.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1080 980" role="img" aria-labelledby="e2e-t e2e-d">
+<title id="e2e-t">A no-mistakes ship from request to teardown</title>
+<desc id="e2e-d">The captain asks for a fix. The supervisor resolves no-mistakes with yolo off, scaffolds the brief and spawns the worker. The worker commits and reports done; the supervisor steers it to run no-mistakes. The pipeline parks at an ask-user gate; the worker escalates with a keyed needs-decision; the supervisor decides and answers with resolve-key; the worker responds. The pipeline pushes, opens the PR, and returns at CI green; the worker reports the PR. The supervisor registers it, asks the captain, and on the captain's word merges through fm-pr-merge. The watcher's later poll sees merged and absorbs the duplicate. The supervisor refreshes the clone and tears the worker down.</desc>
+<defs><marker id="e2e-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="180" y="28">fix-login on myapp: no-mistakes, yolo off</text>
+<g class="c4-person"><circle cx="80" cy="44" r="12"/><rect x="10" y="56" width="140" height="46" rx="12"/><text class="c4-label" x="80" y="84">Captain</text></g>
+<g class="c4-container"><rect x="190" y="50" width="140" height="52" rx="8"/><text class="c4-label" x="260" y="72">Supervisor</text><text class="c4-tech" x="260" y="90">[firstmate]</text></g>
+<g class="c4-container"><rect x="370" y="50" width="140" height="52" rx="8"/><text class="c4-label" x="440" y="72">Worker</text><text class="c4-tech" x="440" y="90">[fm/fix-login]</text></g>
+<g class="c4-external"><rect x="550" y="50" width="140" height="52" rx="8"/><text class="c4-label" x="620" y="72">no-mistakes</text><text class="c4-tech" x="620" y="90">[daemon]</text></g>
+<g class="c4-external"><rect x="730" y="50" width="140" height="52" rx="8"/><text class="c4-label" x="800" y="72">GitHub</text><text class="c4-tech" x="800" y="90">[gh]</text></g>
+<g class="c4-component"><rect x="910" y="50" width="140" height="52" rx="8"/><text class="c4-label" x="980" y="72">Watcher</text><text class="c4-tech" x="980" y="90">[fm-watch.sh]</text></g>
+<g class="c4-rel c4-rel-async"><path d="M80,102 L80,965"/><path d="M260,102 L260,965"/><path d="M440,102 L440,965"/><path d="M620,102 L620,965"/><path d="M800,102 L800,965"/><path d="M980,102 L980,965"/></g>
+<g class="c4-rel"><path d="M80,132 L260,132" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="170" y="125">fix the login bug</text></g>
+<g class="c4-rel"><path d="M260,154 C 320,154 320,188 260,188" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="170" y="176">intake: no-mistakes, yolo off</text></g>
+<g class="c4-rel"><path d="M260,220 L440,220" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="350" y="213">fm-brief · fm-spawn --mode --yolo</text></g>
+<g class="c4-rel"><path d="M440,264 L260,264" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="350" y="257">done: {summary}</text></g>
+<g class="c4-rel"><path d="M260,308 L440,308" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="350" y="301">steer: /no-mistakes</text></g>
+<g class="c4-rel"><path d="M440,352 L620,352" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="530" y="345">axi run --intent</text></g>
+<g class="c4-rel"><path d="M620,396 L440,396" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="530" y="389">gate: ask-user</text></g>
+<g class="c4-rel"><path d="M440,440 L260,440" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="350" y="433">needs-decision [key=nm-…]</text></g>
+<g class="c4-rel"><path d="M260,484 L440,484" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="350" y="477">fm-send --resolve-key</text></g>
+<g class="c4-rel"><path d="M440,528 L620,528" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="530" y="521">axi respond</text></g>
+<g class="c4-rel"><path d="M620,572 L800,572" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="710" y="565">push · PR · CI</text></g>
+<g class="c4-rel"><path d="M620,616 L440,616" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="530" y="609">CI green</text></g>
+<g class="c4-rel"><path d="M440,660 L260,660" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="350" y="653">done: PR &lt;url&gt; checks green</text></g>
+<g class="c4-rel"><path d="M260,704 L980,704" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="620" y="697">fm-pr-check.sh: record pr=, arm poll</text></g>
+<g class="c4-rel"><path d="M260,748 L80,748" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="170" y="741">PR &lt;url&gt; ready: merge?</text></g>
+<g class="c4-rel"><path d="M80,792 L260,792" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="170" y="785">merge it</text></g>
+<g class="c4-rel"><path d="M260,836 L800,836" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="530" y="829">fm-pr-merge.sh: live gate, merge at head, outcome</text></g>
+<g class="c4-rel c4-rel-async"><path d="M980,880 L800,880" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="890" y="873">poll: merged (duplicate absorbed)</text></g>
+<g class="c4-rel"><path d="M260,904 C 320,904 320,938 260,938" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="170" y="926">fleet-sync · teardown</text></g>
+</svg>
+</div>
+<figcaption>Solid arrows are commands, reports, or chat; dashed arrows are polls. The numbered walk-through below cites each arrow's source.</figcaption>
+</figure>
+
+<h2 id="walk">The walk-through</h2>
+<ol>
+<li><strong>Intake.</strong> The captain names no delivery. The registry line for <code>myapp</code> is <code>- myapp [no-mistakes-prod-only] - …</code>, a conditional policy, and the fix changes product behaviour, so the task ships <code>no-mistakes</code> <code class="cite">AGENTS.md:318</code>. <code>+yolo</code> is absent, so <code>yolo</code> is off <code class="cite">bin/fm-project-mode.sh:14-17</code>. Mode, <code>yolo</code>, and any deviation reason go into the backlog note <code class="cite">AGENTS.md:320</code>. See <a href="modes-and-posture.html#intake">Resolution at intake</a>.</li>
+<li><strong>Brief and spawn.</strong> <code>bin/fm-brief.sh fix-login myapp --mode no-mistakes</code> writes <code>data/fix-login/brief.md</code> with the no-mistakes Setup step, rule 1, the ask-user escalation block, and a definition of done opening <code>Delivery contract: mode=no-mistakes</code> <code class="cite">bin/fm-brief.sh:232-237</code> <code class="cite">bin/fm-brief.sh:475-493</code>. After the Task subsections are filled, <code>bin/fm-spawn.sh fix-login projects/myapp --mode no-mistakes --yolo off</code> checks that line, writes <code>mode=no-mistakes</code> and <code>yolo=off</code> into <code>state/fix-login.meta</code>, and prints <code>spawned fix-login harness=… kind=ship mode=no-mistakes yolo=off window=… worktree=…</code> <code class="cite">bin/fm-spawn.sh:381</code> <code class="cite">bin/fm-spawn.sh:2782-2792</code>. The registry's standing posture reads <code>no-mistakes-prod-only</code>, so no deviation notice is printed <code class="cite">bin/fm-spawn.sh:2799-2800</code>.</li>
+<li><strong>Implementation.</strong> The worker runs <code>no-mistakes doctor</code> (and <code>init</code> if needed), implements, commits on <code>fm/fix-login</code>, and appends <code>done [at=…]: {summary}</code> <code class="cite">bin/fm-dod-lib.sh:279-281</code>.</li>
+<li><strong>Trigger.</strong> The supervisor steers the same worker to invoke <code>/no-mistakes</code> <code class="cite">AGENTS.md:368</code>.</li>
+<li><strong>Drive.</strong> The worker starts <code>no-mistakes axi run --intent "&lt;the captain's words&gt;"</code> in the background and polls <code>no-mistakes axi status</code> <code class="cite">bin/fm-dod-lib.sh:285-299</code>. Meanwhile <code>bin/fm-crew-state.sh fix-login</code> reports <code>state: working · source: run-step · validating (running)</code> <code class="cite">bin/fm-crew-state.sh:1048</code>.</li>
+<li><strong>Ask-user gate.</strong> Review raises a finding with action <code>ask-user</code>. Crew-state now reads <code>parked · … parked at &lt;gate&gt;: 1 finding(s)</code> with the <code>ask-user: authority decision</code> component <code class="cite">bin/fm-crew-state.sh:1027-1044</code>. The worker writes <code>data/fix-login/nm-&lt;run&gt;-findings.txt</code> and appends <code>needs-decision [at=…] [key=nm-&lt;run&gt;-&lt;step&gt;]: ask-user findings=&lt;id&gt; file=…</code> <code class="cite">bin/fm-dod-lib.sh:238-245</code>.</li>
+<li><strong>Decision.</strong> The supervisor loads <code>ask-user-authority</code>. The finding asks for a straight correction required by the accepted fix, so firstmate decides it without the captain <code class="cite">.agents/skills/ask-user-authority/SKILL.md:31</code>, and sends one exact decision with <code>bin/fm-send.sh fix-login --resolve-key nm-&lt;run&gt;-&lt;step&gt; "…"</code>, which also appends the <code>resolved</code> line <code class="cite">AGENTS.md:383-384</code> <code class="cite">bin/fm-send.sh:154-160</code>.</li>
+<li><strong>Respond.</strong> The worker feeds the decision to the gate with <code>no-mistakes axi respond</code>, never <code>--yes</code> <code class="cite">bin/fm-dod-lib.sh:302-306</code>.</li>
+<li><strong>PR and CI.</strong> The pipeline pushes, opens the PR, and returns at CI green. The worker checks <code>gh pr view &lt;url&gt; --json isDraft</code> prints <code>false</code> and appends <code>done [at=…]: PR https://github.com/&lt;owner&gt;/myapp/pull/&lt;n&gt; checks green</code> <code class="cite">bin/fm-dod-lib.sh:308-310</code>.</li>
+<li><strong>Register.</strong> The supervisor runs <code>bin/fm-pr-check.sh fix-login &lt;url copied from that line&gt;</code>, which records <code>pr=</code> and <code>pr_head=</code>, arms the merge poll, and prints <code>armed: state/fix-login.check.sh</code> <code class="cite">AGENTS.md:395</code> <code class="cite">bin/fm-pr-check.sh:196</code>.</li>
+<li><strong>Ask for the merge.</strong> With <code>yolo</code> off, the supervisor tells the captain the full URL, a concise outcome, and the no-mistakes risk level, and asks whether to merge <code class="cite">AGENTS.md:396</code> <code class="cite">AGENTS.md:487</code>.</li>
+<li><strong>Merge.</strong> On "merge it", <code>bin/fm-pr-merge.sh fix-login &lt;url&gt;</code> reads the PR live, verifies it open, not draft, mergeable, not dirty, every check green at head; merges with <code>gh pr merge &lt;n&gt; --repo &lt;owner&gt;/myapp --match-head-commit &lt;sha&gt; --squash</code>; persists <code>attended</code> in <code>state/fix-login.merge-authority</code>; reads back <code>verified: … is merged</code>; and publishes <code>check: merge landed: fix-login &lt;url&gt;</code> to the wake queue <code class="cite">bin/fm-pr-merge.sh:1126-1186</code> <code class="cite">bin/fm-merge-outcome-lib.sh:103-106</code>.</li>
+<li><strong>Poll.</strong> Within one check interval the watcher's poll prints <code>merged</code>; the outcome is already recorded, so the watcher retires the poll and logs "absorbed duplicate merged PR poll result for fix-login" <code class="cite">bin/fm-watch.sh:2460-2466</code>.</li>
+<li><strong>Clean up.</strong> The supervisor runs <code>bin/fm-fleet-sync.sh myapp</code> and <code>bin/fm-teardown.sh fix-login</code>. The squash merge leaves the branch's commits on no remote, but the merged PR's head contains the local work, so teardown accepts it, closes the backlog item with the PR link, removes the poll artifacts, and fleet-syncs again <code class="cite">bin/fm-teardown.sh:44-59</code> <code class="cite">bin/fm-teardown.sh:3701-3703</code>.</li>
+</ol>
+
+<h2 id="variants">How the other paths differ</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Variant</th><th>What changes</th></tr></thead>
+<tbody>
+<tr><td><code>direct-PR</code> (for example, internal tooling on the same prod-only project)</td><td>Steps 4 to 8 disappear. The worker pushes <code>fm/&lt;id&gt;</code>, opens a non-draft PR with <code>gh-axi</code>, and reports <code>done: PR &lt;url&gt;</code> with no <code>checks green</code> <code class="cite">bin/fm-dod-lib.sh:250-262</code>. The merge gate still demands every check green at head, so CI is proved at step 12 instead of by the pipeline.</td></tr>
+<tr><td><code>local-only</code></td><td>No PR, poll, or forge. The worker reports <code>done: ready in branch fm/&lt;id&gt;</code>; on approval the supervisor runs <code>bin/fm-merge-local.sh &lt;id&gt;</code>; teardown accepts the local default branch as landed and skips the clone refresh (<a href="local-landing.html">Local landing</a>).</td></tr>
+<tr><td><code>yolo</code> on</td><td>Step 11 becomes a one-line after-the-fact report: firstmate merges green, in-scope work itself and gives "a one-line full-URL … outcome" <code class="cite">AGENTS.md:358</code> <code class="cite">AGENTS.md:364</code>. A red check, a destructive or security-sensitive change, or an ask-user finding that expands the contract still goes to the captain.</td></tr>
+<tr><td>Captain away</td><td>The Pi supervision branch handles wakes. It may merge only what the captain's recorded away words call for, and only green; the merge is recorded as <code>away</code>; <code>--allow-red</code>, <code>--auto</code>, and queued merges are refused; a local-only landing waits for the captain's return; landed workers are still torn down <code class="cite">bin/fm-branch-prompt.sh:104-114</code> <code class="cite">bin/fm-branch-prompt.sh:63-67</code>.</td></tr>
+<tr><td>Secondmate home</td><td>The same steps run inside the secondmate's own home. <code>fm-pr-check.sh</code> publishes <code>done [key=child-pr-&lt;id&gt;]: child &lt;id&gt; PR ready: &lt;url&gt; mode=… yolo=…</code> to the parent channel, and the merge outcome goes upward as <code>done [key=merged-&lt;id&gt;]: merged &lt;id&gt; &lt;url&gt;</code> <code class="cite">bin/fm-pr-check.sh:185-191</code> <code class="cite">bin/fm-merge-outcome-lib.sh:79-80</code>.</td></tr>
+<tr><td>Pipeline withdrawn</td><td>Resolve the task <code>direct-PR</code> at intake; nothing else in steps 9 to 14 depends on no-mistakes (<a href="validation-pipeline.html#absent">Where the code assumes the tool</a>).</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="related">Related</h2>
+<ul>
+<li><a href="index.html">Delivery overview</a> for the component view of every script named here.</li>
+<li><a href="../communication/index.html">Communication</a> for status lines, steering inboxes, and <code>fm-send</code>.</li>
+<li><a href="../supervision/index.html">Supervision</a> for wakes and the watcher.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

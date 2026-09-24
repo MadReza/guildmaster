@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>After the merge · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Delivery</p>
+<h1>After the merge</h1>
+<p class="lede">A merge is not the end of delivery: the watcher turns the forge's merged state into one durable outcome, the supervisor refreshes the project clone and tears the worker down, and teardown refuses unless it can prove the work actually landed.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Delivery overview</a>.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1000 560" role="img" aria-labelledby="am-t am-d">
+<title id="am-t">From merged PR to returned worktree</title>
+<desc id="am-d">On a check sweep the watcher runs the merge poll against the forge; on merged it reads the matching merge-authority record, publishes the outcome to the wake queue or parent channel, retires the authority record and the poll artifacts through a receipt, and wakes. The supervisor handles the check wake: it refreshes the project clone through fleet sync and runs teardown, which proves the work landed, concludes any parked run, closes the backlog item, removes the task's state, and refreshes the clone again.</desc>
+<defs><marker id="am-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">What a landed PR sets in motion</text>
+<g class="c4-external"><rect x="20" y="46" width="170" height="54" rx="8"/><text class="c4-label" x="105" y="70">Forge</text><text class="c4-tech" x="105" y="88">[gh · glab]</text></g>
+<g class="c4-component"><rect x="220" y="46" width="170" height="54" rx="8"/><text class="c4-label" x="305" y="70">Watcher</text><text class="c4-tech" x="305" y="88">[fm-watch.sh check sweep]</text></g>
+<g class="c4-datastore"><path d="M420,52 a85,7 0 0,0 170,0 a85,7 0 0,0 -170,0 v42 a85,7 0 0,0 170,0 v-42"/><text class="c4-label" x="505" y="76">Wake queue</text><text class="c4-tech" x="505" y="92">[or parent channel]</text></g>
+<g class="c4-container"><rect x="620" y="46" width="170" height="54" rx="8"/><text class="c4-label" x="705" y="70">Supervisor</text><text class="c4-tech" x="705" y="88">[main, or away branch]</text></g>
+<g class="c4-component"><rect x="820" y="46" width="170" height="54" rx="8"/><text class="c4-label" x="905" y="70">Teardown · sync</text><text class="c4-tech" x="905" y="88">[fm-teardown · fm-fleet-sync]</text></g>
+<g class="c4-rel c4-rel-async"><path d="M105,100 L105,545"/><path d="M305,100 L305,545"/><path d="M505,102 L505,545"/><path d="M705,100 L705,545"/><path d="M905,100 L905,545"/></g>
+<g class="c4-rel c4-rel-async"><path d="M305,130 L105,130" marker-end="url(#am-arrow)"/><text class="c4-rel-label" x="205" y="123">fm-pr-poll --validated</text></g>
+<g class="c4-rel"><path d="M105,166 L305,166" marker-end="url(#am-arrow)"/><text class="c4-rel-label" x="205" y="159">merged</text></g>
+<g class="c4-rel"><path d="M305,192 C 365,192 365,226 305,226" marker-end="url(#am-arrow)"/><text class="c4-rel-label" x="240" y="214">read .merge-authority</text></g>
+<g class="c4-rel"><path d="M305,262 L505,262" marker-end="url(#am-arrow)"/><text class="c4-rel-label" x="405" y="255">check: merge landed: &lt;id&gt; &lt;url&gt;</text></g>
+<g class="c4-rel"><path d="M305,288 C 365,288 365,322 305,322" marker-end="url(#am-arrow)"/><text class="c4-rel-label" x="226" y="310">retire authority + poll</text></g>
+<g class="c4-rel c4-rel-async"><path d="M505,358 L705,358" marker-end="url(#am-arrow)"/><text class="c4-rel-label" x="605" y="351">drain, handle check wake</text></g>
+<g class="c4-rel"><path d="M705,398 L905,398" marker-end="url(#am-arrow)"/><text class="c4-rel-label" x="805" y="391">fm-fleet-sync.sh &lt;project&gt;</text></g>
+<g class="c4-rel"><path d="M705,438 L905,438" marker-end="url(#am-arrow)"/><text class="c4-rel-label" x="805" y="431">fm-teardown.sh &lt;id&gt; (no flags)</text></g>
+<g class="c4-rel"><path d="M905,462 C 965,462 965,496 905,496" marker-end="url(#am-arrow)"/><text class="c4-rel-label" x="830" y="486">prove landed · close · sync</text></g>
+<g class="c4-rel"><path d="M905,528 L705,528" marker-end="url(#am-arrow)"/><text class="c4-rel-label" x="805" y="521">teardown &lt;id&gt; complete</text></g>
+</svg>
+</div>
+<figcaption>A main home's outcome goes to its wake queue; a secondmate home appends it to the parent channel first and then wakes itself. A merge firstmate performed through <code>bin/fm-pr-merge.sh</code> publishes the same outcome from the merge path, and the poll's later observation is absorbed as a duplicate.</figcaption>
+</figure>
+
+<h2 id="detect">Detecting the merge</h2>
+<p>On a <code>merged</code> answer from a validated PR poll, the watcher does four things in order <code class="cite">bin/fm-watch.sh:2439-2466</code>:</p>
+<ol>
+<li>Reads the task's merge-authority record; with no matching record it logs that it is "recording an external merge outcome".</li>
+<li>Publishes the outcome through <code>fm_merge_outcome_report … poll &lt;authority&gt;</code>. A failure to record it exits the watcher cycle rather than continuing silently.</li>
+<li>Removes exactly the authority record it read, then retires the poll: a retirement receipt is published first and the artifacts are removed through it, so a crash between steps is finished by the next watcher start or the next <code>fm-pr-check.sh</code> <code class="cite">bin/fm-watch.sh:2234-2253</code> <code class="cite">bin/fm-pr-check.sh:54-60</code>.</li>
+<li>Wakes the supervisor, unless the outcome had already been recorded (for example by firstmate's own merge), in which case it logs "absorbed duplicate merged PR poll result".</li>
+</ol>
+<p>The outcome line itself, its destination, and its de-duplication are described on <a href="merge-authority.html#outcome">Merge authority</a>.</p>
+
+<h2 id="handle">What the supervisor does with it</h2>
+<ul>
+<li>A <code>check:</code> wake means "act on the named poll result, including merges" <code class="cite">AGENTS.md:441</code>.</li>
+<li>"When any wake reports a merged PR for a project cloned in this home, refresh that clone through the guarded fleet-sync path" <code class="cite">AGENTS.md:447</code>. Wake-time refreshes can target one clone by name, "so the primary home also catches up when a secondmate reports a merge from its own home" <code class="cite">docs/architecture.md:457-458</code>.</li>
+<li>"Tear down a ship task only after landing is confirmed." A refusal for uncommitted or unlanded work "is a stop-and-investigate result, never an obstacle to bypass", and teardown is never forced without explicit discard authority. Afterwards, record completion, keep only the configured recent Done history, and re-evaluate queued work <code class="cite">AGENTS.md:401-404</code>.</li>
+<li>While the captain is away, the Pi supervision branch owns the same step: "A worker whose pull request has landed is finished, not stuck, and closing it is your job in both postures. A <code>check: merge landed:</code> wake names exactly that moment"; it claims the task's lease and runs <code>bin/fm-teardown.sh &lt;task&gt;</code> with no flags <code class="cite">bin/fm-branch-prompt.sh:63-67</code>. That rule arrived in the pinned commit after landed workers sat for nine hours during an away window; the return brief now lists them under "Landed, cleanup due" <code class="cite">bin/fm-afk-return.sh:529</code> <code class="cite">.agents/skills/afk/SKILL.md:74</code>.</li>
+</ul>
+
+<h2 id="teardown">Teardown's landed-work proof</h2>
+<p>Teardown hard-resets and removes the worktree and kills its processes, so it "REFUSES if the worktree holds work that has not LANDED" <code class="cite">bin/fm-teardown.sh:44-68</code>. Work has landed when:</p>
+<ul>
+<li>it is reachable from any remote-tracking branch (a fork counts, so upstream contributions pushed to a fork qualify); or</li>
+<li>for a normal ship task, its PR is merged and the forge reports a PR head that contains the current local work (ancestor or equivalent patch ids); or</li>
+<li>its content is already present in the up-to-date default branch as a clean tree match.</li>
+</ul>
+<p>This recognises the squash-merge-then-delete-branch flow, "where the branch's own commits live nowhere on a remote yet the change is fully in main". A diverged copy is not treated as landed, because "path-set coverage, git cherry, and merge-tree containment each fail to prove content landed without also accepting unlanded edits to the same paths". When no <code>pr=</code> was ever recorded (the header's own example is "a yolo-authorized merge on a repo with no PR CI"), teardown looks up a merged PR whose head branch matches and fetches <code>refs/pull/&lt;n&gt;/head</code> if the branch was deleted. A forge lookup error falls back to the content check, and if that is inconclusive teardown refuses. Uncommitted changes are never landed. For <code>local-only</code>, a merge into the local default branch also counts (<a href="local-landing.html#after">Local landing</a>).</p>
+<p>Once the landed-work refusals pass, and before anything is returned, teardown concludes a still-parked no-mistakes run it can prove is this task's, reaps processes whose working directory is the task's worktree, and sweeps orphaned remote job workers <code class="cite">bin/fm-teardown.sh:225-278</code>. It validates the PR-poll and merge-authority artifacts as single-link files on the state device and removes them with the rest of the task's volatile state <code class="cite">bin/fm-teardown.sh:76-80</code> <code class="cite">bin/fm-teardown.sh:1330-1368</code>. The backlog item is closed with the PR link, or <code>local main</code> for a local landing, in the same locked step that removes the task record; the intended transition is written to <code>state/&lt;id&gt;.backlog-close</code> first so an interrupted cleanup can be finished at the next session start <code class="cite">bin/fm-teardown.sh:15-29</code> <code class="cite">bin/fm-teardown.sh:1517-1536</code>. A backlog item that is still an open captain call is reopened with the deliverable recorded instead of being closed <code class="cite">bin/fm-teardown.sh:30-43</code>.</p>
+<p>Finally, for a PR-based ship task, teardown runs <code>bin/fm-fleet-sync.sh &lt;project&gt;</code>, ignoring its result <code class="cite">bin/fm-teardown.sh:3701-3703</code>. The rest of teardown, including worktree-slot ownership, endpoint close, and lock recovery, belongs to <a href="../crew/index.html">Crew</a>.</p>
+
+<h2 id="refresh">Clone refresh</h2>
+<p><code>bin/fm-fleet-sync.sh [&lt;project-dir-or-name&gt;]</code> fast-forwards each clone's checked-out default branch to <code>origin/&lt;default&gt;</code> when safe and prunes local branches whose upstream is gone and that no worktree still needs <code class="cite">bin/fm-fleet-sync.sh:2-5</code>. Its guarantees:</p>
+<ul>
+<li>One drift self-heals: a clean detached HEAD with no unique commits is re-attached to the default branch and then fast-forwarded, reported as <code>recovered:</code>.</li>
+<li>Every other off-default state (a named non-default branch, a detached HEAD with unique commits, a dirty tree, a diverged default) "may hold real work, so it is left untouched and reported as a quantified, loud <code>STUCK: ... N commits behind ... - needs attention</code> warning". "Nothing is ever forced, stashed, or discarded" <code class="cite">bin/fm-fleet-sync.sh:6-13</code>.</li>
+<li><code>local-only</code> projects, clones with no origin, missing branches, and fetch failures are benign skips <code class="cite">bin/fm-fleet-sync.sh:14-15</code>. A directory under <code>projects/</code> that is not the root of its own work tree is skipped as "not a clone root", so git discovery cannot walk up into the Firstmate checkout <code class="cite">bin/fm-fleet-sync.sh:16-20</code>.</li>
+<li>Pruning never deletes the checked-out branch or one with a worktree; <code>FM_FLEET_PRUNE=0</code> disables it. An orphaned <code>.git/packed-refs.lock</code> is removed only when provably stale <code class="cite">bin/fm-fleet-sync.sh:21-26</code>.</li>
+</ul>
+<p>The same refresh also runs off the digest's blocking path at session start <code class="cite">AGENTS.md:183</code> <code class="cite">docs/architecture.md:455-463</code>.</p>
+
+<h2 id="self-update">Landing changes to Firstmate itself</h2>
+<p>Firstmate is "its own repo, behind the same no-mistakes gate as any project", so a merged change to its instruction surface sits on <code>main</code> "until each running firstmate pulls it" <code class="cite">.agents/skills/updatefirstmate/SKILL.md:14-17</code>. Shared tracked changes ship "through this repo's no-mistakes pipeline and PR path, with the same merge authority as any other project" <code class="cite">AGENTS.md:48</code>. The captain's <code>/updatefirstmate</code> fast-forwards the running repository and registered secondmate homes from <code>origin</code> without touching project clones, and restarts every live secondmate, because a running agent holds its loaded <code>AGENTS.md</code> and skills frozen and "no verified harness offers a reload" <code class="cite">.agents/skills/updatefirstmate/SKILL.md:19-26</code> <code class="cite">docs/architecture.md:465-473</code>. The shared fast-forward guard is <code>bin/fm-ff-lib.sh</code>: never forcing, merging, or stashing, and reconciling a clean secondmate divergence only when a three-way tree proof shows its whole local result is already in the target <code class="cite">bin/fm-ff-lib.sh:1-38</code>. The update mechanics themselves belong to the <a href="../remote/index.html">Remote</a> and <a href="../persistence/index.html">Persistence</a> areas.</p>
+
+<h2 id="failures">How it fails</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Situation</th><th>Behaviour</th></tr></thead>
+<tbody>
+<tr><td>Outcome cannot be written during a poll</td><td>Watcher logs and exits the cycle; the poll stays armed and is retried</td></tr>
+<tr><td>Authority record cannot be retired</td><td>Watcher logs "published merge outcome … but could not retire its authority record" and exits the cycle</td></tr>
+<tr><td>Poll snapshot changed during retirement</td><td>Retirement deferred and recoverable</td></tr>
+<tr><td>Merged PR whose head does not contain local work</td><td>Teardown refuses; the extra local commits are unlanded</td></tr>
+<tr><td>Forge unreachable at teardown</td><td>Content check; refusal if inconclusive</td></tr>
+<tr><td>Clone dirty or on a feature branch</td><td><code>STUCK:</code> warning, clone untouched</td></tr>
+<tr><td>Backlog close fails after cleanup</td><td>Fatal and loud; the pending-close record is replayed at the next session start</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="related">Related</h2>
+<ul>
+<li><a href="../crew/index.html">Crew</a> for teardown as a lifecycle operation and worktree-slot safety.</li>
+<li><a href="../backlog-and-decisions/index.html">Backlog and decisions</a> for Done history and captain calls.</li>
+<li><a href="../observability/index.html">Observability</a> for Recently Landed and fleet views.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

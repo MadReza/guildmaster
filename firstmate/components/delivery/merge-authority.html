@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Merge authority and the PR merge gate · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Delivery</p>
+<h1>Merge authority and the PR merge gate</h1>
+<p class="lede">Who may say "merge" is a rule for the supervisor's judgment; whether a particular merge is allowed to happen is a set of live checks in <code>bin/fm-pr-merge.sh</code>, which refuses anything it cannot prove green, current, and unheld, and records the authority it merged under so the landing can be reported truthfully later.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Delivery overview</a>.</p>
+
+<h2 id="who">Who may authorise each step</h2>
+<p>Hard rule 2 is "Never merge a PR without the captain's explicit word", and "A project's captain-approved <code>yolo</code> posture is the only standing relaxation for merge authority" <code class="cite">AGENTS.md:32-33</code>. The delivery section fills in the rest <code class="cite">AGENTS.md:357-364</code> <code class="cite">AGENTS.md:397</code>:</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Step</th><th>Who may authorise it</th><th>Source</th></tr></thead>
+<tbody>
+<tr><td>Choose the task's mode and <code>yolo</code></td><td>Supervisor at intake; a current explicit captain instruction wins over the registry</td><td><code class="cite">AGENTS.md:315-320</code></td></tr>
+<tr><td>Drive validation, respond to gates</td><td>The worker that started the run, and only it</td><td><code class="cite">AGENTS.md:369-370</code></td></tr>
+<tr><td>Answer an ask-user finding</td><td>Firstmate when unambiguous; the captain when it expands the contract or is destructive, irreversible, or security-sensitive; never the worker, never by <code>yolo</code></td><td><a href="ask-user.html">Ask-user findings</a></td></tr>
+<tr><td>Merge a green, in-scope PR</td><td>The captain's explicit word; or firstmate itself when the task's <code>yolo</code> is on</td><td><code class="cite">AGENTS.md:358</code></td></tr>
+<tr><td>Merge a PR with one red check</td><td>Only a current explicit captain instruction naming that single check, passed as <code>--allow-red &lt;check-name&gt;</code>; attended only; every other check still green; never by <code>yolo</code></td><td><code class="cite">AGENTS.md:359</code> <code class="cite">AGENTS.md:361</code></td></tr>
+<tr><td>Destructive, irreversible, security-sensitive merge</td><td>Always escalates to the captain</td><td><code class="cite">AGENTS.md:360</code></td></tr>
+<tr><td>Auto-merge, admin bypass, branch deletion</td><td>An explicit captain instruction, passed as <code>--attended-override</code></td><td><code class="cite">bin/fm-pr-merge.sh:95-101</code></td></tr>
+<tr><td>Land a <code>local-only</code> branch</td><td>The captain, or firstmate with <code>yolo</code> on; never the away supervision branch</td><td><a href="local-landing.html">Local landing</a></td></tr>
+<tr><td>Tear down unlanded work</td><td>Only explicit captain discard authority (<code>--force</code>)</td><td><code class="cite">AGENTS.md:401-403</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Standing <code>yolo</code> "is not a substitute for a current explicit captain instruction where an explicit action is required", and an override is never inferred, broadened, or carried to another object <code class="cite">AGENTS.md:616-619</code>. After an autonomous merge, the supervisor owes the captain "a one-line full-URL or local-main outcome" <code class="cite">AGENTS.md:364</code>.</p>
+
+<div class="callout"><span class="callout-title">What the scripts do not check</span>
+<p>No merge entrypoint reads the task's <code>yolo</code> value. <code>bin/fm-pr-merge.sh</code> contains no reference to it, and <code>bin/fm-merge-local.sh</code> mentions it only in its header ("only after the captain approves (or yolo=on auto-approves)" <code class="cite">bin/fm-merge-local.sh:8-9</code>). Whether a merge is authorised by the captain's word or by <code>yolo</code> is entirely the supervisor's judgment. The scripts enforce what can be proved without reading words: the PR's live state, a still-open captain hold, the away-posture record, and the refused flags. The recorded <code>yolo=</code> is used only for reporting: it is echoed on the secondmate PR-ready line and in fleet snapshots <code class="cite">bin/fm-pr-check.sh:186-189</code> <code class="cite">bin/fm-fleet-snapshot.sh:758</code>.</p></div>
+
+<h2 id="gate">The merge gate, step by step</h2>
+<p>Usage: <code>bin/fm-pr-merge.sh &lt;task-id&gt; &lt;pr-url&gt; [--attended-override] [--allow-red &lt;check-name&gt;] [-- &lt;extra forge merge args&gt;]</code> <code class="cite">bin/fm-pr-merge.sh:103</code>. The supervisor must use it for "every task PR merge so merge metadata is recorded and an unproved merge is refused instead of reported as landed", and never "call a lower-level merge command around their guards" <code class="cite">AGENTS.md:363</code>.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 900 860" role="img" aria-labelledby="mg-t mg-d">
+<title id="mg-t">The order of checks in fm-pr-merge.sh</title>
+<desc id="mg-d">Eleven steps in order: screen arguments, read the away-posture record, bind the task's PR identity, record pr= and arm the poll, require any captain hold released, run the live forge gate at the head, lock the away record and re-read authority, run the forge merge bound to the verified head, persist the merge authority, read the outcome back, and publish the outcome. Each step names what it refuses or reports on failure.</desc>
+<defs><marker id="mg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">fm-pr-merge.sh: every step before "merged"</text>
+<g class="c4-component"><rect x="40" y="50" width="380" height="52" rx="8"/><text class="c4-label" x="230" y="72">1 · Screen arguments</text><text class="c4-desc" x="230" y="90">valid URL and id · one --allow-red · no repo or head override</text></g>
+<g class="c4-component"><rect x="40" y="124" width="380" height="52" rx="8"/><text class="c4-label" x="230" y="146">2 · Read away-posture record</text><text class="c4-desc" x="230" y="164">attended or away; --auto / --allow-red refused while away</text></g>
+<g class="c4-component"><rect x="40" y="198" width="380" height="52" rx="8"/><text class="c4-label" x="230" y="220">3 · Bind the task's PR identity</text><text class="c4-desc" x="230" y="238">an existing pr= must equal this URL</text></g>
+<g class="c4-component"><rect x="40" y="272" width="380" height="52" rx="8"/><text class="c4-label" x="230" y="294">4 · Record pr= and arm the poll</text><text class="c4-desc" x="230" y="312">fm-pr-check.sh with FM_PR_CHECK_MERGE=1</text></g>
+<g class="c4-component"><rect x="40" y="346" width="380" height="52" rx="8"/><text class="c4-label" x="230" y="368">5 · Captain hold released</text><text class="c4-desc" x="230" y="386">fm-captain-hold.sh open, under the task control lock</text></g>
+<g class="c4-component"><rect x="40" y="420" width="380" height="52" rx="8"/><text class="c4-label" x="230" y="442">6 · Live forge gate at head</text><text class="c4-desc" x="230" y="460">open · not draft · mergeable · no conflict · checks green</text></g>
+<g class="c4-component"><rect x="40" y="494" width="380" height="52" rx="8"/><text class="c4-label" x="230" y="516">7 · Lock away record, re-read authority</text><text class="c4-desc" x="230" y="534">while away: prove no merge queue</text></g>
+<g class="c4-component"><rect x="40" y="568" width="380" height="52" rx="8"/><text class="c4-label" x="230" y="590">8 · Forge merge bound to verified head</text><text class="c4-desc" x="230" y="608">gh --match-head-commit (default --squash) · glab --sha</text></g>
+<g class="c4-component"><rect x="40" y="642" width="380" height="52" rx="8"/><text class="c4-label" x="230" y="664">9 · Persist merge authority</text><text class="c4-desc" x="230" y="682">state/&lt;id&gt;.merge-authority: away or attended</text></g>
+<g class="c4-component"><rect x="40" y="716" width="380" height="52" rx="8"/><text class="c4-label" x="230" y="738">10 · Read the outcome back</text><text class="c4-desc" x="230" y="756">merged, queued, or refused</text></g>
+<g class="c4-component"><rect x="40" y="790" width="380" height="52" rx="8"/><text class="c4-label" x="230" y="812">11 · Publish the outcome</text><text class="c4-desc" x="230" y="830">fm-merge-outcome-lib.sh, origin self</text></g>
+<g class="c4-rel"><path d="M230,102 L230,124" marker-end="url(#mg-arrow)"/><path d="M230,176 L230,198" marker-end="url(#mg-arrow)"/><path d="M230,250 L230,272" marker-end="url(#mg-arrow)"/><path d="M230,324 L230,346" marker-end="url(#mg-arrow)"/><path d="M230,398 L230,420" marker-end="url(#mg-arrow)"/><path d="M230,472 L230,494" marker-end="url(#mg-arrow)"/><path d="M230,546 L230,568" marker-end="url(#mg-arrow)"/><path d="M230,620 L230,642" marker-end="url(#mg-arrow)"/><path d="M230,694 L230,716" marker-end="url(#mg-arrow)"/><path d="M230,768 L230,790" marker-end="url(#mg-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M420,76 L500,76" marker-end="url(#mg-arrow)"/><path d="M420,150 L500,150" marker-end="url(#mg-arrow)"/><path d="M420,224 L500,224" marker-end="url(#mg-arrow)"/><path d="M420,298 L500,298" marker-end="url(#mg-arrow)"/><path d="M420,372 L500,372" marker-end="url(#mg-arrow)"/><path d="M420,446 L500,446" marker-end="url(#mg-arrow)"/><path d="M420,520 L500,520" marker-end="url(#mg-arrow)"/><path d="M420,594 L500,594" marker-end="url(#mg-arrow)"/><path d="M420,668 L500,668" marker-end="url(#mg-arrow)"/><path d="M420,742 L500,742" marker-end="url(#mg-arrow)"/><path d="M420,816 L500,816" marker-end="url(#mg-arrow)"/></g>
+<g class="c4-rel"><text class="c4-rel-label" x="690" y="80">refuse: invalid request or forbidden flag, exit 2</text><text class="c4-rel-label" x="690" y="154">refuse: record unreadable, nothing merged</text><text class="c4-rel-label" x="690" y="228">refuse: task bound to a different PR</text><text class="c4-rel-label" x="690" y="302">refuse: PR metadata recording failed</text><text class="c4-rel-label" x="690" y="376">refuse: still held, or cannot tell</text><text class="c4-rel-label" x="690" y="450">refuse: every failing condition listed</text><text class="c4-rel-label" x="690" y="524">refuse: lock unavailable, queue unprovable</text><text class="c4-rel-label" x="690" y="598">forge refuses if the head moved</text><text class="c4-rel-label" x="690" y="672">actionable: accepted, not persisted</text><text class="c4-rel-label" x="690" y="746">refuse: neither merged nor queued</text><text class="c4-rel-label" x="690" y="820">actionable: merged, outcome not recorded</text></g>
+</svg>
+</div>
+<figcaption>Steps 1 to 7 refuse with nothing merged. Step 4 runs before the forge is touched so that even a read failure after a real merge leaves teardown the PR identity it needs <code class="cite">bin/fm-pr-merge.sh:1118-1120</code>.</figcaption>
+</figure>
+
+<h3 id="github">GitHub conditions</h3>
+<p>One live <code>gh pr view --json state,isDraft,mergeable,mergeStateStatus,headRefOid,baseRefName,statusCheckRollup</code> read supplies every condition, "each read live at merge time rather than taken from recorded metadata": the PR is open, not a draft, <code>MERGEABLE</code>, not <code>DIRTY</code>, and "every unwaived check is green at the exact current head commit". Every failing condition is reported, not just the first. Reading needs <code>gh</code> and <code>jq</code>; either missing stops the merge before any state is recorded <code class="cite">bin/fm-pr-merge.sh:11-21</code> <code class="cite">bin/fm-pr-merge.sh:574-668</code>.</p>
+<p>A check is green when it is a status context in <code>SUCCESS</code>, or a check run completed as <code>SUCCESS</code>, <code>NEUTRAL</code>, or <code>SKIPPED</code>; a pending check is not green. Because GitHub leaves a cancelled run in the rollup beside the passing re-run it triggered when the base advanced, a check is judged by its current run: a name leaves the red set only when every non-green run completed, has a whole-second <code>startedAt</code>, and started strictly before a green run. Status contexts are never superseded, and an unnamed check run can neither supersede nor be superseded <code class="cite">bin/fm-pr-merge.sh:495-518</code>. The reported name is what <code>--allow-red</code> matches, and it waives only checks with exactly that name.</p>
+<p>The verified head is passed as <code>--match-head-commit</code>, "so a push that lands between that read and the merge fails the merge instead of landing commits nothing verified". The method defaults to <code>--squash</code> when the caller passes none <code class="cite">bin/fm-pr-merge.sh:9-21</code>. After the command returns, the script reads GitHub's queue-aware state through GraphQL, falling back to <code>gh-axi</code>'s view, and accepts only <code>merged</code> or <code>in merge queue</code>; "every outcome it cannot prove refuses" <code class="cite">bin/fm-pr-merge.sh:26-31</code>. A base branch with a merge-queue rule is refused in attended posture with the exact <code>--attended-override -- --auto --&lt;method&gt;</code> retry flags, and no method is chosen for the caller <code class="cite">bin/fm-pr-merge.sh:32-48</code>.</p>
+
+<h3 id="gitlab">GitLab conditions</h3>
+<p>For a merge request the live read must show it open, <code>detailed_merge_status</code> <code>mergeable</code>, <code>has_conflicts</code> false, <code>blocking_discussions_resolved</code> true, and the head pipeline succeeded at the exact current head. The verified head goes to <code>glab mr merge</code> as <code>--sha</code>; no method flag is added because the project's own merge method applies, and <code>--yes</code> only skips an interactive confirmation "which no supervised run can answer". A recorded <code>pr_head</code> that disagrees with the live head "is reported rather than trusted" <code class="cite">bin/fm-pr-merge.sh:53-67</code> <code class="cite">bin/fm-pr-merge.sh:1190-1210</code>. <code>--allow-red</code> is refused on GitLab, "where a merge already requires the head pipeline to have succeeded" <code class="cite">bin/fm-pr-merge.sh:176-179</code>. An accepted but unconfirmed or auto-merge-queued request leaves the poll armed and records no landing <code class="cite">bin/fm-pr-merge.sh:105-108</code>.</p>
+
+<h3 id="flags">Refused flags and the attended override</h3>
+<p>Extra arguments may not carry <code>--repo</code>/<code>-R</code> in any form, including bundled short options such as <code>-yR</code>, because the repository comes only from the URL; nor <code>--sha</code> or <code>--match-head-commit</code>, because the head comes only from the live read. <code>--auto</code>, <code>--admin</code>, and branch deletion (<code>--delete-branch</code>, <code>-d</code>, GitLab's <code>--remove-source-branch</code>) are refused unless <code>--attended-override</code> is passed "for an explicit captain instruction", and the override "never skips the live green check, the away-record read, or a captain hold" <code class="cite">bin/fm-pr-merge.sh:91-101</code>.</p>
+
+<h3 id="hold">Captain holds</h3>
+<p>Before either forge call, the per-task control lock serialises the captain-hold check through the forge command. "A still-held or unreadable row refuses before that command, so a captain approval must be recorded as an <code>answer --release</code> before this entrypoint is invoked" <code class="cite">bin/fm-pr-merge.sh:69-72</code> <code class="cite">bin/fm-pr-merge.sh:875-895</code>. The hold mechanism itself belongs to <a href="../backlog-and-decisions/index.html">Backlog and decisions</a>.</p>
+
+<h2 id="away">Away posture</h2>
+<p>While <code>state/.afk-contract</code> exists, "any green merge may proceed under away authority: the record's presence is the whole mechanical fact, and which merge the captain's away words meant is the supervision session's reading" <code class="cite">bin/fm-pr-merge.sh:73-78</code>. The authority read and the synchronous forge command share the away record's lock, so the record cannot be archived or replaced between them; failing to take that lock refuses. While away, <code>--auto</code>, GitLab auto-merge, <code>--allow-red</code>, and any GitHub base whose rules cannot prove the absence of a merge queue are refused, and a GitLab merge is forced immediate with <code>--auto-merge=false</code> <code class="cite">bin/fm-pr-merge.sh:79-89</code> <code class="cite">bin/fm-pr-merge.sh:920-980</code> <code class="cite">bin/fm-pr-merge.sh:1204-1206</code>. The supervision branch's prompt states the same boundary from the other side: "A red pull request is never merged while away, whatever the words say" <code class="cite">bin/fm-branch-prompt.sh:109-110</code>.</p>
+<p>Two limitations are accepted in the open rather than hidden: a queue rule or PR base change after the preflight can still enqueue a merge that lands after away authority lapses, and killing the lock-owning shell while its forge child lives lets stale-lock recovery admit archive or replacement first <code class="cite">bin/fm-pr-merge.sh:82-86</code> <code class="cite">docs/architecture.md:368-370</code>.</p>
+
+<h2 id="records">Merge-authority records</h2>
+<p>After a forge accepts firstmate's merge request, the answer resolved at the gate is persisted <code class="cite">bin/fm-merge-authority-lib.sh:4-13</code>:</p>
+<pre><code>state/&lt;task-id&gt;.merge-authority
+fm-merge-authority-v1
+&lt;provider&gt;
+&lt;host&gt;
+&lt;path&gt;
+&lt;number&gt;
+&lt;authority&gt;                 away | attended</code></pre>
+<p>It is atomically published, mode <code>0600</code>, single-link, on the state filesystem, and its identity comes from the merge run's own canonical URL parse, revalidated against the task's current <code>pr=</code> under the metadata and lifecycle locks <code class="cite">bin/fm-merge-authority-lib.sh:20-26</code>. The retired values <code>yolo</code> and <code>away-grant</code> are still accepted when read, so a record written before the current model "is still consumed, but they are never written again" <code class="cite">bin/fm-merge-authority-lib.sh:14-19</code>.</p>
+<p>The record exists so the <em>later</em> merged poll can say who merged. When the watcher sees <code>merged</code>, it reads the record and uses it only if every identity field matches its own validated snapshot; "Missing, malformed, or mismatched state means external; it is never resolved again from a later away-posture record" <code class="cite">bin/fm-merge-authority-lib.sh:24-26</code> <code class="cite">bin/fm-watch.sh:2439-2459</code>. "Resolution authorizes nothing by itself": only the merge path gates on the answer, and the watcher and teardown consume or remove the record under the same task lifecycle lock <code class="cite">bin/fm-merge-authority-lib.sh:28-34</code>.</p>
+
+<h2 id="outcome">Merge-outcome publication</h2>
+<p>A confirmed merge must not live "only in the merging agent's memory" <code class="cite">docs/architecture.md:380</code>. <code>fm_merge_outcome_report &lt;home&gt; &lt;state&gt; &lt;task-id&gt; &lt;pr-url&gt; &lt;origin&gt; [authority]</code> is shared by the merge entrypoint (<code>origin=self</code>) and the watcher's poll (<code>origin=poll</code>) <code class="cite">bin/fm-merge-outcome-lib.sh:1-25</code> <code class="cite">bin/fm-merge-outcome-lib.sh:36-56</code>:</p>
+<ul>
+<li>The destination is the home's role, never the caller's choice. A secondmate home appends <code>done [key=merged-&lt;id&gt;]: merged &lt;id&gt; &lt;url&gt;[ &lt;authority&gt;]</code> to its parent channel; a main home appends a wake <code>check: merge landed: &lt;id&gt; &lt;url&gt;[ &lt;authority&gt;]</code> to its durable wake queue. A poll observed in a secondmate home also gets a local wake after the upward write <code class="cite">bin/fm-merge-outcome-lib.sh:79-107</code>.</li>
+<li><code>away</code> and <code>external</code> (and the retired tags) are appended to the line; <code>attended</code> stays untagged <code class="cite">bin/fm-merge-outcome-lib.sh:44-49</code>.</li>
+<li>Duplicates are suppressed through the task's <code>.pr-poll-merge-notified</code> marker under its own lock. "The outcome is published before the marker is committed, so a failed commit stays eligible for at-least-once retry and may rarely duplicate rather than leave a merge silent" <code class="cite">bin/fm-merge-outcome-lib.sh:18-23</code>.</li>
+<li>It returns 0 recorded (or already recorded), 2 invalid request, 3 when the home's own role or parent binding cannot be read, 1 otherwise. "A caller that has already merged must report a non-zero return rather than treat it as success: the merge landed and the record did not" <code class="cite">bin/fm-merge-outcome-lib.sh:51-55</code>. The merge entrypoint prints an <code>actionable:</code> line in both non-zero cases <code class="cite">bin/fm-pr-merge.sh:1232-1244</code>.</li>
+</ul>
+
+<h2 id="findings">Observations</h2>
+<ul>
+<li>The merge-authority record distinguishes only <code>away</code> from <code>attended</code>. A <code>yolo</code>-authorised merge and a captain-worded merge are both <code>attended</code>, so after the fact the ledger cannot say which of the two authorised a given landing. The <code>yolo</code> tag that once said so is retired <code class="cite">bin/fm-merge-authority-lib.sh:14-19</code>.</li>
+<li>The away record is mechanically broader than <code>yolo</code>: while it exists "any green merge lands under away authority, yolo or not", as the runtime verification log records <code class="cite">docs/verification/runtime-backends.md:2192</code>. The policy bound is not in the script but in judgment: the always-loaded contract says away mode "never expand[s] approval authority for merges" <code class="cite">AGENTS.md:473</code>, and the branch prompt limits action to what the captain's recorded away words call for <code class="cite">bin/fm-branch-prompt.sh:107-109</code>. The two agree only if the away words are read as the explicit captain instruction for that merge.</li>
+</ul>
+
+<h2 id="related">Related</h2>
+<ul>
+<li><a href="pull-requests.html">Pull request flow</a> for registration and the poll that feeds step 4 and the later merged wake.</li>
+<li><a href="after-merge.html">After the merge</a> for what the outcome wake triggers.</li>
+<li><a href="../supervision/index.html">Supervision</a> for away mode and the Pi supervision branch.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

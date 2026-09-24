@@ -54,7 +54,15 @@ window.FM_NAV = [
   // end prompts-and-skills
 
   // begin delivery
-  { section: "delivery", title: "Delivery", href: "components/delivery/index.html", stub: true },
+  { section: "delivery", title: "Delivery", href: "components/delivery/index.html" },
+  { section: "delivery", title: "Delivery modes and posture", href: "components/delivery/modes-and-posture.html" },
+  { section: "delivery", title: "Validation pipeline", href: "components/delivery/validation-pipeline.html" },
+  { section: "delivery", title: "Ask-user findings", href: "components/delivery/ask-user.html" },
+  { section: "delivery", title: "Pull request flow", href: "components/delivery/pull-requests.html" },
+  { section: "delivery", title: "Merge authority", href: "components/delivery/merge-authority.html" },
+  { section: "delivery", title: "Local landing", href: "components/delivery/local-landing.html" },
+  { section: "delivery", title: "After the merge", href: "components/delivery/after-merge.html" },
+  { section: "delivery", title: "Delivery end to end", href: "components/delivery/end-to-end.html" },
   // end delivery
 
   // begin backlog-and-decisions
