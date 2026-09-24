@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Busy state and turn ends · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Supervision</p>
+<h1>Busy state and turn ends</h1>
+<p class="lede">The semantic busy-state contract answers one question for the watcher — is this worker provably inside a turn right now? — and it answers <code>unknown</code> rather than <code>idle</code> whenever it cannot prove the answer.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Supervision</a>. Owners: <code class="cite">bin/fm-busy-lib.sh</code> (the one owner of the contract) and <code class="cite">bin/fm-busy-event.sh</code> (its only writer).</p>
+
+<h2 id="problem">What problem it solves</h2>
+<p>A pane that has not changed for two polls might be a finished worker, a worker waiting for a human, or a worker inside a long silent tool call. The watcher must not wake the supervisor for the third case, and must never swallow the first two. Earlier designs guessed from rendered text. The contract's design source, "the captain-approved semantic busy-state redesign (2026-07-28)", replaced that: "each harness adapter reports turn lifecycle through a machine-readable semantic source it owns, classification always exposes which source produced it, and missing, malformed, stale, unsupported, or unverified semantic data is UNKNOWN - never idle" (<code class="cite">bin/fm-busy-lib.sh:4-12</code>).</p>
+<p>Endpoint death is "the only process-level override and yields dead, never busy". Child processes, CPU, sleep state, marker mtimes, and "the old global UI-regex OR are not state signals" (<code class="cite">bin/fm-busy-lib.sh:8-11</code>).</p>
+
+<h2 id="record">Record and incarnation (Level 4)</h2>
+<p><code>state/&lt;id&gt;.busy-state</code> is exactly one line, atomically replaced (<code class="cite">bin/fm-busy-lib.sh:14-17</code>):</p>
+<pre><code>v1 gen=&lt;token&gt; seq=&lt;uint&gt; state=&lt;busy|idle|unknown&gt; source=&lt;token&gt; event=&lt;token&gt; ts=&lt;epoch&gt;</code></pre>
+<p><code>state/&lt;id&gt;.busy-gen</code> holds one token minted when the task's busy wiring is armed. "Every event must present the current gen; an event or record carrying any other gen is a stale incarnation and is rejected (written events) or classified unknown (read records). seq is a strictly increasing integer per gen, advanced under the writer's lock, so an out-of-order apply can never regress a newer record" (<code class="cite">bin/fm-busy-lib.sh:19-25</code>). The gen is also what identifies an agent incarnation elsewhere: the wedge ladder's dead-record marker keys on it so a relaunched agent's own later death is reported again (<code class="cite">bin/fm-watch.sh:1183-1195</code>).</p>
+
+<h3>The writer's four verbs</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Verb</th><th>Effect</th><th>Used by</th></tr></thead>
+<tbody>
+<tr><td><code>arm</code></td><td>Mint a fresh gen, write the sidecar, seed <code>seq=1</code> as <code>busy source=fm-spawn event=launch-brief</code> — "the launch prompt IS a submitted turn". Arming again replaces the incarnation.</td><td><code>bin/fm-spawn.sh</code>, documented recovery re-arms</td></tr>
+<tr><td><code>apply</code></td><td>Append one lifecycle event with <code>--gen G</code> (or <code>--current-gen</code> for the legacy interrupt and recovery paths).</td><td>harness hooks and extensions</td></tr>
+<tr><td><code>progress</code></td><td>Refresh <code>state/&lt;id&gt;.progress</code> for observed native-harness activity without changing state "or emit[ting] a turn-ended notification".</td><td>Pi worker extension on <code>codex-native:progress</code></td></tr>
+<tr><td><code>retire</code></td><td>Remove one incarnation's sidecar and record under the same lock; an exact gen stops an old teardown retiring a newer incarnation.</td><td>teardown</td></tr>
+</tbody>
+</table></div>
+<p class="evidence">Sources: <code class="cite">bin/fm-busy-event.sh:6-38</code>, <code class="cite">bin/fm-spawn.sh:4213-4223</code>. Exit 1 is a refusal (stale gen, unarmed task, lock timeout), and "Adapter hook command lines append <code>|| true</code> so a refusal never breaks the harness's own lifecycle" (<code class="cite">bin/fm-busy-event.sh:36-38</code>).</p>
+
+<h3>Trusted sources per harness</h3>
+<p>A record classifies only if its source is trusted for the task's recorded harness, "so one adapter's writer can never classify another adapter" (<code class="cite">bin/fm-busy-lib.sh:27-47</code>). <code>fm_busy_sources_for_harness</code> maps <code>claude*</code> to <code>claude-hook</code>, <code>opencode*</code> to <code>opencode-plugin</code>, <code>gemini*</code> to <code>gemini-hook</code>, <code>pi|pi-signed</code> to <code>pi-ext</code>, <code>omp</code> to <code>omp-ext</code>, and appends the firstmate-owned <code>fm-spawn fm-interrupt fm-recovery</code>; Codex and Kimi trust nothing until a verification gate opens, and Grok and muse trust nothing because they have no writer (<code class="cite">bin/fm-busy-lib.sh:213-240</code>). Codex classifies <code>unknown codex-unverified</code> because neither its app-server lifecycle nor its hooks were observable on codex-cli 0.145.0 (<code class="cite">bin/fm-busy-lib.sh:153-183</code>).</p>
+
+<h2 id="precedence">Classification precedence</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 740 560" role="img" aria-labelledby="bs-p-t bs-p-d">
+<title id="bs-p-t">Busy-state classification precedence</title>
+<desc id="bs-p-d">A dead endpoint wins first when the live variant is used. Unverified Kimi and Codex are unknown. Cursor folds its transcript. A valid, gen-matching, source-trusted record gives its state, except an untouched spawn seed whose pane shows the harness's launch prompt, which is unknown. With no record, herdr's native busy, muse's session log, and the Grok, Rovo, and AGY rendered fallbacks apply, else unknown missing. Malformed, stale, or untrusted records are unknown.</desc>
+<defs><marker id="bs-p-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">fm_busy_classify — first match wins</text>
+<g class="c4-component"><rect x="20" y="50" width="400" height="56" rx="6"/><text class="c4-label" x="220" y="72">1 · Endpoint gone (live variant)</text><text class="c4-desc" x="220" y="90">fm_busy_classify_live only</text></g>
+<g class="c4-component"><rect x="20" y="126" width="400" height="56" rx="6"/><text class="c4-label" x="220" y="148">2 · Unverified harness</text><text class="c4-desc" x="220" y="166">standalone Kimi, Codex without a source</text></g>
+<g class="c4-component"><rect x="20" y="202" width="400" height="56" rx="6"/><text class="c4-label" x="220" y="224">3 · Cursor transcript fold</text><text class="c4-desc" x="220" y="242">open turn → busy, turn_ended → idle</text></g>
+<g class="c4-component"><rect x="20" y="278" width="400" height="72" rx="6"/><text class="c4-label" x="220" y="300">4 · Valid, gen-matching, trusted record</text><text class="c4-desc" x="220" y="318">its own state and source, unless it is the</text><text class="c4-desc" x="220" y="334">untouched fm-spawn seed on a launch prompt</text></g>
+<g class="c4-component"><rect x="20" y="370" width="400" height="72" rx="6"/><text class="c4-label" x="220" y="392">5 · No record at all</text><text class="c4-desc" x="220" y="410">herdr native busy, muse session log,</text><text class="c4-desc" x="220" y="426">Grok / Rovo / AGY rendered tail</text></g>
+<g class="c4-component"><rect x="20" y="462" width="400" height="56" rx="6"/><text class="c4-label" x="220" y="484">6 · Malformed, stale gen, untrusted</text><text class="c4-desc" x="220" y="502">never a fallback</text></g>
+<g class="c4-rel"><path d="M220,106 V124" marker-end="url(#bs-p-arrow)"/></g>
+<g class="c4-rel"><path d="M220,182 V200" marker-end="url(#bs-p-arrow)"/></g>
+<g class="c4-rel"><path d="M220,258 V276" marker-end="url(#bs-p-arrow)"/></g>
+<g class="c4-rel"><path d="M220,350 V368" marker-end="url(#bs-p-arrow)"/></g>
+<g class="c4-rel"><path d="M220,442 V460" marker-end="url(#bs-p-arrow)"/></g>
+<g class="c4-system"><rect x="520" y="50" width="200" height="56" rx="8"/><text class="c4-label" x="620" y="74">dead endpoint-gone</text><text class="c4-desc" x="620" y="92">never busy</text></g>
+<g class="c4-external"><rect x="520" y="126" width="200" height="56" rx="8"/><text class="c4-label" x="620" y="150">unknown …-unverified</text><text class="c4-desc" x="620" y="168">never idle</text></g>
+<g class="c4-external"><rect x="520" y="202" width="200" height="56" rx="8"/><text class="c4-label" x="620" y="226">busy | idle | unknown</text><text class="c4-desc" x="620" y="244">cursor-transcript</text></g>
+<g class="c4-external"><rect x="520" y="278" width="200" height="72" rx="8"/><text class="c4-label" x="620" y="302">record verdict</text><text class="c4-desc" x="620" y="320">or unknown</text><text class="c4-desc" x="620" y="336">launch-prompt</text></g>
+<g class="c4-external"><rect x="520" y="370" width="200" height="72" rx="8"/><text class="c4-label" x="620" y="394">busy by fallback</text><text class="c4-desc" x="620" y="412">else</text><text class="c4-desc" x="620" y="428">unknown missing</text></g>
+<g class="c4-external"><rect x="520" y="462" width="200" height="56" rx="8"/><text class="c4-label" x="620" y="486">unknown</text><text class="c4-desc" x="620" y="504">gen-mismatch, …</text></g>
+<g class="c4-rel"><path d="M420,78 H518" marker-end="url(#bs-p-arrow)"/></g>
+<g class="c4-rel"><path d="M420,154 H518" marker-end="url(#bs-p-arrow)"/></g>
+<g class="c4-rel"><path d="M420,230 H518" marker-end="url(#bs-p-arrow)"/></g>
+<g class="c4-rel"><path d="M420,314 H518" marker-end="url(#bs-p-arrow)"/></g>
+<g class="c4-rel"><path d="M420,406 H518" marker-end="url(#bs-p-arrow)"/></g>
+<g class="c4-rel"><path d="M420,490 H518" marker-end="url(#bs-p-arrow)"/></g>
+</svg>
+</div>
+<figcaption>The precedence stated in <code class="cite">bin/fm-busy-lib.sh:49-72</code> and implemented in <code class="cite">bin/fm-busy-lib.sh:1016-1170</code>. Every verdict is a pair: state and the source that produced it. "generation state is sufficient for busy, not for idle": herdr's native signal can prove busy but never idle.</figcaption>
+</figure>
+<p>The launch-prompt exception exists because a launch whose record never advanced past the seed "is indistinguishable, from the record alone, between 'still reading its brief' and 'parked on an interactive prompt the harness never gets past without a human'", which would otherwise read as busy for a full hour (<code class="cite">bin/fm-busy-lib.sh:74-92</code>).</p>
+
+<h2 id="turn-ended">Turn-ended markers are notifications, not state</h2>
+<p>Two different files come out of the same hook. On a Claude worker the <code>Stop</code> hook runs <code>touch state/&lt;id&gt;.turn-ended</code> and then applies <code>idle … --event stop</code> (<code class="cite">bin/fm-spawn.sh:4078-4091</code>). On a Pi worker <code>turn_end</code> touches the marker and <code>agent_settled</code> applies idle (<code class="cite">bin/fm-spawn.sh:4207-4212</code>). The marker's only job is to make the watcher's signal scan fire. The contract is explicit: "state/&lt;id&gt;.turn-ended files remain wake NOTIFICATIONS owned by the watcher, not current-state truth" (<code class="cite">bin/fm-busy-lib.sh:11-12</code>). A bare turn-end is therefore a no-verb signal that surfaces unless the crew is provably working (<a href="wake-kinds.html#signal">signal triage</a>).</p>
+<p>Claude fires no hook for a manual interrupt, so "fm-control preserves the adapter-owned state, while the legacy fm-send --key Escape path records idle/fm-interrupt" (<code class="cite">bin/fm-spawn.sh:4078-4084</code>).</p>
+
+<h2 id="watcher-use">How the watcher uses it</h2>
+<dl class="defs">
+<dt><code>window_is_busy</code></dt>
+<dd>Classifies through the task's metadata and returns 0 only for an exact <code>busy</code> verdict; "idle, unknown, and dead all return 1, so a converted adapter whose semantic state is missing, malformed, stale, or unverified is treated as not-provably-working and surfaces rather than being absorbed" (<code class="cite">bin/fm-watch.sh:343-363</code>). It is read once per window per poll and reused (<code class="cite">bin/fm-watch.sh:2648-2653</code>).</dd>
+<dt><code>crew_is_provably_working</code></dt>
+<dd>The authoritative proof for absorbing a signal or a stale: <code>bin/fm-crew-state.sh</code> reports <code>working</code> with source <code>run-step</code> (an active no-mistakes step) or <code>pane</code> (a busy verdict). It is not a pure read — it "may make a bounded no-mistakes call, so callers run it only on no-verb signal and first-sighting stale paths, never every wake" (<code class="cite">bin/fm-classify-lib.sh:2104-2146</code>).</dd>
+<dt><code>busy_turn_over_age</code> and <code>BUSY_TURN_MAX_SECS</code></dt>
+<dd>A busy pane is exempt from staleness, but "a hung foreground call can remain hidden even while its rendered busy footer changes every poll". The bound (default 3600 s) ages the newest of <code>state/&lt;id&gt;.turn-ended</code>, <code>state/&lt;id&gt;.progress</code>, or the spawn record; past it the pane is routed to the wedge timer unless it declared a wait (<code class="cite">bin/fm-watch.sh:267-281</code>, <code class="cite">bin/fm-watch.sh:1288-1300</code>).</dd>
+<dt>Secondmate active-turn gate</dt>
+<dd>A mate whose queue is frozen is deferred only while it is provably busy and the freeze is under the same bound, because a mate's turns end in its own home and leave no completed-turn evidence here (<code class="cite">bin/fm-watch.sh:753-771</code>).</dd>
+</dl>
+
+<h2 id="refuses">What it refuses to do</h2>
+<ul>
+<li>It never promotes <code>unknown</code> to either pole; <code>fm_busy_is_busy</code> is the boolean view and returns false for everything but busy (<code class="cite">bin/fm-busy-lib.sh:1202-1211</code>).</li>
+<li>It invents no UI signature for a harness without a verified source. Kimi's spinner "is deliberately NOT a state source" because it "is locale- and emoji-font-sensitive" (<code class="cite">bin/fm-busy-lib.sh:125-134</code>); Cursor's <code>ctrl+c to stop</code> footer is likewise excluded (<code class="cite">bin/fm-busy-lib.sh:104-110</code>).</li>
+<li>It arms nothing that no writer could clear: "Listing a source here without a writer that can clear it would seed a busy record nothing could ever settle" (<code class="cite">bin/fm-busy-lib.sh:213-220</code>).</li>
+</ul>
+<p>Which adapter installs which hook is owned by <a href="../crew/index.html">Crew</a>.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

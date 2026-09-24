@@ -50,7 +50,19 @@ window.FM_NAV = [
   // end communication
 
   // begin supervision
-  { section: "supervision", title: "Supervision", href: "components/supervision/index.html", stub: true },
+  { section: "supervision", title: "Supervision", href: "components/supervision/index.html" },
+  { section: "supervision", title: "Watcher poll loop", href: "components/supervision/watcher.html" },
+  { section: "supervision", title: "Wake kinds and triage", href: "components/supervision/wake-kinds.html" },
+  { section: "supervision", title: "Durable wake queue", href: "components/supervision/wake-queue.html" },
+  { section: "supervision", title: "Busy state and turn ends", href: "components/supervision/busy-state.html" },
+  { section: "supervision", title: "Wedges and declared waits", href: "components/supervision/wedge-and-pauses.html" },
+  { section: "supervision", title: "Watcher continuity", href: "components/supervision/continuity.html" },
+  { section: "supervision", title: "Claude Stop auto-arm", href: "components/supervision/claude-autoarm.html" },
+  { section: "supervision", title: "Turn-end and pull guards", href: "components/supervision/turn-end-guards.html" },
+  { section: "supervision", title: "Away and quiet postures", href: "components/supervision/away-and-quiet.html" },
+  { section: "supervision", title: "Pi supervision branch", href: "components/supervision/pi-branch.html" },
+  { section: "supervision", title: "Durability argument", href: "components/supervision/durability.html" },
+  { section: "supervision", title: "End-to-end trace", href: "components/supervision/end-to-end.html" },
   // end supervision
 
   // begin persistence

@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Durable wake queue · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Supervision</p>
+<h1>Durable wake queue</h1>
+<p class="lede"><code>state/.wake-queue</code> is the one place an actionable wake exists between the moment the watcher decides it matters and the moment the supervisor has finished handling it; a generation-bound acknowledgement is the only thing that removes a row.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Supervision</a>. Owners: <code class="cite">bin/fm-wake-lib.sh</code> (append, locks, recovery marker) and <code class="cite">bin/fm-wake-drain.sh</code> (presentation and acknowledgement).</p>
+
+<h2 id="why">Why a queue at all</h2>
+<p>A reason line printed by a watcher is ephemeral: the harness might drop it, the supervisor turn might be interrupted, the session might be restarted before handling finishes. The queue makes the wake survive all three. <code class="cite">AGENTS.md:145</code> describes it as "durable queued wakes retained until post-handling acknowledgement", and the drain's own header keeps two facts separate: "Keep sequence-bound row consumption independent from generation-bound episode retirement" (<code class="cite">bin/fm-wake-drain.sh:9-10</code>).</p>
+
+<h2 id="format">Record format (Level 4)</h2>
+<p>One line per wake, five tab-separated fields (<code class="cite">bin/fm-wake-lib.sh:1862</code>):</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Field</th><th>Content</th><th>Rules</th></tr></thead>
+<tbody>
+<tr><td><code>epoch</code></td><td>Append time, <code>date +%s</code>.</td><td>Informational only.</td></tr>
+<tr><td><code>seq</code></td><td>Monotonic sequence from <code>state/.wake-queue.seq</code>, incremented under the lock.</td><td>The identity of a row: claims, presentation, and <code>--ack-through</code> all use it. A non-numeric stored value resets to 0 (<code class="cite">bin/fm-wake-lib.sh:1854-1859</code>).</td></tr>
+<tr><td><code>kind</code></td><td><code>signal</code>, <code>stale</code>, <code>check</code>, or <code>heartbeat</code>.</td><td>Any other kind is rejected with status 2 (<code class="cite">bin/fm-wake-lib.sh:1840-1843</code>).</td></tr>
+<tr><td><code>key</code></td><td>What the wake is about: the status or turn-ended file name for a signal, the window for a stale, the check path or a keyed identity for a check, <code>heartbeat</code> for a heartbeat.</td><td>Tabs, CR, and LF are replaced by spaces (<code class="cite">bin/fm-wake-lib.sh:1819-1821</code>). Producers deduplicate on it with <code>fm_wake_queued_keys</code> (<code class="cite">bin/fm-wake-lib.sh:1867-1888</code>).</td></tr>
+<tr><td><code>payload</code></td><td>The reason text, for example <code>signal: /…/state/t1.status</code> or <code>needs-decision: …</code>.</td><td>Display data only: "Queue payload text is intentionally ignored: it is display data, not a path authority" (<code class="cite">bin/fm-wake-lib.sh:2255-2258</code>).</td></tr>
+</tbody>
+</table></div>
+<pre><code>1790000000	41	signal	t1.status	signal: /home/fm/state/t1.status
+1790000030	42	stale	fm:3	stale: fm:3 (idle 251s, possible wedge, escalation 1)
+1790000300	43	check	/home/fm/state/t1.check.sh	check: /home/fm/state/t1.check.sh: merged</code></pre>
+<p class="evidence">Illustrative rows built from the append format; not copied from any live home.</p>
+
+<h2 id="append">Append: evidence first, then the row</h2>
+<p><code>fm_wake_append</code> takes <code>state/.wake-queue.lock</code> and calls the locked core, which does three things in a fixed order (<code class="cite">bin/fm-wake-lib.sh:1823-1865</code>):</p>
+<ol>
+<li>publish downtime to the <a href="#recovery">recovery marker</a> <code>state/.watcher-down</code>;</li>
+<li>increment the sequence file;</li>
+<li>append the row.</li>
+</ol>
+<p>A failure at any step stops the later ones and returns nonzero, and every watcher call site treats that as fatal (<code>|| exit 1</code>). Callers that must commit another record atomically with the append hold the lock themselves and call <code>fm_wake_append_locked</code>, because "holding this lock excludes the drain's acknowledgement, which deletes consumed rows under the same lock" (<code class="cite">bin/fm-wake-lib.sh:1831-1836</code>). The contributions check is one such caller (<code class="cite">bin/fm-contributions.sh:291-296</code>).</p>
+<p>Producers other than the watcher: <code>bin/fm-contributions.sh</code>, <code>bin/fm-inbox.sh</code>, <code>bin/fm-inactive-reconcile.sh</code>, <code>bin/fm-mail.sh</code>, <code>bin/fm-procevent.sh</code>, <code>bin/fm-merge-outcome-lib.sh</code>, and <code>bin/fm-startup-network.sh</code> all call the same append.</p>
+
+<h2 id="drain">Presentation: fm-wake-drain.sh</h2>
+<p>With no arguments the drain presents; with <code>--ack-through SEQ --recovery-generation G</code> (exactly four arguments) it acknowledges (<code class="cite">bin/fm-wake-drain.sh:196-208</code>). A presentation does, in order:</p>
+<ol>
+<li><strong>Take the queue lock, bounded.</strong> A live holder after <code>FM_STATUS_PRESENTATION_LOCK_TIMEOUT</code> (default 10 s) prints <code>WAKE DRAIN SKIPPED: queue lock remains held by live pid …</code> and exits 0 before any claim or mutation; acknowledgement keeps a blocking acquire (<code class="cite">bin/fm-wake-drain.sh:627-641</code>).</li>
+<li><strong>Repair.</strong> Reclaim a branch grant whose owner process is gone, and, for main only, retire structurally unusable rows (fewer than five fields or a non-numeric sequence), printing up to 20 of them verbatim "because the queue was their only durable record" (<code class="cite">bin/fm-wake-drain.sh:73-117</code>, <code class="cite">docs/watcher-continuity.md:85-86</code>).</li>
+<li><strong>Claim.</strong> Main claims every row a live branch grant does not reserve and records the set in <code>state/.main-eligible-rows</code> (<code class="cite">bin/fm-wake-drain.sh:142-157</code>). If nothing is left for main while a grant holds rows, it prints one <code>WAKE ROWS HELD BY SUPERVISION BRANCH</code> line instead of exiting silently (<code class="cite">bin/fm-wake-drain.sh:788-805</code>).</li>
+<li><strong>Open handling.</strong> Move the recovery marker into its handling phase for the current generation (<code class="cite">bin/fm-wake-drain.sh:807-828</code>).</li>
+<li><strong>Dedupe and print.</strong> Rows are deduplicated by kind and key, keeping the latest line in first-seen order; all heartbeats collapse to one (<code class="cite">bin/fm-wake-lib.sh:1982-2002</code>). The cutoff is the highest presented sequence (<code class="cite">bin/fm-wake-drain.sh:830-851</code>).</li>
+<li><strong>Print the acknowledgement contract</strong> on stderr: <code>WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through SEQ --recovery-generation G</code> (<code class="cite">bin/fm-wake-drain.sh:858-861</code>).</li>
+<li><strong>Status presentation</strong>, under its own bounded lock: annotations for every unread status line of each presented signal, then four sections (<code class="cite">bin/fm-wake-drain.sh:551-610</code>).</li>
+<li><strong>Liveness assertion.</strong> Run the pull guard, whose failure never changes the drain's exit status (<code class="cite">bin/fm-wake-drain.sh:212-225</code>).</li>
+</ol>
+
+<h3 id="sections">The four status sections</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Section</th><th>What it carries</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><code>UNREAD STATUS</code></td><td>Informational lines (notes, pending-reply resolutions) new since the last drain; "not re-printed after this presentation". Runs even on an empty queue "so a buried answer cannot be swallowed".</td><td><code class="cite">bin/fm-wake-drain.sh:397-427</code></td></tr>
+<tr><td><code>STATUS OUTCOME BACKSTOP</code></td><td>Main only: a task's newest captain-facing event that no supervision-branch outcome covers; printed once even if the queue row was already acknowledged.</td><td><code class="cite">bin/fm-wake-drain.sh:304-395</code>, <code class="cite">docs/pi-supervision-branch.md:86-96</code></td></tr>
+<tr><td><code>OPEN DECISIONS</code></td><td>Every still-open <code>needs-decision</code> or <code>blocked</code>, folded from the durable status logs rather than the latest line, bounded to 4000 bytes, with the answerer-closes hint <code>bin/fm-send.sh &lt;task&gt; --resolve-key &lt;key&gt;</code>.</td><td><code class="cite">bin/fm-wake-drain.sh:429-489</code></td></tr>
+<tr><td><code>RECORD DIVERGENCE</code></td><td>Captain calls that read resolved in a status log but are still held in the backlog; "nothing was closed automatically". Bounded by <code>FM_DIVERGENCE_TIMEOUT</code> (default 20 s).</td><td><code class="cite">bin/fm-wake-drain.sh:491-549</code></td></tr>
+</tbody>
+</table></div>
+<p>Sections are prepared into a file first and their presentation receipt is committed only after the bytes reach stdout: "If the consumer closes or fails, leave the receipt behind so the next drain can recover the presentation" (<code class="cite">bin/fm-wake-drain.sh:566-577</code>). The supervisor treats OPEN DECISIONS as actionable even with no queued wake (<code class="cite">AGENTS.md:430</code>). The decision fold itself belongs to <a href="../backlog-and-decisions/index.html">Backlog and decisions</a>.</p>
+
+<h2 id="ack">Acknowledgement, and why it comes after handling</h2>
+<p>The rule, in the supervisor's own contract: "After handling all emitted wakes and reconciling the OPEN DECISIONS and UNREAD STATUS sections, run the exact generation-bound <code>--ack-through</code> command printed as <code>WAKE_ACK_REQUIRED</code>; interruption before that acknowledgement deliberately leaves the work durable for idempotent re-handling" (<code class="cite">AGENTS.md:433</code>). Every harness protocol repeats it as step 1 (for example <code class="cite">docs/supervision-protocols/claude.md:5-6</code>).</p>
+<p>The reasoning follows from the alternatives. Acknowledging at presentation would make presentation and loss the same event: a turn that crashed, was interrupted, or was replaced after printing but before acting would lose the wake with no trace. Acknowledging after handling means the worst case is handling twice, and handling is required to be idempotent. The away daemon follows the same order in bash: it classifies every row, and "acknowledges only after routing completes", retaining the rows if classification fails (<code class="cite">bin/fm-supervise-daemon.sh:35-40</code>, <code class="cite">bin/fm-supervise-daemon.sh:1506-1516</code>).</p>
+<p>What <code>--ack-through SEQ --recovery-generation G</code> does (<code class="cite">bin/fm-wake-drain.sh:646-761</code>):</p>
+<ol>
+<li>Blocking queue lock; re-claim so rows that arrived after presentation but before this acknowledgement are covered by main's "original whole-cutoff acknowledgement contract".</li>
+<li>Collect inactive-outcome fingerprints at or below the cutoff, release the lock, record their receipts, re-take the lock.</li>
+<li>Delete only rows that are this actor's claim <em>and</em> at or below <code>SEQ</code>; commit secondmate stall receipts.</li>
+<li>If the queue is now empty, retire the episode: the generation must match, otherwise the result is "moved".</li>
+<li>Report. Consuming nothing while a presented row above the cutoff waits prints the exact command for the current row, "so the remedy is never 'drain again'"; a moved generation says to re-drain and use the new command.</li>
+</ol>
+<p>Row consumption and episode retirement are separable on purpose: "A generation mismatch therefore does not block consumption of rows through that sequence" (<code class="cite">docs/watcher-continuity.md:62-63</code>).</p>
+
+<h2 id="recovery">Recovery episodes: state/.watcher-down</h2>
+<p>The marker holds one line with the grammar <code>&lt;pending|announced|acked&gt;:&lt;handling|downtime&gt;:&lt;generation&gt;</code> (<code class="cite">bin/fm-wake-lib.sh:627-645</code>). A generation is minted as <code>&lt;pid&gt;.&lt;epoch&gt;.&lt;random&gt;</code> and written through an atomic temp-and-rename (<code class="cite">bin/fm-wake-lib.sh:651-663</code>). <code class="cite">AGENTS.md:146</code> calls it "private generation-bound recovery state coupling watcher downtime, durable wake presentation, and post-handling acknowledgement; never touch".</p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 740 470" role="img" aria-labelledby="wq-rm-t wq-rm-d">
+<title id="wq-rm-t">Recovery marker states and transitions</title>
+<desc id="wq-rm-d">From acked or absent, an append or a watcher close mints a new pending downtime generation, and a watcher arm-check with rows queued mints a new announced downtime generation. A drain moves downtime to handling within the same status. An append or close during handling moves back to downtime keeping the generation. An arm-check announces a pending downtime once. A non-successor watcher start reopens an announced episode as a new pending generation. A matching acknowledgement that empties the queue marks it acked.</desc>
+<defs><marker id="wq-rm-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">state/.watcher-down — episode lifecycle</text>
+<g class="c4-external"><rect x="10" y="205" width="150" height="60" rx="8"/><text class="c4-label" x="85" y="231">acked or absent</text><text class="c4-desc" x="85" y="249">no open episode</text></g>
+<g class="c4-component"><rect x="240" y="60" width="170" height="60" rx="8"/><text class="c4-label" x="325" y="86">pending:downtime</text><text class="c4-desc" x="325" y="104">rows exist, not yet told</text></g>
+<g class="c4-component"><rect x="560" y="60" width="170" height="60" rx="8"/><text class="c4-label" x="645" y="86">pending:handling</text><text class="c4-desc" x="645" y="104">a drain presented them</text></g>
+<g class="c4-component"><rect x="240" y="350" width="170" height="60" rx="8"/><text class="c4-label" x="325" y="376">announced:downtime</text><text class="c4-desc" x="325" y="394">resurfaced once already</text></g>
+<g class="c4-component"><rect x="560" y="350" width="170" height="60" rx="8"/><text class="c4-label" x="645" y="376">announced:handling</text><text class="c4-desc" x="645" y="394">presented after announce</text></g>
+<g class="c4-rel"><path d="M85,205 V90 H238" marker-end="url(#wq-rm-arrow)"/><text class="c4-rel-label" x="160" y="84">append · close</text></g>
+<g class="c4-rel"><path d="M85,265 V380 H238" marker-end="url(#wq-rm-arrow)"/><text class="c4-rel-label" x="160" y="374">arm-check, rows</text></g>
+<g class="c4-rel"><path d="M410,80 H558" marker-end="url(#wq-rm-arrow)"/><text class="c4-rel-label" x="485" y="74">drain</text></g>
+<g class="c4-rel"><path d="M560,106 H412" marker-end="url(#wq-rm-arrow)"/><text class="c4-rel-label" x="485" y="124">append · close</text></g>
+<g class="c4-rel"><path d="M410,370 H558" marker-end="url(#wq-rm-arrow)"/><text class="c4-rel-label" x="485" y="364">drain</text></g>
+<g class="c4-rel"><path d="M560,396 H412" marker-end="url(#wq-rm-arrow)"/><text class="c4-rel-label" x="485" y="414">append · close</text></g>
+<g class="c4-rel"><path d="M280,120 V348" marker-end="url(#wq-rm-arrow)"/><text class="c4-rel-label" x="280" y="300">announce</text></g>
+<g class="c4-rel c4-rel-async"><path d="M370,350 V122" marker-end="url(#wq-rm-arrow)"/><text class="c4-rel-label" x="370" y="170">reopen</text></g>
+<g class="c4-rel"><path d="M645,120 V225 H162" marker-end="url(#wq-rm-arrow)"/></g>
+<g class="c4-rel"><path d="M665,350 V245 H162" marker-end="url(#wq-rm-arrow)"/><text class="c4-rel-label" x="520" y="218">ack: gen matches, queue empty</text></g>
+</svg>
+</div>
+<figcaption>"append · close" keeps the generation from a pending or announced state and mints a new one from acked or absent; an acknowledgement that leaves rows queued changes nothing. Solid arrows are code paths in <code class="cite">bin/fm-wake-lib.sh:665-931</code>; the dashed "new down stretch" arrow is <code>reopen-announced</code>, which only a non-successor watcher start calls (<code class="cite">bin/fm-watch.sh:2113-2118</code>). An unreadable marker is quarantined into a <code>.invalid.*</code> directory and replaced by a fresh announced generation (<code class="cite">bin/fm-wake-lib.sh:798-816</code>).</figcaption>
+</figure>
+
+<div class="table-wrap"><table>
+<thead><tr><th>Operation</th><th>Who calls it</th><th>Effect</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>publish downtime</td><td>every queue append; every watcher exit that still owns the lock; stale watch-lock steal; <code>--restart</code> of a stale recorded lock</td><td>Absent or acked → new pending generation. Pending or announced → same generation, same status, kind downtime.</td><td><code class="cite">bin/fm-wake-lib.sh:665-703</code>, <code class="cite">bin/fm-watch.sh:2212-2216</code>, <code class="cite">bin/fm-watch-arm.sh:225-234</code></td></tr>
+<tr><td>begin handling</td><td>the drain; <code>fm-watch-arm.sh --handling-delivered</code> for adapters that confirm a handoff</td><td>downtime → handling, same generation and status; an expected generation that differs returns 3.</td><td><code class="cite">bin/fm-wake-lib.sh:705-738</code>, <code class="cite">bin/fm-watch-arm.sh:403-408</code></td></tr>
+<tr><td>arm-check</td><td>watcher start, and every cycle of a non-successor watcher</td><td>Decides <code>recover</code>, <code>wait</code>, or <code>none</code>: absent marker with a non-empty queue, pending downtime, or acked with a non-empty queue all become announced and ask for one resurface; handling phases and announced downtime wait.</td><td><code class="cite">bin/fm-wake-lib.sh:776-848</code>, <code class="cite">bin/fm-watch.sh:2279-2294</code></td></tr>
+<tr><td>reopen announced</td><td>non-successor watcher start</td><td>An announced-but-unacknowledged episode becomes a fresh pending generation, "so a still-open decision or buried note can be presented once more".</td><td><code class="cite">bin/fm-wake-lib.sh:850-871</code></td></tr>
+<tr><td>acknowledge</td><td>the drain, only when its acknowledgement left the queue empty</td><td>Matching generation → acked; mismatch → 3 ("moved"); already acked → 0.</td><td><code class="cite">bin/fm-wake-lib.sh:749-774</code>, <code class="cite">bin/fm-wake-drain.sh:708-725</code></td></tr>
+</tbody>
+</table></div>
+
+<h3>The contract, in the owner's words</h3>
+<p><code class="cite">docs/watcher-continuity.md:55-67</code> owns it. The load-bearing sentences:</p>
+<ul>
+<li>"An unacknowledged downtime generation is announced at most once: the first recovery marks that generation announced, and later arms wait until a new down stretch mints a new generation."</li>
+<li>"Every watcher close and every durable queue append publishes downtime, so a downtime republication of any pending episode reuses its generation instead of minting a new one … That reuse keeps a watcher close inside the handling window from orphaning the acknowledgement already presented."</li>
+<li>"A concurrently appended wake has a higher sequence, remains queued, and keeps the episode pending for presentation."</li>
+</ul>
+<div class="callout"><span class="callout-title">A consequence the source implies but does not state</span>
+<p>A non-successor watcher re-runs arm-check at the top of every cycle (<code class="cite">bin/fm-watch.sh:2286-2292</code>). A row appended by another producer (an inbox note, a procevent runner, the contributions check) while that watcher is blocking publishes downtime and flips an acked marker to pending (<code class="cite">bin/fm-wake-lib.sh:1852</code>). On the next cycle arm-check therefore returns <code>recover</code> and the watcher wakes with <code>check: rearm-resurface</code>. Read this way, the recovery marker is also how foreign producers' rows reach the supervisor between turns. The owning documents describe the marker only in terms of recovery episodes, so this is a reading of the code, not a stated purpose.</p></div>
+<p>Handling successors, the watchers that Pi, omp, and OpenCode start before delivering a wake, skip both reopen and resurface: "Re-announcing from this cycle is what turned a lost handshake into an unbounded recovery loop" (<code class="cite">bin/fm-watch.sh:2280-2285</code>).</p>
+
+<h2 id="actors">Per-actor claims</h2>
+<p>On Pi, two actors may drain: main and the supervision branch. The actor is <code>FM_SUPERVISION_ACTOR</code>, unset or <code>main</code> everywhere except inside the branch's own bash calls, where the extension injects <code>branch</code> "deterministically … never agent memory" (<code class="cite">docs/watcher-continuity.md:71</code>). A branch grant lives in <code>state/.branch-eligible-rows</code>, bound to the live branch process and extension generation in <code>state/.branch-eligible-owner</code> (format <code>fm-branch-eligible-owner-v1</code>, pid, identity, generation) (<code class="cite">bin/fm-wake-lib.sh:2016-2038</code>). A branch drain without a valid snapshot refuses loudly because that is "a wiring bug, never 'nothing eligible'" (<code class="cite">bin/fm-wake-drain.sh:170-181</code>). The pull guard counts only rows the calling actor can itself present or retire (<code class="cite">bin/fm-wake-lib.sh:2046-2082</code>). Routing rules are on <a href="pi-branch.html">Pi supervision branch</a>.</p>
+
+<h2 id="failure">Failure behaviour</h2>
+<ul>
+<li>An unreadable queue is never reported as empty: <code>fm_wake_actor_pending_count</code> prints 1 when awk fails, "so callers still raise the alarm on a queue nobody can prove is drained" (<code class="cite">bin/fm-wake-lib.sh:2075-2081</code>).</li>
+<li>A retirement that cannot be written "is reported and never fails the drain" (<code class="cite">docs/watcher-continuity.md:86</code>).</li>
+<li>Durable wakes with an invalid marker stop the drain with an error rather than presenting them without an episode (<code class="cite">bin/fm-wake-drain.sh:809-813</code>); a legacy queue with no marker is adopted by publishing one (<code class="cite">bin/fm-wake-drain.sh:814-817</code>).</li>
+<li>A lock-refused, read-only session start leaves the queue untouched and only counts it (<code class="cite">bin/fm-session-start.sh:721-726</code>).</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

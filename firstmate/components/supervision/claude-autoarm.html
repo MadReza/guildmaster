@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Stop auto-arm · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Supervision</p>
+<h1>Claude Stop auto-arm</h1>
+<p class="lede">On a Claude primary, watcher continuity is owned by a background <code>Stop</code> hook that fires on every turn end, arms one watcher cycle without spending a model token, and wakes the idle session with exit status 2 when that cycle produces an actionable wake.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Supervision</a>. Script: <code class="cite">bin/fm-claude-stop-autoarm.sh</code>. Claim contract: <code class="cite">bin/fm-wake-lib.sh:1405-1479</code>.</p>
+
+<h2 id="registration">Registration</h2>
+<p><code>.claude/settings.json</code> registers two <code>Stop</code> hooks, both anchored at <code>$CLAUDE_PROJECT_DIR</code>: the synchronous guard <code>bin/fm-turnend-guard.sh --claude</code>, and <code>bin/fm-claude-stop-autoarm.sh</code> with <code>"asyncRewake": true</code> and a <code>timeout</code> of 28800 seconds (<code class="cite">.claude/settings.json:43-48</code>, <code class="cite">docs/turnend-guard.md:79</code>). Both commands start with <code>[ -z "${GROK_AGENT:-}${GROK_HOOK_EVENT:-}" ] || exit 0</code>, because Grok loads Claude-compatible settings and has no <code>asyncRewake</code>: an unguarded run once "waited on the foregrounded watcher for the declared 28800-second timeout and the Grok turn never ended" (<code class="cite">docs/turnend-guard.md:89-93</code>). A Cursor-delivered payload is refused for the same reason (<code class="cite">bin/fm-claude-stop-autoarm.sh:115-121</code>).</p>
+
+<h2 id="gates">Gates, in order</h2>
+<p>"Claude Code fires it in the background on EVERY Stop of a Claude primary session, with no deduplication across firings" (<code class="cite">bin/fm-claude-stop-autoarm.sh:5-7</code>). Each firing passes these gates, and "On any uncertainty such as unresolvable ancestry, malformed lock state, or lock contention, it exits 0 and leaves continuity to the synchronous guard and the model" (<code class="cite">bin/fm-claude-stop-autoarm.sh:71-75</code>):</p>
+<ol>
+<li><strong>Scope</strong> — a genuine primary checkout or validly marked secondmate home; child worktrees stay inert (<code class="cite">bin/fm-claude-stop-autoarm.sh:123-124</code>).</li>
+<li><strong>Identity</strong> — this session owns <code>state/.lock</code> by the shared <code>fm_session_lock_owned_by_self</code> verdict; a numeric owner that fails the harness-liveness predicate is marked for guarded recovery, while a live foreign owner, missing, or malformed lock exits (<code class="cite">bin/fm-claude-stop-autoarm.sh:126-140</code>).</li>
+<li><strong>Away</strong> — <code>state/.afk</code> present means the daemon owns the watcher; exit 0 and "NEVER rewake" (<code class="cite">bin/fm-claude-stop-autoarm.sh:142-143</code>).</li>
+<li><strong>Need</strong> — <code>fm_supervision_needed</code>: task metadata, a registered process-event source, a registered custom check, or the Relay poll (<code class="cite">bin/fm-supervision-lib.sh:47-105</code>).</li>
+<li><strong>Stale session-lock recovery</strong> — only now, after the away and need gates, delegate to <code>bin/fm-lock.sh</code> and re-verify ownership (<code class="cite">bin/fm-claude-stop-autoarm.sh:151-158</code>), "so an idle or away home remains byte-for-byte inert".</li>
+<li><strong>Generation claim</strong> — below.</li>
+</ol>
+
+<h2 id="ledger">Generation claims in the epoch ledger</h2>
+<p><code>state/.claude-autoarm-epoch</code> is the claim. Line 1 is <code>epoch=N owner_pid=P outcome=O updated_at=T</code>, plus <code>session_pid=S recovery_generation=G</code> on a rewake; line 2 is the claimant's mandatory process identity (<code class="cite">bin/fm-wake-lib.sh:1411-1420</code>). The rules:</p>
+<ul>
+<li>A claim is <strong>open</strong> while its outcome is <code>arming</code>, its owner is alive, its recorded identity recomputes and matches, and it is not <strong>stuck</strong> — "both the ledger entry and the watcher beacon … are older than the guard grace, which proves the owner hung mid-arm with nothing supervising" (<code class="cite">bin/fm-wake-lib.sh:1421-1427</code>, <code class="cite">bin/fm-wake-lib.sh:1530-1548</code>).</li>
+<li>Every firing defers (exit 0) to an open claim; anything else lets the firing take generation N+1. "Taking a newer generation IS the reclaim: a steady-state predecessor is never signalled or revoked" (<code class="cite">bin/fm-wake-lib.sh:1428-1432</code>).</li>
+<li>"NO mutex is ever held across a blocking step"; <code>state/.claude-autoarm.lock</code> survives only as a micro-mutex around individual ledger writes (<code class="cite">bin/fm-wake-lib.sh:1433-1437</code>).</li>
+<li>"A superseded owner goes COMPLETELY silent … Ownership is re-verified before every side effect" (<code class="cite">bin/fm-wake-lib.sh:1438-1440</code>); the arm loop checks <code>fm_autoarm_still_owner</code> before each attempt (<code class="cite">bin/fm-claude-stop-autoarm.sh:263-270</code>).</li>
+<li>"The irrevocable commit point of a translation is the EXIT STATUS: the harness delivers the collected stderr banner only on exit 2 and discards it on exit 0" — so a losing generation that already printed a banner simply exits 0 and nothing is delivered (<code class="cite">bin/fm-wake-lib.sh:1441-1448</code>, <code class="cite">bin/fm-claude-stop-autoarm.sh:185-208</code>).</li>
+</ul>
+<p>Why: this "structurally removes the failure classes the lock-held-across-arm design produced": a hook that "hung mid-arm with its ledger frozen at 'arming' kept the watcher from ever being auto-re-armed again" (2026-08-26), and "a finished claim whose leftover lock silenced both participants for 40 beacon-less minutes" (2026-08-14) (<code class="cite">bin/fm-wake-lib.sh:1450-1457</code>).</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 740 440" role="img" aria-labelledby="ca-o-t ca-o-d">
+<title id="ca-o-t">Auto-arm generation outcomes and exit statuses</title>
+<desc id="ca-o-d">A Stop firing defers to an open claim or claims the next generation in state arming. The foregrounded arm then ends in one of five outcomes: rewake with exit 2, clean with exit 0, afk with exit 0, failed with a once-per-episode notice and exit 2, or failed-suppressed with exit 2 until the attended alarm exists and exit 0 after it.</desc>
+<defs><marker id="ca-o-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">One Stop firing, one generation</text>
+<g class="c4-component"><rect x="20" y="50" width="220" height="64" rx="6"/><text class="c4-label" x="130" y="72">Stop fires</text><text class="c4-desc" x="130" y="90">gates passed</text><text class="c4-desc" x="130" y="104">(scope, lock, away, need)</text></g>
+<g class="c4-external"><rect x="20" y="160" width="220" height="56" rx="6"/><text class="c4-label" x="130" y="182">Defer, exit 0</text><text class="c4-desc" x="130" y="200">an open claim is deciding</text></g>
+<g class="c4-datastore"><path d="M270,62 a100,8 0 0,0 200,0 a100,8 0 0,0 -200,0 v44 a100,8 0 0,0 200,0 v-44"/><text class="c4-label" x="370" y="84">outcome=arming</text><text class="c4-tech" x="370" y="98">[gen N+1, owner, identity]</text></g>
+<g class="c4-rel"><path d="M130,114 V158" marker-end="url(#ca-o-arrow)"/><text class="c4-rel-label" x="130" y="140">claim open</text></g>
+<g class="c4-rel"><path d="M240,84 H268" marker-end="url(#ca-o-arrow)"/></g>
+<g class="c4-component"><rect x="270" y="150" width="200" height="72" rx="6"/><text class="c4-label" x="370" y="172">Foreground arm</text><text class="c4-desc" x="370" y="190">up to FM_CLAUDE_AUTOARM_</text><text class="c4-desc" x="370" y="206">ATTEMPTS (default 2)</text></g>
+<g class="c4-rel"><path d="M370,114 V148" marker-end="url(#ca-o-arrow)"/></g>
+<g class="c4-system"><rect x="520" y="50" width="200" height="56" rx="8"/><text class="c4-label" x="620" y="72">rewake → exit 2</text><text class="c4-desc" x="620" y="90">bound to session + generation</text></g>
+<g class="c4-external"><rect x="520" y="122" width="200" height="56" rx="8"/><text class="c4-label" x="620" y="144">clean → exit 0</text><text class="c4-desc" x="620" y="162">healthy watcher, or no need</text></g>
+<g class="c4-external"><rect x="520" y="194" width="200" height="56" rx="8"/><text class="c4-label" x="620" y="216">afk → exit 0</text><text class="c4-desc" x="620" y="234">away appeared mid-cycle</text></g>
+<g class="c4-system"><rect x="520" y="266" width="200" height="64" rx="8"/><text class="c4-label" x="620" y="288">failed → exit 2</text><text class="c4-desc" x="620" y="306">creates the notice marker;</text><text class="c4-desc" x="620" y="320">once per failure episode</text></g>
+<g class="c4-system"><rect x="520" y="346" width="200" height="64" rx="8"/><text class="c4-label" x="620" y="368">failed-suppressed</text><text class="c4-desc" x="620" y="386">exit 2 for the next retry;</text><text class="c4-desc" x="620" y="400">exit 0 once alarmed</text></g>
+<g class="c4-rel"><path d="M470,170 H495 V78 H518" marker-end="url(#ca-o-arrow)"/><text class="c4-rel-label" x="495" y="120">actionable</text></g>
+<g class="c4-rel"><path d="M495,150 V378 H518" marker-end="url(#ca-o-arrow)"/></g>
+<g class="c4-rel"><path d="M495,150 H518"/></g>
+<g class="c4-rel"><path d="M495,222 H518" marker-end="url(#ca-o-arrow)"/></g>
+<g class="c4-rel"><path d="M495,298 H518" marker-end="url(#ca-o-arrow)"/></g>
+<g class="c4-component"><rect x="20" y="266" width="450" height="144" rx="6"/><text class="c4-label" x="245" y="290">Failure episode markers</text><text class="c4-desc" x="245" y="312">.claude-autoarm-failure-notified — the one notice was</text><text class="c4-desc" x="245" y="328">committed; later failures stay silent but still exit 2</text><text class="c4-desc" x="245" y="350">.claude-autoarm-failure-alarmed — the guard spent its</text><text class="c4-desc" x="245" y="366">one attended fail-open; no further continuations</text><text class="c4-desc" x="245" y="388">A verified healthy watcher clears both and the budget</text></g>
+</svg>
+</div>
+<figcaption>Outcomes are written only by the generation that owns the ledger entry (<code class="cite">bin/fm-wake-lib.sh:1624-1668</code>). The notice commits only when its marker is created after the winning <code>failed</code> write in the same critical section, because "marker-first ordering could permanently suppress a notice whose ledger write never won" (<code class="cite">bin/fm-wake-lib.sh:1626-1631</code>).</figcaption>
+</figure>
+
+<h2 id="arm-loop">The foreground arm and its translation</h2>
+<p>The winning owner runs <code>bin/fm-watch-arm.sh</code> in the <em>foreground</em> of the hook-owned process tree, exporting its resolved <code>FM_GUARD_GRACE</code> so arm and watcher judge staleness with the same value: "NO shell &amp;: this hook process tree is the harness-owned lifecycle" (<code class="cite">bin/fm-claude-stop-autoarm.sh:252-277</code>). The grace defaults to <code>max(300, FM_POLL + 60)</code>, the fix for a long-poll home whose healthy watcher read stale at the edge of every cycle (<code class="cite">bin/fm-claude-stop-autoarm.sh:103-108</code>, <code class="cite">docs/turnend-guard.md:69-73</code>).</p>
+<ul>
+<li><strong>Actionable close</strong> (<code>signal:</code>, <code>stale:</code>, <code>check:</code>, <code>heartbeat</code>): print a banner to stderr — "one supervision event needs a handling turn now", up to eight reason lines, and the instruction to drain first, acknowledge after handling, and "do NOT run bin/fm-watch-arm.sh after an ordinary wake" — then commit <code>rewake</code> and exit 2 (<code class="cite">bin/fm-claude-stop-autoarm.sh:341-359</code>). Claude delivers it as "Stop hook feedback", which wakes the session even while idle (<code class="cite">bin/fm-claude-stop-autoarm.sh:44-47</code>).</li>
+<li><strong>Non-actionable close with a healthy watcher</strong>: benign; reset the failure episode and record <code>clean</code> (<code class="cite">bin/fm-claude-stop-autoarm.sh:293-331</code>).</li>
+<li><strong>Need vanished mid-cycle</strong> (fleet torn down): <code>clean</code>, exit 0 (<code class="cite">bin/fm-claude-stop-autoarm.sh:304-310</code>).</li>
+<li><strong>Exhausted failure</strong>: one notice per episode — "the Stop-owned automatic supervision mechanism is broken … Do not launch a manual background arm from this notice" — then exit 2 so the next Stop retries (<code class="cite">bin/fm-claude-stop-autoarm.sh:361-388</code>).</li>
+<li><strong>Host interruption</strong>: HUP, TERM, or INT from Claude's timeout or teardown are translated "through the ordinary durable failure protocol instead of leaving the generation frozen at arming" (<code class="cite">bin/fm-claude-stop-autoarm.sh:216-245</code>).</li>
+</ul>
+<p>The rewake outcome records the session-lock pid and the current recovery-marker generation. That binding is what lets the mid-turn pull guard stay quiet when a long handling turn outlives the beacon grace: <code>fm_autoarm_midturn_healthy</code> accepts a stale beacon only while the latest outcome is a <code>rewake</code> for the live session and the same recovery generation, newer than the last beacon, with no failure marker (<code class="cite">bin/fm-wake-lib.sh:1550-1582</code>).</p>
+
+<h2 id="residuals">Accepted residuals</h2>
+<p>Two are stated as "ACCEPTED INTENT, because closing them absolutely would require a mutex held across output or steady-state revocation, both deliberately rejected": an owner that dies between its terminal write and its exit (a committed outcome whose banner never arrives), and a hung old-build owner resuming during the one upgrade window. "Each residual costs at most one extra exit-2 continuation turn absorbed by the durable idempotent wake queue" (<code class="cite">bin/fm-wake-lib.sh:1459-1470</code>). A legacy lock-holding claim from a pre-generation build is handled by a shim that defers while it is genuinely deciding and reclaims it once when proven abandoned, retiring a verified live owner with TERM (<code class="cite">bin/fm-wake-lib.sh:1472-1479</code>, <code class="cite">bin/fm-wake-lib.sh:1698-1817</code>).</p>
+
+<h2 id="cooperation">Cooperation with the turn-end guard</h2>
+<p>The guard fires on the same Stop, synchronously. It waits up to <code>FM_CLAUDE_AUTOARM_SYNC_WAIT_MS</code> (800 ms) for proof that the auto-arm owns recovery — a healthy watcher, an open claim, or a fresh <code>rewake</code> — "so one event epoch yields exactly one recovery turn" (<code class="cite">bin/fm-turnend-guard.sh:60-91</code>). The budget, the one attended fail-open, and how the two hooks share the failure markers are on <a href="turn-end-guards.html#claude">Turn-end and pull guards</a>.</p>
+
+<h2 id="tests">Where it is pinned</h2>
+<p><code>tests/fm-claude-stop-autoarm.test.sh</code> covers scope, stale and live owners, away and need boundaries, single-flight, bounded retries, one-notice episodes, exit-2 translation, and HUP/TERM/INT translation; an opt-in live end-to-end test runs two tokenless cycles against a real Claude (<code class="cite">docs/watcher-continuity.md:127-129</code>).</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Turn-end and pull guards · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Supervision</p>
+<h1>Turn-end and pull guards</h1>
+<p class="lede">Two guards stop supervision from lapsing unnoticed: a pull guard that shouts inside whatever supervision command runs mid-turn, and a push guard that fires at every primary turn end and refuses to let the turn close with work in flight and no live watcher.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Supervision</a>. Contract owner: <code class="cite">docs/turnend-guard.md</code>, "the authoritative current contract for the 'no turn ends blind' primary backstop" (<code class="cite">docs/turnend-guard.md:3</code>).</p>
+
+<h2 id="two">Why two guards</h2>
+<p>"<code>fm-guard.sh</code> (bin/fm-guard.sh) is pull-based: it only warns when some other supervision script happens to run. A primary session that ends a turn without resuming its harness supervision protocol, and then never runs another fleet-touching command itself, can sit blind for hours. This script is push-based: verified harness turn-end hooks invoke it every time the primary is about to end a turn" (<code class="cite">bin/fm-turnend-guard.sh:7-12</code>). Neither replaces the live cycle: "Harness-aware turn-end guards are structural backstops, not permission to omit the live cycle" (<code class="cite">AGENTS.md:458</code>).</p>
+
+<h2 id="predicates">Two different health questions</h2>
+<p>The guards deliberately ask different questions, because they fire at different moments (<code class="cite">bin/fm-wake-lib.sh:176-185</code>):</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Predicate</th><th>Question</th><th>Used by</th></tr></thead>
+<tbody>
+<tr><td><code>fm_watcher_healthy</code> (PID-strict)</td><td>Does a live process, identity-matched to this home's watcher, hold the lock with a beacon inside grace? "a leftover beacon must never satisfy it".</td><td>The arm wrapper, the auto-arm, and the turn-end guard, which "fires at the turn boundary where the auto-arm brings a fresh watcher up".</td></tr>
+<tr><td><code>fm_watcher_supervision_verdict</code> (model-aware)</td><td>Is supervision healthy <em>for this harness's model</em> right now? Sets <code>FM_WATCHER_VERDICT_OK</code> and a reason, <code>no-watcher</code> or <code>stale-beacon</code>.</td><td>The pull guard, which "fires mid-turn, where the auto-arm model runs no watcher at all".</td></tr>
+</tbody>
+</table></div>
+<p>The model-aware verdict (<code class="cite">bin/fm-wake-lib.sh:370-434</code>):</p>
+<ul>
+<li><strong>autoarm</strong> (Claude, Cursor): a fresh beacon is healthy with no live watcher; a stale beacon is still healthy while <code>fm_autoarm_midturn_healthy</code> proves a Claude rewake explains the gap.</li>
+<li><strong>extension</strong> (Pi, pi-signed, omp): a live watcher, or a <em>genuinely unheld</em> lock with a fresh beacon while a live session provably owns continuity through both extensions loaded at their current builds — proven by sha256 digests recorded in state markers and bound to the pid in <code>state/.lock</code> (<code class="cite">bin/fm-wake-lib.sh:218-317</code>). A handoff-phase marker never counts.</li>
+<li><strong>persistent</strong> (every other harness): the strict predicate.</li>
+</ul>
+
+<h2 id="pull">The pull guard: bin/fm-guard.sh</h2>
+<p>Runs inside supervision scripts, inside every drain, and in read-only advisory mode from a lock-refused session start (<code class="cite">bin/fm-guard.sh:1-4</code>). It always exits 0: "the guard warns, it never blocks" (<code class="cite">bin/fm-guard.sh:42</code>). In order it prints:</p>
+<ol>
+<li><strong>Worktree tangle</strong>, checked first and independent of work in flight: the primary checkout is on a non-default branch, so "A crewmate likely branched/committed in the primary instead of its own worktree", with restore commands unless read-only (<code class="cite">bin/fm-guard.sh:142-165</code>).</li>
+<li><strong><code>WATCHER DOWN - SUPERVISION IS OFF</code></strong>, when supervision is needed and the verdict fails, naming the true cause and a harness-specific repair line from <code>bin/fm-supervision-instructions.sh --repair-line</code>; printed in full once per down episode, keyed to the failing condition "not the beacon mtime, which a healthy between-turns watcher advances every poll", then as a one-line reminder (<code class="cite">bin/fm-guard.sh:22-28</code>, <code class="cite">bin/fm-guard.sh:176-262</code>).</li>
+<li><strong>Queued wakes</strong>: "drain them with bin/fm-wake-drain.sh before anything else", counting only the rows the calling actor could present; rows held by a live Pi branch grant get a distinct notice instead, and the branch actor itself gets nothing (<code class="cite">bin/fm-guard.sh:29-41</code>, <code class="cite">bin/fm-guard.sh:268-281</code>).</li>
+</ol>
+
+<h2 id="push">The turn-end guard: bin/fm-turnend-guard.sh</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 740 680" role="img" aria-labelledby="tg-f-t tg-f-d">
+<title id="tg-f-t">Turn-end guard decision flow</title>
+<desc id="tg-f-d">Empty payload, missing jq, a foreign-host payload, or an active stop hook outside Claude mode all allow the stop. Out-of-scope checkouts allow. No supervision need allows. A healthy watcher allows, as does a live identity-matched away daemon with a fresh beacon. In Claude mode, a live foreign session-lock owner gets a diagnostic and allows. Outside Claude mode the guard blocks with exit 2. In Claude mode it waits up to 800 milliseconds for the auto-arm to own recovery, then charges the budget and either blocks or, for a verified failure episode past the budget, allows once with a loud message.</desc>
+<defs><marker id="tg-f-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">One primary turn end</text>
+<g class="c4-component"><rect x="20" y="44" width="400" height="56" rx="6"/><text class="c4-label" x="220" y="66">Readable payload, jq, own host?</text><text class="c4-desc" x="220" y="84">stop_hook_active true outside --claude → allow</text></g>
+<g class="c4-component"><rect x="20" y="120" width="400" height="50" rx="6"/><text class="c4-label" x="220" y="142">Primary scope?</text><text class="c4-desc" x="220" y="158">main home or marked secondmate home</text></g>
+<g class="c4-component"><rect x="20" y="190" width="400" height="50" rx="6"/><text class="c4-label" x="220" y="212">Supervision needed?</text><text class="c4-desc" x="220" y="228">tasks · sources · custom checks · Relay</text></g>
+<g class="c4-component"><rect x="20" y="260" width="400" height="56" rx="6"/><text class="c4-label" x="220" y="282">Healthy watcher, or away daemon?</text><text class="c4-desc" x="220" y="300">PID-strict; daemon needs identity + fresh beacon</text></g>
+<g class="c4-component"><rect x="20" y="336" width="400" height="50" rx="6"/><text class="c4-label" x="220" y="358">--claude: live foreign lock owner?</text><text class="c4-desc" x="220" y="374">this session cannot repair without stealing</text></g>
+<g class="c4-component"><rect x="20" y="406" width="400" height="56" rx="6"/><text class="c4-label" x="220" y="428">--claude: auto-arm owns recovery?</text><text class="c4-desc" x="220" y="446">poll ≤ 800 ms: open claim or fresh rewake</text></g>
+<g class="c4-component"><rect x="20" y="482" width="400" height="56" rx="6"/><text class="c4-label" x="220" y="504">Charge the block budget</text><text class="c4-desc" x="220" y="522">per session; default 3, below Claude's 8</text></g>
+<g class="c4-component"><rect x="20" y="558" width="400" height="56" rx="6"/><text class="c4-label" x="220" y="580">Budget exhausted, failure verified?</text><text class="c4-desc" x="220" y="598">notice consumed, no alarm yet</text></g>
+<g class="c4-rel"><path d="M220,100 V118" marker-end="url(#tg-f-arrow)"/></g>
+<g class="c4-rel"><path d="M220,170 V188" marker-end="url(#tg-f-arrow)"/><text class="c4-rel-label" x="236" y="182">yes</text></g>
+<g class="c4-rel"><path d="M220,240 V258" marker-end="url(#tg-f-arrow)"/><text class="c4-rel-label" x="236" y="252">yes</text></g>
+<g class="c4-rel"><path d="M220,316 V334" marker-end="url(#tg-f-arrow)"/><text class="c4-rel-label" x="236" y="328">no</text></g>
+<g class="c4-rel"><path d="M220,386 V404" marker-end="url(#tg-f-arrow)"/><text class="c4-rel-label" x="236" y="398">no</text></g>
+<g class="c4-rel"><path d="M220,462 V480" marker-end="url(#tg-f-arrow)"/><text class="c4-rel-label" x="236" y="474">no</text></g>
+<g class="c4-rel"><path d="M220,538 V556" marker-end="url(#tg-f-arrow)"/></g>
+<g class="c4-external"><rect x="500" y="44" width="220" height="196" rx="8"/><text class="c4-label" x="610" y="120">Allow, exit 0</text><text class="c4-desc" x="610" y="140">fail open when the payload</text><text class="c4-desc" x="610" y="156">cannot be read safely, or</text><text class="c4-desc" x="610" y="172">there is nothing to guard</text></g>
+<g class="c4-external"><rect x="500" y="260" width="220" height="56" rx="8"/><text class="c4-label" x="610" y="282">Allow</text><text class="c4-desc" x="610" y="300">--claude also resets episode</text></g>
+<g class="c4-external"><rect x="500" y="336" width="220" height="50" rx="8"/><text class="c4-label" x="610" y="356">Diagnostic, allow</text><text class="c4-desc" x="610" y="372">"owned by another live session"</text></g>
+<g class="c4-external"><rect x="500" y="406" width="220" height="56" rx="8"/><text class="c4-label" x="610" y="428">Allow</text><text class="c4-desc" x="610" y="446">one recovery turn per epoch</text></g>
+<g class="c4-system"><rect x="500" y="482" width="220" height="56" rx="8"/><text class="c4-label" x="610" y="504">Block, exit 2</text><text class="c4-desc" x="610" y="522">TURN WOULD END BLIND</text></g>
+<g class="c4-system"><rect x="500" y="558" width="220" height="56" rx="8"/><text class="c4-label" x="610" y="580">Allow once, loudly</text><text class="c4-desc" x="610" y="598">GENUINELY DOWN; alarm marker</text></g>
+<g class="c4-rel"><path d="M420,72 H498" marker-end="url(#tg-f-arrow)"/><text class="c4-rel-label" x="460" y="66">no</text></g>
+<g class="c4-rel"><path d="M420,145 H498" marker-end="url(#tg-f-arrow)"/><text class="c4-rel-label" x="460" y="139">no</text></g>
+<g class="c4-rel"><path d="M420,215 H498" marker-end="url(#tg-f-arrow)"/><text class="c4-rel-label" x="460" y="209">no</text></g>
+<g class="c4-rel"><path d="M420,288 H498" marker-end="url(#tg-f-arrow)"/><text class="c4-rel-label" x="460" y="282">yes</text></g>
+<g class="c4-rel"><path d="M420,361 H498" marker-end="url(#tg-f-arrow)"/><text class="c4-rel-label" x="460" y="355">yes</text></g>
+<g class="c4-rel"><path d="M420,434 H498" marker-end="url(#tg-f-arrow)"/><text class="c4-rel-label" x="460" y="428">yes</text></g>
+<g class="c4-rel"><path d="M420,586 H498" marker-end="url(#tg-f-arrow)"/><text class="c4-rel-label" x="460" y="580">yes</text></g>
+<g class="c4-rel"><path d="M220,614 V640 H470 V510 H498" marker-end="url(#tg-f-arrow)"/><text class="c4-rel-label" x="330" y="634">no</text></g>
+</svg>
+</div>
+<figcaption>The two <code>--claude</code> steps and the budget apply only in Claude mode; in the default mode (Codex, Grok, and the callers of the passive adapters) an unhealthy stop blocks right after the away-daemon check. Source order: <code class="cite">bin/fm-turnend-guard.sh:125-271</code> for the shared path, <code class="cite">bin/fm-turnend-guard.sh:273-526</code> for the Claude cooperative path. "Only when neither materializes is the auto-arm genuinely absent" (<code class="cite">bin/fm-turnend-guard.sh:82-91</code>).</figcaption>
+</figure>
+
+<h3>Shared behaviour</h3>
+<ul>
+<li><strong>Fail open when it cannot read safely.</strong> An empty payload or missing <code>jq</code> exits 0 "because it cannot safely read loop-guard fields" (<code class="cite">bin/fm-turnend-guard.sh:125-133</code>, <code class="cite">docs/turnend-guard.md:65</code>).</li>
+<li><strong>Scope.</strong> A secondmate home "runs its OWN primary firstmate session, so it must be guarded like the main primary; only child crew/scout worktrees are exempt", told apart by a valid <code>.fm-secondmate-home</code> marker and by git-dir versus git-common-dir (<code class="cite">bin/fm-turnend-guard.sh:25-33</code>, <code class="cite">bin/fm-turnend-guard.sh:157-169</code>).</li>
+<li><strong>Need</strong> includes a registered custom check or Relay polling even with no task, so a home-level poll keeps running after the last task is torn down (<code class="cite">docs/turnend-guard.md:30-34</code>).</li>
+<li><strong>Away daemon ownership</strong> replaces the watcher proof while <code>state/.afk</code> exists, in either mode: a live pid in <code>state/.supervise-daemon.lock</code> whose current identity matches the one it recorded, plus a fresh beacon under the poll-derived grace, because the daemon starts a new one-shot watcher only after handling the previous wake (<code class="cite">bin/fm-turnend-guard.sh:209-225</code>, <code class="cite">bin/fm-wake-lib.sh:319-346</code>).</li>
+<li><strong>Loop bound, default mode.</strong> Codex and Grok never block twice in one turn: a true <code>stop_hook_active</code> (or <code>stopHookActive</code>, which wins) allows the stop (<code class="cite">bin/fm-turnend-guard.sh:50-58</code>, <code class="cite">bin/fm-turnend-guard.sh:144-155</code>).</li>
+<li><strong>The block</strong> is a delimited stderr banner, <code>TURN WOULD END BLIND - SUPERVISION IS OFF</code>, naming what needs supervision and the repair line from the emitted protocol, then exit 2 (<code class="cite">bin/fm-turnend-guard.sh:227-255</code>).</li>
+</ul>
+
+<h3 id="claude">The --claude cooperative mode</h3>
+<p>Claude marks every stop after any hook-driven continuation <code>stop_hook_active=true</code>, "including turns started by the asyncRewake auto-arm, so the one-shot allow would re-open the exact blind window this guard exists to close" (the 2026-07-21 incident) (<code class="cite">bin/fm-turnend-guard.sh:60-65</code>). So in Claude mode the guard ignores that flag and cooperates with the auto-arm instead:</p>
+<ul>
+<li>A live foreign session-lock owner gets a <code>systemMessage</code> diagnostic and the stop is allowed, because "That Claude session cannot arm or repair the home without stealing the live owner's lock, so blocking it would create an unbounded loop" (<code class="cite">bin/fm-turnend-guard.sh:257-267</code>, <code class="cite">docs/turnend-guard.md:37-41</code>).</li>
+<li>It polls for up to <code>FM_CLAUDE_AUTOARM_SYNC_WAIT_MS</code> (800 ms) for a healthy watcher, an open generation claim, a live legacy claim, or a <code>rewake</code> outcome younger than <code>FM_CLAUDE_AUTOARM_EPOCH_FRESH</code> (15 s) (<code class="cite">bin/fm-turnend-guard.sh:351-401</code>, <code class="cite">bin/fm-turnend-guard.sh:489-505</code>).</li>
+<li>Otherwise it re-blocks up to <code>FM_CLAUDE_TURNEND_BLOCK_BUDGET</code> (3) times per session, "safely below Claude Code's hard 8-consecutive-block override". The budget charges each ledger epoch once, and also charges "every re-block against an epoch the auto-arm never advanced past the previous re-block", so "an inert hook that leaves the ledger frozen cannot hold the guard in an unbounded re-block loop" (<code class="cite">bin/fm-turnend-guard.sh:82-91</code>, <code class="cite">bin/fm-turnend-guard.sh:278-349</code>).</li>
+<li>Past the budget, with a verified failure episode (the auto-arm committed its one notice and a <code>failed</code> outcome) and a final check that finds neither a healthy watcher nor an open claim, it creates <code>state/.claude-autoarm-failure-alarmed</code> exclusively and allows the stop once with "FIRSTMATE SUPERVISION IS GENUINELY DOWN … Keep this session attended" (<code class="cite">bin/fm-turnend-guard.sh:403-487</code>, <code class="cite">bin/fm-turnend-guard.sh:507-526</code>). After that alarm the auto-arm "suppresses further exit-2 continuations until positive watcher recovery, so the final fail-open remains reachable" (<code class="cite">docs/turnend-guard.md:126</code>).</li>
+<li>A positively verified healthy watcher clears the notice, the alarm, and the budget together (<code class="cite">docs/turnend-guard.md:119</code>, <code class="cite">bin/fm-wake-lib.sh:1368-1403</code>).</li>
+</ul>
+
+<h2 id="harnesses">Per-harness integration</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Harness</th><th>Hook</th><th>How a block is enforced</th><th>Loop bound</th></tr></thead>
+<tbody>
+<tr><td>Claude</td><td>two <code>Stop</code> hooks in <code>.claude/settings.json</code></td><td>exit 2 + stderr</td><td>block budget 3; one attended fail-open</td></tr>
+<tr><td>Codex</td><td><code>Stop</code> in <code>.codex/hooks.json</code></td><td>exit 2 + stderr</td><td><code>stop_hook_active</code>: one forced continuation</td></tr>
+<tr><td>OpenCode</td><td><code>session.idle</code> in <code>.opencode/plugins/fm-primary-turnend-guard.js</code></td><td>one <code>client.session.promptAsync</code></td><td>plugin-owned latch</td></tr>
+<tr><td>Pi, pi-signed</td><td><code>agent_settled</code> in <code>.pi/extensions/fm-primary-turnend-guard.ts</code></td><td>one <code>sendUserMessage(…, {deliverAs: "followUp"})</code></td><td>latch per logical run</td></tr>
+<tr><td>omp</td><td>blocking <code>session_stop</code></td><td><code>{ continue: true, additionalContext }</code>, "compelled rather than requested"</td><td><code>stop_hook_active</code>, then omp's own cap of 8</td></tr>
+<tr><td>Cursor</td><td><code>stop</code> in <code>.cursor/hooks.json</code> → <code>bin/fm-turnend-guard-cursor.sh</code></td><td>exit 2 is a silent no-op; parks on the arm and returns at most one <code>followup_message</code></td><td><code>FM_CURSOR_TURNEND_BLOCK_BUDGET</code> 3, <code>FM_CURSOR_TURNEND_LOOP_CEILING</code> 180 below Cursor's <code>loop_limit</code></td></tr>
+<tr><td>Grok</td><td><code>Stop</code> in <code>.grok/hooks/</code> → <code>bin/fm-turnend-guard-grok.sh</code></td><td>native blocking when the payload carries a boolean <code>stopHookActive</code>; else one <code>grok --resume</code> fallback</td><td><code>stopHookActive</code>; <code>GROK_TURNEND_GUARD_ACTIVE</code></td></tr>
+<tr><td>Kimi (crew only)</td><td>global <code>[[hooks]]</code> region written by <code>bin/fm-kimi-turnend-hook.sh</code></td><td>not a primary guard: an always-zero hook that touches a task's <code>.turn-ended</code></td><td>n/a</td></tr>
+</tbody>
+</table></div>
+<p class="evidence">Source: <code class="cite">docs/turnend-guard.md:77-192</code>. Passive harnesses (OpenCode, Pi) "fail open at the hook boundary to protect the user session but schedule one bounded follow-up when the predicate blocks" (<code class="cite">docs/turnend-guard.md:131-137</code>). Generated follow-ups carry the <code>turn-end-guard</code> operational kind after the U+2063 <code>FIRSTMATE_OP: </code> prefix "so Ahoy does not treat them as captain messages" (<code class="cite">docs/turnend-guard.md:134</code>); that prefix belongs to <a href="../communication/index.html">Communication</a>.</p>
+
+<h2 id="limits">Stated limits</h2>
+<ul>
+<li>Headless OpenCode and untrusted Grok project hooks "remain fail-open at the host boundary"; Cursor's <code>stop</code> does not fire in headless <code>cursor-agent -p</code>, and a Cursor primary must be launched with <code>--trust</code> or "the whole integration is inert" (<code class="cite">docs/turnend-guard.md:176-184</code>).</li>
+<li>omp's <code>session_stop</code> "never fires for an interrupted turn or a task session, so those boundaries are deliberately unguarded" (<code class="cite">docs/turnend-guard.md:83</code>).</li>
+<li>A passive adapter that cannot reach its SDK is caught only by the next pull-guard call (<code class="cite">docs/turnend-guard.md:173-174</code>).</li>
+</ul>
+
+<h2 id="grace">Grace and the poll cadence</h2>
+<p>A healthy watcher touches its beacon once per cycle, so the beacon can be up to one poll old. A flat 300 s grace breaks once <code>FM_POLL</code> reaches it — "exactly what a long-poll home (<code>FM_POLL=300</code>) hit against the Claude Stop-hook auto-arm". The auto-arm, the watcher's own pre-acquisition check, and the turn-end guard's daemon branch derive <code>max(300, FM_POLL + 60)</code>; "Every other direct <code>FM_GUARD_GRACE</code> reader (<code>bin/fm-guard.sh</code>, the strict-watcher checks in <code>bin/fm-turnend-guard.sh</code> and its harness-specific wrappers, <code>bin/fm-wake-lib.sh</code>) still falls back to the bare 300-second default" (<code class="cite">docs/turnend-guard.md:67-75</code>).</p>
+<div class="callout unclear"><span class="callout-title">Open question: long-poll homes and the strict guard</span>
+<p>The turn-end guard's strict watcher check uses <code>GRACE=${FM_GUARD_GRACE:-300}</code> (<code class="cite">bin/fm-turnend-guard.sh:99</code>) while the auto-arm exports its poll-derived grace only to the arm it forks (<code class="cite">bin/fm-claude-stop-autoarm.sh:274</code>). In a home with <code>FM_POLL</code> at or above 300 and no explicit <code>FM_GUARD_GRACE</code>, the guard would read a healthy mid-wait watcher as stale near the end of each poll. The document states the split as intended; whether the guard's cooperative waits always cover that edge is not settled by the source.</p></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

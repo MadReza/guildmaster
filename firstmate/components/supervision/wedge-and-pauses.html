@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wedges and declared waits · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Supervision</p>
+<h1>Wedges and declared waits</h1>
+<p class="lede">A pane that looks busy but never moves might be wedged; a pane that is idle on purpose must not be. The wedge escalation ladder surfaces the first case on a fixed schedule for human inspection, and the declared-wait absorb keeps the second off that ladder while still rechecking it on a long, finite cadence.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Supervision</a>. All behaviour below lives in <code class="cite">bin/fm-watch.sh</code>; the prose contract is <code class="cite">docs/architecture.md:30-60</code>.</p>
+
+<h2 id="ladder">The wedge escalation ladder</h2>
+<p>A stale pane whose crew is <em>provably working</em> (an active no-mistakes step or a busy verdict) is absorbed, but a timer starts in <code>state/.stale-since-&lt;key&gt;</code> "so a genuinely frozen run still escalates past STALE_ESCALATE_SECS" (<code class="cite">bin/fm-watch.sh:2738-2758</code>). On every later poll of the same hash, <code>wedge_timer_check</code> repairs a missing or corrupt timer ("self-heals a watcher restart between recording the hash and recording the timer") or, once the timer reaches <code>FM_STALE_ESCALATE_SECS</code> (default 240), runs the at-threshold branch (<code class="cite">bin/fm-watch.sh:1229-1286</code>).</p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 740 540" role="img" aria-labelledby="wp-l-t wp-l-d">
+<title id="wp-l-t">wedge_timer_check at threshold</title>
+<desc id="wp-l-d">When the idle timer reaches the threshold, three probes run in order: wait evidence defers to the long recheck cadence, worktree writes defer to the same cadence, and a dead or missing agent is reported once. Only when none applies does the escalation count increase and a stale wake fire, marked demand-deep-inspection from the third consecutive escalation.</desc>
+<defs><marker id="wp-l-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">At threshold: three deferrals, then the ladder</text>
+<g class="c4-component"><rect x="20" y="50" width="380" height="56" rx="6"/><text class="c4-label" x="210" y="72">Idle timer ≥ STALE_ESCALATE_SECS</text><text class="c4-desc" x="210" y="90">provably-working stale on one hash</text></g>
+<g class="c4-component"><rect x="20" y="136" width="380" height="64" rx="6"/><text class="c4-label" x="210" y="158">1 · wedge_wait_evidence</text><text class="c4-desc" x="210" y="176">captain-held, unexpired paused:, or (opt-in)</text><text class="c4-desc" x="210" y="190">a parked gate owed firstmate's open decision</text></g>
+<g class="c4-component"><rect x="20" y="230" width="380" height="56" rx="6"/><text class="c4-label" x="210" y="252">2 · crew_worktree_written_since</text><text class="c4-desc" x="210" y="270">a file newer than the quiet window</text></g>
+<g class="c4-component"><rect x="20" y="316" width="380" height="56" rx="6"/><text class="c4-label" x="210" y="338">3 · fm_backend_agent_state</text><text class="c4-desc" x="210" y="356">dead or missing endpoint?</text></g>
+<g class="c4-system"><rect x="20" y="402" width="380" height="64" rx="8"/><text class="c4-label" x="210" y="424">Escalate: count n += 1</text><text class="c4-desc" x="210" y="442">stale: … possible wedge, escalation n</text><text class="c4-desc" x="210" y="456">n ≥ 3 adds demand-deep-inspection</text></g>
+<g class="c4-rel"><path d="M210,106 V134" marker-end="url(#wp-l-arrow)"/></g>
+<g class="c4-rel"><path d="M210,200 V228" marker-end="url(#wp-l-arrow)"/><text class="c4-rel-label" x="230" y="219">none</text></g>
+<g class="c4-rel"><path d="M210,286 V314" marker-end="url(#wp-l-arrow)"/><text class="c4-rel-label" x="230" y="305">none</text></g>
+<g class="c4-rel"><path d="M210,372 V400" marker-end="url(#wp-l-arrow)"/><text class="c4-rel-label" x="230" y="391">alive or unsure</text></g>
+<g class="c4-external"><rect x="480" y="136" width="240" height="64" rx="8"/><text class="c4-label" x="600" y="158">Defer: wait cadence</text><text class="c4-desc" x="600" y="176">timer restarts; recheck</text><text class="c4-desc" x="600" y="190">names who owes the answer</text></g>
+<g class="c4-external"><rect x="480" y="230" width="240" height="56" rx="8"/><text class="c4-label" x="600" y="252">Defer: write cadence</text><text class="c4-desc" x="600" y="270">timer restarts, bounded</text></g>
+<g class="c4-system"><rect x="480" y="316" width="240" height="56" rx="8"/><text class="c4-label" x="600" y="338">Report once</text><text class="c4-desc" x="600" y="356">per verdict and incarnation</text></g>
+<g class="c4-rel"><path d="M400,168 H478" marker-end="url(#wp-l-arrow)"/><text class="c4-rel-label" x="440" y="162">wait</text></g>
+<g class="c4-rel"><path d="M400,258 H478" marker-end="url(#wp-l-arrow)"/><text class="c4-rel-label" x="440" y="252">writes</text></g>
+<g class="c4-rel"><path d="M400,344 H478" marker-end="url(#wp-l-arrow)"/><text class="c4-rel-label" x="440" y="338">gone</text></g>
+<g class="c4-component"><rect x="20" y="490" width="700" height="40" rx="6"/><text class="c4-label" x="370" y="508">The escalation count is never advanced or reset by a deferral</text><text class="c4-desc" x="370" y="523">it resets only when the pane moves, turns busy, or churns</text></g>
+</svg>
+</div>
+<figcaption>The probe order and the reasons for it are stated at <code class="cite">bin/fm-watch.sh:1236-1247</code>: "The wait consult runs first, because a pane that can account for its own quiet has nothing to prove through its worktree. The dead-record probe runs last of the three, so the two cheaper deferrals keep the panes they already own." All three run "at most one each per window per STALE_ESCALATE_SECS, never on an ordinary poll".</figcaption>
+</figure>
+
+<h3 id="deep">demand-deep-inspection</h3>
+<p>Without it, "a pane that keeps re-wedging on the SAME stale hash - each escalation gets absorbed again as 'still validating' one poll later, since the hash never changes - can otherwise repeat forever with no signal that this is no longer a one-off" (<code class="cite">bin/fm-watch.sh:867-877</code>). At <code>FM_WEDGE_DEMAND_INSPECT_COUNT</code> (default 3) the reason becomes <code>stale: &lt;w&gt; (idle Ns, possible wedge, escalation n, demand-deep-inspection: same pane has wedge-escalated n times in a row - do not re-absorb on the run-step/pane state alone)</code> (<code class="cite">bin/fm-watch.sh:1275-1278</code>). The supervisor's duty changes with it: "a deep-inspection reason also requires current-state and validation-log inspection" (<code class="cite">AGENTS.md:440</code>).</p>
+<p>After an escalation the timer file is removed (<code class="cite">bin/fm-watch.sh:1279-1282</code>). On the ordinary non-terminal path the next poll of the same hash repairs the timer, so a pane frozen on one hash escalates about once per <code>STALE_ESCALATE_SECS</code> with a rising count. On the path where an active run overrode a captain-relevant status line, the next poll of the same hash finds no timer and does nothing further until the hash changes (<code class="cite">bin/fm-watch.sh:2725-2734</code>).</p>
+
+<h3 id="never-interrupt">Inspection only, never an interrupt</h3>
+<p>Every form of this escalation is "for human inspection only - never an automatic interrupt, signal, or restart of the worker or its tool process" (<code class="cite">bin/fm-watch.sh:75-78</code>). Recovery is the supervisor's decision through the <code>stuck-crewmate-recovery</code> skill (<code class="cite">AGENTS.md:588</code>).</p>
+
+<h2 id="deferrals">The three deliberate deferrals</h2>
+<p>Each is a <em>deferral</em>, not a cancellation: the idle timer restarts so the next window probes again, and the escalation counter "is neither advanced (this is not an escalation) nor reset (a later genuine escalation must still carry the demand-deep-inspection history it had already earned)" (<code class="cite">bin/fm-watch.sh:904-917</code>). Because the timer restarts, "a wait that ends is escalating again within one STALE_ESCALATE_SECS, which is why the worst-case detection time for a pane that stops waiting does not move" (<code class="cite">bin/fm-watch.sh:1057-1062</code>).</p>
+
+<h3 id="wait-evidence">1 · Wait evidence</h3>
+<p><code>wedge_wait_evidence</code> answers "is this quiet a bounded wait?" from two independent records (<code class="cite">bin/fm-watch.sh:956-1055</code>):</p>
+<ul>
+<li>The worker's own last status line: a verified <code>captain-held</code> transfer, or a <code>paused:</code> declaration whose optional <code>until</code> time has not passed. "The declaration is what the worker said about its OWN silence, so it outranks a liveness verdict that only says something is running."</li>
+<li>Only in a home with <code>config/wedge-defer-parked-gate</code>: a no-mistakes gate whose findings table owes an <code>ask-user</code> answer <em>and</em> an open <code>needs-decision</code> keyed <code>nm-&lt;run&gt;-&lt;step&gt;</code> for that same run. Both signals are needed: the gate says a human owes an answer, and the open decision proves "firstmate was actually told about THIS gate and has not answered yet".</li>
+</ul>
+<p>The evidence travels as a five-field record — kind, subject, whom, action, age anchor — joined with the ASCII unit separator rather than TAB, because "consecutive tabs collapse under <code>read</code>, so a record with an empty middle field would not fail to parse, it would SHIFT every later field left" (<code class="cite">bin/fm-watch.sh:930-954</code>). <code>wedge_defer_wait</code> refuses a malformed record and escalates instead, because "deferring is what takes the ladder away" (<code class="cite">bin/fm-watch.sh:1100-1121</code>). The recheck names who owes the answer: an external dependency for <code>paused:</code>, the captain for a hold, firstmate itself for a parked gate (<code class="cite">docs/architecture.md:37-38</code>).</p>
+
+<h3 id="writes">2 · Worktree writes</h3>
+<p>"The pane and the run step both say nothing is happening; the worktree says otherwise, and files appearing in it is the harder signal to fake" (<code class="cite">bin/fm-watch.sh:904-908</code>). <code>crew_worktree_written_since</code> walks the task's recorded worktree for a file newer than the quiet window, pruned (<code>FM_WORKTREE_WRITE_PRUNE</code>), depth-bounded (<code>FM_WORKTREE_WRITE_MAXDEPTH</code>, 6), and time-bounded (<code>FM_WORKTREE_WRITE_TIMEOUT</code>, 10 s) (<code class="cite">bin/fm-classify-lib.sh:2215-2263</code>). A <code>.writing-since-&lt;key&gt;</code> marker ages the whole deferral chain so it still resurfaces once per <code>PAUSE_RESURFACE_SECS</code>, so "a crew whose worktree churns without real progress cannot stay invisible". A secondmate's worktree is never probed, because its own supervision keeps writing inside it (<code class="cite">docs/architecture.md:51</code>).</p>
+
+<h3 id="dead">3 · Dead record</h3>
+<p>"Is there still an agent here to BE wedged?" Two finished lanes on one live fleet once reached "226 and 203 consecutive escalations, roughly one every <code>FM_STALE_ESCALATE_SECS</code>, which is what drowns the alarms that matter" (<code class="cite">docs/architecture.md:52</code>). <code>wedge_dead_record</code> reads <code>fm_backend_agent_state</code> once; only <code>dead</code> (endpoint present, no agent) and <code>missing</code> (endpoint gone) license it, and every other verdict — <code>alive</code>, <code>ambiguous</code>, <code>unreadable</code>, <code>unverified</code>, a failed read — "keeps the unchanged escalation schedule, reason and count" (<code class="cite">bin/fm-watch.sh:1162-1196</code>). The report is sent once per verdict and agent incarnation (the busy gen, or the pane hash when no gen is readable), appended before its marker so a failed append cannot be absorbed on retry (<code class="cite">bin/fm-watch.sh:1197-1227</code>). It "decides nothing about the record's fate, because such a lane routinely still holds unlanded work that teardown is right to refuse" (<code class="cite">docs/architecture.md:55</code>).</p>
+
+<h2 id="busy-bound">The busy-pane bound</h2>
+<p>A busy pane would otherwise be unconditional proof of liveness. <code>BUSY_TURN_MAX_SECS</code> (default 3600) bounds it: past the bound with no completed turn or native progress, <code>busy_turn_bound_check</code> hands the pane to the same wedge timer, with the same reason, count, and deep-inspection marker — unless the crew declared the wait itself, which takes the pause cadence (<code class="cite">bin/fm-watch.sh:1363-1430</code>). Under daemon-backed away mode a declared wait there is handed to the daemon as a plain <code>stale: &lt;window&gt;</code> once per declaration, keyed on the status-log signature rather than the pane hash, because "a busy pane's harness footer ticks on every capture, so a hash-keyed one-shot would re-fire on every poll" (<code class="cite">bin/fm-watch.sh:1389-1424</code>).</p>
+
+<h2 id="declared">Declared waits and why they are absorbed</h2>
+<p>Two status verbs let a worker account for its own silence (<code class="cite">bin/fm-classify-lib.sh:231-266</code>):</p>
+<dl class="defs">
+<dt><code>paused: &lt;why&gt;</code></dt>
+<dd>"A declared <code>paused:</code> event means a bounded external wait expected to clear on its own, while <code>blocked:</code> means firstmate action is needed" (<code class="cite">AGENTS.md:435</code>). The generated brief tells workers to use it "ONLY when you are deliberately idling on a known external wait"; firstmate "then leaves your idle pane alone and rechecks it on a long cadence instead of treating it as a possible wedge" (<code class="cite">bin/fm-brief.sh:438</code>). An optional <code>until &lt;YYYY-MM-DDTHH:MM[:SS]Z&gt;</code> makes the wait condition-aware; a malformed time "falls back to the cadence rather than silencing the wait" (<code class="cite">bin/fm-classify-lib.sh:268-285</code>).</dd>
+<dt><code>captain-held</code></dt>
+<dd>A verified transfer of the work to the captain. It gets the same cadence but a different recheck wording, because "they block on DIFFERENT humans" (<code class="cite">bin/fm-classify-lib.sh:244-255</code>).</dd>
+</dl>
+<p>Why absorb rather than escalate: "A crew that declared a pause is idling on a known external wait, so its stale pane is absorbed rather than wedge-escalated", while the recheck is "far longer than the wedge threshold, but finite so a forgotten wait cannot rot invisibly" (<code class="cite">bin/fm-watch.sh:289-299</code>). Without the absorb, a worker waiting on an upstream release would climb the ladder every four minutes for hours.</p>
+
+<h3 id="cadence">The recheck cadence</h3>
+<ul>
+<li><strong>Length.</strong> <code>FM_PAUSE_RESURFACE_SECS</code>, default 14400 s (four hours) (<code class="cite">bin/fm-classify-lib.sh:106</code>, <code class="cite">bin/fm-watch.sh:300</code>).</li>
+<li><strong>Anchor.</strong> The wait is aged from the status file's mtime, "so a churny idle pane (a ticking clock, a token counter) cannot keep resetting the cadence the way a hash-tied timer would" (<code class="cite">bin/fm-watch.sh:1302-1311</code>).</li>
+<li><strong>Throttle.</strong> <code>resurface_absorbed</code> fires once per window per cadence, scoped to the declaration's status-log signature so a new declaration starts its own window (<code class="cite">bin/fm-watch.sh:879-902</code>, <code class="cite">bin/fm-watch.sh:1550-1556</code>).</li>
+<li><strong><code>until</code>.</strong> Not rechecked before the declared time; rechecked once as soon as it passes; a declared time beyond the cadence "cannot extend the ordinary recheck cadence" (<code class="cite">bin/fm-watch.sh:14-18</code>, <code class="cite">bin/fm-watch.sh:1340-1354</code>).</li>
+<li><strong>Away.</strong> While the away-posture record exists, "an item held for the captain is never rechecked at all, in either posture": "there is nobody to answer it, the return brief lists it, and a recheck would only churn (the 2026-09-07 away-window audit counted hourly rechecks of captain-held items as pure noise)" (<code class="cite">bin/fm-watch.sh:324-337</code>). External waits keep their cadence.</li>
+</ul>
+
+<h3 id="liveness">Which crews earn the cadence</h3>
+<p><code>pause_state_class</code> reconciles the declaration with authoritative crew state (<code class="cite">bin/fm-watch.sh:1455-1513</code>):</p>
+<ul>
+<li>a crew whose current state is working (an active run started after the pause) reports <code>working</code> and takes the wedge timer — run-step precedence wins over the line;</li>
+<li>an ordinary crew whose agent the backend confidently reports dead is admitted as <code>paused</code>;</li>
+<li>a live or ambiguously read agent reports <code>none</code>, so "a worker genuinely waiting on a decision is never silenced" — its first sight surfaces, and later sights are held to the cadence by <code>surface_nonterminal_stale</code> (<code class="cite">bin/fm-watch.sh:1612-1693</code>);</li>
+<li>a secondmate earns the cadence on its declaration alone, "because its endpoint liveness is deliberately never read" (<code class="cite">bin/fm-watch.sh:291-295</code>).</li>
+</ul>
+<p>A captain hold recorded only in the backlog (the worker's last line is still <code>done</code>) is a second record of a wait; <code>captain_call_stale_bound</code> reads it through <code>bin/fm-captain-hold.sh open</code> so the alarm does not "re-fire for the captain's whole thinking time", binding the throttle to the call's own identity so a released-then-reheld call is a new first sight (<code class="cite">bin/fm-watch.sh:1515-1610</code>). Hold records are owned by <a href="../backlog-and-decisions/index.html">Backlog and decisions</a>.</p>
+<p>The herdr push path absorbs an immediate transition for a declared wait too, "leav[ing] the bounded re-surface to the watcher's own pause cadence" (<code class="cite">bin/fm-push-transition-lib.sh:149-157</code>).</p>
+
+<h2 id="secondmate-stall">Secondmate wake-loop stalls</h2>
+<p>A related liveness check that is not a pane wedge: "Agent endpoint liveness and queue-consumption liveness are separate" (<code class="cite">docs/architecture.md:65</code>). The parent times how long the oldest actionable row in a local mate's queue has not changed, ignores rows that declare an external pause, and emits one <code>check: secondmate wake-loop stalled</code> per no-progress episode, with receipts that survive watcher and handling crashes (<code class="cite">bin/fm-watch.sh:726-865</code>).</p>
+
+<h2 id="unclear">Open questions</h2>
+<div class="callout unclear"><span class="callout-title">Throttle scope for churning parked gates</span>
+<p><code class="cite">docs/architecture.md:46-47</code> records "a known bound: the recheck throttle is scoped to the pane hash", so a parked gate whose display churns is rechecked once per idle window rather than on the long cadence. The code for the wait deferral uses a per-window throttle file, <code>.waiting-resurfaced-&lt;key&gt;</code>, that <code>clear_stale_hash_tracking</code> removes whenever per-hash state resets (<code class="cite">bin/fm-watch.sh:1442-1447</code>). The two are consistent, but whether this residual is still intended after the declaration-scoped throttles were added for <code>paused:</code> is not stated.</p></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

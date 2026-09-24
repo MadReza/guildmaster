@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wake kinds and triage · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Supervision</p>
+<h1>Wake kinds and triage</h1>
+<p class="lede">Every actionable event reaches the supervisor as exactly one of four kinds — <code>signal</code>, <code>stale</code>, <code>check</code>, <code>heartbeat</code> — and each kind has its own producers, its own absorb rules in the watcher, and its own handling duty for the supervisor.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Supervision</a>. Record format: <a href="wake-queue.html">Durable wake queue</a>.</p>
+
+<h2 id="closed-set">A closed set of four</h2>
+<p>The queue refuses any other kind: <code>fm_wake_append_locked</code> accepts only <code>signal|stale|check|heartbeat</code> and returns 2 otherwise (<code class="cite">bin/fm-wake-lib.sh:1840-1843</code>). The arm wrapper, the Claude auto-arm, and the Codex checkpoint all recognise an actionable close by the same leading-token pattern, <code>^(signal:|stale:|check:|heartbeat($|:))</code> (<code class="cite">bin/fm-watch-arm.sh:353-368</code>, <code class="cite">bin/fm-claude-stop-autoarm.sh:289</code>, <code class="cite">bin/fm-watch-checkpoint.sh:91</code>). Anything else on the watcher's stdout, such as <code>watcher: already running</code>, is not a wake.</p>
+
+<div class="table-wrap"><table>
+<thead><tr><th>Kind</th><th>Detects</th><th>Absorbable?</th><th>What the supervisor must do (<code class="cite">AGENTS.md:437-445</code>)</th></tr></thead>
+<tbody>
+<tr><td><code>signal</code></td><td>A status file or turn-ended marker changed since last reported.</td><td>Yes, only with positive working evidence and no captain-relevant event in the new span.</td><td>"Read the listed event lines first, then reconcile current state only where action depends on it."</td></tr>
+<tr><td><code>stale</code></td><td>A pane unchanged for two polls and not busy; a wedge-timer escalation; a herdr push transition; a stuck steering-inbox record.</td><td>Yes: provably working (timed), declared wait (long cadence), write or wait deferral, dead record already reported.</td><td>"Inspect the recorded endpoint and load <code>stuck-crewmate-recovery</code> …; a deep-inspection reason also requires current-state and validation-log inspection."</td></tr>
+<tr><td><code>check</code></td><td>Output from an authenticated check, or a structural event (process-event result, secondmate stall, rejected checks, downtime resurface, inactive outcome).</td><td>No. Output is "always actionable"; only a duplicate merged-PR outcome is absorbed.</td><td>"Act on the named poll result, including merges, contribution signals, Relay events, process-to-event source results, and captain inbox notes."</td></tr>
+<tr><td><code>heartbeat</code></td><td>The backed-off fleet scan found a captain-relevant event past the surfaced position.</td><td>Yes, the no-change case is the norm.</td><td>"Review the whole fleet from the structured fleet view, reconcile suspicious tasks and PR state, update the backlog, and never report an unchanged fleet as progress."</td></tr>
+</tbody>
+</table></div>
+<p>A status line is "a wake event, not current state"; before acting on an old decision, blocker, or pause, the supervisor must use <code>bin/fm-crew-state.sh</code> (<code class="cite">AGENTS.md:434-435</code>).</p>
+
+<h2 id="signal">signal</h2>
+<h3>Producers</h3>
+<ul>
+<li>Workers append lines to <code>state/&lt;id&gt;.status</code> (grammar owned by <a href="../communication/index.html">Communication</a>).</li>
+<li>Harness turn-end hooks touch <code>state/&lt;id&gt;.turn-ended</code>; on Claude the worker's <code>Stop</code> hook runs <code>touch …turn-ended</code> before applying the idle busy event (<code class="cite">bin/fm-spawn.sh:4088</code>). These markers "remain wake NOTIFICATIONS owned by the watcher, not current-state truth" (<code class="cite">bin/fm-busy-lib.sh:10-12</code>).</li>
+</ul>
+<h3>Detection</h3>
+<p><code>scan_signals</code> is a pure read that prints one line per file whose signature differs from its <code>.seen-*</code> marker: status files use a signature that includes readability, turn-ended markers use size and mtime (<code class="cite">bin/fm-watch.sh:1706-1732</code>, <code class="cite">bin/fm-wake-lib.sh:2094-2104</code>). On the first change the watcher sleeps <code>SIGNAL_GRACE</code> and rescans, so a status write and the same turn's turn-end become one wake (<code class="cite">bin/fm-watch.sh:2488-2496</code>).</p>
+<h3>Triage</h3>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 740 600" role="img" aria-labelledby="wk-sig-t wk-sig-d">
+<title id="wk-sig-t">Signal triage decision flow</title>
+<desc id="wk-sig-d">A changed signature lingers for the signal grace and is rescanned. If away mode is present the wake surfaces. If the new span of any status file carries a captain-relevant or decision-owned event, or cannot be read, it surfaces. If every referenced task is provably working it is absorbed. In an opted-in home, bare turn-ends whose panes churned within the bound are absorbed. Otherwise it surfaces.</desc>
+<defs><marker id="wk-sig-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">signal: triage</text>
+<g class="c4-component"><rect x="20" y="50" width="360" height="50" rx="6"/><text class="c4-label" x="200" y="72">Signature differs from .seen-*</text><text class="c4-desc" x="200" y="90">a .status or .turn-ended file</text></g>
+<g class="c4-component"><rect x="20" y="130" width="360" height="50" rx="6"/><text class="c4-label" x="200" y="152">Linger SIGNAL_GRACE, rescan</text><text class="c4-desc" x="200" y="170">last write wins per file</text></g>
+<g class="c4-component"><rect x="20" y="210" width="360" height="56" rx="6"/><text class="c4-label" x="200" y="234">state/.afk present?</text><text class="c4-desc" x="200" y="252">the daemon owns triage</text></g>
+<g class="c4-component"><rect x="20" y="290" width="360" height="56" rx="6"/><text class="c4-label" x="200" y="312">Actionable event in the new span?</text><text class="c4-desc" x="200" y="330">captain-relevant, decision-owned, unreadable</text></g>
+<g class="c4-component"><rect x="20" y="370" width="360" height="56" rx="6"/><text class="c4-label" x="200" y="392">Every task provably working?</text><text class="c4-desc" x="200" y="410">run-step or pane source, fm-crew-state</text></g>
+<g class="c4-component"><rect x="20" y="450" width="360" height="56" rx="6"/><text class="c4-label" x="200" y="472">Opt-in: bare turn-ends churned?</text><text class="c4-desc" x="200" y="490">config/turnend-churn-absorb, bounded</text></g>
+<g class="c4-system"><rect x="20" y="530" width="360" height="50" rx="8"/><text class="c4-label" x="200" y="552">Surface</text><text class="c4-desc" x="200" y="570">queue a row per file, advance, exit</text></g>
+<g class="c4-system"><rect x="470" y="210" width="250" height="136" rx="8"/><text class="c4-label" x="595" y="254">Surface</text><text class="c4-desc" x="595" y="274">one signal row per file;</text><text class="c4-desc" x="595" y="290">decision-owned payload is</text><text class="c4-desc" x="595" y="306">needs-decision:, then exit</text></g>
+<g class="c4-external"><rect x="470" y="370" width="250" height="136" rx="8"/><text class="c4-label" x="595" y="414">Absorb</text><text class="c4-desc" x="595" y="434">advance .seen-* and span,</text><text class="c4-desc" x="595" y="450">log to .watch-triage.log,</text><text class="c4-desc" x="595" y="466">keep blocking, no row</text></g>
+<g class="c4-rel"><path d="M200,100 V128" marker-end="url(#wk-sig-arrow)"/></g>
+<g class="c4-rel"><path d="M200,180 V208" marker-end="url(#wk-sig-arrow)"/></g>
+<g class="c4-rel"><path d="M200,266 V288" marker-end="url(#wk-sig-arrow)"/><text class="c4-rel-label" x="218" y="281">no</text></g>
+<g class="c4-rel"><path d="M200,346 V368" marker-end="url(#wk-sig-arrow)"/><text class="c4-rel-label" x="218" y="361">no</text></g>
+<g class="c4-rel"><path d="M200,426 V448" marker-end="url(#wk-sig-arrow)"/><text class="c4-rel-label" x="218" y="441">no</text></g>
+<g class="c4-rel"><path d="M200,506 V528" marker-end="url(#wk-sig-arrow)"/><text class="c4-rel-label" x="218" y="521">no</text></g>
+<g class="c4-rel"><path d="M380,238 H468" marker-end="url(#wk-sig-arrow)"/><text class="c4-rel-label" x="424" y="232">yes</text></g>
+<g class="c4-rel"><path d="M380,318 H468" marker-end="url(#wk-sig-arrow)"/><text class="c4-rel-label" x="424" y="312">yes</text></g>
+<g class="c4-rel"><path d="M380,398 H468" marker-end="url(#wk-sig-arrow)"/><text class="c4-rel-label" x="424" y="392">yes</text></g>
+<g class="c4-rel"><path d="M380,478 H468" marker-end="url(#wk-sig-arrow)"/><text class="c4-rel-label" x="424" y="472">yes</text></g>
+</svg>
+</div>
+<figcaption>The <code>||</code> ordering at <code class="cite">bin/fm-watch.sh:2550-2551</code> evaluates the two costly proofs only for a non-away signal with no actionable span, and the pane capture only after the authoritative verdict comes up short. Dark boxes surface; the grey box absorbs.</figcaption>
+</figure>
+<p>Three details carry the correctness:</p>
+<ul>
+<li><strong>Span, not last line.</strong> <code>signal_files_actionable</code> classifies every byte appended since the classified offset in the <code>.seen-*</code> marker, so a <code>working:</code> note landing during the grace window cannot hide the <code>needs-decision</code>, <code>blocked</code>, <code>failed</code>, or <code>done</code> that arrived just before it (<code class="cite">bin/fm-watch.sh:1883-1932</code>).</li>
+<li><strong>Decision-owned payload.</strong> A file whose new span carries a decision-owned class is queued with payload <code>needs-decision:&lt;files&gt;</code> instead of <code>signal:&lt;files&gt;</code>. The reason line stays byte-identical; only the row payload changes, and two readers branch on it: the Pi branch dispatcher, which keeps such rows on main, and the away daemon (<code class="cite">bin/fm-watch.sh:2539-2556</code>).</li>
+<li><strong>Unreadable is actionable.</strong> A span that cannot be classified surfaces, commits no classified position, and so is classified again once readable; the reported signature still advances, which "bounds an unreadable log to one report per distinct file state" (<code class="cite">bin/fm-watch.sh:1914-1921</code>, <code class="cite">bin/fm-watch.sh:2560-2564</code>).</li>
+</ul>
+<p>A secondmate's <code>.status</code> signal is never absorbed as provably working, because "that stream is the mate's routed-reply channel, so every append is parent-directed content" (<code class="cite">bin/fm-classify-lib.sh:2296-2303</code>).</p>
+
+<h2 id="stale">stale</h2>
+<h3>Producers</h3>
+<ul>
+<li><strong>The pane-staleness backbone</strong>, for a pane whose hash is unchanged for two polls and which is not busy (<code class="cite">bin/fm-watch.sh:2654-2781</code>). Reason: <code>stale: &lt;window&gt;</code>.</li>
+<li><strong>The wedge timer</strong>, for a provably-working stale idle past <code>STALE_ESCALATE_SECS</code>: <code>stale: &lt;window&gt; (idle Ns, possible wedge, escalation N)</code>, gaining <code>demand-deep-inspection</code> at the third consecutive escalation (<code class="cite">bin/fm-watch.sh:1273-1283</code>). Details on <a href="wedge-and-pauses.html">Wedges and declared waits</a>.</li>
+<li><strong>Deferral rechecks</strong>, which reuse the stale kind so they flow through the same handling: declared-wait, captain-held, worktree-write, and dead-record reports (<code class="cite">bin/fm-watch.sh:892-1227</code>).</li>
+<li><strong>The herdr push path</strong>: <code>stale: &lt;window&gt; (herdr: agent &lt;to&gt; - waiting on human, escalated immediately, not via wedge timer)</code> (<code class="cite">bin/fm-push-transition-lib.sh:163</code>).</li>
+<li><strong>The steering-inbox ladder</strong>, when a firstmate instruction stays unacknowledged after its doorbell budget, when its bookkeeping is unwritable, or when the worker's agent is dead or missing (<code class="cite">bin/fm-watch.sh:419-510</code>). The ladder policy is owned by <code>bin/fm-task-inbox-lib.sh</code> (<a href="../communication/index.html">Communication</a>).</li>
+</ul>
+<h3>Triage of a first-sight stale hash</h3>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 750 620" role="img" aria-labelledby="wk-st-t wk-st-d">
+<title id="wk-st-t">Stale triage decision tree</title>
+<desc id="wk-st-d">A pane unchanged twice and not busy, at a new hash, is routed by kind and posture. Secondmates take only the pause cadence. Under away mode the watcher queues a plain stale once per hash. In normal mode a captain-relevant last status is overridden by a provably working crew, bounded by an open captain call, or surfaced; otherwise pause_state_class decides working, paused, or none.</desc>
+<defs><marker id="wk-st-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">stale: first sight of a stable, idle pane hash</text>
+<g class="c4-component"><rect x="215" y="46" width="320" height="50" rx="6"/><text class="c4-label" x="375" y="68">Hash unchanged ×2, not busy</text><text class="c4-desc" x="375" y="86">.stale-&lt;key&gt; ≠ this hash</text></g>
+<g class="c4-rel"><path d="M375,96 V112 H125 V128" marker-end="url(#wk-st-arrow)"/></g>
+<g class="c4-rel"><path d="M375,112 V128" marker-end="url(#wk-st-arrow)"/></g>
+<g class="c4-rel"><path d="M375,112 H615 V128" marker-end="url(#wk-st-arrow)"/></g>
+<g class="c4-component"><rect x="10" y="130" width="230" height="56" rx="6"/><text class="c4-label" x="125" y="154">kind = secondmate</text><text class="c4-desc" x="125" y="172">idle mate panes are healthy</text></g>
+<g class="c4-component"><rect x="260" y="130" width="230" height="56" rx="6"/><text class="c4-label" x="375" y="154">state/.afk present</text><text class="c4-desc" x="375" y="172">the daemon owns triage</text></g>
+<g class="c4-component"><rect x="500" y="130" width="230" height="56" rx="6"/><text class="c4-label" x="615" y="154">Normal mode</text><text class="c4-desc" x="615" y="172">an ordinary crew</text></g>
+<g class="c4-external"><rect x="10" y="215" width="230" height="70" rx="8"/><text class="c4-label" x="125" y="239">Pause cadence or skip</text><text class="c4-desc" x="125" y="257">only a status-declared wait</text><text class="c4-desc" x="125" y="271">earns a bounded recheck</text></g>
+<g class="c4-system"><rect x="260" y="215" width="230" height="70" rx="8"/><text class="c4-label" x="375" y="239">Queue plain stale</text><text class="c4-desc" x="375" y="257">once per hash; captain-held</text><text class="c4-desc" x="375" y="271">under away record absorbed</text></g>
+<g class="c4-rel"><path d="M125,186 V213" marker-end="url(#wk-st-arrow)"/></g>
+<g class="c4-rel"><path d="M375,186 V213" marker-end="url(#wk-st-arrow)"/></g>
+<g class="c4-rel"><path d="M615,186 V300 H370 V318" marker-end="url(#wk-st-arrow)"/></g>
+<g class="c4-rel"><path d="M615,300 H620 V318" marker-end="url(#wk-st-arrow)"/></g>
+<g class="c4-component"><rect x="260" y="320" width="220" height="56" rx="6"/><text class="c4-label" x="370" y="342">Last status</text><text class="c4-desc" x="370" y="360">captain-relevant</text></g>
+<g class="c4-component"><rect x="510" y="320" width="220" height="56" rx="6"/><text class="c4-label" x="620" y="342">Otherwise</text><text class="c4-desc" x="620" y="360">pause_state_class</text></g>
+<g class="c4-external"><rect x="260" y="400" width="220" height="56" rx="6"/><text class="c4-label" x="370" y="422">working → absorb</text><text class="c4-desc" x="370" y="440">start the wedge timer</text></g>
+<g class="c4-external"><rect x="260" y="470" width="220" height="56" rx="6"/><text class="c4-label" x="370" y="492">captain call → absorb</text><text class="c4-desc" x="370" y="510">already surfaced, bounded</text></g>
+<g class="c4-system"><rect x="260" y="540" width="220" height="56" rx="6"/><text class="c4-label" x="370" y="562">else → surface</text><text class="c4-desc" x="370" y="580">and mark surfaced</text></g>
+<g class="c4-external"><rect x="510" y="400" width="220" height="56" rx="6"/><text class="c4-label" x="620" y="422">working → absorb</text><text class="c4-desc" x="620" y="440">start the wedge timer</text></g>
+<g class="c4-external"><rect x="510" y="470" width="220" height="56" rx="6"/><text class="c4-label" x="620" y="492">paused → cadence</text><text class="c4-desc" x="620" y="510">recheck, 4 h default</text></g>
+<g class="c4-system"><rect x="510" y="540" width="220" height="56" rx="6"/><text class="c4-label" x="620" y="562">none → surface</text><text class="c4-desc" x="620" y="580">first sight always wakes</text></g>
+<g class="c4-rel"><path d="M260,348 H250 V568 H258" marker-end="url(#wk-st-arrow)"/></g>
+<g class="c4-rel"><path d="M250,428 H258" marker-end="url(#wk-st-arrow)"/></g>
+<g class="c4-rel"><path d="M250,498 H258" marker-end="url(#wk-st-arrow)"/></g>
+<g class="c4-rel"><path d="M730,348 H740 V568 H732" marker-end="url(#wk-st-arrow)"/></g>
+<g class="c4-rel"><path d="M740,428 H732" marker-end="url(#wk-st-arrow)"/></g>
+<g class="c4-rel"><path d="M740,498 H732" marker-end="url(#wk-st-arrow)"/></g>
+<g class="c4-component"><rect x="10" y="320" width="230" height="120" rx="6"/><text class="c4-label" x="125" y="344">Same hash, timer running</text><text class="c4-desc" x="125" y="364">wedge_timer_check escalates</text><text class="c4-desc" x="125" y="380">past STALE_ESCALATE_SECS</text><text class="c4-desc" x="125" y="396">after three deferral probes</text><text class="c4-desc" x="125" y="412">(Wedges page)</text></g>
+<g class="c4-component"><rect x="10" y="460" width="230" height="136" rx="6"/><text class="c4-label" x="125" y="484">Busy, no turn for an hour</text><text class="c4-desc" x="125" y="504">busy_turn_bound_check:</text><text class="c4-desc" x="125" y="520">a declared wait takes the</text><text class="c4-desc" x="125" y="536">pause cadence; anything</text><text class="c4-desc" x="125" y="552">else the same wedge timer</text></g>
+</svg>
+</div>
+<figcaption>The costly current-state read runs once per distinct stale hash, never every poll (<code class="cite">bin/fm-watch.sh:2736-2749</code>). The two boxes on the left are the other stale paths a window can take on later polls. Dark boxes surface; grey boxes absorb.</figcaption>
+</figure>
+<p>The terminal branch exists because of a real incident class. A crew's status log gets no new entry once firstmate hands it to a no-mistakes validation, so a pre-validation <code>done:</code> line would otherwise re-surface the crew as stale "every few minutes despite an actively-running pipeline" — the "Root cause of the 2026-07 herdr false-surface incidents" (<code class="cite">bin/fm-watch.sh:2677-2691</code>). A provably-working verdict therefore outranks even a captain-relevant log line.</p>
+<p>The non-terminal <code>none</code> branch is deliberately loud: <code>pause_state_class</code> "answers <code>none</code> for a still-LIVE agent even under a declared wait, so a worker genuinely waiting on a decision is never silenced" — but its repeats are bounded to the pause cadence, keyed to the declaration and not to the pane hash, because an idle parked pane keeps ticking (<code class="cite">bin/fm-watch.sh:1612-1630</code>).</p>
+
+<h2 id="check">check</h2>
+<p>A check is any wake that is not about a worker's own pane or status stream. Every <code>check:</code> reason is actionable; the watcher does not absorb check output (<code class="cite">bin/fm-watch.sh:86</code>).</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Reason</th><th>Source</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><code>check: &lt;script&gt;: &lt;out&gt;</code></td><td>An authenticated <code>state/&lt;id&gt;.check.sh</code>: a PR merge poll (<a href="../delivery/index.html">Delivery</a>), the Relay shim, or a registered custom check. A merged PR is routed through the merge-outcome emitter and its poll retired; a duplicate merged result is absorbed.</td><td><code class="cite">bin/fm-watch.sh:2371-2486</code></td></tr>
+<tr><td><code>check: rejected unauthenticated state checks: …</code></td><td>A <code>*.check.sh</code> that failed validation; never executed.</td><td><code class="cite">bin/fm-watch.sh:2476-2481</code></td></tr>
+<tr><td><code>check: rejected unauthenticated PR poll retirement receipts: …</code></td><td>Startup found invalid pending retirements; preserved untouched.</td><td><code class="cite">bin/fm-watch.sh:2234-2242</code></td></tr>
+<tr><td><code>check: process-event result captured|source stranded|source failed to start: …</code></td><td>Process-to-event sources, published by <code>bin/fm-procevent.sh</code>; surfaced once per captured generation.</td><td><code class="cite">bin/fm-watch.sh:87-107</code>, <code class="cite">bin/fm-watch.sh:1764-1800</code></td></tr>
+<tr><td><code>check: secondmate wake-loop stalled: mate=… row=… idle=…s</code></td><td>A local secondmate's queue did not advance while the mate was not in an active turn.</td><td><code class="cite">bin/fm-watch.sh:118-127</code>, <code class="cite">bin/fm-watch.sh:854-862</code></td></tr>
+<tr><td><code>check: inactive-outcome</code></td><td>The bounded inactive-outcome scan found a terminal outcome lacking its durable receipt.</td><td><code class="cite">bin/fm-watch.sh:115-117</code>, <code class="cite">bin/fm-watch.sh:2354-2362</code></td></tr>
+<tr><td><code>check: rearm-resurface</code></td><td>A fresh (non-successor) watcher found queued rows nobody was told about.</td><td><code class="cite">bin/fm-watch.sh:2279-2294</code></td></tr>
+<tr><td><code>check: contributions &lt;task&gt; &lt;key&gt;</code></td><td>The contributions check, which appends its own rows.</td><td><code class="cite">bin/fm-contributions.sh:283-303</code></td></tr>
+<tr><td>captain inbox and Relay mentions</td><td>Out-of-band notes append one <code>check</code> wake each and stay pending until acknowledged with <code>bin/fm-inbox.sh drain --ack</code>.</td><td><code class="cite">AGENTS.md:138</code></td></tr>
+</tbody>
+</table></div>
+<p>A check-kind row is main-owned on the Pi branch while attended, "so it is never part of a branch claim and never defers one" (<code class="cite">docs/watcher-continuity.md:92</code>).</p>
+
+<h2 id="heartbeat">heartbeat</h2>
+<p>The only kind with no single subject. It is a time-based backstop run inside the watcher on a doubling interval (<a href="watcher.html#heartbeat">Watcher</a>). In normal mode it surfaces only when <code>heartbeat_scan_finds_actionable</code> sees a captain-relevant event past the per-task <code>.hb-surfaced-*</code> offset; "Because every captain-relevant signal/stale already marks itself surfaced when it wakes firstmate, this normally finds nothing and the heartbeat is absorbed" (<code class="cite">bin/fm-watch.sh:1954-1963</code>). It enqueues first and marks second, preserving enqueue-before-suppress (<code class="cite">bin/fm-watch.sh:2853-2861</code>). Under away mode every heartbeat is queued, because the daemon runs its own catch-all scan (<code class="cite">bin/fm-watch.sh:2849-2852</code>). At presentation all heartbeat rows collapse to one (<code class="cite">bin/fm-wake-lib.sh:1982-2002</code>).</p>
+<p>A heartbeat demands a whole-fleet review, and the Pi branch has its own all-or-nothing rule for taking one (<a href="pi-branch.html#heartbeat">Pi supervision branch</a>).</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>
