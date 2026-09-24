@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harness adapters · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Crew</p>
+<h1>Harness adapters</h1>
+<p class="lede">A harness is the agent CLI that runs inside a worker's pane: Claude Code, Codex, Pi, and ten others. An adapter is everything Firstmate must know to launch, observe, and control one of them. Firstmate dispatches only onto adapters it has verified, and "verified" has a precise, multi-owner meaning.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Crew</a>. The skill's routing and wording belong to <a href="../prompts-and-skills/index.html">Prompts and skills</a>; busy-state semantics belong to <a href="../supervision/index.html">Supervision</a>.</p>
+
+<h2 id="rule">The rule</h2>
+<p>"The verified harnesses are <code>claude</code>, <code>codex</code>, <code>opencode</code>, <code>pi</code>, <code>pi-signed</code>, <code>grok</code>, <code>kimi</code>, <code>cursor</code>, and <code>omp</code>, plus <code>muse</code>, <code>gemini</code>, <code>rovo</code>, and <code>agy</code> for crewmates and scouts only; never dispatch on an unverified adapter" <code class="cite">AGENTS.md:219</code>. If a static config names an unverified adapter, Firstmate reports it and falls back only to a verified one <code class="cite">AGENTS.md:220</code>. It tells the captain the runtime is not verified, uses its own verified runtime for current work, and does not pause that work <code class="cite crew-wrap">.agents/skills/harness-adapters/SKILL.md:25-31</code>. The executable list is <code>fm_control_harnesses</code> <code class="cite">bin/fm-control-lib.sh:64-69</code>.</p>
+
+<h2 id="verification">What "verified" means</h2>
+<p>A harness is not verified by being launchable. The skill's verification plan requires every owner to land together: "A value remains unreachable until its executable owner, portable regression, applicable credentialed live guard, and verification record land together" <code class="cite crew-wrap">.agents/skills/harness-adapters/references/common/dispatch.md:27-33</code>. The owners are spread across the codebase:</p>
+
+<figure class="diagram">
+<svg class="c4" viewBox="0 0 960 440" role="img" aria-labelledby="hv-t hv-d">
+<title id="hv-t">The owners a verified harness adapter must land in</title>
+<desc id="hv-d">A verified adapter is the sum of detection in fm-harness.sh, launch in fm-spawn.sh, busy state in fm-busy-lib.sh, composer reading in fm-composer-lib.sh, lifecycle in fm-control-lib.sh, and tmux liveness, plus primary integration for secondmate use, backed by a harness reference, regression tests, and a verification record.</desc>
+<text class="c4-diagram-title" x="20" y="30">A verified adapter, by owner</text>
+<g class="c4-boundary"><rect x="20" y="50" width="920" height="250" rx="10"/><text x="32" y="292">Executable owners (all must carry the new value)</text></g>
+<g class="c4-component"><rect x="40" y="75" width="210" height="80" rx="8"/><text class="c4-label" x="145" y="103">Detection</text><text class="c4-tech" x="145" y="119">[bin/fm-harness.sh]</text><text class="c4-desc" x="145" y="137">env marker + ancestry name</text></g>
+<g class="c4-component"><rect x="265" y="75" width="210" height="80" rx="8"/><text class="c4-label" x="370" y="103">Launch</text><text class="c4-tech" x="370" y="119">[fm-spawn.sh launch_template]</text><text class="c4-desc" x="370" y="137">flags, brief, turn-end wiring</text></g>
+<g class="c4-component"><rect x="490" y="75" width="210" height="80" rx="8"/><text class="c4-label" x="595" y="103">Busy state</text><text class="c4-tech" x="595" y="119">[bin/fm-busy-lib.sh]</text><text class="c4-desc" x="595" y="137">semantic source or fallback</text></g>
+<g class="c4-component"><rect x="715" y="75" width="205" height="80" rx="8"/><text class="c4-label" x="817" y="103">Composer</text><text class="c4-tech" x="817" y="119">[bin/fm-composer-lib.sh]</text><text class="c4-desc" x="817" y="137">empty / pending / unknown</text></g>
+<g class="c4-component"><rect x="40" y="185" width="210" height="80" rx="8"/><text class="c4-label" x="145" y="213">Lifecycle</text><text class="c4-tech" x="145" y="229">[bin/fm-control-lib.sh]</text><text class="c4-desc" x="145" y="247">interrupt key, exit, kinds</text></g>
+<g class="c4-component"><rect x="265" y="185" width="210" height="80" rx="8"/><text class="c4-label" x="370" y="213">Liveness</text><text class="c4-tech" x="370" y="229">[bin/backends/tmux.sh]</text><text class="c4-desc" x="370" y="247">harness vs bare shell</text></g>
+<g class="c4-component"><rect x="490" y="185" width="210" height="80" rx="8"/><text class="c4-label" x="595" y="213">Primary integration</text><text class="c4-tech" x="595" y="229">[supervision protocols, hooks]</text><text class="c4-desc" x="595" y="247">needed for secondmate use</text></g>
+<g class="c4-component"><rect x="715" y="185" width="205" height="80" rx="8"/><text class="c4-label" x="817" y="213">Model discovery</text><text class="c4-tech" x="817" y="229">[model-and-effort.md]</text><text class="c4-desc" x="817" y="247">flags, accepted values</text></g>
+<g class="c4-datastore"><path d="M60,330 a120,11 0 0,0 240,0 a120,11 0 0,0 -240,0 v58 a120,11 0 0,0 240,0 v-58"/><text class="c4-label" x="180" y="362">Harness reference</text><text class="c4-desc" x="180" y="380">references/harness/&lt;tool&gt;.md</text></g>
+<g class="c4-datastore"><path d="M360,330 a120,11 0 0,0 240,0 a120,11 0 0,0 -240,0 v58 a120,11 0 0,0 240,0 v-58"/><text class="c4-label" x="480" y="362">Regression tests</text><text class="c4-desc" x="480" y="380">tests/*.test.sh, live guards</text></g>
+<g class="c4-datastore"><path d="M660,330 a120,11 0 0,0 240,0 a120,11 0 0,0 -240,0 v58 a120,11 0 0,0 240,0 v-58"/><text class="c4-label" x="780" y="362">Verification record</text><text class="c4-desc" x="780" y="380">docs/verification/, dated</text></g>
+</svg>
+<figcaption>The top row and the "Lifecycle" and "Liveness" boxes are required for crewmate use; "Primary integration" only when the adapter may run a secondmate. The bottom row is the evidence. Sources: <code class="cite crew-wrap">.agents/skills/harness-adapters/references/common/dispatch.md:30-33</code>, <code class="cite crew-wrap">.agents/skills/harness-adapters/SKILL.md:50</code>.</figcaption>
+</figure>
+
+<p>Each harness reference opens with its evidence date and version, for example "Busy hooks verified 2026-07-28 on Claude Code 2.1.220" <code class="cite crew-wrap">.agents/skills/harness-adapters/references/harness/claude.md:3</code>, or "Verified 2026-09-02 on Rovo CLI 202609.1.2 for crewmate/scout work only" <code class="cite crew-wrap">.agents/skills/harness-adapters/references/harness/rovo.md:3</code>. The references are "empirical knowledge for those executable owners", and never a second owner <code class="cite crew-wrap">.agents/skills/harness-adapters/references/common/dispatch.md:18-25</code>. For verifying a new CLI, the spawn's raw-launch escape hatch accepts any whitespace-containing string as a literal command, "only for a trivial supervised task" <code class="cite">bin/fm-spawn.sh:154-155</code> <code class="cite crew-wrap">.agents/skills/harness-adapters/references/common/dispatch.md:29</code>.</p>
+
+<h2 id="matrix">The 13 adapters</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Harness</th><th>Kinds</th><th>Interrupt</th><th>Exit</th><th>Busy source</th><th>Evidence line</th></tr></thead>
+<tbody>
+<tr><td>claude</td><td>all</td><td>Escape</td><td><code>/exit</code></td><td>owned hooks (<code>UserPromptSubmit</code> opens; <code>Stop</code>, <code>StopFailure</code>, <code>SessionEnd</code> close)</td><td>2026-07-28, 2.1.220</td></tr>
+<tr><td>codex</td><td>all</td><td>Escape</td><td><code>/quit</code></td><td>"Unknown until a semantic source is live-verified"</td><td>2026-06-11, 0.139.0</td></tr>
+<tr><td>opencode</td><td>all</td><td>Escape ×2</td><td><code>/exit</code></td><td>Firstmate plugin's <code>session.status</code></td><td>2026-06-11, 1.15.7–1.17.6</td></tr>
+<tr><td>pi, pi-signed</td><td>all</td><td>Escape</td><td><code>/quit</code></td><td>Firstmate extension, <code>agent_start</code> / <code>agent_settled</code></td><td>shared contract</td></tr>
+<tr><td>omp</td><td>all</td><td>Escape</td><td><code>/quit</code></td><td>per-task extension <code>omp-ext</code></td><td>2026-09-05, 18.1.11</td></tr>
+<tr><td>grok</td><td>all</td><td>Ctrl+C</td><td><code>/exit</code></td><td>rendered-tail fallback (<code>Ctrl+c:cancel</code>)</td><td>—</td></tr>
+<tr><td>kimi</td><td>all</td><td>Escape</td><td><code>/exit</code></td><td>unknown pending a semantic source</td><td>2026-09-17, 2.0.0</td></tr>
+<tr><td>cursor</td><td>all</td><td>Escape</td><td><code>/exit</code></td><td>per-conversation transcript fold</td><td>2026-08-11 to 08-13</td></tr>
+<tr><td>gemini</td><td>ship, scout</td><td>Escape</td><td><code>/quit</code></td><td><code>gemini-hook</code> (<code>BeforeAgent</code> / <code>AfterAgent</code>)</td><td>2026-09-04, 0.58.0</td></tr>
+<tr><td>muse</td><td>ship, scout</td><td>Escape + Ctrl+U</td><td><code>/exit</code></td><td>durable session event log</td><td>2026-08-05, 0.1.0-R708.1</td></tr>
+<tr><td>rovo</td><td>ship, scout</td><td>Escape</td><td><code>/exit</code></td><td>rendered-tail fallback (<code>Rovo is thinking...</code>)</td><td>2026-09-02, 202609.1.2</td></tr>
+<tr><td>agy</td><td>ship, scout</td><td>Escape</td><td><code>/quit</code></td><td>Herdr native state, else <code>agy-regex</code> fallback</td><td>2026-09-10, 1.2.0</td></tr>
+</tbody></table></div>
+<p class="evidence">Interrupt, exit, and kinds: <code class="cite">bin/fm-control-lib.sh:113-197</code>. Busy sources and evidence dates: the first table in each file under <code class="cite crew-wrap">.agents/skills/harness-adapters/references/harness/</code>.</p>
+<p>Two rows show that "verified" does not mean "fully observable". Codex and standalone kimi have no verified semantic busy source, so their busy state is unknown until one is proven. They remain dispatchable because launch, lifecycle, and supervision through status lines are verified.</p>
+
+<h2 id="detection">Detection and static resolution</h2>
+<p><code>bin/fm-harness.sh</code> prints the harness the first mate itself runs on. It combines two kinds of evidence: environment <em>markers</em>, which a child inherits and a multiplexer can replay stale, and process <em>ancestry</em>, "the structural fact about who actually owns the process tree, so it is what settles a disagreement" <code class="cite">bin/fm-harness.sh:47-57</code>. <code>detect_own</code> is the single place that combines them. Launches clear foreign markers so a worker is not misdetected as its parent (<a href="launch.html#prefixes">Launch prefixes</a>).</p>
+<p>With no explicit harness, resolution is static <code class="cite">bin/fm-harness.sh:2-19</code>:</p>
+<ul>
+<li><code>fm-harness.sh crew</code>: <code>config/crew-harness</code>, where absent or <code>default</code> means Firstmate's own harness.</li>
+<li><code>fm-harness.sh secondmate</code>: <code>config/secondmate-harness</code>, then <code>config/crew-harness</code>, then its own. That file may add a model and effort token on the same line. The split stays "DURABLE across every respawn" <code class="cite">bin/fm-spawn.sh:146-154</code> <code class="cite">bin/fm-spawn.sh:182-190</code>.</li>
+</ul>
+<p>When <code>config/crew-dispatch.json</code> exists, static resolution is off for crewmates and scouts and the harness must be passed explicitly. See <a href="dispatch-profiles.html">Dispatch profiles</a>.</p>
+
+<h2 id="recorded">The recorded harness is authoritative afterwards</h2>
+<p>"For recovery and control, use the exact <code>harness=</code> in <code>state/&lt;id&gt;.meta</code>; never infer it from a model or provider" <code class="cite crew-wrap">.agents/skills/harness-adapters/SKILL.md:33</code>. A task launched from a raw command records the command's basename, so <code>fm_control_harness_family</code> maps prefixes such as <code>claude*</code> to their adapter. <code>pi</code>, <code>pi-signed</code>, <code>omp</code> and <code>agy</code> must match exactly, and anything else "returns nonzero rather than being guessed into a family" <code class="cite">bin/fm-control-lib.sh:79-103</code>.</p>
+
+<h2 id="axes">Model, effort, and provider</h2>
+<ul>
+<li>Scripts receive only concrete axes, never natural-language rules <code class="cite crew-wrap">.agents/skills/harness-adapters/references/common/model-and-effort.md:8-9</code>.</li>
+<li><strong>Record and omit.</strong> An effort outside the adapter's accepted set is written to <code>effort=</code> in the record but emitted as no flag, which "preserves launch success instead of passing a known-bad value". <code>ultra</code> is the exception and is refused outside its model scope <code class="cite crew-wrap">.agents/skills/harness-adapters/references/common/model-and-effort.md:20-23</code>.</li>
+<li><strong>Effort fallback.</strong> <code>low</code> for well-understood work, <code>xhigh</code> for ambiguous investigation, never <code>max</code> without explicit captain preference <code class="cite crew-wrap">.agents/skills/harness-adapters/references/common/model-and-effort.md:12-18</code>.</li>
+<li><strong>Harness is not provider.</strong> "<code>harness=pi</code> with <code>model=xai/grok-*</code> is Pi using xAI, not standalone Grok Build" <code class="cite crew-wrap">.agents/skills/harness-adapters/references/common/model-and-effort.md:25-29</code>.</li>
+</ul>
+
+<h2 id="lifecycle">What the adapter decides at runtime</h2>
+<ul>
+<li><strong>Trust dialogs.</strong> Claude's workspace-trust dialog cannot be answered by key and is pre-registered by the spawn. agy's is pre-registered, and a post-launch gate backs it up. Cursor passes <code>--trust</code>, muse <code>--yolo</code>, grok avoids its picker by starting in the git root, Pi's is answered with Enter, and Codex shows one on the first run for a repository root <code class="cite crew-wrap">.agents/skills/harness-adapters/references/common/control-and-recovery.md:19-25</code>.</li>
+<li><strong>Completion.</strong> "Trust handling is complete only when inspection proves the target started processing its instructions; delivery success alone is not proof" <code class="cite crew-wrap">.agents/skills/harness-adapters/SKILL.md:37</code>.</li>
+<li><strong>No resume verb.</strong> Native resume is not deterministic across adapters, so relaunch trusts "instructions on disk, not a private session" <code class="cite">docs/agent-control.md:54-56</code>.</li>
+</ul>
+
+<div class="callout"><span class="callout-title">Finding: two link bases in one skill</span>
+<p>The router says links inside nested references resolve "against the skill directory" <code class="cite crew-wrap">.agents/skills/harness-adapters/SKILL.md:22</code>. Most harness references follow that (<code>../../../bin/…</code>). <code>gemini.md</code> and <code>agy.md</code> instead use links relative to their own file (<code>../../../../../bin/…</code>), and <code>claude.md</code> and <code>muse.md</code> mix both styles. A renderer that resolves relative to the file breaks the first group; an agent following the router's rule breaks the second.</p></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

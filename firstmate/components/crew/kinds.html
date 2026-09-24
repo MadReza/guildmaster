@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kinds of worker · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Crew</p>
+<h1>Kinds of worker</h1>
+<p class="lede">Firstmate commands three kinds of direct report: the ephemeral ship crewmate that changes a project, the scout whose deliverable is knowledge, and the persistent secondmate that is a whole Firstmate of its own. They share one mechanism and differ in records, gates, and behaviour.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Crew</a>.</p>
+
+<h2 id="one-mechanism">One mechanism, three kinds</h2>
+<p>The supervisor contract is explicit that there is no separate architecture for the persistent kind: "A secondmate is a crewmate with an isolated firstmate home and a charter, not a second architecture" <code class="cite">AGENTS.md:23</code>. All three are created by <code>bin/fm-spawn.sh</code>, recorded in <code>state/&lt;id&gt;.meta</code> of the home that spawned them, reached through the same backend adapter, and retired by <code>bin/fm-teardown.sh</code>. The script's usage line shows the three shapes <code class="cite">bin/fm-spawn.sh:2-6</code>:</p>
+<pre><code>fm-spawn.sh &lt;task-id&gt; &lt;project-dir&gt; --mode &lt;no-mistakes|direct-PR|local-only&gt; --yolo &lt;on|off&gt; …
+fm-spawn.sh &lt;task-id&gt; &lt;project-dir&gt; --scout …
+fm-spawn.sh &lt;task-id&gt; [&lt;firstmate-home&gt;] … --secondmate</code></pre>
+<p>The kind is written once as <code>kind=ship|scout|secondmate</code> <code class="cite">bin/fm-spawn.sh:196-198</code>, and changes only through <a href="promotion.html">promotion</a>, which flips a scout to a ship.</p>
+
+<figure class="diagram">
+<svg class="c4" viewBox="0 0 900 460" role="img" aria-labelledby="kinds-t">
+<title id="kinds-t">Where each kind of worker lives</title>
+<defs><marker id="kinds-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="32">Where each kind lives</text>
+<g class="c4-boundary"><rect x="20" y="60" width="420" height="370" rx="10"/><text x="32" y="420">Primary home (FM_HOME) · state/</text></g>
+<g class="c4-datastore">
+<path d="M50,95 a100,10 0 0,0 200,0 a100,10 0 0,0 -200,0 v44 a100,10 0 0,0 200,0 v-44"/>
+<text class="c4-label" x="150" y="124">ship-a.meta</text>
+<text class="c4-desc" x="150" y="141">kind=ship mode= yolo=</text>
+</g>
+<g class="c4-datastore">
+<path d="M50,185 a100,10 0 0,0 200,0 a100,10 0 0,0 -200,0 v44 a100,10 0 0,0 200,0 v-44"/>
+<text class="c4-label" x="150" y="214">scout-b.meta</text>
+<text class="c4-desc" x="150" y="231">kind=scout, no mode</text>
+</g>
+<g class="c4-datastore">
+<path d="M50,275 a100,10 0 0,0 200,0 a100,10 0 0,0 -200,0 v44 a100,10 0 0,0 200,0 v-44"/>
+<text class="c4-label" x="150" y="304">sm-c.meta</text>
+<text class="c4-desc" x="150" y="321">kind=secondmate home=</text>
+</g>
+<g class="c4-boundary"><rect x="480" y="60" width="390" height="160" rx="10"/><text x="492" y="78">Treehouse pool for the project</text></g>
+<g class="c4-container">
+<rect x="500" y="92" width="170" height="62" rx="8"/>
+<text class="c4-label" x="585" y="114">ship-a worktree</text>
+<text class="c4-desc" x="585" y="134">branch fm/ship-a</text>
+</g>
+<g class="c4-container">
+<rect x="685" y="92" width="170" height="62" rx="8"/>
+<text class="c4-label" x="770" y="114">scout-b worktree</text>
+<text class="c4-desc" x="770" y="134">scratch, discarded</text>
+</g>
+<g class="c4-boundary"><rect x="480" y="250" width="390" height="180" rx="10"/><text x="492" y="420">Secondmate home sm-c (its own FM_HOME)</text></g>
+<g class="c4-container">
+<rect x="500" y="276" width="170" height="62" rx="8"/>
+<text class="c4-label" x="585" y="302">sm-c agent</text>
+<text class="c4-desc" x="585" y="321">idle until work is routed</text>
+</g>
+<g class="c4-datastore">
+<path d="M690,284 a80,9 0 0,0 160,0 a80,9 0 0,0 -160,0 v40 a80,9 0 0,0 160,0 v-40"/>
+<text class="c4-label" x="770" y="311">own state/ data/</text>
+<text class="c4-desc" x="770" y="327">backlog, projects/</text>
+</g>
+<g class="c4-container">
+<rect x="500" y="350" width="355" height="52" rx="8"/>
+<text class="c4-label" x="677" y="372">Its own crewmates and scouts</text>
+<text class="c4-desc" x="677" y="390">dispatched from its own backlog, in their own slots</text>
+</g>
+<g class="c4-rel"><path d="M250,117 L498,121" marker-end="url(#kinds-arrow)"/><text class="c4-rel-label" x="374" y="110">worktree=</text></g>
+<g class="c4-rel"><path d="M250,207 L770,207 L770,156" marker-end="url(#kinds-arrow)"/><text class="c4-rel-label" x="374" y="200">worktree=</text></g>
+<g class="c4-rel"><path d="M250,297 L498,306" marker-end="url(#kinds-arrow)"/><text class="c4-rel-label" x="374" y="290">home= (worktree= too)</text></g>
+</svg>
+<figcaption>Ship and scout records point at a pooled worktree; a secondmate record points at a whole Firstmate home, which repeats the picture one level down. A secondmate's own crewmates are recorded in its home, not the primary's.</figcaption>
+</figure>
+
+<h2 id="ship">Ship crewmate: the ephemeral task worker</h2>
+<p><strong>Purpose.</strong> Ship is the default kind and "produces a project change through the selected delivery mode" <code class="cite">AGENTS.md:307</code>. It is dispatched for exactly one task and torn down once that task's work has landed.</p>
+<ul>
+<li><strong>Delivery contract is mandatory.</strong> <code>--mode</code> and <code>--yolo</code> are "REQUIRED for every ship spawn and refused on --scout and --secondmate spawns" <code class="cite">bin/fm-spawn.sh:7-9</code>. The implementation refuses a missing flag, the registry-only value <code>no-mistakes-prod-only</code>, and any other value <code class="cite">bin/fm-spawn.sh:754-782</code>.</li>
+<li><strong>Brief and record must agree.</strong> The ship brief carries a fixed line <code>Delivery contract: mode=&lt;mode&gt;</code>. A spawn passing a different <code>--mode</code> refuses, and a brief with no such line only warns <code class="cite">bin/fm-spawn.sh:2785-2795</code>.</li>
+<li><strong>Standing posture is advisory.</strong> A mode with less rigor than the project's registered posture prints a loud notice and proceeds <code class="cite">bin/fm-spawn.sh:2796-2804</code>.</li>
+<li><strong>Records.</strong> <code>kind=ship</code>, <code>mode=</code>, <code>yolo=</code>, plus the common fields below. <code>pr=</code> and <code>pr_head=</code> are added later by <code>bin/fm-pr-check.sh</code> when the worker reports a ready PR <code class="cite">bin/fm-pr-check.sh:2-3</code>.</li>
+<li><strong>Teardown gate.</strong> Uncommitted changes refuse. Unpushed commits refuse unless the <a href="teardown.html#landed">landed-work test</a> proves them merged. <code>local-only</code> work must be merged into the local default branch <code class="cite">bin/fm-teardown.sh:1780-1843</code>.</li>
+</ul>
+
+<h2 id="scout">Scout: the worker whose deliverable is knowledge</h2>
+<p><strong>Purpose.</strong> A scout "produces knowledge in <code>data/&lt;id&gt;/report.md</code>, never a PR". It suits investigation, diagnosis, planning, reproduction, or audit work, and only when the captain asks for a separate knowledge deliverable or when uncertainty "could materially change whether or what to build" <code class="cite">AGENTS.md:308</code>.</p>
+<ul>
+<li><strong>No delivery posture.</strong> The spawn refuses <code>--mode</code> and <code>--yolo</code> for a scout <code class="cite">bin/fm-spawn.sh:783-793</code>, and the record carries neither <code class="cite">bin/fm-spawn.sh:4402-4405</code>. Teardown treats an absent mode as <code>no-mistakes</code>, and promotion requires an explicit mode <code class="cite">bin/fm-spawn.sh:4392-4397</code>.</li>
+<li><strong>A scratch laboratory.</strong> The scout brief says "The worktree is your laboratory - install, run, edit, and make scratch commits freely; all of it is discarded at teardown", and rule 1 is "Never push to any remote and never open a PR" <code class="cite">bin/fm-brief.sh:419-423</code>.</li>
+<li><strong>The report is the product.</strong> It must "stand alone: what you did, what you found, the evidence …, and what you recommend", and the scout must pass the <code>captain-hold-lifecycle</code> completion gate before reporting done <code class="cite">bin/fm-brief.sh:463-467</code>.</li>
+<li><strong>Teardown gate.</strong> Teardown skips the dirty and landed checks for a scout. It refuses instead when <code>data/&lt;id&gt;/report.md</code> is missing or <code>fm-captain-hold.sh verify</code> fails <code class="cite">bin/fm-teardown.sh:3280-3292</code>. The report lives under <code>data/</code>, so it survives the worktree.</li>
+<li><strong>A report is not authorization.</strong> "A report may recommend implementation but does not authorize it", and a separately authorized fix promotes the same scout rather than spawning a duplicate <code class="cite">AGENTS.md:411-415</code>. See <a href="promotion.html">Scout promotion</a>.</li>
+</ul>
+
+<h2 id="secondmate">Secondmate: the persistent worker with its own home</h2>
+<p><strong>Purpose.</strong> A secondmate owns a domain. "Each secondmate has a persistent isolated <code>FM_HOME</code>, including its own state, backlog, projects, and session lock" <code class="cite">AGENTS.md:55</code>. It "is idle by default and acts only on work routed by the main firstmate" <code class="cite">AGENTS.md:269</code>, and "an empty queue is healthy" <code class="cite">AGENTS.md:406</code>. Inside its home it runs the same supervisor contract and spawns its own crewmates.</p>
+<h3 id="sm-spawn">How its spawn differs</h3>
+<ul>
+<li><strong>The home is validated, not created.</strong> <code>validate_firstmate_home_for_spawn</code> refuses a home that is the filesystem root, the active home, or the Firstmate repo, or that sits inside or above either of them. It also refuses a home without the <code>.fm-secondmate-home</code> marker naming this exact id, <code>AGENTS.md</code>, or <code>bin/</code> <code class="cite">bin/fm-spawn.sh:2539-2591</code>. Homes are provisioned beforehand by <code>bin/fm-home-seed.sh</code>, often on a durable Treehouse lease (<a href="worktrees.html#secondmate-lease">details</a>).</li>
+<li><strong>The home is brought up to date.</strong> Before launch the home is fast-forwarded to the primary checkout's default-branch commit when that is safe. A dirty, diverged, or wrong-branch home launches unchanged with a warning <code class="cite">bin/fm-spawn.sh:2651-2675</code>. Primary-authoritative local configuration is then propagated into it <code class="cite">bin/fm-spawn.sh:2677-2696</code>.</li>
+<li><strong>Its instructions are a charter.</strong> The launch reads <code>&lt;home&gt;/data/charter.md</code>, falling back to <code>data/&lt;id&gt;/brief.md</code> in the primary <code class="cite">bin/fm-spawn.sh:2698-2702</code>. It never receives the ship and scout worker role contract, and on Claude it never receives the task-worker <code>--append-system-prompt</code> statement <code class="cite">bin/fm-spawn.sh:1852-1858</code>. See <a href="launch.html">Launch</a>.</li>
+<li><strong>It becomes a Firstmate.</strong> The launch line clears the primary's path overrides and sets <code>FM_HOME</code> to the secondmate home, plus a supervision model: <code>autoarm</code> for claude and cursor, <code>extension</code> for pi, pi-signed and omp, and <code>persistent</code> for the rest <code class="cite">bin/fm-spawn.sh:4655-4672</code>.</li>
+<li><strong>Harness and backend limits.</strong> muse, gemini, agy and rovo are refused because none has a primary supervision protocol <code class="cite">bin/fm-spawn.sh:2109-2134</code>. The orca and cmux backends refuse <code>--secondmate</code> <code class="cite">bin/fm-spawn.sh:1533-1540</code>.</li>
+<li><strong>It can live on another host.</strong> A remotely routed secondmate takes <code>spawn_remote_secondmate</code> first. That path records <code>window=remote:&lt;id&gt;</code> and prints a success line with <code>remote=</code> and <code>backend=</code> <code class="cite">bin/fm-spawn.sh:1510-1516</code> <code class="cite">bin/fm-spawn.sh:1076</code>. The <a href="../remote/index.html">Remote</a> area owns that path.</li>
+<li><strong>It is never a work item.</strong> The backlog gate skips secondmates entirely <code class="cite crew-wrap">bin/fm-backlog-transition-lib.sh:283-286</code>, and "A persistent secondmate is recorded in the secondmate registry and runtime state, never as a backlog work item" <code class="cite">AGENTS.md:333</code>.</li>
+</ul>
+<h3 id="sm-behaviour">How it behaves differently afterwards</h3>
+<ul>
+<li><strong>Current state.</strong> An idle pane is its healthy state, so <code>fm-crew-state.sh</code> skips the busy check for it and reads its status log only <code class="cite">bin/fm-crew-state.sh:1203-1215</code>.</li>
+<li><strong>Messages.</strong> Text sent to it always carries the from-firstmate routing marker, because its reply must come back through the status path <code class="cite">docs/agent-control.md:5-6</code>.</li>
+<li><strong>Relaunch.</strong> A secondmate relaunch re-resolves its durable <code>config/secondmate-harness</code> pin, needs no <code>--note</code>, and never rewrites its charter. A secondmate whose endpoint is gone is respawned by <code>fm-spawn.sh --secondmate</code> from the session-start liveness sweep, not by <code>relaunch</code> <code class="cite">docs/agent-control.md:58-79</code> <code class="cite">docs/agent-control.md:117</code> <code class="cite">AGENTS.md:191</code>.</li>
+<li><strong>Retirement.</strong> It is retired only on an explicit decision <code class="cite">AGENTS.md:407</code>. Normal teardown refuses while its home has in-flight task records <code class="cite">bin/fm-teardown.sh:3264</code>, and <code>--force</code> is the approved discard path for its children <code class="cite">bin/fm-teardown.sh:147-163</code>.</li>
+</ul>
+
+<h2 id="records">The task record by kind (Level 4)</h2>
+<p><code>fm-spawn.sh</code> writes <code>state/&lt;id&gt;.meta</code> as <code>key=value</code> lines to a temporary file under the per-task meta lock, then publishes it atomically <code class="cite">bin/fm-spawn.sh:4436-4515</code>.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Key</th><th>Ship</th><th>Scout</th><th>Secondmate</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>window</code></td><td>✓</td><td>✓</td><td>✓</td><td>Backend target; <code>fm-&lt;id&gt;</code> alias on Orca; <code>remote:&lt;id&gt;</code> for a remote secondmate</td></tr>
+<tr><td><code>endpoint_task_id</code></td><td>✓</td><td>✓</td><td>✓</td><td>Binds the record filename to the opaque endpoint</td></tr>
+<tr><td><code>worktree</code></td><td>slot path</td><td>slot path</td><td>home path</td><td>Where the agent runs</td></tr>
+<tr><td><code>project</code></td><td>project clone</td><td>project clone</td><td>home path</td><td>What was spawned from</td></tr>
+<tr><td><code>harness</code>, <code>model</code>, <code>effort</code></td><td>✓</td><td>✓</td><td>✓</td><td>Profile; <code>default</code> when unset</td></tr>
+<tr><td><code>kind</code></td><td>ship</td><td>scout</td><td>secondmate</td><td>Branch point for every lifecycle script</td></tr>
+<tr><td><code>mode</code>, <code>yolo</code></td><td>explicit</td><td>absent</td><td><code>secondmate</code>, <code>off</code></td><td>Delivery contract</td></tr>
+<tr><td><code>tasktmp</code></td><td>✓</td><td>✓</td><td>✓</td><td><code>/tmp/fm-&lt;id&gt;</code>, removed at teardown</td></tr>
+<tr><td><code>busy_gen</code>, <code>spawn_gen</code></td><td>✓</td><td>✓</td><td>✓</td><td>Incarnation tokens; a new <code>spawn_gen</code> on every spawn or relaunch</td></tr>
+<tr><td><code>backend</code> + backend ids</td><td colspan="3">only when not tmux</td><td><code>herdr_session</code>, <code>herdr_pane_id</code>, <code>zellij_*</code>, <code>orca_worktree_id</code>, <code>terminal</code>, <code>cmux_*</code></td></tr>
+<tr><td><code>home</code>, <code>projects</code></td><td>—</td><td>—</td><td>✓</td><td>The secondmate home and its registered clones</td></tr>
+<tr><td><code>traceparent</code></td><td colspan="3">only when trace context is enabled</td><td>W3C carrier also exported into the pane</td></tr>
+<tr><td><code>pr</code>, <code>pr_head</code></td><td>after PR</td><td>—</td><td>—</td><td>Written by <code>fm-pr-check.sh</code></td></tr>
+</tbody></table></div>
+<p class="evidence">Sources: <code class="cite">bin/fm-spawn.sh:4460-4509</code>, <code class="cite">bin/fm-spawn.sh:381-387</code>, <code class="cite">docs/configuration.md:152-157</code>.</p>
+
+<h2 id="behaviour">Behaviour differences, side by side</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Concern</th><th>Ship</th><th>Scout</th><th>Secondmate</th></tr></thead>
+<tbody>
+<tr><td>Launch brief</td><td>Worker role + brief (+ intent overlay for no-mistakes)</td><td>Worker role + brief</td><td>Charter, no worker role</td></tr>
+<tr><td>Pane marker <code>FM_TASK_ID</code></td><td>✓</td><td>✓</td><td>not set <code class="cite">bin/fm-spawn.sh:212-217</code></td></tr>
+<tr><td>Fresh-base reset</td><td>✓</td><td>✓</td><td>fast-forward to primary instead</td></tr>
+<tr><td>Backlog transition</td><td>✓</td><td>✓</td><td>skipped</td></tr>
+<tr><td>Busy-state read in crew-state</td><td>✓</td><td>✓</td><td>skipped, idle is healthy</td></tr>
+<tr><td>Teardown gate</td><td>landed work</td><td>report + captain-call gate</td><td>no work under way in its home</td></tr>
+<tr><td>Allowed harnesses</td><td>all 13 verified</td><td>all 13 verified</td><td>9: not muse, gemini, rovo, agy <code class="cite">bin/fm-control-lib.sh:113-121</code></td></tr>
+<tr><td>Allowed backends</td><td>all 5</td><td>all 5</td><td>tmux, herdr, zellij</td></tr>
+</tbody></table></div>
+
+<div class="callout"><span class="callout-title">Crewmates never address the captain</span>
+<p>All three kinds report only to the Firstmate that spawned them: "All crewmate communication flows through firstmate" <code class="cite">AGENTS.md:38-40</code>. A secondmate reaches the captain only through its parent's channel.</p></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

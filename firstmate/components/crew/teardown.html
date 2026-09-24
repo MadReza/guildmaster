@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teardown · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Crew</p>
+<h1>Teardown</h1>
+<p class="lede"><code>bin/fm-teardown.sh</code> retires a finished task: it returns the worktree, closes the endpoint, clears volatile state, and closes the backlog item. It refuses whenever that could destroy work that has not landed, or work that belongs to another task.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Crew</a>. Clone refresh after a merge belongs to <a href="../delivery/index.html">Delivery</a>; the backlog close to <a href="../backlog-and-decisions/index.html">Backlog and decisions</a>.</p>
+
+<h2 id="contract">Contract</h2>
+<pre><code>fm-teardown.sh &lt;task-id&gt; [--force] [--legacy-record]</code></pre>
+<p>"Tear down a finished task: return the treehouse worktree, release the Orca worktree, or retire a secondmate home; kill the recorded runtime endpoint, clear volatile state, and transition this home's backlog item for ship and scout tasks before reporting success …, then refresh/prune the project's clone for PR-based ship tasks" <code class="cite">bin/fm-teardown.sh:2-7</code>. The header runs to about 280 lines. When to call it is set by the supervisor contract: "Tear down a ship task only after landing is confirmed. A teardown refusal for uncommitted or unlanded work is a stop-and-investigate result, never an obstacle to bypass. Never force teardown without explicit discard authority" <code class="cite">AGENTS.md:401-403</code>.</p>
+<p>On success it prints one of: <code>teardown &lt;id&gt; complete (window …, worktree …)</code>; the same with a legacy-record note; or, when the slot had been reassigned, "pool slot … left to task … which it was reassigned to" <code class="cite">bin/fm-teardown.sh:3709-3714</code>.</p>
+
+<h2 id="landed">The landed-work test (ship tasks)</h2>
+<p>"REFUSES if the worktree holds work that has not LANDED, because cleanup hard-resets/removes the worktree and kills its processes" <code class="cite">bin/fm-teardown.sh:44-45</code>. The implementation is <code>validate_worktree_teardown_safety</code> with its helpers <code class="cite">bin/fm-teardown.sh:1780-1843</code>.</p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 960 470" role="img" aria-labelledby="lw-t lw-d">
+<title id="lw-t">The landed-work decision for a ship task</title>
+<desc id="lw-d">Uncommitted changes refuse. With no commits outside every remote-tracking branch, the work is safe. A local-only task must be merged into the local default branch. Otherwise a merged PR whose head contains the local work, or content already present in the default branch, counts as landed; anything else refuses.</desc>
+<defs><marker id="lw-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">Has this ship task's work landed?</text>
+<g class="c4-component"><rect x="20" y="50" width="330" height="54" rx="8"/><text class="c4-label" x="185" y="72">Uncommitted changes?</text><text class="c4-desc" x="185" y="90">ignoring untracked .claude/, .fm-grok/kimi-turnend</text></g>
+<g class="c4-component"><rect x="20" y="140" width="330" height="54" rx="8"/><text class="c4-label" x="185" y="162">Commits not on any remote?</text><text class="c4-desc" x="185" y="180">git log HEAD --not --remotes</text></g>
+<g class="c4-component"><rect x="20" y="230" width="330" height="54" rx="8"/><text class="c4-label" x="185" y="252">mode = local-only?</text><text class="c4-desc" x="185" y="270">then: merged into local default?</text></g>
+<g class="c4-component"><rect x="20" y="320" width="330" height="54" rx="8"/><text class="c4-label" x="185" y="342">PR merged, head contains work?</text><text class="c4-desc" x="185" y="360">ancestor, or unpushed patch ids in PR</text></g>
+<g class="c4-component"><rect x="20" y="410" width="330" height="54" rx="8"/><text class="c4-label" x="185" y="432">Content already in default?</text><text class="c4-desc" x="185" y="450">merge-tree result = default tree</text></g>
+<g class="c4-rel"><path d="M185,104 L185,138" marker-end="url(#lw-arrow)"/><text class="c4-rel-label" x="205" y="125">no</text></g>
+<g class="c4-rel"><path d="M185,194 L185,228" marker-end="url(#lw-arrow)"/><text class="c4-rel-label" x="205" y="215">yes</text></g>
+<g class="c4-rel"><path d="M185,284 L185,318" marker-end="url(#lw-arrow)"/><text class="c4-rel-label" x="205" y="305">no</text></g>
+<g class="c4-rel"><path d="M185,374 L185,408" marker-end="url(#lw-arrow)"/><text class="c4-rel-label" x="205" y="395">no</text></g>
+
+<g class="c4-external"><rect x="700" y="50" width="240" height="54" rx="8"/><text class="c4-label" x="820" y="72">REFUSE</text><text class="c4-desc" x="820" y="90">"has uncommitted changes"</text></g>
+<g class="c4-component"><rect x="700" y="140" width="240" height="54" rx="8"/><text class="c4-label" x="820" y="162">Safe: proceed</text><text class="c4-desc" x="820" y="180">everything is on some remote</text></g>
+<g class="c4-external"><rect x="700" y="230" width="240" height="54" rx="8"/><text class="c4-label" x="820" y="252">REFUSE or proceed</text><text class="c4-desc" x="820" y="270">unmerged or dirty → refuse</text></g>
+<g class="c4-component"><rect x="700" y="320" width="240" height="54" rx="8"/><text class="c4-label" x="820" y="342">Landed: proceed</text><text class="c4-desc" x="820" y="360">found PR becomes the close link</text></g>
+<g class="c4-external"><rect x="700" y="410" width="240" height="54" rx="8"/><text class="c4-label" x="820" y="432">REFUSE unless yes</text><text class="c4-desc" x="820" y="450">"not on any remote and not landed"</text></g>
+<g class="c4-rel"><path d="M350,77 L698,77" marker-end="url(#lw-arrow)"/><text class="c4-rel-label" x="525" y="70">yes</text></g>
+<g class="c4-rel"><path d="M350,167 L698,167" marker-end="url(#lw-arrow)"/><text class="c4-rel-label" x="525" y="160">no</text></g>
+<g class="c4-rel"><path d="M350,257 L698,257" marker-end="url(#lw-arrow)"/><text class="c4-rel-label" x="525" y="250">yes</text></g>
+<g class="c4-rel"><path d="M350,347 L698,347" marker-end="url(#lw-arrow)"/><text class="c4-rel-label" x="525" y="340">yes</text></g>
+<g class="c4-rel"><path d="M350,437 L698,437" marker-end="url(#lw-arrow)"/><text class="c4-rel-label" x="525" y="430">yes → proceed, else refuse</text></g>
+</svg>
+</div>
+<figcaption>Refusal boxes use the external style to stand out. <code>--force</code> skips this whole test. Sources: <code class="cite">bin/fm-teardown.sh:1416-1519</code>, <code class="cite">bin/fm-teardown.sh:1780-1843</code>.</figcaption>
+</figure>
+<ul>
+<li><strong>"Landed" first means "not only local".</strong> Work has landed "when it is reachable from any remote-tracking branch (a fork counts as a remote, …)" <code class="cite">bin/fm-teardown.sh:46-48</code>. A branch that has been pushed but whose PR is still open therefore passes this test. Merge itself is enforced by the supervisor contract ("only after landing is confirmed"), not by the script.</li>
+<li><strong>Squash merges.</strong> A squash-merged PR whose branch was deleted leaves the commits on no remote, so teardown asks GitHub. It accepts a merged PR whose head contains the current local work, either as an ancestor or with every unpushed commit's patch id present in the PR. It falls back to a three-way merge of HEAD into the freshly fetched default branch, which must reproduce the default tree exactly <code class="cite">bin/fm-teardown.sh:48-59</code> <code class="cite">bin/fm-teardown.sh:1441-1509</code>.</li>
+<li><strong>What it deliberately rejects.</strong> "A diverged copy is not treated as landed: path-set coverage, git cherry, and merge-tree containment each fail to prove content landed without also accepting unlanded edits to the same paths" <code class="cite">bin/fm-teardown.sh:53-58</code>.</li>
+<li><strong>A missing <code>pr=</code></strong> does not cause a false refusal. The PR is looked up by head branch, and its head is fetched through <code>refs/pull/&lt;n&gt;/head</code> when the branch is gone. A <code>gh</code> error falls back to the content check, and an inconclusive result refuses <code class="cite">bin/fm-teardown.sh:60-68</code>.</li>
+<li><strong>"Uncommitted changes are never landed"</strong> <code class="cite">bin/fm-teardown.sh:68</code>. Only Firstmate's own untracked hook files are ignored by the dirty check <code class="cite">bin/fm-teardown.sh:1796</code>.</li>
+</ul>
+
+<h2 id="kind-gates">The other kinds</h2>
+<dl class="defs">
+<dt>Scout</dt>
+<dd>The worktree "is declared scratch and the report at data/&lt;task-id&gt;/report.md is the work product" <code class="cite">bin/fm-teardown.sh:72-75</code>. Without <code>--force</code>, a missing report refuses ("The report is the work product"), and so does a failed <code>fm-captain-hold.sh verify</code>, the shared unresolved-decision completion gate <code class="cite">bin/fm-teardown.sh:3280-3292</code>.</dd>
+<dt>Secondmate</dt>
+<dd>"Normal teardown refuses while their home has in-flight crewmate meta files; --force is the approved discard path". The forced path locks each descendant home's task set before enumerating it, and a retired leased home releases its durable Treehouse lease <code class="cite">bin/fm-teardown.sh:147-163</code> <code class="cite">bin/fm-teardown.sh:3264</code>. A secondmate is never a backlog item, so no transition runs <code class="cite">bin/fm-teardown.sh:5-6</code>.</dd>
+</dl>
+
+<h2 id="order">The order of work</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 960 540" role="img" aria-labelledby="td-t td-d">
+<title id="td-t">fm-teardown.sh order of work</title>
+<desc id="td-d">Validate the record and endpoint identity, take locks, prove slot ownership, apply the kind gates and the public follow-up gate, conclude a parked pipeline run and reap leaked processes, remove the branch and hooks, return the worktree, close the endpoint, remove temp and volatile state, then remove the record and close the backlog item together, and finally refresh the clone.</desc>
+<defs><marker id="td-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">Teardown, in order</text>
+<g class="c4-boundary"><rect x="20" y="45" width="440" height="310" rx="8"/><text x="32" y="347">Refusal zone: nothing is changed yet</text></g>
+<g class="c4-component"><rect x="40" y="60" width="400" height="44" rx="8"/><text class="c4-label" x="240" y="80">1 · Record and endpoint identity</text><text class="c4-desc" x="240" y="96">shape, endpoint_task_id, one spawn_gen</text></g>
+<g class="c4-component"><rect x="40" y="116" width="400" height="44" rx="8"/><text class="c4-label" x="240" y="136">2 · Locks</text><text class="c4-desc" x="240" y="152">project lock, meta lock, Herdr presentation lock</text></g>
+<g class="c4-component"><rect x="40" y="172" width="400" height="44" rx="8"/><text class="c4-label" x="240" y="192">3 · Slot exclusivity and owner claim</text><text class="c4-desc" x="240" y="208">no other record names it; claim mine/other</text></g>
+<g class="c4-component"><rect x="40" y="228" width="400" height="44" rx="8"/><text class="c4-label" x="240" y="248">4 · Kind gates</text><text class="c4-desc" x="240" y="264">landed work · report + gate · no child work</text></g>
+<g class="c4-component"><rect x="40" y="284" width="400" height="44" rx="8"/><text class="c4-label" x="240" y="304">5 · Public follow-up and check artifacts</text><text class="c4-desc" x="240" y="320">owed Relay reply refuses; unsafe check files refuse</text></g>
+<g class="c4-boundary"><rect x="500" y="45" width="440" height="480" rx="8"/><text x="512" y="517">Destructive phase</text></g>
+<g class="c4-component"><rect x="520" y="60" width="400" height="44" rx="8"/><text class="c4-label" x="720" y="80">6 · Conclude and reap</text><text class="c4-desc" x="720" y="96">abort own parked run · kill cwd-in-worktree processes</text></g>
+<g class="c4-component"><rect x="520" y="116" width="400" height="44" rx="8"/><text class="c4-label" x="720" y="136">7 · Branch and hooks</text><text class="c4-desc" x="720" y="152">detach, delete local branch, remove hook files</text></g>
+<g class="c4-component"><rect x="520" y="172" width="400" height="44" rx="8"/><text class="c4-label" x="720" y="192">8 · Return the worktree</text><text class="c4-desc" x="720" y="208">treehouse return --force (or orca rm); drop claim</text></g>
+<g class="c4-component"><rect x="520" y="228" width="400" height="44" rx="8"/><text class="c4-label" x="720" y="248">9 · Close the endpoint</text><text class="c4-desc" x="720" y="264">unproven close refuses before records go</text></g>
+<g class="c4-component"><rect x="520" y="284" width="400" height="44" rx="8"/><text class="c4-label" x="720" y="304">10 · Volatile state</text><text class="c4-desc" x="720" y="320">/tmp/fm-&lt;id&gt;, launch namespace, markers, inbox</text></g>
+<g class="c4-component"><rect x="520" y="340" width="400" height="44" rx="8"/><text class="c4-label" x="720" y="360">11 · Record + backlog, together</text><text class="c4-desc" x="720" y="376">backlog-close record, remove meta, done or reopen</text></g>
+<g class="c4-component"><rect x="520" y="396" width="400" height="44" rx="8"/><text class="c4-label" x="720" y="416">12 · Clone refresh</text><text class="c4-desc" x="720" y="432">fm-fleet-sync.sh for PR-based ship tasks</text></g>
+<g class="c4-component"><rect x="520" y="452" width="400" height="44" rx="8"/><text class="c4-label" x="720" y="472">13 · Report</text><text class="c4-desc" x="720" y="488">"teardown &lt;id&gt; complete (…)"</text></g>
+<g class="c4-rel"><path d="M240,104 L240,114" marker-end="url(#td-arrow)"/></g>
+<g class="c4-rel"><path d="M240,160 L240,170" marker-end="url(#td-arrow)"/></g>
+<g class="c4-rel"><path d="M240,216 L240,226" marker-end="url(#td-arrow)"/></g>
+<g class="c4-rel"><path d="M240,272 L240,282" marker-end="url(#td-arrow)"/></g>
+<g class="c4-rel"><path d="M440,306 L480,306 L480,82 L518,82" marker-end="url(#td-arrow)"/></g>
+<g class="c4-rel"><path d="M720,104 L720,114" marker-end="url(#td-arrow)"/></g>
+<g class="c4-rel"><path d="M720,160 L720,170" marker-end="url(#td-arrow)"/></g>
+<g class="c4-rel"><path d="M720,216 L720,226" marker-end="url(#td-arrow)"/></g>
+<g class="c4-rel"><path d="M720,272 L720,282" marker-end="url(#td-arrow)"/></g>
+<g class="c4-rel"><path d="M720,328 L720,338" marker-end="url(#td-arrow)"/></g>
+<g class="c4-rel"><path d="M720,384 L720,394" marker-end="url(#td-arrow)"/></g>
+<g class="c4-rel"><path d="M720,440 L720,450" marker-end="url(#td-arrow)"/></g>
+<text class="crew-note" x="20" y="390">A reassigned slot (claim = other) skips every step that</text>
+<text class="crew-note" x="20" y="406">would read or touch it: 6 (worktree reap), 7, 8.</text>
+<text class="crew-note" x="20" y="436">Orca: the terminal is closed at step 7, then</text>
+<text class="crew-note" x="20" y="452">the Orca worktree is removed.</text>
+<text class="crew-note" x="20" y="482">Herdr: steps 8 to 11 run under the session</text>
+<text class="crew-note" x="20" y="498">presentation lock; only a structured not-found</text>
+<text class="crew-note" x="20" y="514">proves the pane gone.</text>
+</svg>
+</div>
+<figcaption>Sources: <code class="cite">bin/fm-teardown.sh:1033</code>, <code class="cite">bin/fm-teardown.sh:3276-3336</code>, <code class="cite">bin/fm-teardown.sh:3357-3363</code>, <code class="cite">bin/fm-teardown.sh:3451-3715</code>.</figcaption>
+</figure>
+
+<h3 id="cleanup-fixes">The pre-cleanup sequence</h3>
+<p>Three fixes run after every safety refusal has passed and before anything destructive <code class="cite">bin/fm-teardown.sh:225-278</code>:</p>
+<ol>
+<li><strong>Conclude the task's own parked no-mistakes run.</strong> A run left parked at a gate with no worker to answer it "sits there holding a fleet slot indefinitely (observed 2026-08-03: runs parked 7h39m …)". Teardown aborts it only when branch <em>and</em> code identity prove it is this task's run. Runs still executing are left alone, because they work in no-mistakes' own clone.</li>
+<li><strong>Reap leaked processes.</strong> Any process whose current directory is this task's worktree or tasktmp gets TERM, then KILL, for example "two <code>go test</code> binaries … pinning CPU for hours". An <code>lsof</code> failure refuses rather than guessing <code class="cite">bin/fm-teardown.sh:2092-2185</code>.</li>
+<li><strong>Sweep abandoned remote job workers</strong>, best effort, through <code>bin/fm-remote-job-reap-orphans.sh</code>.</li>
+</ol>
+
+<h3 id="endpoint">Endpoint close must be provable</h3>
+<p>"An endpoint whose close could not do its job REFUSES before any record naming it is removed: those records are the only thing that names what survived" <code class="cite">bin/fm-teardown.sh:8-14</code>. <code>--force</code> overrides this at exactly one site, the generic close, because the worktree has already been returned by then <code class="cite">bin/fm-teardown.sh:3062-3090</code>. On Herdr, a refused or unconfirmed close keeps every record, and only a structured not-found proves the pane gone <code class="cite">bin/fm-teardown.sh:3580-3585</code>. A Herdr presentation journal "never authorizes cleanup", and teardown never calls <code>workspace close</code> <code class="cite">bin/fm-teardown.sh:139-146</code>.</p>
+
+<h3 id="backlog">Record and backlog are one step</h3>
+<p>"Removing state/&lt;id&gt;.meta and landing the backlog transition are one step, not two". The intended transition is first written to <code>state/&lt;id&gt;.backlog-close</code>, because the completion links (PR, report path, local-main note) live only in the record being removed. A crash between the halves is replayed at the next session start <code class="cite">bin/fm-teardown.sh:15-29</code>. The completion link is <code>--report</code> for a scout, <code>--note "local main"</code> for local-only, and <code>--pr</code> otherwise <code class="cite">bin/fm-teardown.sh:1521-1537</code>. A row still open as a captain call is <em>reopened</em> with its deliverable recorded instead of closed, and "--force does not lift the deferral" <code class="cite">bin/fm-teardown.sh:30-43</code>.</p>
+
+<h2 id="refusals">Refusals <code>--force</code> does not lift</h2>
+<ul>
+<li>Another live task's slot: "--force authorizes discarding THIS task's unlanded work, never another task's live work" <code class="cite">bin/fm-teardown.sh:131-135</code>.</li>
+<li>An unreadable slot-owner claim. "never remove it, since an absent claim proceeds" <code class="cite">bin/fm-teardown.sh:109-112</code>.</li>
+<li>Project-lock contention, or a slot identity that changed while locks were being taken <code class="cite">bin/fm-teardown.sh:1055-1069</code>.</li>
+<li>A record with no single <code>spawn_gen</code> (use <code>--legacy-record</code> once the endpoint is confirmed dead) <code class="cite">bin/fm-teardown.sh:500-520</code> <code class="cite">bin/fm-teardown.sh:1074-1096</code>.</li>
+<li>An open captain call: its close becomes a reopen <code class="cite">bin/fm-teardown.sh:38-43</code>.</li>
+<li>An owed public reply through the Relay <code class="cite">bin/fm-teardown.sh:3295-3312</code>.</li>
+<li>A Herdr or Orca endpoint whose close cannot be proven <code class="cite">bin/fm-teardown.sh:3073-3085</code>.</li>
+</ul>
+
+<h2 id="lock-retry">Git index locks</h2>
+<p>A killed worker can leave an <code>index.lock</code> that makes <code>treehouse return</code> fail. "the fix is patience, not rm". Teardown retries up to 3 times, 1 second apart, and removes the lock only when it is provably stale: no <code>lsof</code> holder and older than 30 seconds <code class="cite">bin/fm-teardown.sh:195-224</code>.</p>
+
+<h2 id="after">After teardown</h2>
+<p>For PR-based ship tasks (not scouts, secondmates, or local-only), teardown runs <code>fm-fleet-sync.sh</code> on the project clone <code class="cite">bin/fm-teardown.sh:3701-3703</code>. The supervisor contract then asks Firstmate to "record completion, retain only the configured recent Done history, and re-evaluate queued work" <code class="cite">AGENTS.md:404</code>.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dispatch profiles · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Crew</p>
+<h1>Dispatch profiles</h1>
+<p class="lede">A profile is the concrete harness, model, and effort a worker is launched with. Firstmate chooses it at intake from natural-language rules and live quota evidence. Scripts only ever receive the resulting three flags, and <code>fm-spawn.sh</code> refuses to launch without them when rules exist.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Crew</a>. Related: <a href="harnesses.html">Harness adapters</a>.</p>
+
+<h2 id="split">Judgement in the agent, flags in the script</h2>
+<p><code>config/crew-dispatch.json</code> is an optional, local, gitignored file of natural-language rules. "The shell scripts do not match those rules; firstmate chooses the best matching rule with judgment … and passes only concrete <code>--harness</code>, <code>--model</code>, and <code>--effort</code> flags to <code>fm-spawn.sh</code>" <code class="cite">docs/configuration.md:451-455</code>. The script enforces that the consultation happened: while the file exists, a crewmate or scout spawn without an explicit harness refuses <code class="cite">docs/configuration.md:455-457</code> <code class="cite">bin/fm-spawn.sh:2088-2090</code>. Secondmates are exempt and keep their <code>config/secondmate-harness</code> pin.</p>
+
+<h2 id="flow">How a profile is chosen</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 980 520" role="img" aria-labelledby="dp-t dp-d">
+<title id="dp-t">Dispatch profile resolution at intake</title>
+<desc id="dp-d">A captain's per-task override wins. Otherwise, if typed resolution is enabled and returns clear, its profile line is used unless Firstmate states a reason to override. Otherwise Firstmate picks the best-fit rule, then the default, then the static crew harness. A single profile is used directly; an array goes through quota-array-dispatch's three gates and the spendPriority ranking. The concrete flags then go to fm-spawn, which validates them.</desc>
+<defs><marker id="dp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">Profile resolution at intake</text>
+<g class="c4-component"><rect x="20" y="55" width="200" height="60" rx="8"/><text class="c4-label" x="120" y="80">Captain override</text><text class="c4-desc" x="120" y="98">explicit for this task</text></g>
+<g class="c4-component"><rect x="255" y="55" width="200" height="60" rx="8"/><text class="c4-label" x="355" y="80">Typed resolution</text><text class="c4-desc" x="355" y="98">fm-dispatch-resolve: clear?</text></g>
+<g class="c4-component"><rect x="490" y="55" width="200" height="60" rx="8"/><text class="c4-label" x="590" y="80">Best-fit rule</text><text class="c4-desc" x="590" y="98">Firstmate's judgement</text></g>
+<g class="c4-component"><rect x="725" y="55" width="235" height="60" rx="8"/><text class="c4-label" x="842" y="80">default, then static harness</text><text class="c4-desc" x="842" y="98">config/crew-harness last</text></g>
+<g class="c4-rel"><path d="M220,85 L253,85" marker-end="url(#dp-arrow)"/></g>
+<g class="c4-rel"><path d="M455,85 L488,85" marker-end="url(#dp-arrow)"/></g>
+<g class="c4-rel"><path d="M690,85 L723,85" marker-end="url(#dp-arrow)"/></g>
+<text class="crew-note" x="470" y="46">each rightward arrow means "none, or not clear"</text>
+<g class="c4-component"><rect x="300" y="185" width="380" height="54" rx="8"/><text class="c4-label" x="490" y="207">One profile, or an array?</text><text class="c4-desc" x="490" y="225">"use" and "default" accept either form</text></g>
+<g class="c4-rel"><path d="M120,115 L120,212 L298,212" marker-end="url(#dp-arrow)"/></g>
+<g class="c4-rel"><path d="M355,115 L355,183" marker-end="url(#dp-arrow)"/></g>
+<g class="c4-rel"><path d="M590,115 L590,183" marker-end="url(#dp-arrow)"/></g>
+<g class="c4-rel"><path d="M842,115 L842,212 L682,212" marker-end="url(#dp-arrow)"/></g>
+<g class="c4-boundary"><rect x="420" y="270" width="540" height="150" rx="8"/><text x="432" y="412">quota-array-dispatch (arrays only)</text></g>
+<g class="c4-component"><rect x="440" y="292" width="150" height="72" rx="8"/><text class="c4-label" x="515" y="317">1 · Eligibility</text><text class="c4-desc" x="515" y="335">catalog, account,</text><text class="c4-desc" x="515" y="350">contradicting proof</text></g>
+<g class="c4-component"><rect x="605" y="292" width="150" height="72" rx="8"/><text class="c4-label" x="680" y="317">2 · Reasoning class</text><text class="c4-desc" x="680" y="335">never downgraded</text><text class="c4-desc" x="680" y="350">to save quota</text></g>
+<g class="c4-component"><rect x="770" y="292" width="170" height="72" rx="8"/><text class="c4-label" x="855" y="317">3 · Runway floor</text><text class="c4-desc" x="855" y="335">must last to likely</text><text class="c4-desc" x="855" y="350">completion</text></g>
+<g class="c4-rel"><path d="M590,328 L603,328" marker-end="url(#dp-arrow)"/></g>
+<g class="c4-rel"><path d="M755,328 L768,328" marker-end="url(#dp-arrow)"/></g>
+<text class="crew-note" x="440" y="388">then highest known spendPriority; genuine tie → captain</text>
+<g class="c4-rel"><path d="M600,239 L600,268" marker-end="url(#dp-arrow)"/><text class="c4-rel-label" x="636" y="258">array</text></g>
+<g class="c4-component"><rect x="20" y="450" width="560" height="54" rx="8"/><text class="c4-label" x="300" y="472">fm-spawn.sh --harness H [--model M] [--effort E]</text><text class="c4-desc" x="300" y="490">validates, records model= and effort=, omits unsupported axes</text></g>
+<g class="c4-rel"><path d="M380,239 L380,448" marker-end="url(#dp-arrow)"/><text class="c4-rel-label" x="340" y="345">one profile</text></g>
+<g class="c4-rel"><path d="M690,420 L690,477 L582,477" marker-end="url(#dp-arrow)"/><text class="c4-rel-label" x="720" y="450">winner</text></g>
+</svg>
+</div>
+<figcaption>Precedence from <code class="cite">AGENTS.md:224</code>; typed resolution from <code class="cite">AGENTS.md:235</code>; array procedure from <code class="cite crew-wrap">.agents/skills/quota-array-dispatch/SKILL.md:58-134</code>.</figcaption>
+</figure>
+
+<h2 id="schema">The rules file</h2>
+<p><code>docs/configuration.md</code> is "the single owner of the canonical schema" <code class="cite">docs/configuration.md:458</code>. The shape <code class="cite">docs/configuration.md:462-478</code>:</p>
+<pre><code>{
+  "rules": [
+    { "when": "&lt;natural-language condition&gt;",
+      "approval": "captain",
+      "floor": { "scope": "…", "min_percent": 20, "provider": "…" },
+      "use": [ { "harness": "…", "model": "…", "effort": "…", "provider": "…", "floor": {…} } ],
+      "why": "&lt;rationale&gt;" }
+  ],
+  "default": [ { "harness": "…", "model": "…", "effort": "…" } ]
+}</code></pre>
+<ul>
+<li><code>when</code> and <code>use</code> are required per rule; <code>rules</code> may be empty for a default-only setup. <code>use</code> and <code>default</code> each take one profile or a non-empty array, and every profile needs <code>harness</code> <code class="cite">docs/configuration.md:480-483</code>.</li>
+<li><code>approval</code>, <code>floor</code>, and profile <code>provider</code> are enforced only by typed resolution. "without that opt-in they are inert", and Firstmate reads them as hints <code class="cite">docs/configuration.md:484</code>.</li>
+<li>An unsupported effort is recorded as <code>effort=</code> but omitted from the launch flags; <code>ultra</code> refuses instead <code class="cite">docs/configuration.md:504-505</code>.</li>
+<li>Bootstrap validates the file with <code>jq</code> and reports <code>CREW_DISPATCH: invalid config/crew-dispatch.json - …</code>. "malformed configuration must be reported and corrected rather than selected around" <code class="cite">docs/configuration.md:507-512</code>.</li>
+<li>Secondmate homes inherit the file, so their own crewmates follow the same rules <code class="cite">docs/configuration.md:513</code>.</li>
+</ul>
+<p>The shipped example routes current-events work to <code>grok</code>, trivial edits to <code>claude</code> with <code>haiku</code> at <code>low</code>, and big ambiguous work to an array of a Claude and a Codex profile. Its default is an array of Codex and Pi profiles <code class="cite">docs/examples/crew-dispatch.json:1-26</code>.</p>
+
+<h2 id="array">Resolving an array</h2>
+<p>An array is "an implicit quota-aware choice" <code class="cite">docs/configuration.md:502</code>. The first mate owns it alone: it starts from <code>quota-axi</code>'s default TOON at that intake and ranks by <code>spendPriority</code> "as the one quota-perspective ranker after the skill's eligibility, reasoning-class, and runway-feasibility gates" <code class="cite">AGENTS.md:225</code>. The <code>quota-array-dispatch</code> skill owns the procedure:</p>
+<ol>
+<li><strong>Eligibility.</strong> Only concrete contradicting evidence blocks a candidate, such as a catalog proving the model unsupported. Missing quota or authentication facts are "disclosed uncertainty that keeps a candidate eligible, never a credential or login escalation" <code class="cite">AGENTS.md:228-229</code>.</li>
+<li><strong>Reasoning-class fit.</strong> "Never use <code>spendPriority</code> or remaining quota to silently replace that class" <code class="cite crew-wrap">.agents/skills/quota-array-dispatch/SKILL.md:97-101</code>.</li>
+<li><strong>Runway feasibility.</strong> A window that will run out before the likely completion fails, "even when that candidate has the highest <code>spendPriority</code>" <code class="cite crew-wrap">.agents/skills/quota-array-dispatch/SKILL.md:103-110</code>.</li>
+<li><strong>Rank.</strong> Highest known <code>spendPriority</code> wins. Unknown is never treated as zero or healthy. "Genuine ties: stop and report every tied candidate for captain choice", never by array order or harness name <code class="cite crew-wrap">.agents/skills/quota-array-dispatch/SKILL.md:112-130</code>.</li>
+</ol>
+<p>Every candidate must be accounted for visibly with its evidence; "never omit a candidate, guess, fall back silently, or call the result quota-informed without them" <code class="cite">AGENTS.md:226</code>.</p>
+
+<h2 id="typed">Typed resolution (opt-in)</h2>
+<p><code>bin/fm-dispatch-resolve.sh</code> turns the rule match into one tool call. It is off unless <code>TYPESAFE_API_KEY</code> is set in the environment or the home's <code>.env</code>. Off means one <code>dispatch-resolve: off</code> line, exit 0, and no network call <code class="cite">bin/fm-dispatch-resolve.sh:8-14</code>. When on, it sends the project name and the whole brief to typesafe.ai's Jev model as one Choice question over every rule's <code>when</code>. "The model never sees quota, catalogs, approvals, <code>why</code>, or <code>use</code>". Everything after the answer runs in <code>jq</code>: the confidence floor of 0.6, approvals, floors, one <code>quota-axi --json</code> snapshot, and the <code>spendPriority</code> argmax <code class="cite">bin/fm-dispatch-resolve.sh:16-31</code> <code class="cite">docs/configuration.md:547</code>.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Status</th><th>Meaning</th><th>What Firstmate does</th></tr></thead>
+<tbody>
+<tr><td><code>clear</code></td><td>a <code>profile: --harness … [--model …] [--effort …]</code> line</td><td>passes it to <code>fm-spawn.sh</code> unless it states a reason to override</td></tr>
+<tr><td><code>ambiguous</code></td><td>confidence below the floor</td><td>ordinary intake</td></tr>
+<tr><td><code>escalate</code></td><td>approval-gated rule, unverifiable floor, nothing rankable, or a tie</td><td>ordinary intake</td></tr>
+<tr><td><code>error</code></td><td>API, network, response, or quota failure</td><td>ordinary intake</td></tr>
+</tbody></table></div>
+<p class="evidence">Every outcome exits 0, "so an intake is never blocked by this tool"; exit 2 is reserved for configuration errors <code class="cite">bin/fm-dispatch-resolve.sh:34-47</code>. Firstmate runs it directly on the written brief "with no preflight" <code class="cite">AGENTS.md:235</code>.</p>
+<div class="callout"><span class="callout-title">A deliberate gap</span>
+<p>"By accepted design, a <code>clear</code> result does not enforce catalog/authentication, reasoning-class, or completion-runway gates" <code class="cite">docs/configuration.md:542</code>. That is why Firstmate keeps the right to override it.</p></div>
+
+<h2 id="helper">The worker-side helper</h2>
+<p><code>bin/fm-quota-choose.sh</code> picks the first quota-eligible candidate from an ordered list, using an already-captured snapshot. Its header records a known limitation: it maps each harness to one primary provider family, so a Pi or OpenCode candidate running another provider's model "is checked against the wrong quota row". Authoritative multi-provider routing stays with <code>AGENTS.md</code> and the skill <code class="cite">bin/fm-quota-choose.sh:2-38</code>.</p>
+
+<h2 id="effort">Effort when nothing specifies it</h2>
+<p>The fallback belongs to <code>harness-adapters</code>: explicit captain or configured effort wins. Otherwise "low for well-understood explicit work, xhigh for ambiguous investigation or design, intermediate levels proportionally, and never max without explicit captain preference" <code class="cite">AGENTS.md:236-237</code>.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

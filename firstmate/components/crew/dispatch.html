@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dispatch · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Crew</p>
+<h1>Dispatch</h1>
+<p class="lede"><code>bin/fm-spawn.sh</code> is the only way a worker comes into existence. It checks every gate before it creates anything, creates the endpoint, worktree, and record in a fixed order under locks, and reports success only after the backlog agrees the task is in flight.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Crew</a>. The launch itself (the brief the worker reads, the staged command, the environment) is on <a href="launch.html">Launch and the injected prompt</a>.</p>
+
+<h2 id="role">Responsibility and contract</h2>
+<p>The header opens: "Spawn a direct report: a crewmate in a treehouse or Orca worktree, or a secondmate in its isolated firstmate home" <code class="cite">bin/fm-spawn.sh:2-3</code>. The supervisor contract makes it exclusive: "Spawn only through <code>bin/fm-spawn.sh</code> after the profile and backend checks in section 4", and "a failed isolation assertion stops the task" <code class="cite">AGENTS.md:329-330</code>. The header is about 390 lines long, and the script uses that header as its own <code>--help</code> text <code class="cite">bin/fm-spawn.sh:403-408</code>.</p>
+<p><strong>What it guarantees on success.</strong> A worker is running in an isolated, clean, current worktree (or its secondmate home). <code>state/&lt;id&gt;.meta</code> names its exact endpoint with a new <code>spawn_gen</code>. For ship and scout tasks the backlog row reads In flight. It prints exactly one line <code class="cite">bin/fm-spawn.sh:381</code>:</p>
+<pre><code>spawned &lt;id&gt; harness=&lt;name&gt; kind=&lt;ship|scout|secondmate&gt; [mode=&lt;mode&gt; yolo=&lt;on|off&gt;] window=&lt;backend-target&gt; worktree=&lt;path&gt;</code></pre>
+
+<h2 id="usage">How it is invoked</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Shape</th><th>Example</th></tr></thead>
+<tbody>
+<tr><td>Ship</td><td><code>bin/fm-spawn.sh fix-a-k3 projects/foo --mode direct-PR --yolo off --harness claude --effort low</code></td></tr>
+<tr><td>Scout</td><td><code>bin/fm-spawn.sh probe-b-q7 projects/foo --scout --harness codex --effort xhigh</code></td></tr>
+<tr><td>Secondmate</td><td><code>bin/fm-spawn.sh web-sm --secondmate</code> (home from the registry or its record)</td></tr>
+<tr><td>Batch</td><td><code>bin/fm-spawn.sh fix-a-k3=projects/foo add-b-q7=projects/bar --scout --harness claude</code> <code class="cite">bin/fm-spawn.sh:235-244</code></td></tr>
+<tr><td>Relaunch</td><td><code>bin/fm-spawn.sh fix-a-k3 --relaunch [--harness …]</code>, normally only from <code>fm-control.sh relaunch</code> <code class="cite">bin/fm-spawn.sh:31-38</code></td></tr>
+</tbody></table></div>
+<p>A batch re-executes the script once per <code>id=repo</code> pair, "so the single path stays the only source of truth". The loop lives in bash because the tool shell is zsh, which "does not word-split unquoted $vars and silently breaks ad-hoc <code>for … in $pairs</code> loops" <code class="cite">bin/fm-spawn.sh:236-244</code>. A failed pair is reported and skipped, and the exit is non-zero if any pair failed <code class="cite">bin/fm-spawn.sh:1327-1332</code>.</p>
+
+<h3 id="flags">Flags</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Flag</th><th>Applies to</th><th>Rule</th></tr></thead>
+<tbody>
+<tr><td><code>--mode</code>, <code>--yolo</code></td><td>ship only</td><td>Required, closed set; refused elsewhere <code class="cite">bin/fm-spawn.sh:7-17</code></td></tr>
+<tr><td><code>--scout</code>, <code>--secondmate</code></td><td>kind</td><td>Default kind is ship <code class="cite">bin/fm-spawn.sh:196-198</code></td></tr>
+<tr><td><code>--harness</code></td><td>all</td><td>Adapter name, or a raw launch command containing whitespace (the escape hatch for verifying new adapters) <code class="cite">bin/fm-spawn.sh:146-161</code></td></tr>
+<tr><td><code>--model</code>, <code>--effort</code></td><td>all</td><td>Threaded only into harnesses verified for that axis; effort in <code>low…max, ultra</code> <code class="cite">bin/fm-spawn.sh:64-69</code></td></tr>
+<tr><td><code>--backend</code></td><td>this task only</td><td>Overrides <code>FM_BACKEND</code>, <code>config/backend</code>, detection, tmux <code class="cite">bin/fm-spawn.sh:70-78</code></td></tr>
+<tr><td><code>--relaunch</code></td><td>existing task</td><td>Every identity axis comes from the record; only harness, model, effort may change <code class="cite">bin/fm-spawn.sh:38-44</code></td></tr>
+<tr><td><code>--traceparent</code></td><td>secondmate only</td><td>A remote parent's already-resolved W3C carrier <code class="cite">bin/fm-spawn.sh:392-398</code></td></tr>
+</tbody></table></div>
+
+<h2 id="order">The gate order</h2>
+<p>The order matters. Every check that can be made before an endpoint exists is made first, because "a refusal here costs nothing to unwind, while the same refusal after publication would strand a live pane" <code class="cite">bin/fm-spawn.sh:3099-3103</code>.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 960 840" role="img" aria-labelledby="disp-t disp-d">
+<title id="disp-t">fm-spawn.sh gate and step order</title>
+<desc id="disp-d">Twelve steps from preflight to commit, with what each step refuses. Steps one to seven refuse before anything exists; steps eight to eleven run after the endpoint exists; step twelve is the commit point.</desc>
+<defs><marker id="disp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="34">fm-spawn.sh, in order</text>
+
+<g class="c4-boundary"><rect x="395" y="52" width="545" height="444" rx="8"/><text transform="translate(928,488) rotate(-90)" x="0" y="0">Refuses before anything exists</text></g>
+<g class="c4-boundary"><rect x="395" y="500" width="545" height="256" rx="8"/><text transform="translate(928,748) rotate(-90)" x="0" y="0">After the endpoint exists</text></g>
+<g class="c4-boundary"><rect x="395" y="760" width="545" height="62" rx="8"/><text transform="translate(928,814) rotate(-90)" x="0" y="0">Commit</text></g>
+
+<g class="c4-component"><rect x="40" y="60" width="330" height="48" rx="8"/><text class="c4-label" x="205" y="81">1 · Preflight</text><text class="c4-desc" x="205" y="98">config files, gate agent, flags</text></g>
+<text class="crew-note" x="410" y="79">malformed config/launch-env-allowlist, claude-permission-mode,</text>
+<text class="crew-note" x="410" y="95">lavish-axi-host · a no-mistakes gate agent · bad or missing flags</text>
+<g class="c4-component"><rect x="40" y="124" width="330" height="48" rx="8"/><text class="c4-label" x="205" y="145">2 · Batch fan-out</text><text class="c4-desc" x="205" y="162">re-exec once per id=repo pair</text></g>
+<text class="crew-note" x="410" y="143">crew-dispatch.json present but no explicit --harness</text>
+<text class="crew-note" x="410" y="159">(also checked on the single path)</text>
+<g class="c4-component"><rect x="40" y="188" width="330" height="48" rx="8"/><text class="c4-label" x="205" y="209">3 · Role and capacity</text><text class="c4-desc" x="205" y="226">actor, spend cap, task-set lock</text></g>
+<text class="crew-note" x="410" y="207">supervision branch spawning new work · away-mode worker cap</text>
+<text class="crew-note" x="410" y="223">reached · forced teardown holds the task-set lock</text>
+<g class="c4-component"><rect x="40" y="252" width="330" height="48" rx="8"/><text class="c4-label" x="205" y="273">4 · Backend and task lock</text><text class="c4-desc" x="205" y="290">resolve, validate, .spawn-&lt;id&gt;.lock</text></g>
+<text class="crew-note" x="410" y="271">unknown or not spawn-capable backend · orca/cmux secondmate ·</text>
+<text class="crew-note" x="410" y="287">Orca not ready · another spawn of the same id</text>
+<g class="c4-component"><rect x="40" y="316" width="330" height="48" rx="8"/><text class="c4-label" x="205" y="337">5 · Harness and profile</text><text class="c4-desc" x="205" y="354">template, binaries, model checks</text></g>
+<text class="crew-note" x="410" y="335">secondmate on muse/gemini/rovo/agy · ultra out of scope ·</text>
+<text class="crew-note" x="410" y="351">missing Pi/omp binary · model absent from omp/agy listing</text>
+<g class="c4-component"><rect x="40" y="380" width="330" height="48" rx="8"/><text class="c4-label" x="205" y="401">6 · Brief and contract</text><text class="c4-desc" x="205" y="418">project lock, brief checks, launch brief</text></g>
+<text class="crew-note" x="410" y="399">slot allocation racing · no brief · placeholders · empty Task ·</text>
+<text class="crew-note" x="410" y="415">Captain-label address · brief mode ≠ --mode</text>
+<g class="c4-component"><rect x="40" y="444" width="330" height="48" rx="8"/><text class="c4-label" x="205" y="465">7 · Backlog preflight</text><text class="c4-desc" x="205" y="482">row must be dispatchable</text></g>
+<text class="crew-note" x="410" y="463">no item · not unheld, unblocked Queued or In flight ·</text>
+<text class="crew-note" x="410" y="479">pending backlog-close record</text>
+
+<g class="c4-component"><rect x="40" y="508" width="330" height="48" rx="8"/><text class="c4-label" x="205" y="529">8 · Endpoint and worktree</text><text class="c4-desc" x="205" y="546">create, treehouse get, isolate, claim</text></g>
+<text class="crew-note" x="410" y="527">no isolated worktree within 60s · slot cannot be claimed ·</text>
+<text class="crew-note" x="410" y="543">dirty or stale slot · origin fetch or reset fails</text>
+<g class="c4-component"><rect x="40" y="572" width="330" height="48" rx="8"/><text class="c4-label" x="205" y="593">9 · Trust and wiring</text><text class="c4-desc" x="205" y="610">trust store, /tmp root, turn-end hooks</text></g>
+<text class="crew-note" x="410" y="591">Claude trust registration refused · unsafe /tmp/fm-&lt;id&gt; ·</text>
+<text class="crew-note" x="410" y="607">hook or busy-state wiring cannot be written</text>
+<g class="c4-component"><rect x="40" y="636" width="330" height="48" rx="8"/><text class="c4-label" x="205" y="657">10 · Publish the record</text><text class="c4-desc" x="205" y="674">state/&lt;id&gt;.meta, atomically</text></g>
+<text class="crew-note" x="410" y="655">publication fails · then the project and task-set</text>
+<text class="crew-note" x="410" y="671">locks are released; the meta lock is kept</text>
+<g class="c4-component"><rect x="40" y="700" width="330" height="48" rx="8"/><text class="c4-label" x="205" y="721">11 · Launch</text><text class="c4-desc" x="205" y="738">stage 0600 file, source it, Enter</text></g>
+<text class="crew-note" x="410" y="719">unsafe launch namespace · kimi, rovo, agy readiness or</text>
+<text class="crew-note" x="410" y="735">delivery gate fails (their endpoint is closed)</text>
+
+<g class="c4-component"><rect x="40" y="764" width="330" height="48" rx="8"/><text class="c4-label" x="205" y="785">12 · Commit</text><text class="c4-desc" x="205" y="802">backlog → In flight, print spawned</text></g>
+<text class="crew-note" x="410" y="783">transition fails twice → record removed, spawn fails;</text>
+<text class="crew-note" x="410" y="799">signals deferred and preservation verified by read-back</text>
+
+<g class="c4-rel"><path d="M205,108 L205,122" marker-end="url(#disp-arrow)"/></g>
+<g class="c4-rel"><path d="M205,172 L205,186" marker-end="url(#disp-arrow)"/></g>
+<g class="c4-rel"><path d="M205,236 L205,250" marker-end="url(#disp-arrow)"/></g>
+<g class="c4-rel"><path d="M205,300 L205,314" marker-end="url(#disp-arrow)"/></g>
+<g class="c4-rel"><path d="M205,364 L205,378" marker-end="url(#disp-arrow)"/></g>
+<g class="c4-rel"><path d="M205,428 L205,442" marker-end="url(#disp-arrow)"/></g>
+<g class="c4-rel"><path d="M205,492 L205,506" marker-end="url(#disp-arrow)"/></g>
+<g class="c4-rel"><path d="M205,556 L205,570" marker-end="url(#disp-arrow)"/></g>
+<g class="c4-rel"><path d="M205,620 L205,634" marker-end="url(#disp-arrow)"/></g>
+<g class="c4-rel"><path d="M205,684 L205,698" marker-end="url(#disp-arrow)"/></g>
+<g class="c4-rel"><path d="M205,748 L205,762" marker-end="url(#disp-arrow)"/></g>
+</svg>
+</div>
+<figcaption>The three dashed zones: steps 1 to 7 refuse before any endpoint, worktree, or record exists; steps 8 to 11 run after the endpoint exists, so most refusals print the endpoint to inspect; step 12 is the commit point. The single-task path for a fresh ship or scout. A secondmate replaces steps 7 to 8 with home validation, sync, and inheritance, and skips the backlog. A relaunch replaces step 8 with adopting or re-creating the recorded endpoint.</figcaption>
+</figure>
+
+<h3 id="steps">Step notes with evidence</h3>
+<dl class="defs">
+<dt>1 · Preflight</dt>
+<dd>Three local config files are parsed once, and a malformed one refuses before any mutation <code class="cite">bin/fm-spawn.sh:458-518</code>. <code>fm_refuse_if_gate_agent</code> stops a no-mistakes gate agent that has wandered into a Firstmate checkout. It refuses on either the <code>NO_MISTAKES_GATE</code> marker or a git common dir under a no-mistakes gate repo <code class="cite">bin/fm-spawn.sh:559-561</code> <code class="cite">bin/fm-gate-refuse-lib.sh:19-29</code>. The watcher guard runs once (once per batch) <code class="cite">bin/fm-spawn.sh:562-564</code>.</dd>
+<dt>3 · Role and capacity</dt>
+<dd>A fresh spawn is main-owned while attended, so the supervision-branch actor is refused unless the away-posture record relocates queued work to it <code class="cite">bin/fm-spawn.sh:1396-1410</code>. The away record's <code>spend_max_concurrent_workers</code> caps ordinary task records (secondmates exempt) <code class="cite">bin/fm-spawn.sh:1411-1441</code>. The per-home task-set lock is taken with try-acquire and "Refusing rather than waiting is the fail-closed direction" <code class="cite">bin/fm-spawn.sh:1474-1505</code>.</dd>
+<dt>4 · Backend and task lock</dt>
+<dd>Resolution order and validation are on <a href="backends.html#selection">Session backends</a> <code class="cite">bin/fm-spawn.sh:1518-1543</code>. A backend refusal is terminal and must never be silently retried on another backend <code class="cite">bin/fm-spawn.sh:87-89</code>. The per-id lock <code>state/.spawn-&lt;id&gt;.lock</code> serializes same-id spawns even across backends <code class="cite">bin/fm-spawn.sh:1545-1550</code>.</dd>
+<dt>5 · Harness and profile</dt>
+<dd>See <a href="harnesses.html">Harness adapters</a> and <a href="dispatch-profiles.html">Dispatch profiles</a>. Secondmate harness refusals: <code class="cite">bin/fm-spawn.sh:2109-2134</code>.</dd>
+<dt>6 · Brief and contract</dt>
+<dd>A fresh Treehouse-backed spawn takes the project-identity lock before allocation and refuses on contention <code class="cite">bin/fm-spawn.sh:2708-2718</code>. It then refuses a missing brief, leftover <code>{TASK}</code>/<code>{FIRSTMATE_SPEC}</code>, an empty Task, or an intent line addressed to the captain <code class="cite">bin/fm-spawn.sh:2719-2735</code>. It renders <code>launch-brief.md</code> <code class="cite">bin/fm-spawn.sh:2747-2769</code> and checks the brief's delivery line <code class="cite">bin/fm-spawn.sh:2785-2804</code>.</dd>
+<dt>7 · Backlog preflight</dt>
+<dd>Only when the backlog gate applies (not for secondmates, manual-backend homes, or markdown homes with no backlog file). The row must read <code>queued no no</code> or <code>in_flight no no</code>, meaning state, not held, not blocked <code class="cite">bin/fm-spawn.sh:3104-3138</code> <code class="cite crew-wrap">bin/fm-backlog-transition-lib.sh:821-826</code>. The error names the fix: <code>bin/fm-tasks-axi.sh add &lt;id&gt; '&lt;title&gt;' --kind &lt;kind&gt;</code> <code class="cite">bin/fm-spawn.sh:3111</code>. A leftover <code>state/&lt;id&gt;.backlog-close</code> also refuses <code class="cite">bin/fm-spawn.sh:3140-3143</code>.</dd>
+<dt>8 · Endpoint and worktree</dt>
+<dd>The endpoint is created first. Then, on every backend except Orca, the literal text <code>treehouse get</code> is typed into the new pane, and the pane's current directory is polled until two consecutive reads agree on an isolated worktree <code class="cite">bin/fm-spawn.sh:3842-3902</code>. Details on <a href="worktrees.html">Worktrees and slot claims</a>.</dd>
+<dt>9 · Trust and wiring</dt>
+<dd>Claude is "the one harness whose pre-launch setup can REFUSE the spawn": the directory is registered in Claude's trust store, and a failed registration stops the spawn <code class="cite">bin/fm-spawn.sh:352-360</code> <code class="cite">bin/fm-spawn.sh:3953-3964</code>. agy's registration is non-fatal <code class="cite">bin/fm-spawn.sh:3944-3951</code>. A private <code>/tmp/fm-&lt;id&gt;</code> root holds Go's <code>GOTMPDIR</code> <code class="cite">bin/fm-spawn.sh:3976-3996</code>. Per-harness turn-end hooks are written outside git's view <code class="cite">bin/fm-spawn.sh:3997-4000</code>.</dd>
+<dt>10 · Publish the record</dt>
+<dd>Written to a temp file under the meta lock and published atomically; a new <code>spawn_gen</code> token is minted <code class="cite">bin/fm-spawn.sh:4436-4516</code>. The Treehouse project lock and task-set lock are released only now <code class="cite">bin/fm-spawn.sh:4584-4596</code>.</dd>
+<dt>11 · Launch</dt>
+<dd>See <a href="launch.html#delivery">Launch delivery</a>. kimi and rovo launch bare and receive a typed brief pointer after readiness and delivery gates; agy must show a busy turn <code class="cite">bin/fm-spawn.sh:4844-4912</code>.</dd>
+<dt>12 · Commit</dt>
+<dd>"This is the commit point": the backlog transition runs under the same meta lock, retried once. On failure, a fresh spawn removes its record so "no worker is left that the backlog does not own" <code class="cite">bin/fm-spawn.sh:4914-4957</code>. HUP, INT and TERM are deferred across the commit. An interrupted spawn re-reads the row and the record, and reports only what it verified <code class="cite">bin/fm-spawn.sh:4538-4568</code> <code class="cite">bin/fm-spawn.sh:4959-4977</code>.</dd>
+</dl>
+
+<h2 id="locks">Locks it holds</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Lock</th><th>Scope</th><th>Held</th><th>Contention</th></tr></thead>
+<tbody>
+<tr><td><code>state/.task-set.lock</code></td><td>which tasks exist in a home</td><td>fresh spawn, from before its own locks to record publication</td><td>refuse <code class="cite">bin/fm-wake-lib.sh:1163-1182</code></td></tr>
+<tr><td><code>state/.spawn-&lt;id&gt;.lock</code></td><td>one task id</td><td>backend creation to metadata publication</td><td>refuse <code class="cite">bin/fm-spawn.sh:125-128</code></td></tr>
+<tr><td><code>&lt;root&gt;/state/.treehouse-project-&lt;hash&gt;.lock</code></td><td>one project origin, across every local home</td><td>slot allocation to record publication</td><td>refuse <code class="cite">bin/fm-spawn.sh:130-145</code></td></tr>
+<tr><td><code>state/.meta-&lt;id&gt;.lock</code></td><td>one task record</td><td>backlog preflight through the commit</td><td>wait <code class="cite">bin/fm-spawn.sh:4914-4921</code></td></tr>
+<tr><td><code>state/.control-&lt;id&gt;.lock</code></td><td>lifecycle actions on one task</td><td>relaunch only (owned by <code>fm-control.sh</code>)</td><td>refuse <code class="cite">bin/fm-spawn.sh:1456-1473</code></td></tr>
+<tr><td>Herdr presentation-order lock</td><td>one Herdr session and socket, all homes</td><td>projected create through launch handoff</td><td>warn and fall back to flat layout <code class="cite">bin/fm-spawn.sh:113-117</code></td></tr>
+</tbody></table></div>
+<p>The <a href="../persistence/index.html">Persistence</a> area owns the lock primitives themselves.</p>
+
+<h2 id="refuses-to-guess">What it refuses to guess</h2>
+<ul>
+<li><strong>The delivery contract.</strong> The mode is never looked up from <code>data/projects.md</code>; that file "holds the captain's standing posture as context, not as this task's answer" <code class="cite">bin/fm-spawn.sh:9-11</code>.</li>
+<li><strong>The harness, when profiles exist.</strong> With <code>config/crew-dispatch.json</code> present, a crewmate or scout spawn with no explicit harness refuses, "so firstmate cannot silently skip dispatch profile consultation" <code class="cite">bin/fm-spawn.sh:146-150</code> <code class="cite">bin/fm-spawn.sh:2088-2090</code>.</li>
+<li><strong>Unsupported profile axes.</strong> They are "omitted from that harness's launch rather than guessed" <code class="cite">bin/fm-spawn.sh:64-69</code>.</li>
+<li><strong>A fallback backend.</strong> A backend refusal is terminal for that backend <code class="cite">bin/fm-spawn.sh:87-89</code>.</li>
+<li><strong>Herdr placement by label.</strong> Herdr "enforces no label uniqueness, so a label cannot tell two 'firstmate' workspaces apart". The worker goes into the launcher's exact workspace, and an unreadable or contradictory parent identity stops the spawn <code class="cite">bin/fm-spawn.sh:90-99</code>.</li>
+<li><strong>Version-dependent flags.</strong> Pi's <code>--tui-mode regular</code> is added only when the resolved binary's <code>--help</code> advertises it. <code>pi-signed</code> "never falls back to pi" <code class="cite">bin/fm-spawn.sh:155-160</code>.</li>
+<li><strong>A transient cwd.</strong> A pane still reporting the project or the primary checkout while <code>treehouse get</code> works is "waited out as a transient rather than adopted and then refused" <code class="cite">bin/fm-spawn.sh:205-211</code>.</li>
+<li><strong>A remedy for a stale submodule.</strong> It names each submodule and both pins but prints no fix command, because its containment test reads local refs only and could be fooled <code class="cite">bin/fm-spawn.sh:226-234</code>.</li>
+<li><strong>A relaunch identity.</strong> Backend, kind, project, worktree and endpoint come from the validated record, never the command line <code class="cite">bin/fm-spawn.sh:38-44</code>.</li>
+</ul>
+
+<h2 id="failure">Failure behaviour and cleanup</h2>
+<p>An <code>EXIT</code> trap, <code>spawn_abort_cleanup</code>, releases every lock the run holds and removes an unpublished temporary record. It drops the slot claim only while the project lock is still held, retires a relaunch's replacement wiring, cleans an exact Herdr projection, and closes an Orca terminal and worktree <code class="cite">bin/fm-spawn.sh:1140-1272</code>. It closes no tmux, zellij or cmux endpoint. Refusals after step 8 instead print the endpoint to inspect, for example "treehouse get did not enter an isolated worktree within 60s (last seen …); inspect window $T" <code class="cite">bin/fm-spawn.sh:3897-3899</code>. The kimi, rovo and agy launch gates are the exception: they run after publication, so they close their own endpoint rather than leave "an orphaned autonomous agent outside task control" <code class="cite">bin/fm-spawn.sh:3736-3742</code>.</p>
+<div class="callout unclear"><span class="callout-title">Not settled by the source</span>
+<p>The source does not say who removes a tmux, zellij or cmux endpoint left behind by a refusal in steps 8 to 11. No record names that endpoint yet, so <code>fm-teardown.sh &lt;id&gt;</code> cannot find it. The error text leaves it to the operator.</p></div>
+
+<h2 id="neighbours">Depends on, and depended on by</h2>
+<ul>
+<li>Calls: <code>bin/fm-backend.sh</code> and its adapters, <code>bin/fm-backlog-transition-lib.sh</code>, <code>bin/fm-dod-lib.sh</code> (role and intent overlay), <code>bin/fm-wake-lib.sh</code> (locks, slot claims), <code>bin/fm-claude-trust.sh</code>, <code>bin/fm-agy-trust.sh</code>, <code>bin/fm-config-inherit-lib.sh</code>, <code>bin/fm-project-mode.sh</code> <code class="cite">bin/fm-spawn.sh:420-556</code>.</li>
+<li>Called by: the first mate at intake, <code>bin/fm-control.sh relaunch</code>, and the session-start secondmate liveness sweep (<code>--secondmate</code>) <code class="cite">AGENTS.md:191</code>.</li>
+<li>Read later by: the watcher, <code>fm-crew-state.sh</code>, <code>fm-send.sh</code>, <code>fm-control.sh</code>, and <code>fm-teardown.sh</code>, all through the record it publishes.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

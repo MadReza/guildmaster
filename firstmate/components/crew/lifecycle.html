@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>End-to-end trace · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">Components › Crew</p>
+<h1>End-to-end trace</h1>
+<p class="lede">One direct-PR ship task, followed from the captain's request to a Done backlog row, with the exact command at each step and the state of every record in between.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Crew</a>. The task id <code>fix-login-k3</code> and project <code>foo</code> are illustrative; every step and command shape comes from the cited source.</p>
+
+<h2 id="sequence">The whole path</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1100 800" role="img" aria-labelledby="e2e-t e2e-d">
+<title id="e2e-t">One ship task from request to Done</title>
+<desc id="e2e-d">The captain asks; the first mate adds a backlog item, scaffolds and fills a brief, resolves a profile, and spawns. fm-spawn creates the endpoint and worktree, launches the worker, and moves the backlog row to In flight. The worker appends status lines that wake the first mate, which reads current state and steers through the inbox. The worker pushes and opens a PR, then reports done with the PR URL. The first mate arms the merge poll, reports to the captain, merges on authority, and after the merge wake runs teardown, which returns the worktree, closes the endpoint, and closes the backlog row.</desc>
+<defs><marker id="e2e-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">fix-login-k3, direct-PR, yolo off</text>
+<g class="c4-person"><circle cx="90" cy="54" r="12"/><rect x="30" y="66" width="120" height="36" rx="12"/><text class="c4-label" x="90" y="89">Captain</text></g>
+<g class="c4-container"><rect x="210" y="56" width="140" height="46" rx="8"/><text class="c4-label" x="280" y="77">First mate</text><text class="c4-tech" x="280" y="93">[agent]</text></g>
+<g class="c4-component"><rect x="410" y="56" width="140" height="46" rx="8"/><text class="c4-label" x="480" y="77">Toolbelt</text><text class="c4-tech" x="480" y="93">[bin/fm-*.sh]</text></g>
+<g class="c4-datastore"><path d="M600,60 a60,7 0 0,0 120,0 a60,7 0 0,0 -120,0 v34 a60,7 0 0,0 120,0 v-34"/><text class="c4-label" x="660" y="86">Backlog</text></g>
+<g class="c4-container"><rect x="760" y="56" width="140" height="46" rx="8"/><text class="c4-label" x="830" y="77">Worker</text><text class="c4-tech" x="830" y="93">[pane + worktree]</text></g>
+<g class="c4-external"><rect x="940" y="56" width="140" height="46" rx="8"/><text class="c4-label" x="1010" y="77">Forge</text><text class="c4-tech" x="1010" y="93">[GitHub]</text></g>
+<path class="crew-lifeline" d="M90,102 L90,785"/>
+<path class="crew-lifeline" d="M280,102 L280,785"/>
+<path class="crew-lifeline" d="M480,102 L480,785"/>
+<path class="crew-lifeline" d="M660,102 L660,785"/>
+<path class="crew-lifeline" d="M830,102 L830,785"/>
+<path class="crew-lifeline" d="M1010,102 L1010,785"/>
+
+<g class="c4-rel"><path d="M90,130 L278,130" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="185" y="123">1 "fix the login bug in foo"</text></g>
+<g class="c4-rel"><path d="M280,160 L658,160" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="470" y="153">2 fm-tasks-axi.sh add fix-login-k3 … --kind ship (Queued)</text></g>
+<g class="c4-rel"><path d="M280,190 L478,190" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="380" y="183">3 fm-brief.sh … --mode direct-PR</text></g>
+<text class="crew-note" x="290" y="212">4 fill Captain's intent + Firstmate spec; resolve profile</text>
+<g class="c4-rel"><path d="M280,240 L478,240" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="380" y="233">5 fm-spawn.sh … --mode direct-PR --yolo off --harness …</text></g>
+<g class="c4-rel"><path d="M480,270 L828,270" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="655" y="263">6 endpoint · treehouse get · launch brief</text></g>
+<g class="c4-rel"><path d="M480,300 L658,300" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="570" y="293">7 start → In flight</text></g>
+<g class="c4-rel c4-rel-async"><path d="M828,340 L282,340" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="555" y="333">8 status: needs-decision [at=…] … (watcher wake)</text></g>
+<g class="c4-rel"><path d="M280,370 L478,370" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="380" y="363">9 fm-crew-state.sh fix-login-k3</text></g>
+<g class="c4-rel"><path d="M280,400 L828,400" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="555" y="393">10 fm-send.sh … --resolve-key (inbox record + doorbell)</text></g>
+<g class="c4-rel"><path d="M830,440 L1008,440" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="920" y="433">11 push fm/…, open PR</text></g>
+<g class="c4-rel c4-rel-async"><path d="M828,475 L282,475" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="555" y="468">12 status: done [at=…]: PR https://…</text></g>
+<g class="c4-rel"><path d="M280,505 L478,505" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="380" y="498">13 fm-pr-check.sh &lt;id&gt; &lt;url&gt;</text></g>
+<g class="c4-rel"><path d="M280,535 L92,535" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="185" y="528">14 PR URL + summary</text></g>
+<g class="c4-rel"><path d="M90,565 L278,565" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="185" y="558">15 "merge it"</text></g>
+<g class="c4-rel"><path d="M280,595 L1008,595" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="640" y="588">16 fm-pr-merge.sh (guarded merge)</text></g>
+<g class="c4-rel c4-rel-async"><path d="M1008,630 L282,630" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="640" y="623">17 merge poll: check wake "merged"</text></g>
+<g class="c4-rel"><path d="M280,665 L478,665" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="380" y="658">18 fm-teardown.sh fix-login-k3</text></g>
+<g class="c4-rel"><path d="M480,695 L828,695" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="655" y="688">19 landed test · return worktree · close endpoint</text></g>
+<g class="c4-rel"><path d="M480,725 L658,725" marker-end="url(#e2e-arrow)"/><text class="c4-rel-label" x="570" y="718">20 done --pr … (Done)</text></g>
+<text class="crew-note" x="290" y="760">21 re-evaluate queued work</text>
+</svg>
+</div>
+<figcaption>Dashed arrows are events: the worker appends to its status log and the watcher wakes the first mate. Each numbered step is explained below.</figcaption>
+</figure>
+
+<h2 id="steps">Step by step</h2>
+<dl class="defs">
+<dt>1 · Request and intake</dt>
+<dd>The first mate resolves the project, routes by secondmate scope, and classifies the deliverable as ship or scout <code class="cite">AGENTS.md:293-308</code>. It resolves the delivery mode and <code>yolo</code> for this task, explicit captain words first, then the registry's standing posture, and records them with any deviation reason in the backlog note <code class="cite">AGENTS.md:315-320</code>.</dd>
+<dt>2 · Backlog item</dt>
+<dd>A dispatchable backlog row must exist, or the spawn will refuse. The spawn's own error names the command: <code>bin/fm-tasks-axi.sh add &lt;id&gt; '&lt;title&gt;' --kind ship</code> <code class="cite">bin/fm-spawn.sh:3111</code>. Details in <a href="../backlog-and-decisions/index.html">Backlog and decisions</a>.</dd>
+<dt>3–4 · Brief and profile</dt>
+<dd><code>bin/fm-brief.sh fix-login-k3 foo --mode direct-PR</code> scaffolds <code>data/fix-login-k3/brief.md</code>. It refuses to overwrite an existing brief and records <code>Delivery contract: mode=direct-PR</code> <code class="cite">bin/fm-brief.sh:17</code> <code class="cite">bin/fm-brief.sh:50-53</code> <code class="cite">bin/fm-brief.sh:89</code>. The first mate fills <code>## Captain's intent</code> and <code>## Firstmate spec</code> <code class="cite">AGENTS.md:324-325</code>, then resolves the profile (<a href="dispatch-profiles.html">Dispatch profiles</a>).</dd>
+<dt>5–7 · Dispatch</dt>
+<dd><code>bin/fm-spawn.sh fix-login-k3 projects/foo --mode direct-PR --yolo off --harness claude</code> runs every gate, creates the endpoint, types <code>treehouse get</code>, proves isolation, claims the slot, resets to <code>origin/&lt;default&gt;</code>, publishes <code>state/fix-login-k3.meta</code>, launches, and only then moves the row to In flight and prints <code>spawned …</code> (<a href="dispatch.html">Dispatch</a>, <a href="launch.html">Launch</a>). The first mate then confirms the worker is actually processing its brief <code class="cite">AGENTS.md:332</code>.</dd>
+<dt>8–10 · Supervision</dt>
+<dd>The worker reports by appending lines such as <code>needs-decision [at=&lt;epoch&gt;]: …</code> to <code>state/fix-login-k3.status</code>, sparingly <code class="cite">bin/fm-brief.sh:59-66</code>. "A status line is a wake event, not current state", so the first mate asks <code>fm-crew-state.sh</code> when current state matters <code class="cite">AGENTS.md:434</code>. It answers through <code>fm-send</code>: the message becomes a durable inbox record, the pane gets only a doorbell line, and <code>--resolve-key</code> closes the open decision at answer time <code class="cite">AGENTS.md:335-337</code>. Lifecycle actions, if needed, go through <a href="control.html"><code>fm-control.sh</code></a>. The watcher and wake queue belong to <a href="../supervision/index.html">Supervision</a>.</dd>
+<dt>11–12 · Delivery</dt>
+<dd>In direct-PR mode the worker pushes <code>fm/fix-login-k3</code>, opens a non-draft PR, and reports <code>done [at=&lt;epoch&gt;]: PR &lt;url&gt;</code> <code class="cite">AGENTS.md:394</code>. See <a href="../delivery/index.html">Delivery</a>.</dd>
+<dt>13–14 · PR recorded, captain told</dt>
+<dd><code>bin/fm-pr-check.sh &lt;id&gt; &lt;url&gt;</code> records <code>pr=</code> and <code>pr_head=</code> in the task record and arms the watcher's merge poll. It refuses a draft <code class="cite">AGENTS.md:395</code> <code class="cite">bin/fm-pr-check.sh:2-15</code>. The captain gets the full URL <code class="cite">AGENTS.md:396</code>.</dd>
+<dt>15–17 · Merge</dt>
+<dd>With <code>yolo</code> off, only the captain's word authorizes the merge <code class="cite">AGENTS.md:397</code>, and every merge goes through <code>bin/fm-pr-merge.sh</code> <code class="cite">AGENTS.md:363</code>. The armed poll surfaces the merge as a <code>check:</code> wake <code class="cite">AGENTS.md:441</code>.</dd>
+<dt>18–20 · Teardown</dt>
+<dd><code>bin/fm-teardown.sh fix-login-k3</code> passes the landed-work test because the PR is merged, returns the slot, closes the endpoint, removes volatile state, and removes the record and closes the row in one step with <code>--pr &lt;url&gt;</code> as the completion link. It then refreshes the project clone (<a href="teardown.html">Teardown</a>).</dd>
+<dt>21 · Next</dt>
+<dd>"After successful teardown, record completion, retain only the configured recent Done history, and re-evaluate queued work whose blockers and time gates have cleared" <code class="cite">AGENTS.md:404</code>.</dd>
+</dl>
+
+<h2 id="records">The records over time</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>After step</th><th>Backlog row</th><th><code>state/&lt;id&gt;.meta</code></th><th>Worktree</th><th>Endpoint</th><th>Status log</th></tr></thead>
+<tbody>
+<tr><td>2</td><td>Queued</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>5, during</td><td>Queued</td><td>temporary file only</td><td>claimed slot, reset clean</td><td>created, harness launching</td><td>—</td></tr>
+<tr><td>7</td><td>In flight</td><td>published: kind=ship, mode, yolo, spawn_gen, window, worktree</td><td>worker's</td><td>worker running</td><td>—</td></tr>
+<tr><td>8–10</td><td>In flight</td><td>unchanged</td><td>commits on <code>fm/&lt;id&gt;</code></td><td>running</td><td>events appended</td></tr>
+<tr><td>13</td><td>In flight</td><td>+ <code>pr=</code>, <code>pr_head=</code></td><td>pushed</td><td>running or idle</td><td><code>done: PR …</code></td></tr>
+<tr><td>20</td><td>Done, with PR link</td><td>removed</td><td>returned to pool, claim dropped</td><td>closed</td><td>removed with volatile state</td></tr>
+</tbody></table></div>
+<p class="evidence">The pairing "<code>state/&lt;id&gt;.meta</code> exists ⇔ this home's backlog row for &lt;id&gt; is In flight" is the invariant <code>bin/fm-backlog-transition-lib.sh</code> owns <code class="cite">bin/fm-backlog-transition-lib.sh:7-19</code>. Volatile removals, including the status log through <code>status_retire_presentation_task</code>: <code class="cite">bin/fm-teardown.sh:3629-3667</code> <code class="cite">bin/fm-classify-lib.sh:1503-1570</code>.</p>
+
+<h2 id="variations">Variations on the same path</h2>
+<ul>
+<li><strong>Scout.</strong> Spawned with <code>--scout</code>; step 11 becomes writing <code>data/&lt;id&gt;/report.md</code>. Teardown needs that report and the captain-call gate instead of landed work. If a fix is then authorized, <a href="promotion.html"><code>fm-promote.sh</code></a> turns the same worker into a ship between steps 12 and 13.</li>
+<li><strong>no-mistakes.</strong> The worker drives the pipeline and reports <code>done … PR &lt;url&gt; checks green</code> only after CI is green, and <code>fm-crew-state.sh</code> reads the run-step as authoritative <code class="cite">AGENTS.md:387-394</code>.</li>
+<li><strong>local-only.</strong> No push or PR; the worker stops on a clean branch, and teardown requires the branch to be merged into local main through <code>bin/fm-merge-local.sh</code> <code class="cite">bin/fm-teardown.sh:1808-1825</code>.</li>
+<li><strong>A stuck or dead worker.</strong> <a href="control.html#relaunch"><code>fm-control.sh relaunch --note …</code></a> replaces the agent in the same worktree; on Herdr a destroyed pane can be reclaimed.</li>
+<li><strong>Routed to a secondmate.</strong> The whole path runs inside the secondmate's home, against its own backlog; its reply returns through its status log <code class="cite">AGENTS.md:297-299</code>.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Current state vs events · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Crew</p>
+<h1>Current state vs events</h1>
+<p class="lede">A worker's status log records what happened, not what is true now. <code>bin/fm-crew-state.sh</code> answers "what is this worker doing right now?" deterministically, from the most authoritative source available, and reconciles the possibly stale log against it.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Crew</a>. The status log format and verbs belong to <a href="../communication/index.html">Communication</a>; the watcher that consumes this verdict belongs to <a href="../supervision/index.html">Supervision</a>.</p>
+
+<h2 id="problem">The problem it solves</h2>
+<p>"<code>state/&lt;id&gt;.status</code> is an append-only, best-effort EVENT LOG. Crews append only wake-worthy transitions … and nothing when they silently resume, so <code>tail -1</code> of that log reports the last EVENT, not the current STATE" <code class="cite">bin/fm-crew-state.sh:4-11</code>. A worker that reported <code>needs-decision</code>, got its answer, and went back to work still shows <code>needs-decision</code> as its last line. The supervisor contract therefore splits the two: status tails are "wake-event history", and current state needs targeted reconciliation <code class="cite">AGENTS.md:247</code>. Validation outcome is judged "by the resolved state line from <code>bin/fm-crew-state.sh</code> … never by shell liveness, the last status event, or a raw run record" <code class="cite">AGENTS.md:387</code>.</p>
+
+<h2 id="output">The output: one line</h2>
+<pre><code>state: &lt;working|parked|done|blocked|paused|failed|unknown&gt; · source: &lt;run-step|pane|status-log|remote-endpoint|none&gt; · &lt;detail&gt;</code></pre>
+<p>It is "token-tight" so the first mate can read it every heartbeat <code class="cite">bin/fm-crew-state.sh:22-25</code>. The script is "Read-only and side-effect free", always exits 0 on a successful read, and exits 2 only on a usage error <code class="cite">bin/fm-crew-state.sh:148-149</code>. The first <code>emit</code> exits the script, so the first matching source decides <code class="cite">bin/fm-crew-state.sh:192-197</code>. Invocation: <code>bin/fm-crew-state.sh &lt;id&gt;</code>.</p>
+
+<h2 id="order">The decision order</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 980 560" role="img" aria-labelledby="cs-t cs-d">
+<title id="cs-t">fm-crew-state.sh decision order</title>
+<desc id="cs-d">No metadata gives unknown. A remote secondmate asks its host for endpoint state. An attributed no-mistakes run is authoritative. Otherwise an unreadable pane is classified by the recovery-grade classifier and reported unknown, a ship or scout's busy verdict decides working, and finally a status line whose verb maps to a state answers. Anything else is unknown.</desc>
+<defs><marker id="cs-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">Which source answers</text>
+<g class="c4-component"><rect x="20" y="50" width="300" height="52" rx="8"/><text class="c4-label" x="170" y="72">1 · state/&lt;id&gt;.meta present?</text><text class="c4-desc" x="170" y="90">worktree, backend target, kind</text></g>
+<g class="c4-component"><rect x="20" y="130" width="300" height="52" rx="8"/><text class="c4-label" x="170" y="152">2 · remote_host= recorded?</text><text class="c4-desc" x="170" y="170">remote secondmate</text></g>
+<g class="c4-component"><rect x="20" y="210" width="300" height="52" rx="8"/><text class="c4-label" x="170" y="232">3 · Run attributed to this crew?</text><text class="c4-desc" x="170" y="250">no-mistakes: branch + code identity</text></g>
+<g class="c4-component"><rect x="20" y="290" width="300" height="52" rx="8"/><text class="c4-label" x="170" y="312">4 · Pane readable?</text><text class="c4-desc" x="170" y="330">else classify: missing, dead, …</text></g>
+<g class="c4-component"><rect x="20" y="370" width="300" height="52" rx="8"/><text class="c4-label" x="170" y="392">5 · Busy verdict (not secondmate)</text><text class="c4-desc" x="170" y="410">semantic harness busy state</text></g>
+<g class="c4-component"><rect x="20" y="450" width="300" height="52" rx="8"/><text class="c4-label" x="170" y="472">6 · Resolved status declaration</text><text class="c4-desc" x="170" y="490">only a verb that maps to a state</text></g>
+<g class="c4-rel"><path d="M170,102 L170,128" marker-end="url(#cs-arrow)"/></g>
+<g class="c4-rel"><path d="M170,182 L170,208" marker-end="url(#cs-arrow)"/></g>
+<g class="c4-rel"><path d="M170,262 L170,288" marker-end="url(#cs-arrow)"/></g>
+<g class="c4-rel"><path d="M170,342 L170,368" marker-end="url(#cs-arrow)"/></g>
+<g class="c4-rel"><path d="M170,422 L170,448" marker-end="url(#cs-arrow)"/></g>
+<g class="c4-rel"><path d="M170,502 L170,528" marker-end="url(#cs-arrow)"/></g>
+<text class="crew-note-strong" x="100" y="546">else: unknown · none</text>
+
+<g class="c4-rel"><path d="M320,76 L418,76" marker-end="url(#cs-arrow)"/><text class="c4-rel-label" x="368" y="69">no</text></g>
+<g class="c4-rel"><path d="M320,156 L418,156" marker-end="url(#cs-arrow)"/><text class="c4-rel-label" x="368" y="149">yes</text></g>
+<g class="c4-rel"><path d="M320,236 L418,236" marker-end="url(#cs-arrow)"/><text class="c4-rel-label" x="368" y="229">yes</text></g>
+<g class="c4-rel"><path d="M320,316 L418,316" marker-end="url(#cs-arrow)"/><text class="c4-rel-label" x="368" y="309">no</text></g>
+<g class="c4-rel"><path d="M320,396 L418,396" marker-end="url(#cs-arrow)"/><text class="c4-rel-label" x="368" y="389">busy</text></g>
+<g class="c4-rel"><path d="M320,476 L418,476" marker-end="url(#cs-arrow)"/><text class="c4-rel-label" x="368" y="469">maps</text></g>
+
+<text class="crew-note-strong" x="425" y="81">unknown · none · "no metadata for &lt;id&gt;"</text>
+<text class="crew-note" x="425" y="146">remote host's recovery-grade verdict: alive → status log;</text>
+<text class="crew-note" x="425" y="162">dead/missing → unknown; unreachable → "not proof of death"</text>
+<text class="crew-note" x="425" y="226">run-step is AUTHORITATIVE: running/fixing/ci → working,</text>
+<text class="crew-note" x="425" y="242">approval/fix-review → parked, passed → done, failed → failed</text>
+<text class="crew-note" x="425" y="306">tmux, herdr: missing/dead → "gone"; failed probe → "unreachable";</text>
+<text class="crew-note" x="425" y="322">alive → continue. zellij, orca, cmux: failed capture → "gone"</text>
+<text class="crew-note" x="425" y="386">working · pane. Idle continues; any other verdict → unknown · pane.</text>
+<text class="crew-note" x="425" y="402">A secondmate skips this step: an idle pane is healthy.</text>
+<text class="crew-note" x="425" y="466">working→working, needs-decision→parked, blocked, done, failed,</text>
+<text class="crew-note" x="425" y="482">paused verb → paused. "resolved" is never a state.</text>
+</svg>
+</div>
+<figcaption>Header steps 1 to 5 <code class="cite">bin/fm-crew-state.sh:27-146</code>; implementation <code class="cite">bin/fm-crew-state.sh:200-1234</code>.</figcaption>
+</figure>
+
+<h2 id="runstep">Step 3: the pipeline run is authoritative</h2>
+<p>When a no-mistakes run is attributed to the crew, its step decides the state, "regardless of pane liveness", so "a finished crew whose endpoint has closed still reports its run-step state" <code class="cite">bin/fm-crew-state.sh:284-287</code>. Attribution is strict, and <code>bin/fm-nm-run-lib.sh</code> owns the rules:</p>
+<ul>
+<li>"Branch name alone is not enough: a historical run on a reused branch whose head was rewritten or diverged must not be attributed" <code class="cite">bin/fm-crew-state.sh:36-39</code>.</li>
+<li>A run that is <em>executing</em> (pending, running, fixing, ci) binds regardless of head, because the pipeline rebases and commits fix rounds in its own checkout. It stops binding once an explicit probe has shown the daemon is down, because a record left saying <code>running</code> by a dead daemon "is evidence from a dead instrument" <code class="cite">bin/fm-crew-state.sh:40-54</code>.</li>
+<li>Every other run matches only when its head equals the worktree's HEAD or descends from it <code class="cite">bin/fm-crew-state.sh:54-59</code>.</li>
+</ul>
+<div class="table-wrap"><table>
+<thead><tr><th>Run step</th><th>State</th><th>Exception</th></tr></thead>
+<tbody>
+<tr><td>running, fixing</td><td>working</td><td>—</td></tr>
+<tr><td>ci</td><td>working</td><td>becomes <code>done</code> once the CI log shows checks green, so "a green PR is never silently read as still-validating"</td></tr>
+<tr><td>awaiting_approval, fix_review</td><td>parked (with gate findings)</td><td>—</td></tr>
+<tr><td>passed, checks-passed, passed-with-override</td><td>done</td><td>—</td></tr>
+<tr><td>failed, cancelled</td><td>failed</td><td>a run failed only in its CI monitor step, after checks went green, reads <code>done</code> (held for merge); a failed record whose daemon is proven down reads <code>unknown</code></td></tr>
+</tbody></table></div>
+<p class="evidence">Source: <code class="cite">bin/fm-crew-state.sh:94-114</code>. For a passed run, a merge-poll retirement receipt or a forge read bounded to 5 seconds supplies PR detail; <code>FM_CREW_STATE_NO_FORGE=1</code> skips the forge read, and a missing PR identity "yields an honest unknown, never an optimistic merged claim" <code class="cite">bin/fm-crew-state.sh:17-21</code>.</p>
+
+<h2 id="reconcile">Reconciling a stale log</h2>
+<p>The log is read through <code>status_current_line</code> in <code>bin/fm-classify-lib.sh</code>, not <code>tail -1</code>. Open decisions survive unrelated events, and "continuation prose cannot hide a declaration" <code class="cite">bin/fm-crew-state.sh:115-117</code> <code class="cite">bin/fm-crew-state.sh:242-243</code>. Against a live run:</p>
+<ul>
+<li>A <code>needs-decision</code> or <code>blocked</code> line whose run has moved on is "deterministically stale and is flagged superseded".</li>
+<li>A parked run plus a <code>needs-decision</code> line agree and read as parked.</li>
+<li>A <code>blocked:</code> line reporting a refused or missing daemon socket stays blocked while it is the latest event. Other daemon or timeout claims "are superseded BECAUSE THE RUN IS ALIVE", and are answered "by steering the crew to reattach, not by escalating".</li>
+</ul>
+<p class="evidence">Source: <code class="cite">bin/fm-crew-state.sh:115-132</code>. The verb-to-state mapping has one owner, <code>map_log_state</code> <code class="cite">bin/fm-crew-state.sh:227-240</code>, and a trailing <code>resolved:</code> line never becomes state or detail <code class="cite">bin/fm-crew-state.sh:1217-1232</code>.</p>
+
+<h2 id="death">Unknown is never death</h2>
+<p>Without an attributed run, only positive evidence may read as gone. "a backend that failed to answer is unknown, never death". On tmux and Herdr, <code>missing</code> and <code>dead</code> from the recovery-grade classifier report <code>unknown · none</code> with "backend target gone". Any other probe failure reports "backend unreachable". Backends without a classifier keep the older rule that a failed capture means gone <code class="cite">bin/fm-crew-state.sh:1145-1201</code>. A remote secondmate whose host cannot be reached is "unknown-remote … (not proof of death)" <code class="cite">bin/fm-crew-state.sh:245-280</code>.</p>
+
+<h2 id="users">Who reads it</h2>
+<ul>
+<li>The watcher treats it as the authoritative current-state source <code class="cite">bin/fm-watch.sh:2690</code>, and session start defers to it for current state <code class="cite">bin/fm-session-start.sh:165</code>.</li>
+<li><code>bin/fm-fleet-snapshot.sh</code> parses it for each local task <code class="cite">bin/fm-fleet-snapshot.sh:54</code> <code class="cite">bin/fm-fleet-snapshot.sh:335</code>.</li>
+<li>Teardown's refusals point the operator to it to reconcile a record first <code class="cite">bin/fm-teardown.sh:1093</code> <code class="cite">bin/fm-teardown.sh:2289</code>.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

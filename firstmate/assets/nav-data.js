@@ -80,7 +80,19 @@ window.FM_NAV = [
   // end persistence
 
   // begin crew
-  { section: "crew", title: "Crew", href: "components/crew/index.html", stub: true },
+  { section: "crew", title: "Crew", href: "components/crew/index.html" },
+  { section: "crew", title: "Kinds of worker", href: "components/crew/kinds.html" },
+  { section: "crew", title: "Dispatch", href: "components/crew/dispatch.html" },
+  { section: "crew", title: "Launch and the injected prompt", href: "components/crew/launch.html" },
+  { section: "crew", title: "Worktrees and slot claims", href: "components/crew/worktrees.html" },
+  { section: "crew", title: "Harness adapters", href: "components/crew/harnesses.html" },
+  { section: "crew", title: "Session backends", href: "components/crew/backends.html" },
+  { section: "crew", title: "Dispatch profiles", href: "components/crew/dispatch-profiles.html" },
+  { section: "crew", title: "Current state vs events", href: "components/crew/crew-state.html" },
+  { section: "crew", title: "Control plane", href: "components/crew/control.html" },
+  { section: "crew", title: "Scout promotion", href: "components/crew/promotion.html" },
+  { section: "crew", title: "Teardown", href: "components/crew/teardown.html" },
+  { section: "crew", title: "End-to-end trace", href: "components/crew/lifecycle.html" },
   // end crew
 
   // begin prompts-and-skills
