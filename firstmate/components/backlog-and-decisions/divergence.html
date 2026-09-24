@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Record divergence · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Backlog and decisions</p>
+<h1>Record divergence</h1>
+<p class="lede">One captain call can be written down twice: once as a keyed decision in a status log, and once as a backlog task held for the captain. Closing one record does not close the other. <code>diverged</code> reports when the status log says a call is resolved but the backlog still holds it. The wake drain prints that report every turn, and nothing is closed automatically.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Backlog and decisions</a>. The status log and the OPEN DECISIONS fold belong to <a href="../communication/index.html">Communication</a>; the drain belongs to <a href="../supervision/index.html">Supervision</a>.</p>
+
+<h2 id="problem">The problem</h2>
+<p>"A captain call can have two records, and closing one does not close the other. A <code>resolved [key=...]</code> line closes the status-log fold; the structured captain-held task closes only through <code>answer</code>. Until this guard existed, closing on the status side alone left no trace of the disagreement: the fold went quiet, the durable record kept saying the captain owed an answer, and nothing warned." <code class="cite">docs/captain-hold-lifecycle.md:161-163</code> The script comment puts it briefly: "The defect was never the separation; it was the silence." <code class="cite">bin/fm-captain-hold.sh:1734-1739</code></p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 920 320" role="img" aria-labelledby="bd-div-t bd-div-d">
+<title id="bd-div-t">Two records of one captain call</title>
+<desc id="bd-div-d">A status log whose closing verb for key K is resolved, and a backlog row K that is still open and captain-held, are compared by fm-captain-hold.sh diverged. It reads both, closes nothing, and prints one tab-separated line per divergence. The wake drain runs it under a time bound on every drain and prints a bounded RECORD DIVERGENCE section with a hint naming both reconciliation directions.</desc>
+<defs><marker id="bd-div-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">One call, two records</text>
+<g class="c4-datastore"><path d="M20,62 a130,9 0 0,0 260,0 a130,9 0 0,0 -260,0 v70 a130,9 0 0,0 260,0 v-70"/><text class="c4-label" x="150" y="90">state/&lt;origin&gt;.status</text><text class="c4-tech" x="150" y="106">[append-only event log]</text><text class="c4-desc" x="150" y="123">last verb for [key=K]: resolved</text></g>
+<g class="c4-datastore"><path d="M20,202 a130,9 0 0,0 260,0 a130,9 0 0,0 -260,0 v70 a130,9 0 0,0 260,0 v-70"/><text class="c4-label" x="150" y="230">Backlog row K</text><text class="c4-tech" x="150" y="246">[this home, via tasks-axi]</text><text class="c4-desc" x="150" y="263">not Done · hold_kind captain</text></g>
+<g class="c4-component"><rect x="360" y="120" width="220" height="92" rx="8"/><text class="c4-label" x="470" y="147">diverged</text><text class="c4-tech" x="470" y="163">[fm-captain-hold.sh · read-only]</text><text class="c4-desc" x="470" y="181">flags exactly one condition;</text><text class="c4-desc" x="470" y="196">closes nothing</text></g>
+<g class="c4-container"><rect x="660" y="120" width="240" height="92" rx="8"/><text class="c4-label" x="780" y="147">fm-wake-drain.sh</text><text class="c4-tech" x="780" y="163">[every supervision turn]</text><text class="c4-desc" x="780" y="181">RECORD DIVERGENCE section,</text><text class="c4-desc" x="780" y="196">≤ 20 s, ≤ 2000 bytes</text></g>
+<g class="c4-rel"><path d="M280,100 L358,145" marker-end="url(#bd-div-arrow)"/><text class="c4-rel-label" x="320" y="110">closing verb</text></g>
+<g class="c4-rel"><path d="M280,240 L358,190" marker-end="url(#bd-div-arrow)"/><text class="c4-rel-label" x="320" y="232">state · hold kind</text></g>
+<g class="c4-rel"><path d="M580,166 L658,166" marker-end="url(#bd-div-arrow)"/><text class="c4-rel-label" x="619" y="110">task · origin · key · title</text></g>
+<g class="c4-rel c4-rel-async"><path d="M780,212 L780,268 L420,268" marker-end="url(#bd-div-arrow)"/><text class="c4-rel-label" x="600" y="286">hint: answer with the captain's words, or re-open the status decision</text></g>
+</svg>
+</div>
+<figcaption>Reconciliation belongs to a human in both directions. "a captain call closed wrongly leaves review entirely" <code class="cite">docs/captain-hold-lifecycle.md:167</code>.</figcaption>
+</figure>
+
+<h2 id="condition">Exactly what is flagged</h2>
+<p>"It flags exactly one condition: a task still open and still carrying the captain-hold annotations, whose key was closed on the status side by the resolve verb, resolved through the collapsed identity (the key is the task id) or the legacy derived one." <code class="cite">docs/captain-hold-lifecycle.md:166</code></p>
+<p>Three states are deliberately <em>not</em> divergence <code class="cite">docs/captain-hold-lifecycle.md:169-172</code>:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Status side</th><th>Backlog side</th><th>Reported?</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td><code>resolved [key=K]</code></td><td>K open, captain-held</td><td><strong>Yes</strong></td><td>The two records contradict each other.</td></tr>
+<tr><td><code>captain-held [key=K]</code></td><td>K open, captain-held</td><td>No</td><td>"the VERIFIED transfer to that very task, written by command_complete only after verifying it" <code class="cite">bin/fm-captain-hold.sh:1750-1752</code></td></tr>
+<tr><td>K still open (<code>needs-decision</code>)</td><td>anything</td><td>No</td><td>"the OPEN DECISIONS fold already owns that one" <code class="cite">bin/fm-captain-hold.sh:1753-1754</code></td></tr>
+<tr><td><code>resolved [key=K]</code></td><td>K Done, or not captain-held</td><td>No</td><td>The two records agree.</td></tr>
+<tr><td>(any)</td><td>no routed work item</td><td>Not part of the test</td><td>"when the decision is the deliverable there is nothing to route" <code class="cite">docs/captain-hold-lifecycle.md:172</code></td></tr>
+</tbody>
+</table></div>
+<p>The two closing verbs are told apart by <code>status_key_closing_verb</code> in <code>bin/fm-classify-lib.sh</code> <code class="cite">docs/captain-hold-lifecycle.md:170</code>. <code>tests/fm-classify-decision-key.test.sh</code> pins that function, including "treats a prose mention as no transition" <code class="cite">docs/captain-hold-lifecycle.md:214</code>.</p>
+
+<h2 id="how">How it runs</h2>
+<ol>
+<li><strong>Same home only.</strong> The command runs only when <code>STATE</code> is <code>$FM_HOME/state</code>, "since tasks-axi reads that home's backlog and a mismatch would report one home's logs against another's tasks" <code class="cite">docs/captain-hold-lifecycle.md:175</code> <code class="cite">bin/fm-captain-hold.sh:1805-1810</code>.</li>
+<li><strong>Cheap candidate set.</strong> One <code>tasks-axi list</code> gives every open task id. It reads only the first two comma-separated fields, "so a title containing commas or quotes cannot shift them" <code class="cite">bin/fm-captain-hold.sh:1772-1785</code>. It then does one <code>[key=…]</code> token scan per status log <code class="cite">bin/fm-captain-hold.sh:1787-1793</code>.</li>
+<li><strong>Precise check only where needed.</strong> For each open id whose own key appears in a log (the id itself, or <code>&lt;origin&gt;-decision-</code> stripped for a legacy row), it asks <code>status_key_closing_verb</code>. When the verb is <code>resolved</code>, it reads the row and confirms Not Done and <code>hold_kind: captain</code> <code class="cite">bin/fm-captain-hold.sh:1817-1851</code>.</li>
+<li><strong>Output.</strong> One line per divergence, <code>&lt;task-id&gt;\t&lt;origin&gt;\t&lt;key&gt;\t&lt;title&gt;</code>, "nothing when the two records agree". The title is sanitised, because it is "the only free-text field here" <code class="cite">bin/fm-captain-hold.sh:1769-1770</code> <code class="cite">bin/fm-captain-hold.sh:1839-1843</code>.</li>
+<li><strong>Silent failure.</strong> "If tasks-axi is unavailable or its listing cannot be parsed, the guard cannot read the structured record and prints nothing." It deliberately "skips the mutation-oriented compatibility floor" on this per-wake path <code class="cite">bin/fm-captain-hold.sh:1811-1816</code>.</li>
+</ol>
+
+<h2 id="drain">In the wake drain</h2>
+<p><code>print_record_divergence_section</code> runs <code>diverged</code> under <code>FM_DIVERGENCE_TIMEOUT</code> (default 20 s, and a non-positive value falls back to 20). It caps each item at 220 bytes and the whole section at 2000 bytes, announcing any omissions <code class="cite">bin/fm-wake-drain.sh:504-548</code>. It is "Bounded and silent like OPEN DECISIONS above", and "A guard failure never changes the drain's exit status - a supervision turn must still present its wakes when the backlog tool is having a bad day" <code class="cite">bin/fm-wake-drain.sh:499-503</code>. The section header reads:</p>
+<pre><code>RECORD DIVERGENCE (answered in the status log, still held in the backlog - nothing was closed automatically):
+…
+RECORD DIVERGENCE: reconcile each one - record the captain's own words with bin/fm-captain-hold.sh answer &lt;task&gt; --decision-file &lt;path&gt;, or re-open the status decision when that resolution was not the captain's word.</code></pre>
+<p class="evidence"><code class="cite">bin/fm-wake-drain.sh:539</code> <code class="cite">bin/fm-wake-drain.sh:548</code>. Session start's drain prints the same section <code class="cite">AGENTS.md:197</code>.</p>
+
+<h2 id="reading">How the supervisor must read it</h2>
+<p>"Treat any <code>RECORD DIVERGENCE</code> section as a contradiction between two records of one captain call, never as proof the captain ruled; load <code>captain-hold-lifecycle</code> and reconcile it in whichever direction the evidence supports." <code class="cite">AGENTS.md:432</code> The skill adds: "a call can dissolve because its premise was false, or turn out to have been a question of fact rather than the captain's to answer. Reconcile it with what actually happened - <code>answer</code> when the captain's own words exist to record, and a fresh <code>needs-decision</code> line re-opening the status decision when that resolution was not the captain's word." <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:53-54</code></p>
+<p>The regression suite reconstructs the silent case and the false-signal boundary. It shows that "the backlog task, its hold, and the status log all survive the report unchanged and the printed hint names both reconciliation directions" <code class="cite">docs/captain-hold-lifecycle.md:193</code>.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

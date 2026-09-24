@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backends and manual mode · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Backlog and decisions</p>
+<h1>Backends and manual mode</h1>
+<p class="lede">Two separate choices decide how a home's backlog is written. The first is whether Firstmate mutates it through <code>tasks-axi</code> at all, or leaves it to hand editing. The second is which <code>tasks-axi</code> adapter holds the rows. A single gate turns those choices into "transition automatically", "skip", or "refuse".</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Backlog and decisions</a>.</p>
+
+<h2 id="two-choices">The two choices</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Choice</th><th>Where it lives</th><th>Values</th><th>Owner</th></tr></thead>
+<tbody>
+<tr><td>Routine backlog backend</td><td><code>config/backlog-backend</code>: local, gitignored, and "inherited by secondmate homes"</td><td>Absent, empty, or <code>tasks-axi</code> selects <code>tasks-axi</code>. <code>manual</code> forces hand editing.</td><td><code class="cite">bin/fm-tasks-axi-lib.sh:179-194</code> <code class="cite">AGENTS.md:76</code></td></tr>
+<tr><td><code>tasks-axi</code> adapter</td><td><code>TASKS_AXI_BACKEND</code>, then the addressing root's <code>.tasks.toml</code>, then <code>$HOME/.tasks-axi/config.toml</code>, then the default</td><td><code>markdown</code> (default), or another adapter such as Beads</td><td><code class="cite">bin/fm-tasks-axi-lib.sh:18-23</code> <code class="cite">bin/fm-tasks-axi-lib.sh:143-173</code></td></tr>
+</tbody>
+</table></div>
+<p>The resolver copies <code>tasks-axi</code>'s own precedence: "Lower-priority sources are read only when no earlier source supplies a backend". An unreadable or non-regular configuration file, "including a dangling symlink, returns 2 with a path diagnostic on stderr and no backend on stdout". Callers "must check it before selecting backend-specific flags or exemptions" <code class="cite">bin/fm-tasks-axi-lib.sh:20-25</code>. Inside <code>.tasks.toml</code> only a root-level <code>backend =</code> line counts; a key inside a <code>[section]</code> is ignored <code class="cite">bin/fm-tasks-axi-lib.sh:110-141</code>.</p>
+
+<h2 id="compat">What "compatible tasks-axi" means</h2>
+<p>"Compatible means tasks-axi --version reports FM_TASKS_AXI_MIN or newer, <code>tasks-axi update --help</code> exposes --archive-body for recoverable note rewrites, and <code>tasks-axi mv --help</code> exposes [&lt;id&gt;...] for atomic multi-ID moves required by secondmate handoffs." <code class="cite">bin/fm-tasks-axi-lib.sh:6-9</code> The floor is <code>FM_TASKS_AXI_MIN=0.2.4</code> <code class="cite">bin/fm-tasks-axi-lib.sh:45</code>.</p>
+<ul>
+<li><strong>A version it cannot parse is incompatible.</strong> "An unparseable version is incompatible, never assumed current, so a development or vendored build cannot pass a floor it was never checked against." <code class="cite">bin/fm-tasks-axi-lib.sh:82-84</code></li>
+<li><strong>The feature probes stay even when the version passes.</strong> They are "defense in depth for stripped or forked builds that advertise a current version without those flags" <code class="cite">bin/fm-tasks-axi-lib.sh:12-13</code>.</li>
+<li><strong>The verdict is reused, but only within one process and one hop.</strong> It is memoised in-process. A parent can pass it to one child through <code>FM_TASKS_AXI_COMPATIBLE=0|1</code>, and sourcing the library consumes that variable, "so the verdict reaches the child that needs it and never leaks onward into a spawned agent's environment, where it could outlive a tasks-axi upgrade" <code class="cite">bin/fm-tasks-axi-lib.sh:30-43</code> <code class="cite">bin/fm-tasks-axi-lib.sh:47-52</code>.</li>
+</ul>
+<p><code>fm-captain-hold.sh</code> adds one probe of its own. <code>tasks-axi hold --help</code> must mention <code>--kind captain</code>, or the command fails with "tasks-axi does not expose the captain-hold contract" <code class="cite">bin/fm-captain-hold.sh:353-357</code>. Bootstrap reports an installed but incompatible build as <code>MISSING: tasks-axi</code> <code class="cite">bin/fm-bootstrap.sh:1491-1493</code>. Bootstrap "requires compatible <code>tasks-axi</code> on every profile" <code class="cite">docs/configuration.md:122</code>.</p>
+
+<h2 id="gate">The single gate</h2>
+<p><code>fm_backlog_transition_applies &lt;config-dir&gt; &lt;data-dir&gt; &lt;kind&gt;</code> is "the single gate" for automatic transitions. Spawn, teardown, and bootstrap all call it <code class="cite">bin/fm-backlog-transition-lib.sh:23-28</code> <code class="cite">bin/fm-backlog-transition-lib.sh:280-317</code>. It has three outcomes. <strong>0</strong> means transition automatically. <strong>1</strong> means an exemption, "never errors", with the reason stored in <code>FM_BACKLOG_TRANSITION_SKIP</code>. <strong>2</strong> means refuse before mutating anything.</p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 900 540" role="img" aria-labelledby="bd-gate-t bd-gate-d">
+<title id="bd-gate-t">The automatic-transition gate</title>
+<desc id="bd-gate-d">A top-to-bottom sequence of checks. Secondmate kind, manual backend, or a markdown home with no backlog file each lead to an exemption on the right. An unresolvable data directory or unreadable backend configuration, an unauthorised data source, or incompatible tasks-axi each lead to a refusal on the left. Passing every check means the transition applies.</desc>
+<defs><marker id="bd-gate-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">fm_backlog_transition_applies</text>
+<g class="c4-component"><rect x="300" y="50" width="300" height="46" rx="8"/><text class="c4-label" x="450" y="78">kind is secondmate?</text></g>
+<g class="c4-component"><rect x="300" y="120" width="300" height="46" rx="8"/><text class="c4-label" x="450" y="148">config/backlog-backend = manual?</text></g>
+<g class="c4-component"><rect x="300" y="190" width="300" height="46" rx="8"/><text class="c4-label" x="450" y="211">data dir, .tasks.toml and</text><text class="c4-desc" x="450" y="227">backend all resolve?</text></g>
+<g class="c4-component"><rect x="300" y="260" width="300" height="46" rx="8"/><text class="c4-label" x="450" y="281">markdown adapter with</text><text class="c4-desc" x="450" y="297">no data/backlog.md?</text></g>
+<g class="c4-component"><rect x="300" y="330" width="300" height="46" rx="8"/><text class="c4-label" x="450" y="351">data source present and</text><text class="c4-desc" x="450" y="367">inside this home?</text></g>
+<g class="c4-component"><rect x="300" y="400" width="300" height="46" rx="8"/><text class="c4-label" x="450" y="428">tasks-axi compatible?</text></g>
+<g class="c4-container"><rect x="330" y="474" width="240" height="46" rx="8"/><text class="c4-label" x="450" y="496">0 · transition applies</text><text class="c4-desc" x="450" y="512">spawn, teardown, bootstrap move rows</text></g>
+<g class="c4-container"><rect x="660" y="50" width="220" height="46" rx="8"/><text class="c4-label" x="770" y="70">1 · exempt</text><text class="c4-desc" x="770" y="86">"secondmates are not backlog items"</text></g>
+<g class="c4-container"><rect x="660" y="120" width="220" height="46" rx="8"/><text class="c4-label" x="770" y="140">1 · exempt</text><text class="c4-desc" x="770" y="156">manual editing selected</text></g>
+<g class="c4-container"><rect x="660" y="260" width="220" height="46" rx="8"/><text class="c4-label" x="770" y="280">1 · exempt</text><text class="c4-desc" x="770" y="296">"keeps no markdown backlog"</text></g>
+<g class="c4-container"><rect x="20" y="190" width="220" height="46" rx="8"/><text class="c4-label" x="130" y="210">2 · refuse</text><text class="c4-desc" x="130" y="226">before any mutation</text></g>
+<g class="c4-container"><rect x="20" y="330" width="220" height="46" rx="8"/><text class="c4-label" x="130" y="350">2 · refuse</text><text class="c4-desc" x="130" y="366">source not authorised</text></g>
+<g class="c4-container"><rect x="20" y="400" width="220" height="46" rx="8"/><text class="c4-label" x="130" y="420">2 · refuse</text><text class="c4-desc" x="130" y="436">tasks-axi below floor</text></g>
+<g class="c4-rel"><path d="M450,96 L450,118" marker-end="url(#bd-gate-arrow)"/><text class="c4-rel-label" x="470" y="112">no</text></g>
+<g class="c4-rel"><path d="M450,166 L450,188" marker-end="url(#bd-gate-arrow)"/><text class="c4-rel-label" x="470" y="182">no</text></g>
+<g class="c4-rel"><path d="M450,236 L450,258" marker-end="url(#bd-gate-arrow)"/><text class="c4-rel-label" x="470" y="252">yes</text></g>
+<g class="c4-rel"><path d="M450,306 L450,328" marker-end="url(#bd-gate-arrow)"/><text class="c4-rel-label" x="470" y="322">no</text></g>
+<g class="c4-rel"><path d="M450,376 L450,398" marker-end="url(#bd-gate-arrow)"/><text class="c4-rel-label" x="470" y="392">yes</text></g>
+<g class="c4-rel"><path d="M450,446 L450,472" marker-end="url(#bd-gate-arrow)"/><text class="c4-rel-label" x="470" y="464">yes</text></g>
+<g class="c4-rel"><path d="M600,73 L658,73" marker-end="url(#bd-gate-arrow)"/><text class="c4-rel-label" x="629" y="66">yes</text></g>
+<g class="c4-rel"><path d="M600,143 L658,143" marker-end="url(#bd-gate-arrow)"/><text class="c4-rel-label" x="629" y="136">yes</text></g>
+<g class="c4-rel"><path d="M600,283 L658,283" marker-end="url(#bd-gate-arrow)"/><text class="c4-rel-label" x="629" y="276">yes</text></g>
+<g class="c4-rel"><path d="M300,213 L242,213" marker-end="url(#bd-gate-arrow)"/><text class="c4-rel-label" x="271" y="206">no</text></g>
+<g class="c4-rel"><path d="M300,353 L242,353" marker-end="url(#bd-gate-arrow)"/><text class="c4-rel-label" x="271" y="346">no</text></g>
+<g class="c4-rel"><path d="M300,423 L242,423" marker-end="url(#bd-gate-arrow)"/><text class="c4-rel-label" x="271" y="416">no</text></g>
+</svg>
+</div>
+<figcaption>The checks run in this order <code class="cite">bin/fm-backlog-transition-lib.sh:283-316</code>. Exemptions sit on the right and refusals on the left. The ordering matters: an unreadable backend configuration "can refuse lifecycle work before the no-backlog exemption applies" <code class="cite">docs/configuration.md:116</code>.</figcaption>
+</figure>
+<p>The documentation states the scope: "The gate does not apply to persistent secondmates, manual-backend homes, or markdown homes without a backlog file, preserving their existing persistent-agent, manual, or ad-hoc lifecycle behavior while configured non-markdown adapters remain active without that file." <code class="cite">docs/configuration.md:113</code> On the refusal side: "missing or incompatible <code>tasks-axi</code>, an unresolvable configured data directory, or one containing a control byte fails lifecycle work before mutation" <code class="cite">docs/configuration.md:115</code>.</p>
+
+<h2 id="manual">The manual alternative</h2>
+<p>Writing <code>manual</code> into the local <code>config/backlog-backend</code> forces "manual backlog editing" <code class="cite">docs/configuration.md:123</code>. Such a home "owns its backlog file outright: the lifecycle transitions above are skipped there, dispatch and completion never fail over the file's contents, and a completed teardown prints the hand edit that is owed instead" <code class="cite">docs/configuration.md:124</code>.</p>
+<ul>
+<li><strong>Dispatch.</strong> The gate returns 1, so spawn never probes the row. It does not refuse a missing or held item, and it does not move anything <code class="cite">bin/fm-spawn.sh:3104-3133</code>. <code>AGENTS.md</code> keeps the duty with the supervisor: "a manual-backend home retains the hand-editing contract in <code>docs/configuration.md</code>" <code class="cite">AGENTS.md:331</code>.</li>
+<li><strong>Completion.</strong> Teardown prints the edit it did not make: "Backlog: $ID just finished ($BACKLOG_SKIP_REASON). Update $backlog_display - move $ID to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due." <code class="cite">bin/fm-teardown.sh:1561-1562</code></li>
+<li><strong>Startup listing.</strong> Session start prints headings and title lines only, labelled <code>manual backend</code>. It keeps every held and blocked title line by reading the line's own markers <code class="cite">bin/fm-session-start.sh:151-156</code> <code class="cite">bin/fm-session-start.sh:511-517</code>.</li>
+<li><strong>What manual does not change.</strong> Handoffs "bypass that routine-backend choice … the <code>config/backlog-backend=manual</code> knob governs firstmate's own hand-editing of its backlog, not this validated helper" <code class="cite">docs/configuration.md:117</code> <code class="cite">docs/configuration.md:120</code>. <code>fm-captain-hold.sh</code> never consults the manual knob either. It calls <code>tasks-axi</code> directly through its own addressing <code class="cite">bin/fm-captain-hold.sh:340-357</code>, so a captain hold on a manual home still needs a compatible <code>tasks-axi</code>.</li>
+</ul>
+<p>The setting also suppresses one routine fact: "suppress the verbose <code>BOOTSTRAP_INFO: tasks-axi available</code> fact, not missing-tool reporting" <code class="cite">docs/configuration.md:123</code> <code class="cite">bin/fm-bootstrap.sh:1523-1526</code>.</p>
+
+<div class="callout unclear"><span class="callout-title">Header and implementation disagree</span>
+<p>The library header says that absent or any non-manual value "keeps the default tasks-axi backend path, falling back to manual mutation when the tool is not compatible" <code class="cite">bin/fm-tasks-axi-lib.sh:16-17</code>. The lifecycle gate does not fall back. An incompatible <code>tasks-axi</code> returns 2, and spawn and teardown refuse <code class="cite">bin/fm-backlog-transition-lib.sh:312-315</code>, which matches <code class="cite">docs/configuration.md:115</code>. The only fallback found is a read: session start's listing drops to the title-line form, labelled "tasks-axi unavailable or incompatible" <code class="cite">bin/fm-session-start.sh:515-516</code>. The "manual mutation" wording therefore describes no mutation path at this commit.</p></div>
+
+<h2 id="adapters">Non-markdown adapters (Beads)</h2>
+<p>"A home may instead select another tasks-axi adapter such as Beads through its own <code>.tasks.toml</code> or <code>TASKS_AXI_BACKEND</code>; firstmate still uses only tasks-axi verbs for routine backlog reads and mutations, and the adapter maps <code>start</code> and evidence-bearing <code>done</code> transitions to its native statuses and evidence fields." <code class="cite">docs/configuration.md:102</code> The lint enforces the boundary: it rejects a "direct Beads CLI invocation" because "Backend adapters belong behind tasks-axi" <code class="cite">bin/fm-lint.sh:168</code> <code class="cite">bin/fm-lint.sh:389</code>.</p>
+<ul>
+<li><strong>Addressing.</strong> The data directory's parent is always the working root. <code>--file &lt;data&gt;/backlog.md</code> is passed only for markdown, because on any other adapter "<code>--file</code> would override the adapter's own workspace path" <code class="cite">bin/fm-backlog-transition-lib.sh:30-39</code>. <code>fm-captain-hold.sh</code> does the same <code class="cite">bin/fm-captain-hold.sh:334-351</code>.</li>
+<li><strong>Captain rows.</strong> The create path passes <code>--kind captain</code>, which is metadata ("Beads native type <code>task</code>"). It also sets <code>BD_DUE_REQUIRED=false</code> "rather than inventing a due date or registering a <code>types.custom</code> captain issue type" <code class="cite">bin/fm-captain-hold.sh:43-48</code> <code class="cite">bin/fm-captain-hold.sh:873-882</code> <code class="cite">docs/configuration.md:103-105</code>.</li>
+<li><strong>Migrated holds.</strong> A home that moved from markdown to Beads resolves old attested ids through the migration's marker notes, or as a last guess through the configured prefix (<a href="captain-holds.html#legacy">legacy identities</a>). That resolution "reads its graph path, binary, and prefix from the root <code>.tasks.toml</code> <code>[beads]</code> section only" <code class="cite">docs/configuration.md:114</code>.</li>
+</ul>
+<div class="callout unclear"><span class="callout-title">Markdown-only readers</span>
+<p>Several consumers read <code>data/backlog.md</code> by path rather than through <code>tasks-axi</code>: the fleet snapshot's parser <code class="cite">bin/fm-fleet-snapshot.sh:134</code> <code class="cite">bin/fm-fleet-snapshot.sh:384-390</code>, handoff's section classifier and move <code class="cite">bin/fm-backlog-handoff.sh:86</code> <code class="cite">bin/fm-backlog-handoff.sh:1072</code>, and the code-root fork check. The source read here does not show how a Beads home's rows reach Bearings or a handoff. <a href="buckets.html#adapter">Hold buckets</a> and <a href="handoff.html#adapter">handoff</a> record this as an open question.</p></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

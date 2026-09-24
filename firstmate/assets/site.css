@@ -367,3 +367,4 @@ svg.c4 .ps-lifeline { fill: none; stroke: var(--c4-boundary); stroke-width: 1; s
 @media (max-width: 40rem) {
   code.cite.ps-wrap, a.cite code.cite.ps-wrap { white-space: normal; overflow-wrap: anywhere; }
 }
+/* Long citation paths wrap on a phone instead of widening the page (appended by backlog-and-decisions). */ @media (max-width: 30rem) { code.cite, a.cite code { white-space: normal; overflow-wrap: anywhere; } }

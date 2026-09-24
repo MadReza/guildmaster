@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>End-to-end walkthrough · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">Components › Backlog and decisions</p>
+<h1>End-to-end walkthrough</h1>
+<p class="lede">This page traces one ship task, <code>sample-fix</code>, from filing to landing. The captain has to choose its approach before work starts and approve the merge before it lands. Both decisions are holds on the same backlog row, and both are resolved by recording the captain's words.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Backlog and decisions</a>. The id and the captain's words are illustrative. Every command and behaviour is cited.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 940 660" role="img" aria-labelledby="bd-wt-t bd-wt-d">
+<title id="bd-wt-t">Walkthrough: one gated ship task</title>
+<desc id="bd-wt-d">The supervisor adds sample-fix, then holds it for the captain's choice of approach. The row is Queued, held, and live on Captain's Call. The captain answers; the supervisor records the words with answer --release and the row is unheld. fm-spawn dispatches it and moves it to In flight. When the pull request is ready, the supervisor holds the same row again for merge approval, which starts a new lifecycle. The captain approves; answer --release records it. fm-pr-merge asks open, gets 1, and merges. Teardown asks open, gets 1, and closes the row with the PR link.</desc>
+<defs><marker id="bd-wt-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">sample-fix, filed to landed</text>
+<g class="c4-person"><circle cx="80" cy="52" r="12"/><rect x="20" y="64" width="120" height="36" rx="12"/><text class="c4-label" x="80" y="87">Captain</text></g>
+<g class="c4-container"><rect x="180" y="56" width="140" height="44" rx="8"/><text class="c4-label" x="250" y="83">Supervisor</text></g>
+<g class="c4-component"><rect x="360" y="56" width="160" height="44" rx="8"/><text class="c4-label" x="440" y="83">fm-captain-hold.sh</text></g>
+<g class="c4-component"><rect x="560" y="56" width="160" height="44" rx="8"/><text class="c4-label" x="640" y="76">spawn · merge ·</text><text class="c4-label" x="640" y="92">teardown</text></g>
+<g class="c4-datastore"><path d="M760,62 a50,6 0 0,0 100,0 a50,6 0 0,0 -100,0 v30 a50,6 0 0,0 100,0 v-30"/><text class="c4-label" x="810" y="85">row</text></g>
+<g class="c4-rel c4-rel-async"><path d="M80,100 L80,640"/></g>
+<g class="c4-rel c4-rel-async"><path d="M250,100 L250,640"/></g>
+<g class="c4-rel c4-rel-async"><path d="M440,100 L440,640"/></g>
+<g class="c4-rel c4-rel-async"><path d="M640,100 L640,640"/></g>
+<g class="c4-rel c4-rel-async"><path d="M810,100 L810,640"/></g>
+
+<g class="c4-rel"><path d="M250,125 L808,125" marker-end="url(#bd-wt-arrow)"/><text class="c4-rel-label" x="530" y="118">1 · fm-tasks-axi.sh add sample-fix '…' --kind ship</text></g>
+<text class="c4-rel-label" x="880" y="129">Queued</text>
+<g class="c4-rel"><path d="M250,160 L438,160" marker-end="url(#bd-wt-arrow)"/><text class="c4-rel-label" x="345" y="153">2 · hold --reason</text></g>
+<g class="c4-rel"><path d="M440,185 L808,185" marker-end="url(#bd-wt-arrow)"/><text class="c4-rel-label" x="625" y="178">stamp, then tasks-axi hold --kind captain</text></g>
+<text class="c4-rel-label" x="880" y="182">held · live</text>
+<text class="c4-rel-label" x="880" y="196">Captain's Call</text>
+<g class="c4-rel c4-rel-async"><path d="M250,220 L82,220" marker-end="url(#bd-wt-arrow)"/><text class="c4-rel-label" x="165" y="213">3 · relays the decision</text></g>
+<g class="c4-rel"><path d="M80,250 L248,250" marker-end="url(#bd-wt-arrow)"/><text class="c4-rel-label" x="165" y="243">"Go with A."</text></g>
+<g class="c4-rel"><path d="M250,280 L438,280" marker-end="url(#bd-wt-arrow)"/><text class="c4-rel-label" x="345" y="273">4 · answer --release</text></g>
+<g class="c4-rel"><path d="M440,305 L808,305" marker-end="url(#bd-wt-arrow)"/><text class="c4-rel-label" x="625" y="298">record (released) · unhold</text></g>
+<text class="c4-rel-label" x="880" y="309">Queued · unheld</text>
+<g class="c4-rel"><path d="M250,340 L638,340" marker-end="url(#bd-wt-arrow)"/><text class="c4-rel-label" x="445" y="333">5 · fm-spawn.sh sample-fix</text></g>
+<g class="c4-rel"><path d="M640,365 L808,365" marker-end="url(#bd-wt-arrow)"/><text class="c4-rel-label" x="725" y="358">probe · start (fused)</text></g>
+<text class="c4-rel-label" x="880" y="369">In flight</text>
+<g class="c4-rel"><path d="M250,405 L438,405" marker-end="url(#bd-wt-arrow)"/><text class="c4-rel-label" x="345" y="398">6 · hold again: merge?</text></g>
+<g class="c4-rel"><path d="M440,430 L808,430" marker-end="url(#bd-wt-arrow)"/><text class="c4-rel-label" x="625" y="423">new stamp · new lifecycle</text></g>
+<text class="c4-rel-label" x="880" y="428">In flight · held</text>
+<text class="c4-rel-label" x="880" y="442">(also in Underway)</text>
+<g class="c4-rel"><path d="M80,470 L248,470" marker-end="url(#bd-wt-arrow)"/><text class="c4-rel-label" x="165" y="463">"Merge it."</text></g>
+<g class="c4-rel"><path d="M250,495 L438,495" marker-end="url(#bd-wt-arrow)"/><text class="c4-rel-label" x="345" y="488">7 · answer --release</text></g>
+<text class="c4-rel-label" x="880" y="499">In flight · unheld</text>
+<g class="c4-rel"><path d="M250,535 L638,535" marker-end="url(#bd-wt-arrow)"/><text class="c4-rel-label" x="445" y="528">8 · fm-pr-merge.sh (asks open → 1)</text></g>
+<g class="c4-rel"><path d="M250,580 L638,580" marker-end="url(#bd-wt-arrow)"/><text class="c4-rel-label" x="445" y="573">9 · fm-teardown.sh sample-fix</text></g>
+<g class="c4-rel"><path d="M640,605 L808,605" marker-end="url(#bd-wt-arrow)"/><text class="c4-rel-label" x="725" y="598">open → 1 · done --pr</text></g>
+<text class="c4-rel-label" x="880" y="609">Done · PR linked</text>
+</svg>
+</div>
+<figcaption>The row's state after each step is shown on the right. Solid arrows are commands. Dashed arrows are relays to the captain. The step numbers match the table below.</figcaption>
+</figure>
+
+<div class="table-wrap"><table>
+<thead><tr><th>#</th><th>What happens</th><th>Why, and what would refuse</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>The supervisor files the item: <code>bin/fm-tasks-axi.sh add sample-fix 'Fix the sample' --kind ship</code>. The wrapper runs <code>tasks-axi</code> from this home's backlog root.</td><td>Filing is the supervisor's job. Without the row, spawn would refuse and print this exact command.</td><td><code class="cite">AGENTS.md:540</code> <code class="cite">bin/fm-spawn.sh:3110-3112</code></td></tr>
+<tr><td>2</td><td>The approach is the captain's call, so the supervisor holds the very item it gates: <code>bin/fm-captain-hold.sh hold sample-fix --reason "approach A or B"</code>. The stamp is written first, then the hold. The row buckets <code>live</code>.</td><td>"Prefer holding the work item the question gates over minting a new row." Spawn would now refuse, because the row triple is <code>queued yes no</code>.</td><td><code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:20</code> <code class="cite">bin/fm-captain-hold.sh:884-898</code> <code class="cite">bin/fm-backlog-transition-lib.sh:821-826</code></td></tr>
+<tr><td>3</td><td>The supervisor presents the choice from Bearings' Captain's Call, in plain words.</td><td>"do not use the word hold in captain chat".</td><td><code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:63</code></td></tr>
+<tr><td>4</td><td>The captain's words go into a file, then <code>answer sample-fix --decision-file &lt;file&gt; --release</code>. A <code>released</code> record is prepended and <code>tasks-axi unhold</code> runs. On the board, the same answer would arrive through <code>answers</code> with mode <code>release</code>.</td><td>This is gated <em>work</em>, not a question, so it is a release rather than a close. A plain <code>answer</code> would mark the unbuilt work Done.</td><td><code class="cite">docs/captain-hold-lifecycle.md:17</code> <code class="cite">bin/fm-captain-hold.sh:966-973</code></td></tr>
+<tr><td>5</td><td><code>fm-spawn.sh</code> probes <code>queued no no</code>, publishes the record, launches the worker, and commits <code>start</code> as its last fallible step.</td><td>If <code>start</code> fails, the record is rolled back and spawn does not report success.</td><td><code class="cite">bin/fm-spawn.sh:3104-3133</code> <code class="cite">bin/fm-spawn.sh:4937-4960</code></td></tr>
+<tr><td>6</td><td>The PR is ready and the merge needs the captain's approval. The supervisor holds the same row again. Released work that is held again gets a new stamp, so it is a new lifecycle. <code>open --identity</code> now reports a different identity, which keeps the watcher from treating this as the old call.</td><td>The row is In flight <em>and</em> held. The snapshot lists it both on Captain's Call and in Underway.</td><td><code class="cite">docs/captain-hold-lifecycle.md:15</code> <code class="cite">bin/fm-watch.sh:1558-1568</code> <code class="cite">docs/captain-hold-lifecycle.md:139</code></td></tr>
+<tr><td>7</td><td>The captain approves. <code>answer sample-fix --decision-file &lt;file&gt; --release</code> writes a second record on top.</td><td>"A merge approval uses that existing release path … Closing a held row at merge approval instead records completion before landing."</td><td><code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:31-32</code></td></tr>
+<tr><td>8</td><td><code>fm-pr-merge.sh</code> asks <code>open sample-fix --distinguish-absent</code>, gets 1, and merges.</td><td>Had step 7 been skipped, the answer would be 0: "still held for the captain; release it before merging". A read failure (2) also refuses.</td><td><code class="cite">bin/fm-pr-merge.sh:69-72</code> <code class="cite">bin/fm-pr-merge.sh:878-886</code></td></tr>
+<tr><td>9</td><td>After landing, teardown asks <code>open</code>, gets 1, and selects <code>close</code>. It writes <code>state/sample-fix.backlog-close</code> with <code>arg=--pr</code> and <code>arg=&lt;url&gt;</code>, cleans up, then removes the meta, runs <code>tasks-axi done --pr &lt;url&gt;</code>, and removes the record. It prints "Backlog: sample-fix is closed … Run bin/fm-tasks-axi.sh ready …".</td><td>A crash between the halves leaves the record, and the next session start replays the close. The row lands in Recently Landed with its PR.</td><td><code class="cite">bin/fm-teardown.sh:545-562</code> <code class="cite">bin/fm-teardown.sh:3668-3685</code> <code class="cite">bin/fm-teardown.sh:1559-1560</code></td></tr>
+</tbody>
+</table></div>
+
+<h2 id="variants">How the same path bends</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Variant</th><th>What changes</th><th>See</th></tr></thead>
+<tbody>
+<tr><td>The captain says "later" at step 3</td><td><code>hold sample-fix --reason … --until 2026-10-15</code>. The row moves to the <code>dated</code> bucket as a Charted Next gate and comes back on its date.</td><td><a href="captain-holds.html#until">Deferral</a></td></tr>
+<tr><td>The question dissolves before the captain answers</td><td>The captain picks Reconcile on the card, which files a request. The supervisor verifies, then runs <code>reconcile close --evidence-file</code>, or <code>reconcile note</code> if the call is still live.</td><td><a href="reconcile.html">Reconcile</a></td></tr>
+<tr><td>The row is still held when teardown runs</td><td><code>open</code> returns 0. Teardown records <code>Deliverable of the finished work: PR &lt;url&gt;</code> and reopens the row as Queued and held. It closes only on <code>answer</code>.</td><td><a href="transitions.html#retain">Retain</a></td></tr>
+<tr><td>A scout raises the question</td><td>The supervisor holds the gated task, then runs <code>complete &lt;scout&gt; &lt;task&gt;</code>. Scout teardown refuses until <code>verify</code> passes.</td><td><a href="completion-gate.html">Completion gate</a></td></tr>
+<tr><td>A status line says "resolved" but no answer was recorded</td><td>The wake drain prints RECORD DIVERGENCE. The supervisor records the captain's words with <code>answer</code>, or re-opens the status decision.</td><td><a href="divergence.html">Divergence</a></td></tr>
+<tr><td>The work belongs to a secondmate</td><td>Before step 5, <code>fm-backlog-handoff.sh &lt;mate&gt; sample-fix</code> moves the Queued row into the mate's own backlog and wakes the mate.</td><td><a href="handoff.html">Handoff</a></td></tr>
+</tbody>
+</table></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

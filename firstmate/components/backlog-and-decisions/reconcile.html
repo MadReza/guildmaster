@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reconcile requests · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Backlog and decisions</p>
+<h1>Reconcile requests</h1>
+<p class="lede">A captain call can stop being a question without the captain ever answering it. "Reconcile" is the standing third choice for that case. It does not answer the call. It asks Firstmate to check the current state first, then either close the call with evidence or keep it open with a note.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Backlog and decisions</a>.</p>
+
+<h2 id="problem">The problem it solves</h2>
+<p>"A captain call can stop being a question without the captain ever answering it because the subject lands, the premise turns out to be false, or the choice becomes a matter of fact rather than the captain's to make. <code>reconcile</code> is the standing third option for that case, and its whole point is that it is NOT an answer. It means 'go verify the latest state', and it resolves in exactly one of two ways once that verification has actually been done: close the call with the evidence that made it moot, or leave it open with a note recording that it is genuinely still active." <code class="cite">docs/captain-hold-lifecycle.md:66-68</code></p>
+<p>Every decision card on the board carries this option. The board injects it "so the guarantee does not depend on the composer's memory" <code class="cite">bin/fm-bearings-board.sh:57-59</code>.</p>
+
+<h2 id="flow">The flow</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 920 470" role="img" aria-labelledby="bd-rec-t bd-rec-d">
+<title id="bd-rec-t">Reconcile: request, verify, decide</title>
+<desc id="bd-rec-d">The captain picks Reconcile on a board card. The Lavish adapter's reconciles command emits the task id. The process-event runner, for a bound source only, pipes it into fm-captain-hold.sh reconcile-requests, which verifies the binding and that the task is a live captain call, then writes one request per task under state/reconcile-requests. The supervisor re-checks reality and resolves the request with reconcile close and an evidence file, which closes the task as reconciled, or reconcile note with a note file, which leaves it held. A reconcile value sent through chat or any keyed-answer caller is refused by answers and creates nothing.</desc>
+<defs><marker id="bd-rec-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">Reconcile flow</text>
+<g class="c4-person"><circle cx="110" cy="58" r="16"/><rect x="20" y="74" width="180" height="62" rx="14"/><text class="c4-label" x="110" y="100">Captain</text><text class="c4-desc" x="110" y="118">picks Reconcile on a card</text></g>
+<g class="c4-container"><rect x="250" y="70" width="190" height="70" rx="8"/><text class="c4-label" x="345" y="95">Lavish adapter</text><text class="c4-tech" x="345" y="111">[fm-procevent-lavish.sh]</text><text class="c4-desc" x="345" y="127">reconciles &lt;result&gt;</text></g>
+<g class="c4-container"><rect x="490" y="70" width="190" height="70" rx="8"/><text class="c4-label" x="585" y="95">Event runner</text><text class="c4-tech" x="585" y="111">[fm-procevent.sh]</text><text class="c4-desc" x="585" y="127">bound sources only</text></g>
+<g class="c4-component"><rect x="730" y="70" width="170" height="70" rx="8"/><text class="c4-label" x="815" y="95">reconcile-requests</text><text class="c4-tech" x="815" y="111">[fm-captain-hold.sh]</text><text class="c4-desc" x="815" y="127">re-verify binding + task</text></g>
+<g class="c4-datastore"><path d="M730,200 a85,8 0 0,0 170,0 a85,8 0 0,0 -170,0 v56 a85,8 0 0,0 170,0 v-56"/><text class="c4-label" x="815" y="226">reconcile-requests/</text><text class="c4-desc" x="815" y="243">&lt;task&gt;.request, one per task</text></g>
+<g class="c4-container"><rect x="440" y="196" width="220" height="70" rx="8"/><text class="c4-label" x="550" y="221">Supervisor</text><text class="c4-tech" x="550" y="237">[reconcile list]</text><text class="c4-desc" x="550" y="253">re-checks the current state</text></g>
+<g class="c4-component"><rect x="300" y="340" width="260" height="76" rx="8"/><text class="c4-label" x="430" y="366">reconcile close</text><text class="c4-tech" x="430" y="382">[--evidence-file]</text><text class="c4-desc" x="430" y="399">mode reconciled · task Done</text></g>
+<g class="c4-component"><rect x="620" y="340" width="280" height="76" rx="8"/><text class="c4-label" x="760" y="366">reconcile note</text><text class="c4-tech" x="760" y="382">[--note-file]</text><text class="c4-desc" x="760" y="399">dated note · call stays held</text></g>
+<g class="c4-container"><rect x="20" y="196" width="230" height="70" rx="8"/><text class="c4-label" x="135" y="221">Chat or keyed answer</text><text class="c4-tech" x="135" y="237">[answers intake]</text><text class="c4-desc" x="135" y="253">"reconcile" → refused</text></g>
+<g class="c4-rel"><path d="M200,105 L248,105" marker-end="url(#bd-rec-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M440,105 L488,105" marker-end="url(#bd-rec-arrow)"/><text class="c4-rel-label" x="464" y="97">ids</text></g>
+<g class="c4-rel"><path d="M680,105 L728,105" marker-end="url(#bd-rec-arrow)"/></g>
+<g class="c4-rel"><path d="M815,140 L815,190" marker-end="url(#bd-rec-arrow)"/><text class="c4-rel-label" x="848" y="170">record</text></g>
+<g class="c4-rel c4-rel-async"><path d="M730,231 L662,231" marker-end="url(#bd-rec-arrow)"/><text class="c4-rel-label" x="696" y="224">pending</text></g>
+<g class="c4-rel"><path d="M510,266 L460,338" marker-end="url(#bd-rec-arrow)"/><text class="c4-rel-label" x="450" y="300">moot</text></g>
+<g class="c4-rel"><path d="M600,266 L680,338" marker-end="url(#bd-rec-arrow)"/><text class="c4-rel-label" x="680" y="300">still active</text></g>
+<g class="c4-rel c4-rel-async"><path d="M110,136 L110,194" marker-end="url(#bd-rec-arrow)"/><text class="c4-rel-label" x="150" y="170">chat text</text></g>
+<g class="c4-legend">
+<rect class="c4-legend-frame" x="20" y="320" width="230" height="130" rx="6"/>
+<text class="c4-legend-heading" x="32" y="340">Legend</text>
+<g class="c4-person"><rect x="32" y="350" width="30" height="16" rx="7"/></g><text x="72" y="363">Person</text>
+<g class="c4-container"><rect x="32" y="374" width="30" height="16" rx="3"/></g><text x="72" y="387">Container</text>
+<g class="c4-component"><rect x="140" y="350" width="30" height="16" rx="3"/></g><text x="178" y="363">Component</text>
+<g class="c4-datastore"><path d="M140,377 a15,3 0 0,0 30,0 a15,3 0 0,0 -30,0 v10 a15,3 0 0,0 30,0 v-10"/></g><text x="178" y="387">Data store</text>
+<g class="c4-rel"><path d="M32,412 L62,412"/></g><text x="72" y="416">Call</text>
+<g class="c4-rel c4-rel-async"><path d="M140,412 L170,412"/></g><text x="178" y="416">Captured / polled</text>
+<text x="32" y="440">Both outcomes retire the request.</text>
+</g>
+</svg>
+</div>
+<figcaption>Only one path creates a request: a bound captured source carrying the captain's structured board selection. The shared keyed-answer intake refuses the value from every channel <code class="cite">docs/captain-hold-lifecycle.md:70-71</code>.</figcaption>
+</figure>
+
+<h2 id="reserved">Why <code>reconcile</code> is reserved at the intake</h2>
+<p>"The value remains reserved at the shared keyed-answer intake, which visibly refuses it from every channel and never passes it to <code>answer</code>. A reconcile value delivered through chat or any ordinary keyed-answer caller therefore cannot complete a task, lift a hold, write a resolution record, or create a reconcile request." <code class="cite">docs/captain-hold-lifecycle.md:70-71</code> The script header says: "RECONCILE IS RESERVED AT THIS INTAKE, NOT FILTERED IN A CHANNEL." <code class="cite">bin/fm-captain-hold.sh:96-102</code> The check runs before the close mode is read, "so no channel and no card-declared mode can turn it into a close, release, or request".</p>
+<p>Board requests use "a separate captured-source seam". The board emits the selected option and the freeform note in separate fields, "so annotating Reconcile cannot turn it into an ordinary answer value". The Lavish adapter's <code>answers</code> command emits only non-reconcile selections, and its <code>reconciles</code> command emits only task ids whose structured selection is Reconcile <code class="cite">docs/captain-hold-lifecycle.md:73-75</code>. The payload validator reserves the value "across every card type because the captured payload carries no card type" <code class="cite">bin/fm-bearings-board.sh:60-62</code>.</p>
+<div class="callout"><span class="callout-title">Rollout branch</span>
+<p>"Current rows require the versioned shape and the <code>choice</code> tag; a time-limited rollout branch accepts ordinary answers from the old question/answer shape but refuses its bare and separator-annotated reconcile values from both intakes because those rows do not separate the selected option from its note." <code class="cite">docs/captain-hold-lifecycle.md:76</code></p></div>
+
+<h2 id="request">Recording the request</h2>
+<pre><code>fm-captain-hold.sh reconcile-requests --source-id &lt;source-id&gt; --source &lt;provenance&gt;
+# stdin: &lt;task-id&gt;[\t&lt;captain note&gt;]</code></pre>
+<p class="evidence"><code class="cite">bin/fm-captain-hold.sh:27</code> <code class="cite">bin/fm-captain-hold.sh:1412-1469</code></p>
+<ul>
+<li>It verifies the binding again: "source $source_id is not bound; no reconcile requests were created" <code class="cite">bin/fm-captain-hold.sh:1424-1425</code>.</li>
+<li>Per id, under the task's control lock, it refuses an invalid or over-long id, an absent task, a closed task, or one "not held for the captain". A read that hits its time bound stops the command.</li>
+<li>It writes one request per task, atomically, with mode 0600:
+<pre><code>schema=fm-reconcile-request.v1
+task=&lt;task-id&gt;
+requested=&lt;UTC timestamp&gt;
+source=&lt;provenance&gt;; captain note: &lt;note&gt;</code></pre>
+"Idempotent per task: a repeated reconcile keeps the one request and its original timestamp, so a re-delivered board answer never resets the clock on an obligation that is already open." <code class="cite">bin/fm-captain-hold.sh:1363-1383</code></li>
+</ul>
+<p>The record's purpose: "so the obligation to re-check cannot be lost between the wake that carried the answer and the turn that acts on it" <code class="cite">docs/captain-hold-lifecycle.md:81</code>. The runner side is <code>feed_reconcile_requests</code> <code class="cite">bin/fm-procevent.sh:447-458</code>. "Failures remain best-effort and never acknowledge or suppress the captured result." <code class="cite">docs/captain-hold-lifecycle.md:79</code></p>
+
+<h2 id="outcomes">The two outcomes</h2>
+<p>"That board-created request is yours to work off in the turn that receives it" <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:41</code>. Both outcomes "refuse unless that task still has the pending request created by the captain's board selection, so neither is a standalone way to mutate a captain call" <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:42</code>.</p>
+<h3 id="close">Moot: <code>reconcile close &lt;task-id&gt; --evidence-file &lt;path&gt;</code></h3>
+<p>The command requires an evidence file: "a moot call closes on evidence, never on assertion" <code class="cite">bin/fm-captain-hold.sh:1513</code>. The evidence goes through the same size and non-empty checks as a decision file. The command writes a resolution record with mode <code>reconciled</code> under the label <code>Reconciliation evidence:</code>, then runs <code>tasks-axi done</code>. "The distinct mode and label are what keep the record honest: it says the call dissolved against verified evidence, and it never claims the captain answered." <code class="cite">docs/captain-hold-lifecycle.md:87-89</code> <code class="cite">bin/fm-captain-hold.sh:1499-1563</code></p>
+<p>An exact retry on an already closed call finishes the interrupted close. Different evidence, or a record in any other mode, is refused. In a secondmate home a failed parent publication fails the command <code class="cite">bin/fm-captain-hold.sh:1524-1541</code> <code class="cite">bin/fm-captain-hold.sh:1558-1560</code>.</p>
+<h3 id="note">Still active: <code>reconcile note &lt;task-id&gt; --note-file &lt;path&gt;</code></h3>
+<p>The note is non-empty and at most 8192 bytes. The call must still be open. The command appends one block to the body and leaves the hold in place:</p>
+<pre><code>Captain hold reconciled: &lt;UTC&gt;
+Reconcile request: &lt;requested&gt; | &lt;source&gt; | note digest: &lt;sha256&gt;
+&lt;note text&gt;</code></pre>
+<p class="evidence"><code class="cite">bin/fm-captain-hold.sh:1565-1621</code></p>
+<p>"a marker bound to the request timestamp, provenance, and note digest lets a matching retry finish retirement without appending again while a later request with the same finding still receives its own dated note" <code class="cite">docs/captain-hold-lifecycle.md:92</code>. After writing, it checks again that the call is still open: "recording the reconcile note released captain-held task $id" is a failure <code class="cite">bin/fm-captain-hold.sh:1619</code>.</p>
+<h3 id="list"><code>reconcile list</code></h3>
+<p>This is a read-only enumeration: <code>&lt;task&gt;\trequested=…\tsource=…</code> per request, then <code>reconcile-requests: N</code> <code class="cite">bin/fm-captain-hold.sh:1483-1497</code>.</p>
+
+<h2 id="retirement">Retirement is checked</h2>
+<p>"Every retirement is checked: if request removal fails after an answer, close, or note is already durable, the durable outcome stands but the command fails and leaves the pending request visible for retry." <code class="cite">docs/captain-hold-lifecycle.md:96</code> A normal answer also retires a pending request, "because an answered call has no remaining re-check obligation" <code class="cite">docs/captain-hold-lifecycle.md:95</code>. The summary guarantee: "No path here closes a captain call without either the captain's words through <code>answer</code> or the evidence through <code>reconcile close</code>." <code class="cite">docs/captain-hold-lifecycle.md:97</code></p>
+
+<h2 id="limits">Known limit: remote secondmate cards</h2>
+<p>"A remote-secondmate card whose task is absent from the main backlog therefore remains announced but cannot create a main-home request; owner-aware request and mutation routing to the authoritative secondmate home is a separate follow-up." <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:40</code> <code class="cite">docs/captain-hold-lifecycle.md:117-118</code></p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Captain holds · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Backlog and decisions</p>
+<h1>Captain holds</h1>
+<p class="lede">A decision only the captain can make is an ordinary backlog task with a captain hold on it. <code>bin/fm-captain-hold.sh hold</code> is the only way to place that hold. It stamps when the hold began, can defer the call to a date, and in a secondmate home tells the parent at once.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Backlog and decisions</a>. Next in the lifecycle: <a href="answers.html">Recording answers</a>.</p>
+
+<h2 id="primitive">One primitive, no decision type</h2>
+<p>"There is no separate decision type. A captain call is an ordinary backlog task held for the captain through this script's mandatory <code>hold</code> subcommand, and its identity is simply the task id." <code class="cite">bin/fm-captain-hold.sh:12-14</code> Structurally, a captain call is a row that is not Done and whose <code>hold_kind</code> is <code>captain</code>. That is exactly what the <code>open</code> predicate tests <code class="cite">bin/fm-captain-hold.sh:1900-1916</code>.</p>
+<p>The script supplies mechanics only. It "never reads report, visual-review, chat, or terminal prose to guess whether the captain owes an answer. The invoking agent decides what is genuinely waiting on the captain; this script supplies guarded creation, a durable record of what the captain actually said, the investigation completion gate, and the one keyed-answer intake every channel feeds" <code class="cite">bin/fm-captain-hold.sh:5-10</code>. The policy side lives in the <code>captain-hold-lifecycle</code> skill, which is "Agent-only" <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:4</code>.</p>
+
+<h2 id="when">When the supervisor places a hold</h2>
+<ul>
+<li><strong>Any decision worth tracking.</strong> "A decision is simply a task held for the captain" <code class="cite">AGENTS.md:537</code>. The same goes for "a pending captain decision or relay reminder … worth durable tracking" <code class="cite">AGENTS.md:538</code>.</li>
+<li><strong>Every unresolved captain question an investigation or review surfaces.</strong> Each "must be carried by a captain-held task in the authoritative backlog of the home that owns the originating work before that work or review may be treated as complete" <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:19</code>. The <a href="completion-gate.html">completion gate</a> enforces this.</li>
+<li><strong>Which row to hold.</strong> "Prefer holding the work item the question gates over minting a new row … keep one held task per genuine gate: a multi-question review is one held task pointing at its report, not a row per question." The board then shows "exactly one board card" per task <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:20-21</code>.</li>
+<li><strong>Which home.</strong> The hold goes in the originating work's own <code>FM_HOME</code>. "a question already held anywhere is never re-registered as a second row" <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:25</code>.</li>
+<li><strong>What does not get a hold.</strong> "Resolved findings, recommendations that need no captain choice, and prose that merely sounds decision-like do not create held tasks." <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:48</code></li>
+</ul>
+<p>In captain-facing chat the word <em>hold</em> is internal vocabulary. The skill says "do not use the word hold in captain chat" <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:63</code>. <code>AGENTS.md</code> rewrites "hold, gate, ask-user, needs-decision, blocked, or paused" as "the concrete decision, wait, approval, blocker, or external delay" <code class="cite">AGENTS.md:496</code>.</p>
+
+<h2 id="hold">The <code>hold</code> subcommand</h2>
+<pre><code>fm-captain-hold.sh hold &lt;task-id&gt; --reason &lt;reason&gt; \
+  [--title &lt;title&gt;] [--repo &lt;repo&gt;] [--origin &lt;origin-id&gt;] [--until YYYY-MM-DD]</code></pre>
+<p class="evidence"><code class="cite">bin/fm-captain-hold.sh:23-24</code>. Implementation: <code class="cite">bin/fm-captain-hold.sh:813-908</code>.</p>
+<ol>
+<li><strong>Validate.</strong> The task id must be a "privacy-safe slug" (<code>[A-Za-z0-9._-]</code>). The reason must be one line and "must not contain parentheses (tasks-axi hold contract)". <code>--until</code> must be <code>YYYY-MM-DD</code>. The hold time is <code>FM_CAPTAIN_HOLD_NOW</code> or the current UTC time, as <code>YYYY-MM-DDTHH:MM:SSZ</code> <code class="cite">bin/fm-captain-hold.sh:829-845</code>.</li>
+<li><strong>Serialise.</strong> It takes the per-task control lock <code>state/.control-&lt;id&gt;.lock</code> <code class="cite">bin/fm-captain-hold.sh:286-290</code> and requires a compatible <code>tasks-axi</code> that exposes <code>--kind captain</code>.</li>
+<li><strong>Existing task.</strong> A Done task is refused: "task $id is already closed; a new captain call needs its own task". A task already under an active captain hold keeps its original stamp. A <code>--title</code> that differs from the existing title is refused <code class="cite">bin/fm-captain-hold.sh:848-861</code>.</li>
+<li><strong>Missing task.</strong> <code>--title</code> is required. The repo comes from <code>--repo</code>, else the origin's task metadata <code>project=</code>, else <code>firstmate</code>. The body is <code>Origin: &lt;origin&gt;</code> when an origin is given. It then runs <code>tasks-axi add &lt;id&gt; &lt;title&gt; --kind captain --repo &lt;repo&gt;</code> with <code>BD_DUE_REQUIRED=false</code> <code class="cite">bin/fm-captain-hold.sh:862-883</code>.</li>
+<li><strong>Stamp, then hold.</strong> It writes the hold-set stamp as the leading body line and verifies it. Only then does it run <code>tasks-axi hold &lt;id&gt; --reason … --kind captain [--until …]</code> <code class="cite">bin/fm-captain-hold.sh:884-898</code>.</li>
+<li><strong>Verify.</strong> It re-reads the row. It fails if <code>hold_kind</code> is not <code>captain</code>, or if the stamp was lost while holding <code class="cite">bin/fm-captain-hold.sh:899-905</code>.</li>
+<li><strong>Publish</strong> to the parent channel, if this is a secondmate home (<a href="#parent">below</a>), and print the task id.</li>
+</ol>
+<p>A real invocation from <code>AGENTS.md</code>: <code>bin/fm-captain-hold.sh hold &lt;id&gt; --reason "&lt;reason&gt;"</code>, with <code>--until &lt;date&gt;</code> for a deferral <code class="cite">AGENTS.md:537</code>. The skill puts "the question and its options in the hold reason" <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:21</code>.</p>
+
+<h3 id="stamp">The hold-set stamp</h3>
+<p>The first body line of a held row is <code>Captain hold set: 2026-09-23T17:44:50Z</code>. A date-only form is also recognised <code class="cite">bin/fm-captain-hold.sh:755-761</code>. The stamp defines "this hold lifecycle's age". Presentation reads it to decide whether an undated hold has <a href="buckets.html">aged</a> out of Captain's Call.</p>
+<ul>
+<li><strong>Written first.</strong> "A concurrent snapshot may see the harmless stamp by itself, but can never see a newly held task without the timestamp that defines this hold lifecycle's age." <code class="cite">bin/fm-captain-hold.sh:884-886</code></li>
+<li><strong>Preserved across retries.</strong> "Retries of an active hold preserve its hold-set timestamp, while re-holding released work starts a new timestamped lifecycle" <code class="cite">docs/captain-hold-lifecycle.md:15</code> <code class="cite">bin/fm-captain-hold.sh:763-793</code>.</li>
+<li><strong>Kept until the close lands.</strong> <code>answer</code> writes its resolution block <em>beneath</em> the stamp. It removes the stamp only after the close succeeds, so "If the close is interrupted, the still-held task therefore keeps its original age basis" <code class="cite">docs/captain-hold-lifecycle.md:18-19</code>.</li>
+<li><strong>Older holds.</strong> "Existing undated holds without a hold-set stamp fall back to the task's <code>since</code> date." <code class="cite">docs/captain-hold-lifecycle.md:130</code></li>
+</ul>
+
+<h3 id="until">Deferral with a date</h3>
+<p>"When the captain says 'later', that is an answer too: re-hold with <code>bin/fm-captain-hold.sh hold &lt;id&gt; --reason "&lt;reason&gt;" --until &lt;date&gt;</code> so the item leaves the live Captain's Call and resurfaces on its date, instead of leaving a live-looking card or fabricating a closure." <code class="cite">.agents/skills/captain-hold-lifecycle/SKILL.md:34</code> The date is "the captain's own deferral date", stored through <code>tasks-axi</code>'s date gate <code class="cite">bin/fm-captain-hold.sh:52-54</code>. Until it is due, the hold sits in the <code>dated</code> bucket. From that date <code>tasks-axi</code> reports it as no longer held, but the annotations survive, and they are what keep it answerable <code class="cite">bin/fm-captain-hold.sh:70-72</code>.</p>
+<div class="callout unclear"><span class="callout-title">Not settled by the source</span>
+<p>Once the date passes, <code>tasks-axi</code> no longer reports the row as <code>held</code>, while <code>hold_kind: captain</code> survives. The dispatch gate tests the <code>held</code> flag <code class="cite">bin/fm-backlog-transition-lib.sh:821-826</code>, and <code>open</code> tests <code>hold_kind</code> <code class="cite">bin/fm-captain-hold.sh:1902</code>. So an expired deferral on a work item appears both dispatchable and an open captain call. Nothing read here says whether that pairing is intended. The snapshot places such a row in the <code>live</code> bucket, so it reappears on Captain's Call.</p></div>
+
+<h2 id="lifecycle">The lifecycle of one call</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 920 500" role="img" aria-labelledby="bd-life-t bd-life-d">
+<title id="bd-life-t">Captain call lifecycle</title>
+<desc id="bd-life-d">An unheld row becomes a live call through hold. A live call can be deferred with hold --until; once the date passes, tasks-axi reports it as not held, but it stays answerable. A live call closes through answer (answered), releases through answer --release (the work resumes, and holding again starts a new lifecycle), or closes through reconcile close with evidence (reconciled). Teardown's retain and reconcile note both leave it live. A captain-held row closed outside the script is repaired by answer.</desc>
+<defs><marker id="bd-life-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">One captain call</text>
+<g class="c4-component"><rect x="30" y="60" width="170" height="70" rx="8"/><text class="c4-label" x="115" y="88">Unheld row</text><text class="c4-desc" x="115" y="108">or no row yet</text></g>
+<g class="c4-component"><rect x="370" y="60" width="220" height="70" rx="8"/><text class="c4-label" x="480" y="88">Open call</text><text class="c4-desc" x="480" y="106">open → 0 · stamped</text><text class="c4-desc" x="480" y="120">Queued or In flight</text></g>
+<g class="c4-component"><rect x="710" y="60" width="180" height="70" rx="8"/><text class="c4-label" x="800" y="88">Deferred</text><text class="c4-desc" x="800" y="108">hold-until in future</text></g>
+<g class="c4-component"><rect x="710" y="220" width="180" height="70" rx="8"/><text class="c4-label" x="800" y="248">Date reached</text><text class="c4-desc" x="800" y="266">not held; still answerable</text></g>
+<g class="c4-component"><rect x="30" y="220" width="170" height="70" rx="8"/><text class="c4-label" x="115" y="248">Released</text><text class="c4-desc" x="115" y="266">unheld · record kept</text></g>
+<g class="c4-component"><rect x="370" y="380" width="250" height="70" rx="8"/><text class="c4-label" x="495" y="408">Closed · answered</text><text class="c4-desc" x="495" y="428">Done · "Captain decision:"</text></g>
+<g class="c4-component"><rect x="710" y="380" width="180" height="70" rx="8"/><text class="c4-label" x="800" y="408">Closed · reconciled</text><text class="c4-desc" x="800" y="428">"Reconciliation evidence:"</text></g>
+<g class="c4-component"><rect x="30" y="380" width="170" height="70" rx="8"/><text class="c4-label" x="115" y="408">Closed elsewhere</text><text class="c4-desc" x="115" y="428">Done, no record</text></g>
+<g class="c4-rel"><path d="M200,95 L368,95" marker-end="url(#bd-life-arrow)"/><text class="c4-rel-label" x="284" y="88">hold</text></g>
+<g class="c4-rel"><path d="M590,80 L708,80" marker-end="url(#bd-life-arrow)"/><text class="c4-rel-label" x="649" y="73">hold --until</text></g>
+<g class="c4-rel c4-rel-async"><path d="M800,130 L800,218" marker-end="url(#bd-life-arrow)"/><text class="c4-rel-label" x="800" y="178">date arrives</text></g>
+<g class="c4-rel"><path d="M440,60 L440,42 L520,42 L520,58" marker-end="url(#bd-life-arrow)"/><text class="c4-rel-label" x="480" y="36">teardown retain · reconcile note</text></g>
+<g class="c4-rel"><path d="M470,130 L470,378" marker-end="url(#bd-life-arrow)"/><text class="c4-rel-label" x="470" y="330">answer</text></g>
+<g class="c4-rel"><path d="M370,122 L202,232" marker-end="url(#bd-life-arrow)"/><text class="c4-rel-label" x="270" y="160">answer --release</text></g>
+<g class="c4-rel"><path d="M200,275 L400,132" marker-end="url(#bd-life-arrow)"/><text class="c4-rel-label" x="315" y="222">hold again: new stamp</text></g>
+<g class="c4-rel"><path d="M590,110 L660,110 L660,415 L708,415" marker-end="url(#bd-life-arrow)"/><text class="c4-rel-label" x="660" y="300">reconcile close</text></g>
+<g class="c4-rel"><path d="M710,255 L600,255 L600,378" marker-end="url(#bd-life-arrow)"/><text class="c4-rel-label" x="600" y="340">answer</text></g>
+<g class="c4-rel"><path d="M200,415 L368,415" marker-end="url(#bd-life-arrow)"/><text class="c4-rel-label" x="284" y="408">answer → repaired</text></g>
+</svg>
+</div>
+<figcaption>Every close carries a resolution record. The captain's own words are labelled <code>Captain decision:</code>, and verified evidence is labelled <code>Reconciliation evidence:</code>. The resolution modes are <code>answered</code>, <code>released</code>, <code>repaired</code>, and <code>reconciled</code> <code class="cite">bin/fm-captain-hold.sh:188-192</code>. Details: <a href="answers.html">answers</a>, <a href="reconcile.html">reconcile</a>.</figcaption>
+</figure>
+
+<h2 id="open">The <code>open</code> predicate</h2>
+<p>"<code>open</code> is the read-only predicate a mechanical closer asks before it may retire a task's row: is this task still an open captain call? Exit 0 means it is (not Done, hold kind captain), 1 means it is not, and 2 means the answer could not be established, so a caller that must never close a live call can treat 'cannot tell' as its own case instead of as a no." <code class="cite">bin/fm-captain-hold.sh:161-165</code></p>
+<ul>
+<li><code>--distinguish-absent</code> returns 3 for an absent task. A home with no backlog file counts as absent, "because it records no captain calls" <code class="cite">bin/fm-captain-hold.sh:166-167</code> <code class="cite">bin/fm-captain-hold.sh:1887-1898</code>.</li>
+<li><code>--identity</code> prints the call's lifecycle identity, <code>&lt;hold-set stamp&gt;#&lt;recorded answer count&gt;</code>, and only on exit 0. It exists because "re-holding released work starts a new lifecycle without necessarily touching the task's status log, so a consumer that bounds repeated work per call cannot use the task id alone" <code class="cite">bin/fm-captain-hold.sh:169-174</code> <code class="cite">bin/fm-captain-hold.sh:1903-1913</code>.</li>
+<li>Every read failure on a record that exists is a 2, "because a mechanical closer must never read 'cannot tell' as permission to close" <code class="cite">bin/fm-captain-hold.sh:1854-1859</code>.</li>
+</ul>
+<div class="table-wrap"><table>
+<thead><tr><th>Caller</th><th>Asks</th><th>Does with the answer</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><code>fm-teardown.sh</code></td><td><code>open &lt;id&gt;</code></td><td>0 retains the row, 1 closes it, anything else refuses before destruction.</td><td><code class="cite">bin/fm-teardown.sh:548-561</code></td></tr>
+<tr><td><code>fm-pr-merge.sh</code>, <code>fm-merge-local.sh</code></td><td><code>open &lt;id&gt; --distinguish-absent</code></td><td>0 refuses: "still held for the captain; release it before merging". 1 or 3 proceeds. Anything else refuses.</td><td><code class="cite">bin/fm-pr-merge.sh:878-886</code> <code class="cite">bin/fm-merge-local.sh:118-130</code></td></tr>
+<tr><td><code>fm-watch.sh</code></td><td><code>open &lt;task&gt; --identity</code></td><td>On 0, bounds repeated stale alarms for that call's identity. On any other result, keeps alarming: "a wait this watcher cannot prove is not a wait".</td><td><code class="cite">bin/fm-watch.sh:1525-1548</code></td></tr>
+<tr><td><code>fm-bearings-board.sh</code></td><td><code>open &lt;task&gt; --distinguish-absent</code></td><td>1 drops the card. 2 and 3 keep it: "a card wrongly shown is recoverable and a call wrongly hidden is not".</td><td><code class="cite">bin/fm-bearings-board.sh:281</code> <code class="cite">docs/captain-hold-lifecycle.md:105-107</code></td></tr>
+<tr><td><code>reconcile note</code></td><td><code>command_open</code></td><td>Refuses to annotate a call that is not open. Checks again that the note did not release it.</td><td><code class="cite">bin/fm-captain-hold.sh:1589-1590</code></td></tr>
+</tbody>
+</table></div>
+
+<h2 id="parent">Parent channel: a secondmate's calls reach the captain</h2>
+<p>"inside a secondmate home a task held for the captain, and its answer, are captain-facing facts the moment they are recorded, so <code>hold</code> publishes <code>needs-decision [key=captain-hold-&lt;task&gt;-&lt;n&gt;]</code> and <code>answer</code> (and <code>answers</code>) the matching <code>resolved</code> line on the parent channel … whether or not the mate model appends anything." <code class="cite">bin/fm-captain-hold.sh:194-198</code></p>
+<ul>
+<li><strong>The key.</strong> <code>&lt;n&gt;</code> is "the count of resolution records the body already carries plus one, so a released and re-held task opens and closes a distinct parent decision with no new persisted state". An exact retry republishes the same line, "which the channel deduplicates" <code class="cite">bin/fm-captain-hold.sh:199-202</code>.</li>
+<li><strong>A main home publishes nothing.</strong> The channel library returns 1 for "a main home … nothing to report" <code class="cite">bin/fm-parent-channel-lib.sh:47-51</code>.</li>
+<li><strong>A failed publication does not undo the record.</strong> "The hold or answer is already durable in the backlog, so a channel that cannot be written is reported as <code>actionable:</code> on stderr rather than undoing the record" <code class="cite">bin/fm-captain-hold.sh:203-205</code> <code class="cite">bin/fm-captain-hold.sh:231-240</code>. One exception: when a pending reconcile request exists, an answer's failed publication fails the command, so the request is not retired silently <code class="cite">bin/fm-captain-hold.sh:1402-1410</code>.</li>
+</ul>
+<p>The parent channel itself is documented under <a href="../communication/index.html">Communication</a>.</p>
+
+<h2 id="legacy">Legacy identities and the shim</h2>
+<p>Before the collapse, decisions had their own identity, <code>&lt;origin&gt;-decision-&lt;key&gt;</code>, minted by <code>bin/fm-decision-hold.sh</code>. "Those rows are already plain task ids, so they render, answer, verify, and close through the collapsed surfaces with no data migration." <code class="cite">docs/captain-hold-lifecycle.md:180-181</code> Three legacy inputs are still resolved in place <code class="cite">docs/captain-hold-lifecycle.md:182</code>:</p>
+<ul>
+<li>a <code>decision_keys=</code> metadata entry that names no task;</li>
+<li>a channel key that names no task, when the source's binding carries a concrete legacy origin;</li>
+<li>resolution records written by the old script, recognised wherever a record is read (<code>Resolution recorded by fm-decision-hold.</code>) <code class="cite">bin/fm-captain-hold.sh:451-460</code>.</li>
+</ul>
+<p>Resolution order is: the exact task id first, then the legacy derived id, then (on Beads) the migrated row. The result reports <em>how</em> it resolved (<code>exact</code>, <code>legacy</code>, <code>migrated-note</code>, <code>migrated-prefix</code>) "so a caller can record which evidence carried the attestation" <code class="cite">bin/fm-captain-hold.sh:723-728</code>. On a Beads home, the marker note <code>migrated from data/backlog.md id &lt;legacy id&gt;</code> is authoritative. The configured prefix is only a guess, accepted "solely for a single row still held for the captain - two such rows refuse rather than attest" <code class="cite">docs/captain-hold-lifecycle.md:183-185</code>.</p>
+<p>The shim "only maps the retired command surface onto it so in-flight work briefed before the collapse keeps working for one release, and it will be removed in the release after the collapse lands" <code class="cite">bin/fm-decision-hold.sh:5-8</code>. Its mapping includes <code>resolve … --routed-to</code> becoming an <code>answer</code>, followed by clearing the recorded <code>blocked-by</code> edges <code class="cite">bin/fm-decision-hold.sh:10-28</code>. A <code>decision-hold-lifecycle</code> skill also survives, but only as a "Renamed pointer kept for in-flight briefs" that redirects to <code>captain-hold-lifecycle</code> <code class="cite">.agents/skills/decision-hold-lifecycle/SKILL.md:4-5</code>.</p>
+
+<h2 id="failures">Failure behaviour</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Condition</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td>The task is already Done</td><td>Refused. A new call needs its own task. Closed calls are never reopened.</td></tr>
+<tr><td><code>--title</code> is missing for a new task, or differs from the existing title</td><td>Refused before any write.</td></tr>
+<tr><td>The reason has parentheses or a newline</td><td>Refused, following the <code>tasks-axi hold</code> contract.</td></tr>
+<tr><td>A backlog read hits its time bound</td><td>Stops with exit 124, and never reads the timeout as absence, which could mint a duplicate row <code class="cite">bin/fm-captain-hold.sh:359-379</code>.</td></tr>
+<tr><td>The stamp or hold does not verify after writing</td><td>Fails loudly, naming the task.</td></tr>
+<tr><td>The parent channel cannot be written</td><td><code>actionable:</code> on stderr. The hold stands.</td></tr>
+</tbody>
+</table></div>
+<p>The regression suite is <code>tests/fm-captain-hold-lifecycle.test.sh</code>, "using only synthetic <code>sample</code> identities and decision text" <code class="cite">docs/captain-hold-lifecycle.md:192</code>.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

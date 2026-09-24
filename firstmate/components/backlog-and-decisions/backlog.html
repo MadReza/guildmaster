@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The work queue · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Backlog and decisions</p>
+<h1>The work queue</h1>
+<p class="lede">The backlog is each home's durable list of work items. It records their state, dependencies, holds, date gates, and completion links. Every routine command reaches it through one wrapper, so it cannot fork into two copies.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. The row format belongs to the external <code>tasks-axi</code> tool; its quoted help comes from the installed <code>tasks-axi 0.2.5</code>. Up: <a href="index.html">Backlog and decisions</a>.</p>
+
+<h2 id="problem">What problem it solves</h2>
+<p>Everything under way must survive a restart, and "a restart must be a non-event" <code class="cite">AGENTS.md:256</code>. The backlog is where outstanding work lives between sessions. The context digest does not hold it, and neither does a worker's pane. <code>AGENTS.md</code> names three owners for the details: "<code>.tasks.toml</code>, <code>docs/configuration.md</code>, and current <code>tasks-axi --help</code> own the backlog schema, compatibility, retention, and routine command syntax." <code class="cite">AGENTS.md:543</code></p>
+<p>The backlog holds work items and nothing else: "It tracks work items only, never agents; persistent secondmates never appear as backlog items" <code class="cite">AGENTS.md:535</code>. A secondmate is "recorded in the secondmate registry and runtime state, never as a backlog work item" <code class="cite">AGENTS.md:333</code>. The transition gate enforces this. Its first exemption is <code>kind=secondmate</code>, with the stated reason "secondmates are not backlog items" <code class="cite">bin/fm-backlog-transition-lib.sh:283-286</code>.</p>
+
+<h2 id="store">The store</h2>
+<p>The code root tracks a <code>.tasks.toml</code> that pins the default adapter:</p>
+<pre><code>backend = "markdown"
+
+[markdown]
+path = "data/backlog.md"
+archive = "data/done-archive.md"
+done_keep = 10</code></pre>
+<p class="evidence"><code class="cite">.tasks.toml:1-6</code>. The file tree lists <code>data/backlog.md</code> as "task queue, dependencies, history" <code class="cite">AGENTS.md:93</code>, and <code>.tasks.toml</code> as the "tracked tasks-axi markdown backend config for the default backlog backend" <code class="cite">AGENTS.md:65</code>.</p>
+<p>Each home has its own backlog. "Work routed to a secondmate is recorded in that secondmate home's own backlog, not the main backlog." <code class="cite">AGENTS.md:536</code> Other adapters, and the manual alternative, are covered in <a href="backends.html">Backends and manual mode</a>.</p>
+
+<h3 id="format">Row format (markdown adapter, Level 4)</h3>
+<p>Firstmate never writes this format itself. <code>tasks-axi</code> owns it, and handoff delegates moves to <code>tasks-axi mv</code> so that "the format has exactly one parser and cannot drift out of sync" <code class="cite">bin/fm-backlog-handoff.sh:11-15</code>. Firstmate's own test fixtures show the shape. The rows below are synthetic, copied from a regression test:</p>
+<pre><code>## In flight
+
+## Queued
+- [ ] work-gate - Captain-gated ship work (repo: firstmate) (kind: ship) (hold: captain go needed) (hold-kind: captain)
+- [ ] later-call - Deferred captain call (repo: firstmate) (kind: captain) (hold: revisit with the captain) (hold-kind: captain) (hold-until: 2026-08-01)
+- [ ] external-gate - Externally held work (repo: firstmate) (kind: ship) (hold: upstream release pending) (hold-kind: external)
+
+## Done
+- [x] answered-call - Answered captain question (repo: firstmate) (kind: captain) (done 2026-07-10) (hold: captain choice pending) (hold-kind: captain)
+- [x] shipped-work - Ordinary landed work (repo: firstmate) (kind: ship) (merged 2026-07-10)</code></pre>
+<p class="evidence"><code class="cite">tests/fm-bearings-snapshot.test.sh:1158-1169</code>. Dependency edges appear on the title line as repeated <code>blocked-by: &lt;id&gt;</code> tokens, for example <code>- [ ] captain-run - Run canary blocked-by: worker blocked-by: review (repo: alpha) …</code>. In-flight rows carry <code>(since &lt;date&gt;)</code> (<code class="cite">tests/fm-fleet-snapshot-view.test.sh:393</code>, <code class="cite">tests/fm-bearings-snapshot.test.sh:115-116</code>).</p>
+<dl class="defs">
+<dt>Sections</dt><dd><code>## In flight</code>, <code>## Queued</code>, and <code>## Done</code>. Handoff seeds a fresh secondmate backlog with exactly this three-section scaffold, because left alone "tasks-axi mv writes its own <code># Backlog</code> title format, which is not firstmate's home-backlog convention" <code class="cite">bin/fm-backlog-handoff.sh:1056-1065</code>. On the markdown adapter, "tasks-axi and manual edits produce the same <code>## In flight</code>, <code>## Queued</code>, and <code>## Done</code> sections" <code class="cite">docs/configuration.md:126</code>.</dd>
+<dt>Title-line metadata</dt><dd>Parenthesised <code>repo</code>, <code>kind</code>, <code>priority</code>, <code>hold</code>, <code>hold-kind</code>, <code>hold-until</code>, and dated <code>since</code>, <code>merged</code>, <code>reported</code>, or <code>done</code>. The snapshot strips these keys to recover the title <code class="cite">bin/fm-fleet-snapshot.sh:438</code>.</dd>
+<dt>Body</dt><dd>Indented continuation lines. "Item bodies must use at least two leading spaces … because tasks-axi treats only two-or-more-space lines as body." <code class="cite">bin/fm-backlog-handoff.sh:41-43</code> A captain-held row's first body line is the machine-written <code>Captain hold set: &lt;UTC&gt;</code> stamp (<a href="captain-holds.html#stamp">hold-set stamp</a>).</dd>
+<dt>Kind</dt><dd>Free metadata such as <code>ship</code>, <code>scout</code>, <code>docs</code>, or <code>captain</code>. It does not create a type: "There is no separate decision type: any captain-held task is the same primitive, whatever kind its row carries." <code class="cite">bin/fm-fleet-snapshot.sh:28-29</code></dd>
+</dl>
+
+<h2 id="states">States, overlays, and who moves them</h2>
+<figure class="diagram">
+<svg class="c4" viewBox="0 0 900 360" role="img" aria-labelledby="bd-st-t bd-st-d">
+<title id="bd-st-t">Backlog row states and transitions</title>
+<desc id="bd-st-d">Three states: Queued, In flight, Done. Add enters Queued. Spawn's start moves Queued to In flight. Teardown's done moves In flight to Done. Teardown's retain transition reopens an In flight captain call back to Queued. tasks-axi reopen moves Done back to Queued. Pruning archives Done rows beyond done_keep into done-archive.md. Held and blocked are overlays on Queued or In flight rows, not states.</desc>
+<defs><marker id="bd-st-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">Row lifecycle</text>
+<g class="c4-component"><rect x="70" y="120" width="180" height="80" rx="8"/><text class="c4-label" x="160" y="150">Queued</text><text class="c4-desc" x="160" y="170">dispatchable when</text><text class="c4-desc" x="160" y="185">unheld and unblocked</text></g>
+<g class="c4-component"><rect x="370" y="120" width="180" height="80" rx="8"/><text class="c4-label" x="460" y="150">In flight</text><text class="c4-desc" x="460" y="170">a task record exists</text><text class="c4-desc" x="460" y="185">(state/&lt;id&gt;.meta)</text></g>
+<g class="c4-component"><rect x="670" y="120" width="180" height="80" rx="8"/><text class="c4-label" x="760" y="150">Done</text><text class="c4-desc" x="760" y="170">closed with --pr,</text><text class="c4-desc" x="760" y="185">--report, or --note</text></g>
+<g class="c4-datastore"><path d="M670,272 a90,8 0 0,0 180,0 a90,8 0 0,0 -180,0 v52 a90,8 0 0,0 180,0 v-52"/><text class="c4-label" x="760" y="300">done-archive.md</text><text class="c4-desc" x="760" y="316">pruned, never deleted</text></g>
+<g class="c4-component"><rect x="70" y="262" width="480" height="72" rx="8"/><text class="c4-label" x="310" y="286">Overlays on Queued or In flight (not states)</text><text class="c4-desc" x="310" y="305">held: hold / unhold, --kind captain|external|load|parked|future, --until</text><text class="c4-desc" x="310" y="321">blocked: a blocked-by edge to an item that is not yet Done</text></g>
+<g class="c4-rel"><path d="M20,160 L68,160" marker-end="url(#bd-st-arrow)"/><text class="c4-rel-label" x="40" y="150">add</text></g>
+<g class="c4-rel"><path d="M250,145 L368,145" marker-end="url(#bd-st-arrow)"/><text class="c4-rel-label" x="309" y="137">start · spawn</text></g>
+<g class="c4-rel"><path d="M550,145 L668,145" marker-end="url(#bd-st-arrow)"/><text class="c4-rel-label" x="609" y="137">done · teardown</text></g>
+<g class="c4-rel"><path d="M370,180 L252,180" marker-end="url(#bd-st-arrow)"/><text class="c4-rel-label" x="311" y="197">reopen · retain</text></g>
+<g class="c4-rel"><path d="M760,120 L760,75 L160,75 L160,118" marker-end="url(#bd-st-arrow)"/><text class="c4-rel-label" x="460" y="69">reopen (tasks-axi; also by hand)</text></g>
+<g class="c4-rel c4-rel-async"><path d="M760,200 L760,262" marker-end="url(#bd-st-arrow)"/><text class="c4-rel-label" x="800" y="236">prune</text></g>
+</svg>
+<figcaption>Only three sections exist. Being held or blocked is recorded on the row and never moves it between sections. The automatic moves are spawn's <code>start</code>, teardown's <code>done</code>, and teardown's <code>retain</code>, which reopens a still-open captain call (<a href="transitions.html">transitions</a>).</figcaption>
+</figure>
+<p>Firstmate reads the three flags that matter for dispatch as one triple, <code>"&lt;state&gt; &lt;held&gt; &lt;blocked&gt;"</code>, taken from <code>tasks-axi show</code> <code class="cite">bin/fm-backlog-transition-lib.sh:508-517</code>. Only two triples may be dispatched: <code>in_flight no no</code> and <code>queued no no</code> <code class="cite">bin/fm-backlog-transition-lib.sh:821-826</code>. A held row, a blocked row, and a Done row are all refused before any endpoint or local copy is created <code class="cite">docs/configuration.md:107</code>.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Move</th><th>Command</th><th>Who runs it</th></tr></thead>
+<tbody>
+<tr><td>File an item</td><td><code>bin/fm-tasks-axi.sh add &lt;id&gt; '&lt;title&gt;' --kind &lt;kind&gt;</code></td><td>The supervisor, before dispatch. A missing row makes spawn refuse and print exactly this command <code class="cite">bin/fm-spawn.sh:3110-3112</code>.</td></tr>
+<tr><td>Queued → In flight</td><td><code>tasks-axi start</code></td><td><code>fm-spawn.sh</code>, fused into publishing the task record (<a href="transitions.html#dispatch">dispatch</a>).</td></tr>
+<tr><td>In flight → Done</td><td><code>tasks-axi done --pr|--report|--note</code></td><td><code>fm-teardown.sh</code>, fused into removing the record (<a href="transitions.html#close">close</a>).</td></tr>
+<tr><td>In flight → Queued (captain call)</td><td><code>tasks-axi reopen</code> after recording the deliverable</td><td><code>fm-teardown.sh</code> when <code>open</code> says the row is still the captain's (<a href="transitions.html#retain">retain</a>).</td></tr>
+<tr><td>Hold or release</td><td><code>fm-captain-hold.sh hold</code> / <code>answer --release</code></td><td>The supervisor, never a bare <code>tasks-axi hold</code> for a captain call (<a href="captain-holds.html">captain holds</a>).</td></tr>
+<tr><td>Add a dependency</td><td><code>tasks-axi block &lt;id&gt; --by &lt;other&gt;</code>, or <code>add --blocked-by</code></td><td>The supervisor. The blocker "must already exist" (tasks-axi help).</td></tr>
+</tbody>
+</table></div>
+
+<h2 id="dependencies">Dependencies</h2>
+<p>A dependency is a <code>blocked-by</code> edge from one item to another. Firstmate never follows edges itself before dispatch. It asks <code>tasks-axi</code>, which reports <code>blocked: yes</code> on the row, and the dispatch triple refuses anything blocked. After each cleanup, teardown prints the follow-up it owes: "Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due." <code class="cite">bin/fm-teardown.sh:1560</code> The standing rule is: "Re-evaluate queued work after every teardown and heartbeat, dispatching items only when dependencies and time gates have cleared." <code class="cite">AGENTS.md:541</code></p>
+<p>The read-only snapshot does its own resolution for presentation. "Repeated blocker tokens remain ordered; a blocker resolves only when its structured record is Done, and missing ids stay open." <code class="cite">bin/fm-fleet-snapshot.sh:26-27</code> <code class="cite">bin/fm-fleet-snapshot.sh:545-554</code> A blocker id that is absent from the backlog therefore never counts as satisfied.</p>
+<p>Across homes, <code>tasks-axi mv</code> moves "a whole connected set (a blocker and its dependents) atomically with blocked-by links preserved". It "refuses a move that would strand a dependency across the two files" <code class="cite">bin/fm-backlog-handoff.sh:34-39</code>.</p>
+
+<h2 id="date-gates">Date gates</h2>
+<p>The date gate is a property of a hold: <code>tasks-axi hold &lt;id&gt; --reason … --until YYYY-MM-DD</code>, which the help text describes as a "date gate; inactive on and after that date". The snapshot relies on the same contract: "a <code>hold-until</code> date still in the future keeps a captain hold out of captain_actionable until it is due (tasks-axi's own contract: the hold is inactive on and after that date)" <code class="cite">bin/fm-fleet-snapshot.sh:144-146</code>. Once the date passes, <code>tasks-axi</code> stops reporting the row as held, but it keeps the annotations. That is why an expired captain deferral is still answerable (<a href="answers.html#expired">expired holds</a>) <code class="cite">docs/captain-hold-lifecycle.md:23</code>.</p>
+<p>Firstmate has one sanctioned way to defer a captain call to a date: <code>fm-captain-hold.sh hold &lt;id&gt; --reason … --until &lt;date&gt;</code>. The wrapper checks the date shape before passing it on <code class="cite">bin/fm-captain-hold.sh:835-840</code> <code class="cite">bin/fm-captain-hold.sh:892-898</code>. Other hold kinds (<code>external</code>, <code>load</code>, <code>parked</code>, <code>future</code>) exist in <code>tasks-axi</code>, and the fixture above shows an <code>external</code> hold. The presentation buckets classify captain holds only; a non-captain row "carries null" <code class="cite">bin/fm-fleet-snapshot.sh:38-39</code>.</p>
+<div class="callout unclear"><span class="callout-title">Not settled by the source</span>
+<p>No Firstmate script creates a non-captain hold kind. Their use appears only in <code>tasks-axi</code>'s own help and in test fixtures. The source read here does not show which workflow, if any, is expected to use <code>external</code>, <code>load</code>, <code>parked</code>, or <code>future</code> holds.</p></div>
+
+<h2 id="retention">Retention</h2>
+<p>Done rows are history, and the backlog keeps only a bounded amount of it. <code>done_keep = 10</code> and <code>archive = "data/done-archive.md"</code> are pinned in <code>.tasks.toml</code> <code class="cite">.tasks.toml:5-6</code>. The rule is "keep only the configured recent Done entries" <code class="cite">AGENTS.md:544</code>. On the tasks-axi path, <code>tasks-axi done</code> prunes as part of the close: its help lists <code>--keep &lt;n&gt; (default from config), --no-prune</code>. <code>tasks-axi prune</code> "Trim[s] a section to the N most recent tasks, archiving the rest (never deletes)". A manual home owes the same trim by hand. Teardown prints "move $ID to Done, keep Done to the 10 most recent" <code class="cite">bin/fm-teardown.sh:1562</code>.</p>
+<p>Done records stay in their home. Handoff refuses them: "Done records stay with their home and are pruned/archived" <code class="cite">bin/fm-backlog-handoff.sh:981-984</code>. The retained Done rows feed Recently Landed on Bearings. At session start they are "pure weight", so the startup digest omits them <code class="cite">bin/fm-session-start.sh:131-133</code>.</p>
+
+<h2 id="wrapper">The wrapper: <code>bin/fm-tasks-axi.sh</code></h2>
+<p>"Every routine firstmate backlog read or mutation goes through this command rather than a bare <code>tasks-axi</code>" <code class="cite">bin/fm-tasks-axi.sh:7-9</code>.</p>
+<h3 id="why-wrapper">Why it exists</h3>
+<p>"The tracked <code>.tasks.toml</code> paths resolve against the directory tasks-axi runs in, not <code>FM_HOME</code>, so a bare <code>tasks-axi</code> run from the code root addresses the code root's <code>data/</code> whenever the home lives elsewhere." A symlink cannot fix this: "tasks-axi writes by renaming a temp file over its target, which replaces a symlink with a regular file, so linking the code-root copy into the home forks the queue on the first such write" <code class="cite">docs/configuration.md:128-129</code>.</p>
+<h3 id="how-wrapper">How it addresses the home</h3>
+<ol>
+<li>The data directory is <code>FM_DATA_OVERRIDE</code>, else <code>$FM_HOME/data</code>, else the code root's <code>data/</code> <code class="cite">bin/fm-tasks-axi.sh:32-33</code> <code class="cite">bin/fm-tasks-axi.sh:48-50</code>.</li>
+<li><code>fm_backlog_tasks_axi_addressing</code> resolves the addressing root: the data directory's <em>parent</em>. On the markdown adapter it also resolves the file <code>&lt;data&gt;/backlog.md</code> <code class="cite">bin/fm-backlog-transition-lib.sh:265-278</code>.</li>
+<li>The wrapper exports that file as <code>TASKS_AXI_FILE</code>, "rather than a trailing --file so the no-command dashboard works too". For a non-markdown adapter it clears any inherited <code>TASKS_AXI_FILE</code> <code class="cite">bin/fm-tasks-axi.sh:27-30</code> <code class="cite">bin/fm-tasks-axi.sh:117-124</code>.</li>
+<li>It makes relative <code>--to</code> and <code>--*-file</code> values absolute against the caller's directory, because <code>tasks-axi</code> will run from the backlog root. <code>--report</code> stays as given, since it is stored verbatim as a link <code class="cite">bin/fm-tasks-axi.sh:9-15</code> <code class="cite">bin/fm-tasks-axi.sh:85-108</code>.</li>
+<li>It runs <code>cd</code> into the root, then <code>exec tasks-axi</code> <code class="cite">bin/fm-tasks-axi.sh:126-127</code>.</li>
+</ol>
+<h3 id="refusals">Refusals</h3>
+<p>Each refusal exits 2 with nothing run <code class="cite">bin/fm-tasks-axi.sh:35-44</code>:</p>
+<ul>
+<li><code>tasks-axi</code> is missing from <code>PATH</code>.</li>
+<li>The caller passed <code>--file</code>. The wrapper owns the addressing, and "tasks-axi would silently let the last --file win". The error reads "this command always addresses this home's backlog at $DATA; drop --file, or run tasks-axi directly for another backlog" <code class="cite">bin/fm-tasks-axi.sh:94-96</code>.</li>
+<li>The data directory, or its backend configuration, cannot be resolved.</li>
+<li><code>&lt;data&gt;/backlog.md</code> is itself a symlink, because "the first write would replace the link with a private copy, exactly the fork this command exists to prevent" <code class="cite">bin/fm-tasks-axi.sh:118-120</code>.</li>
+</ul>
+<p>Otherwise the exit status is <code>tasks-axi</code>'s own.</p>
+<h3 id="fork-detect">Detecting a fork that already happened</h3>
+<p>Bootstrap looks for the damage a bare call would leave. If the code root's <code>data/backlog.md</code> or <code>data/done-archive.md</code> exists and is not this home's own file, it prints <code>BACKLOG_RECONCILE: code-root &lt;file&gt; is not this home's &lt;file&gt;; tasks-axi wrote the code root instead of this home, so rows in it may be missing here - merge it into this home's copy and move it aside</code> <code class="cite">bin/fm-bootstrap.sh:1537-1546</code>. This check runs "even in a read-only session" <code class="cite">docs/configuration.md:130</code>.</p>
+
+<h2 id="reads">Bounded reads</h2>
+<p>A backlog read that hangs at session start would blind the whole session. <code>fm_backlog_row_show</code> therefore bounds each read, with <code>FM_BACKLOG_ROW_TIMEOUT_SECS</code> defaulting to 10. "the first bound hit latches FM_BACKLOG_ROW_SHOW_WEDGED and every later read in the same sweep returns immediately, still naming its own item so nothing is silently skipped" <code class="cite">bin/fm-backlog-transition-lib.sh:401-419</code>. A mutation under a held lock can be bounded through <code>FM_TASKS_AXI_TIMEOUT</code>, which uses GNU <code>timeout</code>, <code>gtimeout</code>, or a perl watchdog. With no mechanism at all it refuses rather than running unbounded <code class="cite">bin/fm-backlog-transition-lib.sh:319-394</code>. <code>fm-captain-hold.sh</code> refuses to treat a timed-out read as absence, because "every caller below would otherwise spend it as one - minting a duplicate task, skipping a keyed answer, or reporting a task that exists as missing" <code class="cite">bin/fm-captain-hold.sh:359-379</code>.</p>
+
+<h2 id="digest">How the backlog reaches a session</h2>
+<p>Session start prints a compact listing as a recovery input, "not a reporting surface" <code class="cite">bin/fm-session-start.sh:129-130</code>:</p>
+<ul>
+<li>Done rows never appear.</li>
+<li>Every in-flight, held, and blocked row appears in full, with <code>hold_kind</code>, <code>hold_reason</code>, and <code>blocked_by</code>.</li>
+<li>Only the plain ready-queued list is bounded, by <code>FM_SESSION_START_QUEUED_LIMIT</code> (default 20). An exact remainder count is printed <code class="cite">bin/fm-session-start.sh:134-143</code>.</li>
+</ul>
+<p>The groups are <code>tasks-axi</code>'s own filters, so "this script never reimplements task state" <code class="cite">bin/fm-session-start.sh:144-150</code> <code class="cite">bin/fm-session-start.sh:478-499</code>. In manual mode it prints only headings and title lines <code class="cite">bin/fm-session-start.sh:151-156</code>.</p>
+
+<h2 id="notes">Keeping notes honest</h2>
+<p>The item body is the task's notebook. <code>AGENTS.md</code> sets its hygiene:</p>
+<ul>
+<li>"Keep free-form notes free of temporary paths, moving versions, ephemeral identifiers, and copied state that will rot."</li>
+<li>"Inspect the current task note before replacing its considered body, and archive the superseded body when recoverability matters rather than appending by default."</li>
+<li>"Preserve durable structured identifiers, dependencies, and completion artifact links."</li>
+</ul>
+<p class="evidence"><code class="cite">AGENTS.md:547-550</code></p>
+<p>The archive option is <code>tasks-axi update --body-file … --archive-body</code>. The compatibility probe requires that flag <code class="cite">bin/fm-tasks-axi-lib.sh:7-8</code>, and <code>answer</code> uses it for every resolution record <code class="cite">bin/fm-captain-hold.sh:936</code>.</p>
+
+<h2 id="knobs">Configuration knobs</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Knob</th><th>Effect</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><code>FM_HOME</code>, <code>FM_DATA_OVERRIDE</code></td><td>Select which home's data directory, and so which backlog, is addressed.</td><td><code class="cite">bin/fm-tasks-axi.sh:32-33</code></td></tr>
+<tr><td><code>.tasks.toml</code> (<code>done_keep</code>, <code>archive</code>, <code>path</code>, <code>backend</code>)</td><td>Retention, archive location, and adapter. Read from the addressing root.</td><td><code class="cite">.tasks.toml:1-6</code></td></tr>
+<tr><td><code>config/backlog-backend</code></td><td><code>manual</code> opts out of <code>tasks-axi</code> for routine mutations.</td><td><a href="backends.html#manual">Backends</a></td></tr>
+<tr><td><code>FM_SESSION_START_QUEUED_LIMIT</code></td><td>Bounds the ready-queued part of the startup listing (default 20).</td><td><code class="cite">bin/fm-session-start.sh:138-141</code></td></tr>
+<tr><td><code>FM_BACKLOG_ROW_TIMEOUT_SECS</code></td><td>Per-read bound on <code>tasks-axi show</code> (default 10).</td><td><code class="cite">bin/fm-backlog-transition-lib.sh:419</code></td></tr>
+<tr><td><code>FM_TASKS_AXI_TIMEOUT</code></td><td>Optional bound on mutations. Spawn sets 30 around its commit.</td><td><code class="cite">bin/fm-spawn.sh:4936</code></td></tr>
+</tbody>
+</table></div>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>
