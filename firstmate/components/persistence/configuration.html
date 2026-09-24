@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Per-home configuration · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">Components › Persistence</p>
+<h1>Per-home configuration and inheritance</h1>
+<p class="lede"><code>config/</code> holds one home's local, gitignored operating choices. Ten of them are primary-authoritative and are pushed into every secondmate home. So is one shared data file. The rest stay local to the home that set them.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Persistence</a>.</p>
+
+<h2 id="shape">How config files are shaped</h2>
+<p>Almost every file is one of three kinds:</p>
+<ul>
+<li>a <strong>presence flag</strong>, where only existence is read (<code>trace-context</code>, <code>stow-pass-horizon</code>, <code>turnend-churn-absorb</code>, <code>wedge-defer-parked-gate</code>);</li>
+<li>a <strong>one-token or one-line value</strong> (<code>backend</code>, <code>crew-harness</code>, <code>calm</code>, <code>claude-permission-mode</code>, <code>lavish-axi-host</code>, <code>startup-memory-budget</code>);</li>
+<li>a <strong>structured document</strong> (<code>crew-dispatch.json</code>, <code>watched-tools.json</code>, <code>launch-env-allowlist</code>, <code>brief-include.md</code>, the bindings under <code>extensions.d/</code>).</li>
+</ul>
+<p>Absence nearly always means "the built-in default". Malformed content is handled differently from file to file. Some files fall back to the default. Others refuse the operation that needs them. That difference is recorded per file below.</p>
+
+<h2 id="catalogue">Catalogue</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>File</th><th>What it selects</th><th>Absent</th><th>Malformed</th><th>Into secondmate home?</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><code>config/backend</code></td><td>Runtime session backend for new tasks</td><td>Auto-detect, then tmux</td><td>Rejected unless a known backend</td><td><strong>Yes</strong></td><td><code class="cite">docs/configuration.md:137-142</code> <code class="cite">docs/configuration.md:179</code></td></tr>
+<tr><td><code>config/crew-harness</code></td><td>Harness for crewmates and scouts</td><td>Mirror Firstmate's own harness</td><td>—</td><td><strong>Yes</strong>, as the literal file</td><td><code class="cite">AGENTS.md:72</code></td></tr>
+<tr><td><code>config/crew-dispatch.json</code></td><td>Natural-language dispatch rules</td><td>No rule matching</td><td>Reported. While present, every crew spawn needs an explicit harness.</td><td><strong>Yes</strong></td><td><code class="cite">docs/configuration.md:451-513</code></td></tr>
+<tr><td><code>config/secondmate-harness</code></td><td>Harness, model, and effort for launching secondmates</td><td>Fall back through <code>crew-harness</code></td><td>—</td><td>No: "secondmates do not launch secondmates"</td><td><code class="cite">docs/configuration.md:361</code></td></tr>
+<tr><td><code>config/backlog-backend</code></td><td><code>manual</code> forces hand-editing</td><td>tasks-axi</td><td>—</td><td><strong>Yes</strong></td><td><code class="cite">AGENTS.md:76</code> <code class="cite">docs/configuration.md:123-126</code></td></tr>
+<tr><td><code>config/claude-permission-mode</code></td><td><code>bypass</code> or <code>auto</code> for every Claude launch</td><td><code>bypass</code></td><td><strong>Refuses every spawn</strong> from the home</td><td><strong>Yes</strong></td><td><code class="cite">docs/configuration.md:370-378</code></td></tr>
+<tr><td><code>config/launch-env-allowlist</code></td><td>Environment names passed to workers</td><td>Unfiltered inheritance</td><td>Stops the launch</td><td><strong>Yes</strong></td><td><code class="cite">docs/configuration.md:397-410</code></td></tr>
+<tr><td><code>config/lavish-axi-host</code></td><td>The per-machine Lavish server address</td><td>No address exported</td><td>Refuses the launch</td><td><strong>Yes</strong></td><td><code class="cite">docs/configuration.md:381-387</code></td></tr>
+<tr><td><code>config/startup-memory-budget</code></td><td>Token allowance for startup memory</td><td>Primary: bootstrap writes 7500</td><td>Rejected, never defaulted</td><td><strong>Yes</strong>. A secondmate creates no default of its own.</td><td><code class="cite">docs/configuration.md:255-267</code></td></tr>
+<tr><td><code>config/herdr-presentation-spaces</code></td><td>Herdr visual projection on or off</td><td>Default-on above a version floor</td><td>—</td><td><strong>Yes</strong>. Absence is mirrored.</td><td><code class="cite">docs/configuration.md:169-170</code></td></tr>
+<tr><td><code>config/trace-context</code></td><td>W3C trace-context propagation (flag)</td><td>Off</td><td>—</td><td><strong>Yes, at launch only</strong>. Left unchanged by live convergence.</td><td><code class="cite">docs/configuration.md:202-210</code></td></tr>
+<tr><td><code>config/calm</code></td><td>Calm presentation, <code>on</code> or <code>off</code></td><td>Off</td><td>Off. Legacy <code>max</code> reads as on.</td><td>No</td><td><code class="cite">docs/configuration.md:30-39</code></td></tr>
+<tr><td><code>config/supervision-branch-model</code>, <code>-effort</code></td><td>Pi supervision branch pins</td><td>Follow main</td><td>No pin</td><td>No</td><td><code class="cite">docs/configuration.md:56-97</code></td></tr>
+<tr><td><code>config/stow-pass-horizon</code></td><td>Pass-count decay in <code>/stow</code> (flag)</td><td>Wall-clock horizons only</td><td>Contents ignored</td><td>No</td><td><code class="cite">docs/configuration.md:269-277</code></td></tr>
+<tr><td><code>config/brief-include.md</code></td><td>Text appended to every ship and scout brief</td><td>Nothing appended</td><td>Stops the scaffold</td><td>No</td><td><code class="cite">docs/configuration.md:389-395</code></td></tr>
+<tr><td><code>config/turnend-churn-absorb</code></td><td>Pane churn as work evidence (flag)</td><td>Off</td><td>—</td><td>No</td><td><code class="cite">docs/configuration.md:212-221</code></td></tr>
+<tr><td><code>config/wedge-defer-parked-gate</code></td><td>Parked-gate wait deferral (flag)</td><td>Off</td><td>—</td><td>No</td><td><code class="cite">docs/configuration.md:223-230</code></td></tr>
+<tr><td><code>config/wedge-alarm</code></td><td>Away-mode wedge alarm channels</td><td><code>auto</code></td><td>A failing channel falls through</td><td>Not in the inherited list</td><td><code class="cite">docs/configuration.md:191-200</code></td></tr>
+<tr><td><code>config/cmux-socket-password</code></td><td>cmux control-socket password</td><td>Ambient environment</td><td>—</td><td>Not in the inherited list</td><td><code class="cite">AGENTS.md:88</code></td></tr>
+<tr><td><code>config/watched-tools.json</code></td><td>Tools checked for inert updates</td><td>No check</td><td>—</td><td>No</td><td><code class="cite">AGENTS.md:90</code> <code class="cite">docs/configuration.md:596-610</code></td></tr>
+<tr><td><code>config/x-mode.env</code></td><td>Generated Relay cadence, <code>FM_CHECK_INTERVAL=30</code></td><td>Default 300 s cadence</td><td>—</td><td>Generated per home</td><td><code class="cite">docs/configuration.md:711-713</code></td></tr>
+<tr><td><code>config/extensions.d/</code></td><td>Explicit process-event adapter bindings (mode 0600 files in a 0700 directory)</td><td>Built-in adapters only</td><td>Not discovered</td><td>Not in the inherited list</td><td><code class="cite">docs/configuration.md:813-830</code></td></tr>
+<tr><td><code>config/voice-*</code>, <code>config/inbox-*</code></td><td>Paid-API region, model, and profile for voice and the inbox</td><td>Required values refuse, naming the path</td><td>—</td><td>Not in the inherited list</td><td><code class="cite">docs/configuration.md:1056-1078</code></td></tr>
+<tr><td><code>.env</code> (home root)</td><td>Relay token, mail credentials, <code>TYPESAFE_API_KEY</code></td><td>Features off</td><td>—</td><td>Not in the inherited list</td><td><code class="cite">AGENTS.md:71</code></td></tr>
+</tbody></table></div>
+<p>"Not in the inherited list" means the file is absent from <code>FM_INHERITABLE_CONFIG</code>. That variable is the single declaration the code propagates <code class="cite">bin/fm-config-inherit-lib.sh:67-71</code>. Where the documents do not say "not inherited" in so many words, the code's list is the evidence.</p>
+
+<div class="callout"><span class="callout-title">Findings: the inventories drift from the code's list</span>
+<p>The code's inherited set has ten items: <code>crew-dispatch.json</code>, <code>crew-harness</code>, <code>backlog-backend</code>, <code>backend</code>, <code>herdr-presentation-spaces</code>, <code>startup-memory-budget</code>, <code>trace-context</code>, <code>launch-env-allowlist</code>, <code>claude-permission-mode</code>, and <code>lavish-axi-host</code> <code class="cite">bin/fm-config-inherit-lib.sh:71</code>. The library's own header prose lists every one of them <em>except</em> <code>launch-env-allowlist</code> <code class="cite">bin/fm-config-inherit-lib.sh:2-27</code>. The charter's <code>config/</code> inventory has no entry for <code>launch-env-allowlist</code>, <code>extensions.d/</code>, or the voice and inbox files <code class="cite">AGENTS.md:71-91</code>. The configuration guide does document all of them, and it agrees that the allowlist is inherited <code class="cite">docs/configuration.md:402</code>.</p></div>
+
+<h2 id="mechanism">How inheritance works</h2>
+<p>Private config is gitignored, so "a tracked-files fast-forward never carries these items". Inheritance is "an explicit copy run at the convergence points the primary owns - a secondmate spawn (<code>bin/fm-spawn.sh</code>), the bootstrap secondmate sweep (<code>bin/fm-bootstrap.sh</code>), and the focused mid-session config push (<code>bin/fm-config-push.sh</code>). It is PRIMARY-AUTHORITATIVE" <code class="cite">bin/fm-config-inherit-lib.sh:30-40</code>.</p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1000 420" role="img" aria-labelledby="ci-title">
+<title id="ci-title">Primary-authoritative inheritance into a secondmate home</title>
+<defs><marker id="ci-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="26">Inheritance: primary home to secondmate home</text>
+<g class="c4-boundary"><rect x="20" y="44" width="270" height="340" rx="10"/><text x="32" y="374">Primary home</text></g>
+<g class="c4-datastore"><path d="M40,74 a115,10 0 0,0 230,0 a115,10 0 0,0 -230,0 v60 a115,10 0 0,0 230,0 v-60"/><text class="c4-label" x="155" y="108">config/</text><text class="c4-desc" x="155" y="126">10 declared items</text></g>
+<g class="c4-datastore"><path d="M40,204 a115,10 0 0,0 230,0 a115,10 0 0,0 -230,0 v60 a115,10 0 0,0 230,0 v-60"/><text class="c4-label" x="155" y="238">data/captain-shared.md</text><text class="c4-desc" x="155" y="256">header-validated source</text></g>
+
+<g class="c4-component"><rect x="360" y="60" width="280" height="84" rx="8"/><text class="c4-label" x="500" y="86">Convergence points</text><text class="c4-desc" x="500" y="106">secondmate spawn · bootstrap sweep</text><text class="c4-desc" x="500" y="122">· fm-config-push.sh</text></g>
+<g class="c4-component"><rect x="360" y="170" width="280" height="84" rx="8"/><text class="c4-label" x="500" y="196">propagate_inheritable_config</text><text class="c4-desc" x="500" y="216">copy if different, temp + rename;</text><text class="c4-desc" x="500" y="232">mirror proven absence</text></g>
+<g class="c4-component"><rect x="360" y="280" width="280" height="84" rx="8"/><text class="c4-label" x="500" y="306">Reread nudge</text><text class="c4-desc" x="500" y="326">state/.fm-inherited-config-reread*</text><text class="c4-desc" x="500" y="342">retry and quarantine on failure</text></g>
+
+<g class="c4-boundary"><rect x="710" y="44" width="270" height="340" rx="10"/><text x="722" y="374">Secondmate home (local or remote)</text></g>
+<g class="c4-datastore"><path d="M730,74 a115,10 0 0,0 230,0 a115,10 0 0,0 -230,0 v60 a115,10 0 0,0 230,0 v-60"/><text class="c4-label" x="845" y="108">config/</text><text class="c4-desc" x="845" y="126">converged copies</text></g>
+<g class="c4-datastore"><path d="M730,204 a115,10 0 0,0 230,0 a115,10 0 0,0 -230,0 v60 a115,10 0 0,0 230,0 v-60"/><text class="c4-label" x="845" y="238">data/captain-shared.md</text><text class="c4-desc" x="845" y="256">mode 0444; drift quarantined</text></g>
+<g class="c4-container"><rect x="730" y="296" width="230" height="56" rx="8"/><text class="c4-label" x="845" y="320">Live secondmate agent</text><text class="c4-desc" x="845" y="338">re-reads exact bytes</text></g>
+
+<g class="c4-rel"><path d="M270,104 H358" marker-end="url(#ci-arrow)"/><text class="c4-rel-label" x="314" y="96">read</text></g>
+<g class="c4-rel"><path d="M270,234 H320 V212 H358" marker-end="url(#ci-arrow)"/></g>
+<g class="c4-rel"><path d="M500,144 V168" marker-end="url(#ci-arrow)"/></g>
+<g class="c4-rel"><path d="M640,200 H690 V104 H728" marker-end="url(#ci-arrow)"/><text class="c4-rel-label" x="680" y="150">push</text></g>
+<g class="c4-rel"><path d="M640,226 H728" marker-end="url(#ci-arrow)"/><text class="c4-rel-label" x="684" y="218">push</text></g>
+<g class="c4-rel"><path d="M500,254 V278" marker-end="url(#ci-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M640,322 H728" marker-end="url(#ci-arrow)"/><text class="c4-rel-label" x="684" y="314">nudge</text></g>
+</svg>
+</div>
+<figcaption>The same item list drives remote routes. <code>fm-remote-inherit-push.sh</code> sends and <code>fm-remote-inherit.sh</code> receives. Both derive the set from <code>fm_config_inherit_items</code>, "so a new inheritable item cannot be accepted by one side and refused by the other" <code class="cite">bin/fm-config-inherit-lib.sh:48-56</code>. Remote transport belongs to the <a href="../remote/index.html">Remote</a> area.</figcaption>
+</figure>
+
+<h3 id="copy-rules">Copy rules</h3>
+<ul>
+<li><strong>Idempotent.</strong> A present source is copied "only when its content differs (idempotent: a re-run never churns mtimes)" <code class="cite">bin/fm-config-inherit-lib.sh:185-192</code>.</li>
+<li><strong>Atomic.</strong> The copy goes to <code>.fm-inherit.XXXXXX</code> in the destination directory and is renamed over the target <code class="cite">bin/fm-config-inherit-lib.sh:143-170</code>.</li>
+<li><strong>Absence propagates, but only when proven.</strong> "A source item proven absent is mirrored as a missing destination item, so clearing the primary's value clears it downstream too." But "inspection errors or existing nonregular sources leave that destination item unchanged and report an error; inaccessible paths and dangling source links must never silently remove an inherited grant" <code class="cite">bin/fm-config-inherit-lib.sh:192-197</code>. Absence is proven with <code>lstat</code> and <code>ENOENT</code>, not assumed from a failed read <code class="cite">bin/fm-config-inherit-lib.sh:101-107</code>.</li>
+<li><strong>Reported.</strong> Each item's result is <code>pushed</code>, <code>unchanged</code>, <code>skipped</code>, or <code>error</code>. Only a real copy or remove failure makes the call fail <code class="cite">bin/fm-config-inherit-lib.sh:198-203</code>.</li>
+<li><strong>Session-scoped items.</strong> <code>trace-context</code> is an enablement decision frozen per session, so it is copied at launch and "left untouched by live convergence into an already-running home" <code class="cite">bin/fm-config-inherit-lib.sh:72-79</code>.</li>
+</ul>
+
+<h3 id="captain-shared">The shared captain-preferences file</h3>
+<p><code>data/captain-shared.md</code> is "the one shared data file in this inheritance contract. There is deliberately no shared learnings file" <code class="cite">bin/fm-config-inherit-lib.sh:61-66</code>. The source must carry a header, within its first 12 lines, declaring it main-authoritative and read-only in secondmate homes <code class="cite">bin/fm-config-inherit-lib.sh:223-231</code>. The downstream copy is mode <code>0444</code>. A downstream copy that diverged is <strong>quarantined</strong> as <code>.captain-shared.md.quarantine.&lt;stamp&gt;.&lt;hash&gt;</code>, never overwritten in place, and reported as <code>SECONDMATE_SYNC: … quarantined … drift</code> <code class="cite">bin/fm-config-inherit-lib.sh:257-300</code> <code class="cite">bin/fm-config-inherit-lib.sh:388-404</code>. For the rollout rule, <code>secondmate-provisioning</code> is the owner. Existing homes trim <code>data/captain.md</code> "by hand after first propagation rather than deleting private content automatically" <code class="cite">docs/configuration.md:247</code>.</p>
+
+<h3 id="reread">Telling a running secondmate</h3>
+<p>Changing files under a live agent is not enough, because the agent has already read its old config. After a push that changes any allowlisted config item, local routes receive "the generation-specific literal-content pointer". Remote routes receive a durable marked reread nudge. Unchanged config, and changes only to <code>captain-shared.md</code>, send no reread <code class="cite">bin/fm-config-push.sh:11-16</code>. The instruction files live under <code>state/.fm-inherited-config-reread*</code> "so it never dirties the home". A send that fails is kept in a bounded retry queue, <code>state/.fm-inherited-config-reread-retry</code>, and quarantined past its limits <code class="cite">bin/fm-config-inherit-lib.sh:565-575</code> <code class="cite">bin/fm-config-inherit-lib.sh:611-1072</code>. <code>captain-shared.md</code> "is never allowlisted here and must never be inlined into a reread instruction" <code class="cite">bin/fm-config-inherit-lib.sh:580-583</code>.</p>
+
+<h2 id="deleting">Deleting a config file</h2>
+<p>Deleting a file in a <strong>primary</strong> home returns that choice to its default. For an inherited item, the next convergence also removes it from every secondmate, because absence is mirrored. Deleting an inherited file in a <strong>secondmate</strong> home lasts only until the next convergence, which restores the primary's value. The two exceptions to "delete means default":</p>
+<ul>
+<li><code>config/startup-memory-budget</code> in a primary home is re-materialized as <code>7500</code> by the next locked bootstrap <code class="cite">docs/configuration.md:258</code>.</li>
+<li><code>config/x-mode.env</code> is regenerated by Relay setup while Relay is enabled <code class="cite">docs/configuration.md:711</code>.</li>
+</ul>
+<p>No config file is a lock, a journal, or a queue, so deleting one never corrupts runtime state. It changes behaviour at the next read. Some files, such as the permission mode and the launch allowlist, are read on every spawn <code class="cite">docs/configuration.md:377</code>.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

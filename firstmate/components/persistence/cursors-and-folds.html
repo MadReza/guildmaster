@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cursors and folded decisions · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Persistence</p>
+<h1>Presentation cursors and folded decisions</h1>
+<p class="lede">Status logs only grow. Byte cursors bound by file identity let every drain read only what is new, without replaying old lines or dropping a decision that later lines buried.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Persistence</a>.</p>
+
+<h2 id="problem">Problem solved</h2>
+<p>Every drain prints a fleet-wide <code>OPEN DECISIONS</code> section and an <code>UNREAD STATUS</code> section <code class="cite">AGENTS.md:193-196</code>. Re-reading every task's whole status log on every drain would cost time in proportion to each task's lifetime history. The whole-file fold "re-reads and re-folds a status file's ENTIRE lifetime on every call, so its cost grows with total log size". The incremental sibling reads "only the bytes appended to a status file since its own last call" and folds them into "a persisted running open-set" <code class="cite">bin/fm-classify-lib.sh:913-926</code>. There are two further failure modes to avoid: re-printing lines already presented, and losing a decision because many unrelated lines were appended after it.</p>
+
+<h2 id="records">Records</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>File</th><th>Scope</th><th>Format</th><th>Owner</th></tr></thead>
+<tbody>
+<tr><td><code>state/.&lt;id&gt;.open-decisions-cursor</code></td><td>One task</td><td><code>version=&lt;n&gt;:&lt;kind&gt;</code>, <code>offset=&lt;bytes&gt;</code>, <code>ident=&lt;file identity&gt;</code>, then the open set as <code>key&lt;TAB&gt;verb&lt;TAB&gt;note</code> lines</td><td><code>status_open_decisions_incremental</code> <code class="cite">bin/fm-classify-lib.sh:934-937</code> <code class="cite">bin/fm-classify-lib.sh:1172-1181</code></td></tr>
+<tr><td><code>state/.status-presentation-cursor</code></td><td>Whole home</td><td>One row per task: <code>task&lt;TAB&gt;ident&lt;TAB&gt;annotation-offset&lt;TAB&gt;backstop-offset</code></td><td><code>fm-classify-lib.sh</code> <code class="cite">bin/fm-classify-lib.sh:1294-1340</code> <code class="cite">bin/fm-classify-lib.sh:1610-1639</code></td></tr>
+<tr><td><code>state/.status-presentation-lock</code></td><td>Whole home</td><td>Lock</td><td>The drain and teardown's retirement <code class="cite">bin/fm-wake-drain.sh:581</code> <code class="cite">bin/fm-classify-lib.sh:1506</code></td></tr>
+<tr><td><code>state/.seen-*</code> presentation markers</td><td>One task</td><td><code>v2&lt;TAB&gt;reported-signature&lt;TAB&gt;offset@ident</code></td><td>The watcher's classification <code class="cite">bin/fm-classify-lib.sh:1495-1501</code></td></tr>
+</tbody></table></div>
+
+<h2 id="identity">File identity: how a cursor knows it is still pointing at the same file</h2>
+<p>The design relies on one fact about status logs: "every one is created once (<code>&gt;</code>) and only ever appended to (<code>&gt;&gt;</code>)". A cursor can therefore go stale in only a few ways: "a fold-version mismatch, a shrink (truncated), or the file at this path being a different file than before (replaced/rotated/recreated)". Each of these forces "a full re-fold of the whole current file from byte 0" <code class="cite">bin/fm-classify-lib.sh:941-950</code>.</p>
+<p>The header describes identity as "a changed device+inode". The implementation is slightly stronger. Where the platform reports a birth time, the identity is <code>strong:&lt;dev&gt;:&lt;inode&gt;:&lt;birth&gt;</code>. Otherwise it is <code>weak:&lt;dev&gt;:&lt;inode&gt;</code> <code class="cite">bin/fm-classify-lib.sh:1000-1017</code>. The birth time catches an inode number reused by a recreated file. That is an addition to the header's description, not a contradiction of it.</p>
+<p>The accepted gap is stated plainly: "A same-inode, same-size, in-place byte edit is NOT detected" <code class="cite">bin/fm-classify-lib.sh:950-953</code>.</p>
+
+<h2 id="fold">The fold</h2>
+<p>Both the whole-file fold and the incremental fold apply the same per-line rule, <code>_fm_decision_fold_line</code>, "so the two strategies can never disagree on what is open" <code class="cite">bin/fm-classify-lib.sh:922-925</code>. The rule <code class="cite">bin/fm-classify-lib.sh:678-737</code>:</p>
+<ul>
+<li>A line with neither a colon nor a complete <code>[key=…]</code> token is prose and never moves the set. The colon test reads the line <em>with its time tag stripped</em>, so a worker stamp like <code>[at=10:30]</code> cannot make prose look like a transition.</li>
+<li>On a ship or scout task, a <code>done:</code> or <code>failed:</code> line closes <em>every</em> open decision.</li>
+<li><code>needs-decision</code> and <code>blocked</code> open (or replace) the entry for their key. <code>resolved</code> and <code>captain-held</code> remove it <code class="cite">bin/fm-classify-lib.sh:128-129</code>.</li>
+<li>A key whose slug fails the charset is skipped. It is "never rewritten to default" <code class="cite">bin/fm-classify-lib.sh:445-447</code>.</li>
+</ul>
+<p>Correctness invariant: "cursor advancement, age, and being buried under later appends never drop an open decision ... Only a line the shared fold rule retires removes one" <code class="cite">bin/fm-classify-lib.sh:928-932</code>.</p>
+
+<h3 id="versioning">Fold versioning</h3>
+<p>A persisted open set is only valid under the rule that produced it. <code>FM_OPEN_DECISIONS_FOLD_VERSION</code> is 9 at this commit <code class="cite">bin/fm-classify-lib.sh:997</code>. It "must be bumped whenever <code>_fm_decision_fold_line</code> semantics change, so persisted state from an older interpretation is discarded and rebuilt from byte 0". The version is suffixed with the task kind, because kind changes the fold <code class="cite">bin/fm-classify-lib.sh:934-940</code>. The history comments record each bump: bracketed tags, unbracketed correlation tokens, the terminal-closes-all rule, colon requirements, and the time-tag stripping <code class="cite">bin/fm-classify-lib.sh:966-996</code>. Versioning a cache by the rule that computed it is how Firstmate keeps a rule change from silently reinterpreting old state.</p>
+
+<h3 id="failure">Failure behaviour</h3>
+<p>"The other real failure mode is OUR OWN read failing." On any stat, size, or read error, the function returns "the already-trusted persisted set unchanged rather than risking a silent invalidation that would wipe it - never a bare “empty” as if nothing were open" <code class="cite">bin/fm-classify-lib.sh:954-959</code> <code class="cite">bin/fm-classify-lib.sh:1123-1154</code>. The cursor is rewritten with a temporary file and a rename <code class="cite">bin/fm-classify-lib.sh:1172-1181</code>. The drain calls it only after releasing the queue lock. Two overlapping drains "can at worst redo a little folding work twice - never drop an open decision" <code class="cite">bin/fm-classify-lib.sh:960-968</code>.</p>
+
+<h2 id="presentation-cursor">The status-presentation cursor</h2>
+<p>This cursor answers a different question: which status bytes has the supervisor already been <em>shown</em>? It keeps two independent offsets per task. The annotation offset drives the signal annotations and <code>UNREAD STATUS</code>. The outcome-backstop offset drives the Pi branch's <code>STATUS OUTCOME BACKSTOP</code> <code class="cite">AGENTS.md:148</code>. Reading an offset validates the whole manifest first. A duplicate task row, extra fields, non-numeric offsets, or a symlinked manifest all fail the read. An identity mismatch or an offset past the end reads as 0, "preferring a bounded duplicate over a lost event" <code class="cite">bin/fm-classify-lib.sh:1294-1340</code> <code class="cite">bin/fm-classify-lib.sh:26-28</code>. The drain snapshots each task's end offset and identity, prints, and then commits the snapshot under <code>.status-presentation-lock</code> <code class="cite">bin/fm-classify-lib.sh:1596-1639</code>. A live lock holder makes the drain skip annotations and leave the cursors "retriable on the next drain" <code class="cite">docs/watcher-continuity.md:74</code>.</p>
+<p><strong>Legacy migration.</strong> When the manifest does not exist but an older per-task open-decisions cursor does, the presentation offset is read from that older cursor <code class="cite">bin/fm-classify-lib.sh:1319-1325</code>.</p>
+
+<h2 id="trace">Trace: one decision across two drains</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 900 360" role="img" aria-labelledby="cf-title">
+<title id="cf-title">A needs-decision line and its resolution across two drains</title>
+<defs><marker id="cf-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="26">state/&lt;id&gt;.status bytes and the open-decisions cursor</text>
+<g class="c4-external"><rect x="40" y="56" width="200" height="40" rx="4"/><text class="c4-label" x="140" y="81">earlier lines</text></g>
+<g class="c4-component"><rect x="240" y="56" width="240" height="40" rx="4"/><text class="c4-label" x="360" y="81">needs-decision [key=x]: …</text></g>
+<g class="c4-component"><rect x="480" y="56" width="140" height="40" rx="4"/><text class="c4-label" x="550" y="81">working: …</text></g>
+<g class="c4-component"><rect x="620" y="56" width="240" height="40" rx="4"/><text class="c4-label" x="740" y="81">resolved [key=x]: …</text></g>
+<g class="c4-rel"><path d="M240,100 V130"/><text class="c4-rel-label" x="240" y="146">offset A</text></g>
+<g class="c4-rel"><path d="M620,100 V130"/><text class="c4-rel-label" x="620" y="146">offset C</text></g>
+<g class="c4-rel"><path d="M860,100 V130"/><text class="c4-rel-label" x="848" y="146">offset D</text></g>
+<g class="c4-container"><rect x="40" y="180" width="390" height="150" rx="8"/>
+<text class="c4-label" x="235" y="206">Drain 1 (file size C)</text>
+<text class="c4-desc" x="235" y="228">cursor: version=9:ship offset=A ident=I</text>
+<text class="c4-desc" x="235" y="246">reads bytes A..C only; same ident, no shrink</text>
+<text class="c4-desc" x="235" y="264">open set becomes: x ⇥ needs-decision ⇥ …</text>
+<text class="c4-desc" x="235" y="282">prints x under OPEN DECISIONS</text>
+<text class="c4-desc" x="235" y="300">rewrites cursor: offset=C, same open set</text></g>
+<g class="c4-container"><rect x="470" y="180" width="390" height="150" rx="8"/>
+<text class="c4-label" x="665" y="206">Drain 2 (file size D)</text>
+<text class="c4-desc" x="665" y="228">cursor: offset=C, open set holds x</text>
+<text class="c4-desc" x="665" y="246">reads bytes C..D only</text>
+<text class="c4-desc" x="665" y="264">resolved [key=x] drops x</text>
+<text class="c4-desc" x="665" y="282">OPEN DECISIONS omits x</text>
+<text class="c4-desc" x="665" y="300">rewrites cursor: offset=D, empty set</text></g>
+<g class="c4-rel"><path d="M430,255 H468" marker-end="url(#cf-arrow)"/></g>
+</svg>
+</div>
+<figcaption>Had the log been recreated between the drains (a new identity) or truncated below C, drain 2 would have re-folded from byte 0 and reached the same result. The <code>working:</code> line between A and C never moves the set, however many such lines follow.</figcaption>
+</figure>
+<p>The <code>resolved</code> line is usually written by Firstmate, not the worker: an answer sent with <code>bin/fm-send.sh &lt;task&gt; --resolve-key &lt;key&gt; '&lt;answer&gt;'</code> records the closure "at answer time". A worker self-closes only a blocker that cleared without an answer <code class="cite">bin/fm-classify-lib.sh:424-427</code> <code class="cite">bin/fm-wake-drain.sh:488</code>.</p>
+
+<h2 id="deletion">Deleting a cursor</h2>
+<p>The open-decisions cursor is "safe to delete (forces one full re-fold)" <code class="cite">AGENTS.md:147</code>. The code agrees: a missing cursor means no version, which forces offset 0 and a fold of the whole current file <code class="cite">bin/fm-classify-lib.sh:1139-1141</code>. Deleting <code>.status-presentation-cursor</code> resets every task's presentation offset to 0, so the next drain re-prints all unread lines. The inventory does not call this file safe to delete, and this page does not either. Teardown retires one task's row with a filtered rewrite under the presentation lock, never by deleting the manifest <code class="cite">bin/fm-classify-lib.sh:1503-1575</code>.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

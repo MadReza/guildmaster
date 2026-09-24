@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Locks and leases · Firstmate C4</title>
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Components › Persistence</p>
+<h1>Locks and leases</h1>
+<p class="lede">One portable lock primitive, reused at four scopes: the home's session, the home's set of tasks, one task's lifecycle, and one task's record. A lease adds a fifth, which of two supervision actors may change a task.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="index.html">Persistence</a>.</p>
+
+<h2 id="catalogue">Catalogue</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Lock</th><th>Path</th><th>Excludes</th><th>On contention</th></tr></thead>
+<tbody>
+<tr><td><a href="#session-lock">Session lock</a></td><td><code>state/.lock</code>, <code>.lock-session</code>, claim lock <code>.lock.acquire</code></td><td>A second mutating session in the same home</td><td>Refuse. The session stays read-only.</td></tr>
+<tr><td><a href="#task-set-lock">Task-set lock</a></td><td><code>state/.task-set.lock</code></td><td>A fresh spawn racing a forced teardown's enumeration</td><td>Both sides refuse</td></tr>
+<tr><td><a href="#control-lock">Control lock</a></td><td><code>state/.control-&lt;id&gt;.lock</code></td><td>Two lifecycle actions on one task</td><td><code>fm-control.sh</code> refuses. Some holders wait.</td></tr>
+<tr><td><a href="#meta-lock">Metadata lock</a></td><td><code>state/.meta-&lt;id&gt;.lock</code></td><td>Concurrent rewrites of one task record</td><td>Wait</td></tr>
+<tr><td>Watcher singleton</td><td><code>state/.watch.lock</code></td><td>Two watchers in one home</td><td>Carries pid identity. A stale steal publishes downtime.</td></tr>
+<tr><td>Queue and marker</td><td><code>state/.wake-queue.lock</code>, <code>.watcher-down.lock</code></td><td>Torn queue or marker updates</td><td>Wait. Presentation waits with a deadline.</td></tr>
+<tr><td>Status presentation</td><td><code>state/.status-presentation-lock</code></td><td>Replaying already-presented status lines</td><td>Wait, bounded in the drain</td></tr>
+<tr><td><a href="#lease">Supervision lease</a></td><td><code>state/.lease-&lt;task&gt;</code>, <code>.fm-lease-command.lock</code></td><td>Pi main and branch actors mutating one task</td><td>Refuse with exit 6</td></tr>
+<tr><td>Project identity</td><td><code>fm_treehouse_project_lock_path</code> in the root home's <code>state/</code></td><td>Reusing a Treehouse slot before its owner record exists</td><td>Wait, held through publication</td></tr>
+</tbody></table></div>
+<p>Several of these are missing from the charter's <code>state/</code> inventory: <code>.lock</code> itself, <code>.lock.acquire</code>, <code>.task-set.lock</code>, <code>.control-&lt;id&gt;.lock</code>, <code>.meta-&lt;id&gt;.lock</code>, and <code>.fm-lease-command.lock</code>. The inventory lists <code>.lock-session</code>, <code>.watch.lock</code>, <code>.wake-queue.lock</code>, and <code>.lease-&lt;task&gt;</code> <code class="cite">AGENTS.md:127</code> <code class="cite">AGENTS.md:152-153</code>. The owning libraries document the missing ones.</p>
+
+<h2 id="primitive">The portable lock primitive</h2>
+<p><code>bin/fm-wake-lib.sh</code> describes itself as "Shared durable wake queue and portable lock helpers" <code class="cite">bin/fm-wake-lib.sh:2</code>. Every lock above except the git-lock proof is built from its <code>fm_lock_*</code> functions.</p>
+<h3 id="primitive-shape">Shape on disk</h3>
+<p>A held lock is a <strong>symlink</strong>. It points to a private owner directory named <code>&lt;lock&gt;.owner.XXXXXX</code> that holds a <code>pid</code> file. Optional files are <code>role</code>, <code>pid-identity</code>, <code>fm-home</code>, and <code>watcher-path</code> <code class="cite">bin/fm-wake-lib.sh:436-445</code> <code class="cite">bin/fm-wake-lib.sh:473-485</code>. Creating the symlink with <code>ln -s</code> is the atomic step: exactly one creator can win the name <code class="cite">bin/fm-wake-lib.sh:554-579</code>. Before creating it, the claimant writes and reads back its pid in the owner directory. Afterwards it checks that the link points at its own directory, and that no <code>&lt;lock&gt;.steal</code> is in progress <code class="cite">bin/fm-wake-lib.sh:528-552</code>. An older plain-directory lock is still understood and removed correctly <code class="cite">bin/fm-wake-lib.sh:581-591</code>.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 900 400" role="img" aria-labelledby="lk-title">
+<title id="lk-title">fm_lock_try_acquire decision flow</title>
+<defs><marker id="lk-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="26">fm_lock_try_acquire: when a lock may be taken</text>
+<g class="c4-component"><rect x="20" y="50" width="170" height="56" rx="8"/><text class="c4-label" x="105" y="74">Create symlink</text><text class="c4-desc" x="105" y="92">ln -s owner-dir lock</text></g>
+<g class="c4-component"><rect x="240" y="50" width="170" height="56" rx="8"/><text class="c4-label" x="325" y="74">Holder is me?</text><text class="c4-desc" x="325" y="92">trap-abandoned frame</text></g>
+<g class="c4-component"><rect x="460" y="50" width="170" height="56" rx="8"/><text class="c4-label" x="545" y="74">Holder pid alive?</text><text class="c4-desc" x="545" y="92">kill -0</text></g>
+<g class="c4-component"><rect x="680" y="50" width="200" height="56" rx="8"/><text class="c4-label" x="780" y="74">No pid yet, age &lt; 2s?</text><text class="c4-desc" x="780" y="92">claimant mid-acquire</text></g>
+<g class="c4-component"><rect x="680" y="180" width="200" height="56" rx="8"/><text class="c4-label" x="780" y="204">Take lock.steal</text><text class="c4-desc" x="780" y="222">recheck owner and pid</text></g>
+<g class="c4-component"><rect x="330" y="180" width="260" height="56" rx="8"/><text class="c4-label" x="460" y="204">Remove and recreate</text><text class="c4-desc" x="460" y="222">watch.lock: publish downtime first</text></g>
+<g class="c4-system"><rect x="20" y="310" width="170" height="56" rx="8"/><text class="c4-label" x="105" y="334">Acquired</text><text class="c4-desc" x="105" y="352">return 0</text></g>
+<g class="c4-external"><rect x="560" y="310" width="320" height="56" rx="8"/><text class="c4-label" x="720" y="334">Held</text><text class="c4-desc" x="720" y="352">return 1; FM_LOCK_HELD_PID names holder</text></g>
+
+<g class="c4-rel"><path d="M190,78 H238" marker-end="url(#lk-arrow)"/><text class="c4-rel-label" x="214" y="70">fails</text></g>
+<g class="c4-rel"><path d="M410,78 H458" marker-end="url(#lk-arrow)"/><text class="c4-rel-label" x="434" y="70">no</text></g>
+<g class="c4-rel"><path d="M630,78 H678" marker-end="url(#lk-arrow)"/><text class="c4-rel-label" x="654" y="70">no</text></g>
+<g class="c4-rel"><path d="M780,106 V178" marker-end="url(#lk-arrow)"/><text class="c4-rel-label" x="780" y="146">no</text></g>
+<g class="c4-rel"><path d="M680,208 H592" marker-end="url(#lk-arrow)"/><text class="c4-rel-label" x="640" y="200">still dead</text></g>
+<g class="c4-rel"><path d="M330,222 H150 V308" marker-end="url(#lk-arrow)"/><text class="c4-rel-label" x="240" y="216">recreated</text></g>
+<g class="c4-rel"><path d="M60,106 V308" marker-end="url(#lk-arrow)"/><text class="c4-rel-label" x="60" y="200">succeeds</text></g>
+<g class="c4-rel"><path d="M325,106 V140 H105 V308" marker-end="url(#lk-arrow)"/><text class="c4-rel-label" x="215" y="134">yes: reclaim</text></g>
+<g class="c4-rel"><path d="M612,106 V308" marker-end="url(#lk-arrow)"/><text class="c4-rel-label" x="612" y="150">yes</text></g>
+<g class="c4-rel"><path d="M880,78 H892 V338 H882" marker-end="url(#lk-arrow)"/><text class="c4-rel-label" x="874" y="150">yes</text></g>
+<g class="c4-rel"><path d="M780,236 V308" marker-end="url(#lk-arrow)"/><text class="c4-rel-label" x="780" y="276">revived or steal lost</text></g>
+</svg>
+</div>
+<figcaption>Implemented in <code class="cite">bin/fm-wake-lib.sh:933-1031</code>. The "holder is me" branch exists because an interrupting trap can abandon the frame that held the lock. Spinning there would deadlock the exit path against itself <code class="cite">bin/fm-wake-lib.sh:944-953</code>.</figcaption>
+</figure>
+
+<h3 id="primitive-waiting">Waiting, bounded waiting, and release</h3>
+<ul>
+<li><code>fm_lock_acquire_wait</code> retries every 0.1 s with no deadline <code class="cite">bin/fm-wake-lib.sh:1033-1038</code>.</li>
+<li><code>fm_lock_acquire_wait_bounded &lt;lock&gt; &lt;seconds&gt;</code> waits inside a timed helper process. The helper then rewrites the owner <code>pid</code> to the caller's pid before it exits. "Before transfer the helper is the owner; after transfer the still-live caller is the owner", so ordinary stale recovery covers an interruption at any point <code class="cite">bin/fm-wake-lib.sh:1040-1076</code>. It returns 124 with the holder's pid when a live holder outlasts the deadline. Callers use it where they "must refuse rather than block" <code class="cite">bin/fm-wake-lib.sh:1068-1077</code>.</li>
+<li><code>fm_lock_release</code> removes the lock only when the owner pid is the current process <em>and</em> the link still points to that owner's directory. Otherwise it silently does nothing <code class="cite">bin/fm-wake-lib.sh:1129-1146</code>. A process can never release someone else's lock.</li>
+</ul>
+<div class="callout"><span class="callout-title">Finding: pid liveness only, except for the watcher lock</span>
+<p>The generic primitive decides "held" with <code>kill -0</code> on the recorded pid <code class="cite">bin/fm-wake-lib.sh:48-54</code> <code class="cite">bin/fm-wake-lib.sh:962-965</code>. If the pid is recycled by an unrelated process, a dead holder's lock reads as held until that process exits. Only the watcher lock and the away-mode daemon lock record <code>pid-identity</code>: a start time plus the full command line, "keeps PID reuse a mismatch" <code class="cite">bin/fm-wake-lib.sh:56-90</code>. <code>fm_watcher_lock_matches_pid</code> compares it <code class="cite">bin/fm-wake-lib.sh:139-152</code>, and the daemon check uses "the same discipline" <code class="cite">bin/fm-wake-lib.sh:324-346</code>. The session lock goes further, as described below. The per-task and task-set locks rely on pid liveness alone.</p></div>
+
+<h3 id="git-lock-proof">A different problem: git's own lock files</h3>
+<p><code>bin/fm-lock-lib.sh</code> is not a lock implementation. It is a <em>staleness proof</em> for git's <code>index.lock</code> and <code>packed-refs.lock</code>, used by teardown and fleet sync. A lock is provably stale only if the file exists, <code>lsof</code> shows no holder of the file or its worktree or <code>.git</code> directory, and its age is at least a caller-supplied threshold. "ANY uncertainty - lsof missing, an lsof error, an unreadable mtime - returns non-zero (NOT stale): fail safe, never remove a lock that cannot be proven dead" <code class="cite">bin/fm-lock-lib.sh:1-17</code> <code class="cite">bin/fm-lock-lib.sh:91-104</code>.</p>
+
+<h2 id="session-lock">The session lock</h2>
+<p><strong>Problem solved.</strong> Only one supervisor session may mutate a home. A second session, a resumed session, or a forgotten terminal must not spawn, steer, or drain alongside the first. The charter: "If the session lock cannot be acquired and verified, report its exact diagnostic and remain read-only". A refused session "must not spawn, steer, merge, drain the wake queue, repair supervision, repair a checkout, or perform any other fleet mutation" <code class="cite">AGENTS.md:179-180</code>.</p>
+<h3 id="session-lock-files">Files</h3>
+<ul>
+<li><code>state/.lock</code>. Line 1 is the session's <strong>anchor pid</strong>: the harness process found by walking the shell's ancestry, not the transient pid of one tool call. For a Claude session with a trusted id, the anchor is <code>CLAUDE_PID</code>, "so a shared transient daemon or a front-end that outlives the session never keeps a dead session's lock alive" <code class="cite">bin/fm-lock.sh:4-12</code> <code class="cite">bin/fm-session-lock-lib.sh:251-271</code>.</li>
+<li><code>state/.lock-session</code>. The trusted session id, written only by <code>fm-lock.sh</code> and only under the claim lock. It is refreshed on every confirmed acquisition, removed when the session proves no trusted id, and left byte-identical when unchanged <code class="cite">bin/fm-lock.sh:14-21</code>. The charter says "never touch" <code class="cite">AGENTS.md:152</code>.</li>
+<li><code>state/.lock.acquire</code>. The claim lock, the portable primitive serializing the pair's publication <code class="cite">bin/fm-lock.sh:69</code>.</li>
+</ul>
+<h3 id="session-lock-ownership">Who owns it</h3>
+<p>Two signals decide ownership, "either one sufficient". The recorded pid may be in this process's contiguous harness ancestry, or the trusted Claude session id may match the sidecar. "Neither signal ever fails open" <code class="cite">bin/fm-session-lock-lib.sh:4-13</code>. The ancestry test is membership, not equality, because "the lock owner sits at an unknown depth in a contiguous Claude run" <code class="cite">bin/fm-session-lock-lib.sh:262-283</code>.</p>
+<h3 id="session-lock-acquire">Acquisition</h3>
+<ol>
+<li>Probe that <code>state/</code> is writable with a temporary file. Otherwise exit 1 with "operate read-only until resolved" <code class="cite">bin/fm-lock.sh:59-66</code>.</li>
+<li>If this session already owns the lock, take the claim lock, refresh only the sidecar, and exit 0. Line 1 is never rewritten while its pid is alive, "because <code>bin/fm-startup-network.sh</code> compares that pid across its deferred sweeps" <code class="cite">bin/fm-lock.sh:152-180</code>.</li>
+<li>If a different live harness holds it, refuse, naming the pid and the recorded session <code class="cite">bin/fm-lock.sh:182-201</code>.</li>
+<li>Take the claim lock. If the prior session's deferred startup sweep still holds it, refuse rather than wait <code class="cite">bin/fm-lock.sh:203-211</code>.</li>
+<li>Re-check under the claim lock. Refuse a non-regular or unreadable lock file <code class="cite">bin/fm-lock.sh:213-229</code>.</li>
+<li>Publish the sidecar <em>first</em>, because "a fresh pid beside a previous session's id would let that session's resume own this lock". Then write line 1, read it back, and verify it <code class="cite">bin/fm-lock.sh:230-275</code>.</li>
+</ol>
+<p>A two-field phase journal, <code>LOCK_SESSION_PHASE</code> and <code>LOCK_SESSION_KIND</code>, and a <code>.lock-session.prev</code> backup let the EXIT trap undo a half-published pair. If the sidecar changed but line 1 was not written, the previous sidecar is restored. If line 1 was written but not verified, the sidecar is removed so the lock is "ancestry-only" <code class="cite">bin/fm-lock.sh:71-119</code> <code class="cite">bin/fm-lock.sh:230-235</code>.</p>
+<p><code>fm-lock.sh status</code> is read-only and always exits 0. "A held lock is not proof the holder is consuming wakes" <code class="cite">bin/fm-lock.sh:23-27</code>. Its classifier distinguishes <code>free</code>, <code>held</code>, <code>stale</code>, <code>unreadable</code>, and <code>unknown</code> <code class="cite">bin/fm-session-lock-lib.sh:335-384</code>. The <code>status</code> wording folds <code>unknown</code> into "stale (pid … dead or not a harness)" <code class="cite">bin/fm-lock.sh:47-56</code>.</p>
+
+<h2 id="task-set-lock">The task-set lock</h2>
+<p><strong>Problem solved.</strong> "A per-task lock cannot protect a task that does not exist yet." A forced secondmate teardown enumerates a home's tasks, locks them, and then re-enumerates while removing. A spawn that published inside that window "gets destructively processed while never lifecycle-locked". The comment records the observed failure: a record published 0.249 s after teardown began was removed, and its worktree returned to the pool, with both commands reporting success <code class="cite">bin/fm-wake-lib.sh:1163-1176</code>.</p>
+<p><strong>Rule.</strong> A fresh spawn takes <code>state/.task-set.lock</code> before its own locks and holds it through publication. It "refuses rather than waits", because "the home may be moments from removal, so there is nothing worth waiting for" <code class="cite">bin/fm-spawn.sh:1483-1506</code>. A relaunch is exempt: the existing task's control lock covers it <code class="cite">bin/fm-spawn.sh:1492-1494</code>. A forced teardown takes the same lock per home, parent before child, and refuses if it is held <code class="cite">bin/fm-teardown.sh:2741-2751</code>. "Both directions fail closed" <code class="cite">bin/fm-wake-lib.sh:1172-1176</code>.</p>
+
+<h2 id="control-lock">The per-task control lock</h2>
+<p><code>state/.control-&lt;id&gt;.lock</code> serializes lifecycle actions on one task. <code>fm-control.sh</code> takes it with a non-blocking try and dies with "another lifecycle action is already running for task &lt;id&gt;" <code class="cite">bin/fm-control.sh:296-300</code>. The same lock is taken by <code>fm-pr-merge.sh</code> before either forge merge <code class="cite">bin/fm-pr-merge.sh:69</code>, by <code>fm-merge-local.sh</code> <code class="cite">bin/fm-merge-local.sh:12</code>, by <code>fm-promote.sh</code>, <code>fm-captain-hold.sh</code>, <code>fm-teardown.sh</code>, <code>fm-spawn.sh</code> on relaunch, and <code>fm-bootstrap.sh</code>. The watcher takes it around a validated PR-poll execution, so a merge result and a concurrent lifecycle action cannot interleave <code class="cite">bin/fm-watch.sh:2397-2404</code>.</p>
+
+<h2 id="meta-lock">The per-task metadata lock</h2>
+<p><code>fm_meta_lock_path</code> maps <code>state/&lt;id&gt;.meta</code> to <code>state/.meta-&lt;id&gt;.lock</code>. It refuses a path that does not end in <code>.meta</code> or an id outside <code>[A-Za-z0-9._-]</code> <code class="cite">bin/fm-wake-lib.sh:1148-1161</code>. Every script that rewrites or removes a record takes it: spawn, teardown, <code>fm-pr-check.sh</code>, <code>fm-promote.sh</code>, <code>fm-captain-hold.sh</code>, <code>fm-send.sh</code> (around inbox and remote writes), <code>fm-inactive-reconcile.sh</code>, <code>fm-secondmate-reconcile.sh</code>, and the Relay library.</p>
+
+<h2 id="order">Lock order</h2>
+<p>The order is written once, in forced teardown, and every holder must match it "so they cannot cycle". The order is each home's task-set lock first (parent home before child home), then per-task locks in the same parent-before-child order, sorted by id within each home, "each control lock before its matching metadata lock. No child lock holder ever reaches back for a parent lock" <code class="cite">bin/fm-teardown.sh:2786-2793</code>.</p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 900 250" role="img" aria-labelledby="lo-title">
+<title id="lo-title">Lock acquisition order</title>
+<defs><marker id="lo-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="26">Acquisition order (outer to inner)</text>
+<g class="c4-container"><rect x="20" y="50" width="190" height="70" rx="8"/><text class="c4-label" x="115" y="76">Session lock</text><text class="c4-tech" x="115" y="92">[state/.lock]</text><text class="c4-desc" x="115" y="108">authorizes any mutation</text></g>
+<g class="c4-component"><rect x="245" y="50" width="190" height="70" rx="8"/><text class="c4-label" x="340" y="76">Task-set lock</text><text class="c4-tech" x="340" y="92">[per home, parent first]</text><text class="c4-desc" x="340" y="108">fresh spawn, forced teardown</text></g>
+<g class="c4-component"><rect x="470" y="50" width="190" height="70" rx="8"/><text class="c4-label" x="565" y="76">Control lock</text><text class="c4-tech" x="565" y="92">[per task, id order]</text><text class="c4-desc" x="565" y="108">one lifecycle action</text></g>
+<g class="c4-component"><rect x="695" y="50" width="190" height="70" rx="8"/><text class="c4-label" x="790" y="76">Metadata lock</text><text class="c4-tech" x="790" y="92">[per task]</text><text class="c4-desc" x="790" y="108">one record rewrite</text></g>
+<g class="c4-rel"><path d="M210,85 H243" marker-end="url(#lo-arrow)"/></g>
+<g class="c4-rel"><path d="M435,85 H468" marker-end="url(#lo-arrow)"/></g>
+<g class="c4-rel"><path d="M660,85 H693" marker-end="url(#lo-arrow)"/></g>
+<g class="c4-component"><rect x="245" y="160" width="640" height="60" rx="8"/><text class="c4-label" x="565" y="185">Leaf locks: queue, marker, presentation, lease command, inbox sequence</text><text class="c4-desc" x="565" y="203">held briefly around one read-modify-write; never held while acquiring an outer lock</text></g>
+<g class="c4-rel c4-rel-async"><path d="M790,120 V158" marker-end="url(#lo-arrow)"/></g>
+</svg>
+</div>
+<figcaption>The session lock is not taken per operation. A session holds it for its whole lifetime, and scripts consult it rather than acquire it. The leaf-lock row generalizes from the code read for this page. The source does not state a rule for leaf locks.</figcaption>
+</figure>
+
+<h2 id="lease">The supervision lease</h2>
+<p><strong>Problem solved.</strong> On a Pi primary, two LLM actors share one home inside one process: <em>main</em> (the captain's chat) and <em>branch</em> (the persistent supervision conversation). A small overlap set could be mutated by both: steering or stopping a worker, post-landing cleanup, a task's backlog status, and stuck-worker recovery. "The lease is the merge-conflict analog" <code class="cite">bin/fm-lease-lib.sh:4-12</code>.</p>
+<ul>
+<li><strong>Format.</strong> <code>state/.lease-&lt;task&gt;</code> holds one line, <code>&lt;actor&gt;\t&lt;pid&gt;\t&lt;epoch&gt;</code>. A claim is written with a temporary file and <code>ln</code> (fails if the lease exists). A same-actor refresh uses a temporary file and <code>mv</code>. Everything is serialized by <code>.fm-lease-command.lock</code>. "Leases never coordinate across firstmate homes" <code class="cite">bin/fm-lease-lib.sh:14-18</code> <code class="cite">bin/fm-lease.sh:130-145</code>.</li>
+<li><strong>Identity.</strong> The actor is <code>$FM_SUPERVISION_ACTOR</code>, injected by the Pi branch extension and never taken from agent memory. Any value other than <code>main</code> or <code>branch</code> is refused <code class="cite">bin/fm-lease-lib.sh:19-23</code> <code class="cite">bin/fm-lease-lib.sh:104-113</code>.</li>
+<li><strong>Staleness through identity binding.</strong> A lease is live only in a Pi context, only while its pid is alive, and only while that pid <em>is the current session-lock holder</em>. A lease from an exited Pi session therefore goes stale "even if its pid was recycled", and "a non-Pi home never honors a leftover Pi lease" <code class="cite">bin/fm-lease-lib.sh:24-33</code> <code class="cite">bin/fm-lease-lib.sh:157-170</code>.</li>
+<li><strong>Guard.</strong> <code>fm_lease_guard</code> passes when there is no lease, a same-actor lease, or a stale lease. It refuses with exit 6 when the other actor holds a live lease. In a Pi context it keeps the lease-command lock across the caller's mutation, closing the check-then-use race <code class="cite">bin/fm-lease-lib.sh:182-217</code>.</li>
+<li><strong>Role partition.</strong> Merging a PR, landing local work, spawning, and answering a decision refuse the branch outright. Under a live away-posture record, main's standing authority relocates to the branch, only for scripts that opt in with <code>--away-relocated</code> <code class="cite">bin/fm-lease-lib.sh:53-74</code> <code class="cite">bin/fm-lease-lib.sh:238-255</code>.</li>
+<li><strong>Threat model, stated plainly.</strong> The guards are "CONFUSED-AGENT-GRADE". A deliberately forging shell running as the same user in the same process can evade them. Adversarial separation "is explicitly out of scope" <code class="cite">bin/fm-lease-lib.sh:35-45</code>.</li>
+</ul>
+<p><code>fm-lease.sh sweep</code> removes every provably stale lease and runs at session start. <code>release-actor</code> drops every lease that a replaced branch conversation held <code class="cite">bin/fm-lease.sh:24-31</code>. The Pi branch itself belongs to <a href="../supervision/index.html">Supervision</a>.</p>
+
+<h2 id="slot-claim">Worktree slot ownership</h2>
+<p>A Treehouse slot is reused across tasks. A fresh Treehouse-backed spawn therefore takes the project-identity lock in the local root home's <code>state/</code> before slot allocation, holds it through metadata publication, and writes the slot's owner claim under that lock <code class="cite">bin/fm-spawn.sh:130-140</code>. Teardown holds the same lock while it proves and returns a slot. A claim that names another task makes teardown skip every step that touches the slot. A claim that cannot be read makes teardown refuse, and the operator must "never remove it, since an absent claim proceeds" <code class="cite">bin/fm-teardown.sh:81-116</code>. The claim functions are <code class="cite">bin/fm-wake-lib.sh:1231-1366</code>.</p>
+</article>
+</main>
+</div>
+<script src="../../assets/nav-data.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

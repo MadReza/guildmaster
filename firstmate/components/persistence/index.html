@@ -11,12 +11,202 @@
 <div class="layout">
 <nav id="site-nav" aria-label="Site"></nav>
 <main id="main">
-<article>
-<p class="breadcrumb">Components</p>
+<article class="wide">
+<p class="breadcrumb">Components › Persistence</p>
 <h1>Persistence</h1>
-<p class="lede">Will cover everything Firstmate keeps on disk: the operational home (<code>FM_HOME</code>) and its <code>data/</code>, <code>state/</code>, <code>config/</code>, and <code>projects/</code> trees, the restart-proof recovery model, locks, captain preferences, learnings, the startup memory budget, and <code>/stow</code>.</p>
-<div class="callout unclear"><span class="callout-title">Stub</span>
-<p>This section is reserved and not yet written. A follow-up task fills it in under <a href="../../AUTHORING.md">the authoring contract</a>. Until then, the <a href="../../c4/containers.html">Level 2 containers page</a> is the entry point for this area.</p></div>
+<p class="lede">Everything Firstmate writes down, why each record exists, and what it guarantees. The guiding rule: conversation memory is never authoritative. Durable files and live backend inventory are.</p>
+<p class="meta-line">Read against Firstmate commit <code>ada21f5b</code>. Up: <a href="../../c4/containers.html#c-home">Level 2 containers</a>.</p>
+
+<h2 id="why">Why this area exists</h2>
+<p>Firstmate supervises long-running workers from an agent session that can be cleared, compacted, crash, or be replaced by another harness at any time. The design answer is stated once in the charter: "A restart must be a non-event because durable state and live backend inventory, not conversation memory, are authoritative" <code class="cite">AGENTS.md:256</code>. Every obligation that must survive the session is therefore a file in the operational home. Each record is owned by exactly one script, and the script's header comment is that record's contract <code class="cite">docs/configuration.md:11</code>.</p>
+<p>Three kinds of problem recur, and the rest of this section is organised around them:</p>
+<ul>
+<li><strong>Where things live.</strong> One code root is shared. Each instance has a private home, selected by <code>FM_HOME</code>, with four trees: <code>data/</code>, <code>state/</code>, <code>config/</code>, and <code>projects/</code>. See <a href="home-layout.html">Operational home layout</a>.</li>
+<li><strong>Not losing an event.</strong> Workers report through append-only status logs. Actionable events enter a durable wake queue that is emptied only after the handling turn acknowledges them. See <a href="task-records.html">Per-task records</a>, <a href="wake-queue.html">Wake queue and recovery marker</a>, and <a href="cursors-and-folds.html">Presentation cursors and folded decisions</a>.</li>
+<li><strong>Not letting the wrong writer win.</strong> The home is guarded by a session lock and by per-task, per-home, and per-actor locks and leases. Generation tokens reject stale writers. A check script found in <code>state/</code> runs only if its bytes match a registered hash. See <a href="locks-and-leases.html">Locks and leases</a> and <a href="state-checks.html">Registered state checks</a>.</li>
+</ul>
+
+<h2 id="component-view">Component view (C4 Level 3)</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1200 800" role="img" aria-labelledby="pix-title pix-desc">
+<title id="pix-title">Persistence components inside one operational home</title>
+<desc id="pix-desc">The supervisor agent, watcher, workers, and a secondmate home use eight persistence components. The components write into the home's state, data, and config trees. Numbered arrows are explained in the interactions table below.</desc>
+<defs><marker id="pix-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="30">Persistence — Components (Level 3)</text>
+
+<g class="c4-container"><rect x="40" y="50" width="240" height="70" rx="8"/>
+<text class="c4-label" x="160" y="76">Supervisor agent</text>
+<text class="c4-tech" x="160" y="92">[harness session]</text>
+<text class="c4-desc" x="160" y="108">Runs toolbelt scripts</text></g>
+<g class="c4-container"><rect x="330" y="50" width="240" height="70" rx="8"/>
+<text class="c4-label" x="450" y="76">Watcher</text>
+<text class="c4-tech" x="450" y="92">[bin/fm-watch.sh]</text>
+<text class="c4-desc" x="450" y="108">Polls; queues actionable wakes</text></g>
+<g class="c4-container"><rect x="620" y="50" width="240" height="70" rx="8"/>
+<text class="c4-label" x="740" y="76">Workers</text>
+<text class="c4-tech" x="740" y="92">[crewmates, scouts]</text>
+<text class="c4-desc" x="740" y="108">Append status; ack inbox</text></g>
+<g class="c4-container"><rect x="910" y="50" width="240" height="70" rx="8"/>
+<text class="c4-label" x="1030" y="76">Secondmate home</text>
+<text class="c4-tech" x="1030" y="92">[its own FM_HOME]</text>
+<text class="c4-desc" x="1030" y="108">Receives inherited config</text></g>
+
+<g class="c4-boundary"><rect x="20" y="150" width="1165" height="630" rx="10"/><text x="32" y="770">One operational home (FM_HOME) · persistence components and stores</text></g>
+
+<g class="c4-component"><rect x="40" y="190" width="240" height="80" rx="8"/>
+<text class="c4-label" x="160" y="216">Session lock</text>
+<text class="c4-tech" x="160" y="232">[bin/fm-lock.sh]</text>
+<text class="c4-desc" x="160" y="249">One mutating session per home</text></g>
+<g class="c4-component"><rect x="330" y="190" width="240" height="80" rx="8"/>
+<text class="c4-label" x="450" y="216">Wake queue</text>
+<text class="c4-tech" x="450" y="232">[fm-wake-lib.sh · fm-wake-drain.sh]</text>
+<text class="c4-desc" x="450" y="249">Held until acknowledged</text></g>
+<g class="c4-component"><rect x="620" y="190" width="240" height="80" rx="8"/>
+<text class="c4-label" x="740" y="216">Record publisher</text>
+<text class="c4-tech" x="740" y="232">[fm-backlog-transition-lib.sh]</text>
+<text class="c4-desc" x="740" y="249">meta ⇔ backlog, one step</text></g>
+<g class="c4-component"><rect x="910" y="190" width="240" height="80" rx="8"/>
+<text class="c4-label" x="1030" y="216">Config inheritance</text>
+<text class="c4-tech" x="1030" y="232">[fm-config-inherit-lib.sh]</text>
+<text class="c4-desc" x="1030" y="249">Primary-authoritative push</text></g>
+
+<g class="c4-component"><rect x="40" y="320" width="240" height="80" rx="8"/>
+<text class="c4-label" x="160" y="346">Lock primitive</text>
+<text class="c4-tech" x="160" y="362">[fm-wake-lib.sh fm_lock_*]</text>
+<text class="c4-desc" x="160" y="379">Symlink claim, stale reclaim</text></g>
+<g class="c4-component"><rect x="330" y="320" width="240" height="80" rx="8"/>
+<text class="c4-label" x="450" y="346">Lease guard</text>
+<text class="c4-tech" x="450" y="362">[fm-lease-lib.sh]</text>
+<text class="c4-desc" x="450" y="379">main vs branch, per task</text></g>
+<g class="c4-component"><rect x="620" y="320" width="240" height="80" rx="8"/>
+<text class="c4-label" x="740" y="346">Check trust binding</text>
+<text class="c4-tech" x="740" y="362">[fm-check-register.sh]</text>
+<text class="c4-desc" x="740" y="379">Run only hash-matched bytes</text></g>
+<g class="c4-component"><rect x="910" y="320" width="240" height="80" rx="8"/>
+<text class="c4-label" x="1030" y="346">Cursors and folds</text>
+<text class="c4-tech" x="1030" y="362">[fm-classify-lib.sh]</text>
+<text class="c4-desc" x="1030" y="379">Read only new status bytes</text></g>
+
+<g class="c4-datastore"><path d="M40,492 a420,12 0 0,0 840,0 a420,12 0 0,0 -840,0 v80 a420,12 0 0,0 840,0 v-80"/>
+<text class="c4-label" x="460" y="530">state/</text>
+<text class="c4-desc" x="460" y="548">runtime records · status logs · queue · locks · checks · cursors</text></g>
+<g class="c4-datastore"><path d="M920,492 a115,12 0 0,0 230,0 a115,12 0 0,0 -230,0 v80 a115,12 0 0,0 230,0 v-80"/>
+<text class="c4-label" x="1035" y="530">data/</text>
+<text class="c4-desc" x="1035" y="548">backlog · briefs · reports · memory</text></g>
+<g class="c4-datastore"><path d="M920,632 a115,12 0 0,0 230,0 a115,12 0 0,0 -230,0 v80 a115,12 0 0,0 230,0 v-80"/>
+<text class="c4-label" x="1035" y="670">config/</text>
+<text class="c4-desc" x="1035" y="688">local operating choices</text></g>
+<g class="c4-datastore"><path d="M40,632 a130,12 0 0,0 260,0 a130,12 0 0,0 -260,0 v80 a130,12 0 0,0 260,0 v-80"/>
+<text class="c4-label" x="170" y="670">projects/</text>
+<text class="c4-desc" x="170" y="688">clones, read-only to Firstmate</text></g>
+
+<g class="c4-rel"><path d="M160,120 V188" marker-end="url(#pix-arrow)"/></g>
+<g class="c4-rel"><path d="M450,120 V188" marker-end="url(#pix-arrow)"/></g>
+<g class="c4-rel"><path d="M620,100 H595 V478" marker-end="url(#pix-arrow)"/></g>
+<g class="c4-rel"><path d="M1030,190 V122" marker-end="url(#pix-arrow)"/></g>
+<g class="c4-rel"><path d="M1150,230 H1170 V672 H1152" marker-end="url(#pix-arrow)"/></g>
+<g class="c4-rel"><path d="M160,270 V318" marker-end="url(#pix-arrow)"/></g>
+<g class="c4-rel"><path d="M330,240 H305 V478" marker-end="url(#pix-arrow)"/></g>
+<g class="c4-rel"><path d="M860,240 H895 V520 H918" marker-end="url(#pix-arrow)"/></g>
+<g class="c4-rel"><path d="M160,400 V478" marker-end="url(#pix-arrow)"/></g>
+<g class="c4-rel"><path d="M450,400 V478" marker-end="url(#pix-arrow)"/></g>
+<g class="c4-rel"><path d="M740,400 V478" marker-end="url(#pix-arrow)"/></g>
+<g class="c4-rel"><path d="M1030,400 V440 H860 V478" marker-end="url(#pix-arrow)"/></g>
+
+<g class="c4-rel-num"><circle cx="160" cy="152" r="9"/><text x="160" y="156">1</text></g>
+<g class="c4-rel-num"><circle cx="450" cy="152" r="9"/><text x="450" y="156">2</text></g>
+<g class="c4-rel-num"><circle cx="595" cy="300" r="9"/><text x="595" y="304">3</text></g>
+<g class="c4-rel-num"><circle cx="1030" cy="156" r="9"/><text x="1030" y="160">4</text></g>
+<g class="c4-rel-num"><circle cx="1170" cy="450" r="9"/><text x="1170" y="454">5</text></g>
+<g class="c4-rel-num"><circle cx="160" cy="294" r="9"/><text x="160" y="298">6</text></g>
+<g class="c4-rel-num"><circle cx="305" cy="300" r="9"/><text x="305" y="304">7</text></g>
+<g class="c4-rel-num"><circle cx="895" cy="300" r="9"/><text x="895" y="304">8</text></g>
+<g class="c4-rel-num"><circle cx="160" cy="440" r="9"/><text x="160" y="444">9</text></g>
+<g class="c4-rel-num"><circle cx="450" cy="440" r="9"/><text x="450" y="444">10</text></g>
+<g class="c4-rel-num"><circle cx="740" cy="440" r="9"/><text x="740" y="444">11</text></g>
+<g class="c4-rel-num"><circle cx="1030" cy="425" r="9"/><text x="1030" y="429">12</text></g>
+
+<g class="c4-legend">
+<rect class="c4-legend-frame" x="340" y="630" width="230" height="120" rx="6"/>
+<text class="c4-legend-heading" x="352" y="650">Legend</text>
+<g class="c4-container"><rect x="352" y="660" width="32" height="16" rx="3"/></g><text x="394" y="672">Container (Level 2)</text>
+<g class="c4-component"><rect x="352" y="684" width="32" height="16" rx="3"/></g><text x="394" y="696">Component (Level 3)</text>
+<g class="c4-datastore"><path d="M352,711 a16,3 0 0,0 32,0 a16,3 0 0,0 -32,0 v11 a16,3 0 0,0 32,0 v-11"/></g><text x="394" y="720">Data store</text>
+<g class="c4-rel"><path d="M352,738 L384,738"/></g><text x="394" y="742">Uses / writes</text>
+</g>
+</svg>
+</div>
+<figcaption>Level 3 view of the persistence area. Numbers key into the <a href="#interactions">interactions table</a>. <code>projects/</code> has no persistence component of its own: Firstmate clones and refreshes it but never writes project files.</figcaption>
+</figure>
+
+<h3 id="interactions">Interactions</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>#</th><th>From → to</th><th>What happens</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Supervisor → Session lock</td><td>Session start takes the per-home session lock before anything mutates shared state. If the lock is refused, the whole session stays read-only.</td><td><code class="cite">AGENTS.md:187</code> <code class="cite">AGENTS.md:179-180</code></td></tr>
+<tr><td>2</td><td>Watcher → Wake queue</td><td>Every actionable finding is appended as one tab-separated row before the watcher exits.</td><td><code class="cite">bin/fm-watch.sh:2478</code> <code class="cite">bin/fm-wake-lib.sh:1837-1871</code></td></tr>
+<tr><td>3</td><td>Workers → state/</td><td>A worker appends one status line per phase change and moves each handled inbox message into <code>handled/</code>.</td><td><code class="cite">AGENTS.md:103</code> <code class="cite">bin/fm-task-inbox-lib.sh:25-30</code></td></tr>
+<tr><td>4</td><td>Config inheritance → Secondmate home</td><td>The primary pushes a declared list of local config items and a read-only shared-preferences file into each secondmate home.</td><td><code class="cite">bin/fm-config-inherit-lib.sh:2-27</code></td></tr>
+<tr><td>5</td><td>Config inheritance → config/</td><td>It reads the primary's <code>config/</code>. A source that is provably absent is mirrored as absent downstream.</td><td><code class="cite">bin/fm-config-inherit-lib.sh:185-202</code></td></tr>
+<tr><td>6</td><td>Session lock → Lock primitive</td><td>The session lock's own writes are serialized by a claim lock, <code>state/.lock.acquire</code>, taken with the shared primitive.</td><td><code class="cite">bin/fm-lock.sh:69</code> <code class="cite">bin/fm-lock.sh:203-211</code></td></tr>
+<tr><td>7</td><td>Wake queue → state/</td><td>The queue writes <code>.wake-queue</code>, <code>.wake-queue.seq</code>, <code>.wake-queue.lock</code>, the <code>.watcher-down</code> recovery marker, and per-actor claim files.</td><td><code class="cite">bin/fm-wake-lib.sh:9-10</code> <code class="cite">bin/fm-wake-drain.sh:66-68</code></td></tr>
+<tr><td>8</td><td>Record publisher → data/</td><td>A task's metadata is published or removed in the same run and under the same lock as its backlog transition.</td><td><code class="cite">bin/fm-backlog-transition-lib.sh:7-20</code></td></tr>
+<tr><td>9</td><td>Lock primitive → state/</td><td>Every lock is a symlink to a private owner directory holding the owner's pid.</td><td><code class="cite">bin/fm-wake-lib.sh:554-579</code></td></tr>
+<tr><td>10</td><td>Lease guard → state/</td><td>On a Pi primary it writes <code>state/.lease-&lt;task&gt;</code>, naming which supervision actor may change that task.</td><td><code class="cite">bin/fm-lease-lib.sh:14-18</code></td></tr>
+<tr><td>11</td><td>Check trust binding → state/</td><td>It writes <code>state/&lt;id&gt;.check-trust</code>, which binds the current SHA-256 of <code>state/&lt;id&gt;.check.sh</code>.</td><td><code class="cite">bin/fm-check-register.sh:32-41</code></td></tr>
+<tr><td>12</td><td>Cursors and folds → state/</td><td>It writes per-task open-decision cursors and the fleet-wide status-presentation cursor.</td><td><code class="cite">bin/fm-classify-lib.sh:960-964</code> <code class="cite">bin/fm-classify-lib.sh:1503-1575</code></td></tr>
+</tbody></table></div>
+
+<h2 id="pages">Pages in this section</h2>
+<ul class="cards">
+<li><a href="home-layout.html"><strong>Operational home layout</strong><span>FM_HOME, the code root / home split, the four trees, per-directory overrides, and secondmate home markers.</span></a></li>
+<li><a href="task-records.html"><strong>Per-task records</strong><span>Task metadata, the append-only status log, briefs and reports, the pending-close record, and what teardown removes.</span></a></li>
+<li><a href="wake-queue.html"><strong>Wake queue and recovery marker</strong><span>Row format, append, presentation, generation-bound acknowledgement, and the <code>.watcher-down</code> state machine.</span></a></li>
+<li><a href="locks-and-leases.html"><strong>Locks and leases</strong><span>The portable lock primitive, the session lock, per-task control and metadata locks, the task-set lock, lock order, and the supervision lease.</span></a></li>
+<li><a href="state-checks.html"><strong>Registered state checks</strong><span>Why a script in state/ is never simply executed, and how the content-trust binding gates it.</span></a></li>
+<li><a href="cursors-and-folds.html"><strong>Presentation cursors and folded decisions</strong><span>Byte cursors, file identity, the folded open-decision set, and fold versioning.</span></a></li>
+<li><a href="configuration.html"><strong>Per-home configuration and inheritance</strong><span>Every config/ file, what it does, and which ones flow into a secondmate home.</span></a></li>
+<li><a href="durable-memory.html"><strong>Durable memory</strong><span>Captain preferences, learnings, the startup memory budget, and the cold archive.</span></a></li>
+<li><a href="patterns.html"><strong>Engineering patterns</strong><span>Atomic replace, append-only logs, generation binding, refusal over guessing, and durability past the conversation.</span></a></li>
+<li><a href="deletion-safety.html"><strong>What is safe to delete</strong><span>A register of which files may be removed, which regenerate, and which must never be touched.</span></a></li>
+</ul>
+
+<h2 id="record-map">Record map at a glance</h2>
+<p>The charter's inventory is the routing table <code class="cite">AGENTS.md:58-160</code>. The layout's single owner is <code class="cite">docs/configuration.md:9-17</code>. This table groups the records by the guarantee each one carries. Each row links to the page that explains it.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Guarantee</th><th>Records</th><th>Page</th></tr></thead>
+<tbody>
+<tr><td>Outlives the task and the session</td><td><code>data/backlog.md</code>, <code>data/&lt;id&gt;/brief.md</code>, <code>data/&lt;id&gt;/report.md</code>, <code>data/captain.md</code>, <code>data/learnings.md</code>, <code>data/memory-archive.md</code>, registries</td><td><a href="task-records.html">Per-task records</a>, <a href="durable-memory.html">Durable memory</a></td></tr>
+<tr><td>Outlives the session, retired with the task</td><td><code>state/&lt;id&gt;.meta</code>, <code>state/&lt;id&gt;.status</code>, <code>state/&lt;id&gt;.inbox/</code>, check and PR-poll sidecars, cursors</td><td><a href="task-records.html">Per-task records</a></td></tr>
+<tr><td>Held until acknowledged</td><td><code>state/.wake-queue</code>, <code>state/.watcher-down</code></td><td><a href="wake-queue.html">Wake queue</a></td></tr>
+<tr><td>Crash-replay journal</td><td><code>state/&lt;id&gt;.backlog-close</code>, <code>state/&lt;id&gt;.control-relaunch</code></td><td><a href="task-records.html#backlog-close">Pending close</a>, <a href="locks-and-leases.html#control-lock">Control lock</a></td></tr>
+<tr><td>Mutual exclusion</td><td><code>state/.lock</code>, <code>.lock-session</code>, <code>.task-set.lock</code>, <code>.control-&lt;id&gt;.lock</code>, <code>.meta-&lt;id&gt;.lock</code>, <code>.lease-&lt;task&gt;</code></td><td><a href="locks-and-leases.html">Locks and leases</a></td></tr>
+<tr><td>Content-trust binding</td><td><code>state/&lt;id&gt;.check-trust</code></td><td><a href="state-checks.html">State checks</a></td></tr>
+<tr><td>Cache that rebuilds itself</td><td><code>state/.&lt;id&gt;.open-decisions-cursor</code>, <code>state/.watch-triage.log</code></td><td><a href="cursors-and-folds.html">Cursors</a>, <a href="deletion-safety.html">Deletion safety</a></td></tr>
+<tr><td>Local choice</td><td><code>config/*</code>, <code>.env</code></td><td><a href="configuration.html">Configuration</a></td></tr>
+</tbody></table></div>
+
+<h2 id="end-to-end">One path end to end</h2>
+<p>A single ship task touches nearly every record type. The <a href="task-records.html#trace">per-task records trace</a> follows one task from dispatch to teardown. The <a href="wake-queue.html#trace">wake queue trace</a> follows one of that task's status lines through the watcher, the durable queue, the drain, and the acknowledgement.</p>
+<ol>
+<li><code>fm-spawn.sh</code> takes the home's task-set lock and then the task's metadata lock. It writes <code>state/&lt;id&gt;.meta</code> to a temporary file, renames it into place, and starts the backlog row in the same run <code class="cite">bin/fm-spawn.sh:1498-1506</code> <code class="cite">bin/fm-spawn.sh:4440-4518</code>.</li>
+<li>The worker appends <code>done [at=…]: PR …</code> to <code>state/&lt;id&gt;.status</code> <code class="cite">bin/fm-classify-lib.sh:284-290</code>.</li>
+<li>The watcher sees new status bytes and appends a <code>signal</code> row to <code>state/.wake-queue</code>. The append first republishes the <code>.watcher-down</code> downtime generation <code class="cite">bin/fm-wake-lib.sh:1852-1867</code>.</li>
+<li>The supervisor runs <code>fm-wake-drain.sh</code>, which presents the row and prints <code>WAKE_ACK_REQUIRED</code>. After handling, it acknowledges with that exact sequence and generation <code class="cite">bin/fm-wake-drain.sh:860-861</code>.</li>
+<li><code>fm-teardown.sh</code> writes <code>state/&lt;id&gt;.backlog-close</code>, removes volatile state, and closes the backlog row. It removes the metadata last and removes the pending-close record once the close lands <code class="cite">bin/fm-teardown.sh:15-23</code> <code class="cite">bin/fm-teardown.sh:3653-3700</code>.</li>
+</ol>
+
+<h2 id="neighbours">Neighbouring areas</h2>
+<p>This section owns where records live and what each one guarantees. What the records are used for belongs to sibling areas:</p>
+<ul>
+<li><a href="../supervision/index.html">Supervision</a>: the watcher loop, triage, and the arm and turn-end layers that consume the wake queue.</li>
+<li><a href="../communication/index.html">Communication</a>: steering-inbox delivery and the re-ring ladder, status-line vocabulary as a protocol, and the pending replies of secondmates.</li>
+<li><a href="../backlog-and-decisions/index.html">Backlog and decisions</a>: the backlog's own format and captain holds, which the pending-close record protects.</li>
+<li><a href="../delivery/index.html">Delivery</a>: the PR poll and merge authority, whose sidecars this section only classifies.</li>
+<li><a href="../prompts-and-skills/index.html">Prompts and skills</a>: the <code>/stow</code> skill, which curates durable memory.</li>
+<li><a href="../remote/index.html">Remote</a>: remote secondmate homes and the inherited-material transfer over SSH.</li>
+</ul>
 </article>
 </main>
 </div>
