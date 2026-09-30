@@ -24,7 +24,7 @@ Where a term replaces one from Firstmate, the Firstmate column records the origi
 | --- | --- | --- |
 | **Patron** | The person the guild serves. The only source of authority, and the only one who can approve anything irreversible. | captain |
 | **Guildmaster** | The patron's single point of contact. Supervises all work, and performs none of it directly. | first mate |
-| **Chapter Master** | A persistent supervisor owning one domain, with its own chapter house and its own queue. Idle by default, acts only on routed work. | second mate |
+| **Party Leader** | A persistent supervisor owning one domain, with its own chapter house and its own queue. Idle by default, acts only on routed work. | second mate |
 | **Adventurer** | An ephemeral worker dispatched for exactly one job, in its own camp, torn down when the job lands. | crewmate |
 | **Scout** | An adventurer sent to learn rather than to build. Produces a field report and never changes a project. | scout |
 
@@ -45,7 +45,7 @@ Where a term replaces one from Firstmate, the Firstmate column records the origi
 | Term | Definition | Firstmate |
 | --- | --- | --- |
 | **Guildhall** | One instance's private home: its archive, ledgers, standing orders, and project clones. | operational home (`FM_HOME`) |
-| **Chapter House** | A chapter master's own guildhall, isolated from every other. | secondmate home |
+| **Chapter House** | A party leader's own guildhall, isolated from every other. | secondmate home |
 | **Camp** | An isolated, disposable workspace for exactly one job. Never the main checkout. | worktree |
 | **Roster** | Every worker the guildhall currently commands. | fleet |
 

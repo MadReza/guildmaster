@@ -10,6 +10,7 @@ This repository is at its beginning. The vocabulary comes first, because every l
 
 - [TERMINOLOGY.md](TERMINOLOGY.md) is the single owner of the project's vocabulary. Read it before writing anything else here.
 - `firstmate/` holds the research into the prior system this one succeeds, kept separate from Guildmaster's own design.
+- `vision/` holds Guildmaster's own design material: the patron's notes, the requirements drawn from them, and a Firstmate-informed consultation.
 
 ## Prior art
 
