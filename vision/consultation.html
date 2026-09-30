@@ -1,0 +1,729 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guildmaster consultation</title>
+<meta name="description" content="A Firstmate-informed consultation on the patron's first Guildmaster requirements.">
+<style>
+/* ---------- Tokens ---------- */
+:root {
+  color-scheme: light dark;
+
+  --bg: #fbfbfa;
+  --bg-raised: #ffffff;
+  --bg-sunken: #f1f2f0;
+  --fg: #1d2125;
+  --fg-muted: #5a636b;
+  --border: #d9dcd8;
+  --accent: #1f5fa8;
+  --accent-soft: #e4eef9;
+  --warn-bg: #fff6df;
+  --warn-border: #d9a51f;
+  --note-bg: #eef5ee;
+  --note-border: #4d8a55;
+  --code-bg: #eef0ee;
+
+  /* C4 diagram palette (light) */
+  --c4-person: #0b3d73;
+  --c4-person-stroke: #072a51;
+  --c4-system: #1565b8;
+  --c4-system-stroke: #0e4a88;
+  --c4-container: #3f86cf;
+  --c4-container-stroke: #2c6aa8;
+  --c4-component: #8dbdea;
+  --c4-component-stroke: #5e97cc;
+  --c4-component-fg: #0c2440;
+  --c4-datastore: #2f7d6d;
+  --c4-datastore-stroke: #205a4e;
+  --c4-external: #7a7f86;
+  --c4-external-stroke: #5d6167;
+  --c4-node-fg: #ffffff;
+  --c4-rel: #4f575f;
+  --c4-rel-label: #3a4148;
+  --c4-boundary: #6d747b;
+  --c4-canvas: #ffffff;
+
+  --radius: 6px;
+  --measure: 46rem;
+  --nav-width: 17rem;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15181b;
+    --bg-raised: #1c2024;
+    --bg-sunken: #111316;
+    --fg: #e3e6e8;
+    --fg-muted: #9aa3ab;
+    --border: #30363c;
+    --accent: #7fb3ee;
+    --accent-soft: #1d2b3b;
+    --warn-bg: #2d2615;
+    --warn-border: #b98d1c;
+    --note-bg: #182619;
+    --note-border: #5e9f67;
+    --code-bg: #23282d;
+
+    --c4-person: #1e5694;
+    --c4-person-stroke: #6fa3dc;
+    --c4-system: #1f6fc2;
+    --c4-system-stroke: #7fb3ee;
+    --c4-container: #2f6fae;
+    --c4-container-stroke: #8fbdea;
+    --c4-component: #264a6e;
+    --c4-component-stroke: #8dbdea;
+    --c4-component-fg: #e3eefa;
+    --c4-datastore: #2a6b5e;
+    --c4-datastore-stroke: #7cc4b3;
+    --c4-external: #4a4f55;
+    --c4-external-stroke: #9aa1a8;
+    --c4-node-fg: #f4f7fa;
+    --c4-rel: #aab3bb;
+    --c4-rel-label: #c9d0d6;
+    --c4-boundary: #8e969e;
+    --c4-canvas: #1a1e22;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #15181b;
+  --bg-raised: #1c2024;
+  --bg-sunken: #111316;
+  --fg: #e3e6e8;
+  --fg-muted: #9aa3ab;
+  --border: #30363c;
+  --accent: #7fb3ee;
+  --accent-soft: #1d2b3b;
+  --warn-bg: #2d2615;
+  --warn-border: #b98d1c;
+  --note-bg: #182619;
+  --note-border: #5e9f67;
+  --code-bg: #23282d;
+
+  --c4-person: #1e5694;
+  --c4-person-stroke: #6fa3dc;
+  --c4-system: #1f6fc2;
+  --c4-system-stroke: #7fb3ee;
+  --c4-container: #2f6fae;
+  --c4-container-stroke: #8fbdea;
+  --c4-component: #264a6e;
+  --c4-component-stroke: #8dbdea;
+  --c4-component-fg: #e3eefa;
+  --c4-datastore: #2a6b5e;
+  --c4-datastore-stroke: #7cc4b3;
+  --c4-external: #4a4f55;
+  --c4-external-stroke: #9aa1a8;
+  --c4-node-fg: #f4f7fa;
+  --c4-rel: #aab3bb;
+  --c4-rel-label: #c9d0d6;
+  --c4-boundary: #8e969e;
+  --c4-canvas: #1a1e22;
+}
+
+/* ---------- Base ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}
+
+a { color: var(--accent); text-underline-offset: 0.15em; }
+a:hover { text-decoration-thickness: 2px; }
+
+h1, h2, h3, h4 { line-height: 1.25; margin: 2rem 0 0.75rem; }
+h1 { font-size: 1.9rem; margin-top: 0.5rem; }
+h2 { font-size: 1.4rem; padding-top: 0.5rem; border-top: 1px solid var(--border); }
+h3 { font-size: 1.12rem; }
+h4 { font-size: 1rem; }
+
+p, ul, ol, dl, table, figure, pre, .callout { margin: 0 0 1rem; }
+ul, ol { padding-left: 1.4rem; }
+li + li { margin-top: 0.25rem; }
+
+code, kbd, pre { font-family: var(--font-mono); font-size: 0.88em; }
+code { background: var(--code-bg); padding: 0.08em 0.3em; border-radius: 4px; overflow-wrap: anywhere; }
+pre {
+  background: var(--code-bg);
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  overflow-x: auto;
+  max-width: 100%;
+}
+pre code { background: none; padding: 0; overflow-wrap: normal; }
+
+hr { border: 0; border-top: 1px solid var(--border); margin: 2rem 0; }
+
+img, svg { max-width: 100%; }
+
+.skip {
+  position: absolute; left: -999px; top: 0;
+  background: var(--bg-raised); padding: 0.5rem 1rem; z-index: 10;
+}
+.skip:focus { left: 0.5rem; top: 0.5rem; }
+
+/* ---------- Content blocks ---------- */
+.table-wrap { overflow-x: auto; max-width: 100%; margin: 0 0 1rem; }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+.table-wrap table { margin: 0; }
+th, td { text-align: left; vertical-align: top; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border); }
+th { background: var(--bg-sunken); font-weight: 600; }
+
+.callout { padding: 0.75rem 1rem; border-left: 4px solid var(--note-border); background: var(--note-bg); border-radius: 0 var(--radius) var(--radius) 0; }
+.callout.unclear { border-left-color: var(--warn-border); background: var(--warn-bg); }
+.callout > :last-child { margin-bottom: 0; }
+.callout-title { font-weight: 700; display: block; margin-bottom: 0.25rem; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 0.75rem; margin: 0 0 1rem; padding: 0; list-style: none; }
+.cards li { margin: 0; }
+.cards a, .cards .card {
+  display: block; height: 100%;
+  padding: 0.75rem 0.9rem; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-raised); color: var(--fg); text-decoration: none;
+}
+.cards a:hover { border-color: var(--accent); }
+.cards strong { display: block; color: var(--accent); }
+.cards span { font-size: 0.9rem; color: var(--fg-muted); }
+
+/* Evidence citation: <code class="cite">bin/fm-watch.sh:12</code>. site.js links it to the pinned source commit. */
+code.cite, a.cite code { font-size: 0.8em; white-space: nowrap; }
+a.cite { text-decoration: none; }
+a.cite:hover code { outline: 1px solid var(--accent); }
+.evidence { font-size: 0.88rem; color: var(--fg-muted); }
+
+dl.defs dt { font-weight: 600; margin-top: 0.6rem; }
+dl.defs dd { margin: 0 0 0 1rem; }
+
+/* ---------- C4 diagram vocabulary ----------
+ * Wrap every diagram as <figure class="diagram"> containing one inline <svg class="c4" viewBox=...>
+ * with a <title>, and a <figcaption>. Node kinds are classes on a <g> around the shape and its labels:
+ *   .c4-person .c4-system .c4-container .c4-component .c4-datastore .c4-external
+ * Scope/boundary box: .c4-boundary. Relationship: <g class="c4-rel"> with a <path> plus .c4-rel-label text.
+ * Text: .c4-label (name), .c4-tech ([technology]), .c4-desc (one-line description), .c4-diagram-title.
+ * Legend: <g class="c4-legend">. Snippets for every shape are in ../AUTHORING.md.
+ */
+figure.diagram {
+  margin: 1.25rem 0 1.5rem;
+  padding: 0.75rem;
+  background: var(--c4-canvas);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+figure.diagram figcaption { font-size: 0.88rem; color: var(--fg-muted); margin-top: 0.5rem; }
+svg.c4 { display: block; width: 100%; height: auto; font-family: var(--font-sans); }
+
+svg.c4 .c4-diagram-title { fill: var(--fg); font-size: 18px; font-weight: 700; }
+svg.c4 text { fill: var(--c4-node-fg); }
+svg.c4 .c4-label { font-size: 14px; font-weight: 700; }
+svg.c4 .c4-tech { font-size: 11px; font-style: italic; opacity: 0.9; }
+svg.c4 .c4-desc { font-size: 11.5px; }
+svg.c4 text.c4-label, svg.c4 text.c4-tech, svg.c4 text.c4-desc { text-anchor: middle; }
+
+svg.c4 .c4-person > rect, svg.c4 .c4-person > circle, svg.c4 .c4-person > path { fill: var(--c4-person); stroke: var(--c4-person-stroke); stroke-width: 1.5; }
+svg.c4 .c4-system > rect, svg.c4 .c4-system > path { fill: var(--c4-system); stroke: var(--c4-system-stroke); stroke-width: 1.5; }
+svg.c4 .c4-container > rect, svg.c4 .c4-container > path { fill: var(--c4-container); stroke: var(--c4-container-stroke); stroke-width: 1.5; }
+svg.c4 .c4-component > rect, svg.c4 .c4-component > path { fill: var(--c4-component); stroke: var(--c4-component-stroke); stroke-width: 1.5; }
+svg.c4 .c4-component text { fill: var(--c4-component-fg); }
+svg.c4 .c4-datastore > rect, svg.c4 .c4-datastore > path, svg.c4 .c4-datastore > ellipse { fill: var(--c4-datastore); stroke: var(--c4-datastore-stroke); stroke-width: 1.5; }
+svg.c4 .c4-external > rect, svg.c4 .c4-external > path, svg.c4 .c4-external > circle { fill: var(--c4-external); stroke: var(--c4-external-stroke); stroke-width: 1.5; }
+
+svg.c4 .c4-boundary > rect { fill: none; stroke: var(--c4-boundary); stroke-width: 1.5; stroke-dasharray: 7 5; }
+svg.c4 .c4-boundary > text { fill: var(--c4-boundary); font-size: 12.5px; font-weight: 700; text-anchor: start; }
+
+svg.c4 .c4-rel > path, svg.c4 .c4-rel > line { fill: none; stroke: var(--c4-rel); stroke-width: 1.4; }
+svg.c4 .c4-rel.c4-rel-async > path, svg.c4 .c4-rel.c4-rel-async > line { stroke-dasharray: 5 4; }
+svg.c4 .c4-rel-label { fill: var(--c4-rel-label); font-size: 11px; text-anchor: middle; paint-order: stroke; stroke: var(--c4-canvas); stroke-width: 4px; stroke-linejoin: round; }
+svg.c4 .c4-arrowhead { fill: var(--c4-rel); stroke: none; }
+/* Numbered relationship badge: <g class="c4-rel-num"><circle/><text/></g>, keyed to an interactions table. */
+svg.c4 .c4-rel-num circle { fill: var(--c4-canvas); stroke: var(--c4-rel); stroke-width: 1.4; }
+svg.c4 .c4-rel-num text { fill: var(--fg); font-size: 10.5px; font-weight: 700; text-anchor: middle; }
+
+svg.c4 .c4-legend > rect.c4-legend-frame { fill: var(--c4-canvas); stroke: var(--border); stroke-width: 1; }
+svg.c4 .c4-legend text { fill: var(--fg); font-size: 11.5px; text-anchor: start; }
+svg.c4 .c4-legend .c4-legend-heading { font-weight: 700; }
+
+/* A dense diagram keeps a readable minimum width and scrolls inside its own frame on a phone; the page never scrolls sideways. */
+figure.diagram .diagram-scroll { overflow-x: auto; max-width: 100%; }
+@media (max-width: 52rem) {
+  figure.diagram svg.c4.c4-dense { min-width: 760px; }
+  .table-wrap table { min-width: 40rem; }
+}
+
+
+/* ---------- Guildmaster vision page (self-contained; mirrors firstmate/assets/site.css) ---------- */
+.vision-header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 1rem; background: var(--bg-raised); border-bottom: 1px solid var(--border); }
+.vision-header .brand { font-weight: 700; color: var(--fg); text-decoration: none; }
+.vision-header .brand small { font-weight: 400; color: var(--fg-muted); }
+.layout { display: grid; grid-template-columns: var(--nav-width) minmax(0, 1fr); min-height: calc(100vh - 3rem); }
+#toc { position: sticky; top: 3rem; align-self: start; max-height: calc(100vh - 3rem); overflow-y: auto; padding: 1rem 0.75rem 2rem 1rem; border-right: 1px solid var(--border); background: var(--bg-sunken); font-size: 0.92rem; }
+#toc h2 { font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-muted); border: 0; padding: 0; margin: 0 0 0.35rem; }
+#toc ul { list-style: none; margin: 0 0 1rem; padding: 0; }
+#toc li + li { margin-top: 0; }
+#toc a { display: block; padding: 0.2rem 0.5rem; border-radius: 4px; color: var(--fg); text-decoration: none; }
+#toc a:hover { background: var(--accent-soft); }
+main { min-width: 0; padding: 1.5rem 2rem 4rem; }
+main > article { max-width: 52rem; }
+.breadcrumb { font-size: 0.85rem; color: var(--fg-muted); margin-bottom: 0.25rem; }
+.lede { font-size: 1.08rem; color: var(--fg-muted); }
+@media (max-width: 52rem) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  #toc { position: static; max-height: none; border-right: 0; border-bottom: 1px solid var(--border); }
+  main { padding: 1rem 16px 3rem; }
+  h1 { font-size: 1.55rem; }
+  figure.diagram svg.c4.c4-dense { min-width: 760px; }
+}
+@media (max-width: 30rem) { code.cite, a.cite code { white-space: normal; overflow-wrap: anywhere; } }
+svg.c4 .gm-note { fill: var(--c4-rel-label); font-size: 11.5px; text-anchor: start; }
+svg.c4 .gm-note-strong { fill: var(--fg); font-size: 12px; font-weight: 700; text-anchor: start; }
+svg.c4 .gm-axis { stroke: var(--border); stroke-width: 1; }
+svg.c4 .gm-span-gm > rect { fill: var(--c4-system); stroke: var(--c4-system-stroke); }
+svg.c4 .gm-span-cm > rect { fill: var(--c4-container); stroke: var(--c4-container-stroke); }
+svg.c4 .gm-span-adv > rect { fill: var(--c4-component); stroke: var(--c4-component-stroke); }
+svg.c4 .gm-span-adv text { fill: var(--c4-component-fg); }
+svg.c4 .gm-span-ext > rect { fill: var(--c4-external); stroke: var(--c4-external-stroke); }
+svg.c4 .gm-span-gm text, svg.c4 .gm-span-cm text, svg.c4 .gm-span-ext text { fill: var(--c4-node-fg); }
+svg.c4 text.gm-span-text { font-size: 11px; text-anchor: start; }
+svg.c4 .gm-term > rect { fill: var(--bg-sunken); stroke: var(--border); stroke-width: 1.5; }
+svg.c4 .gm-term text { fill: var(--fg); font-family: var(--font-mono); font-size: 12px; text-anchor: start; }
+svg.c4 .gm-term .gm-term-muted { fill: var(--fg-muted); }
+svg.c4 .gm-term .gm-term-accent { fill: var(--accent); font-weight: 700; }
+svg.c4 .gm-bar > rect { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1; }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="vision-header"><a class="brand" href="#top">Guildmaster <small>vision · consultation</small></a></header>
+<div class="layout">
+<nav id="toc" aria-label="Contents"><h2>Contents</h2><ul><li><a href="#the-answer-in-brief">The answer in brief</a></li><li><a href="#the-proposed-shape">The proposed shape</a></li><li><a href="#how-each-section-reads">How each section reads</a></li><li><a href="#0-and-1-party-leaders-long-lived-one-per-focus">0 and 1. Party Leaders: long-lived, one per focus</a></li><li><a href="#2-the-guildmaster-knows-but-does-not-tell">2. The Guildmaster knows, but does not tell</a></li><li><a href="#3-repositories-and-camps">3. Repositories and camps</a></li><li><a href="#4-rules-of-engagement-phases-and-playbooks">4. Rules of engagement, phases and playbooks</a></li><li><a href="#5-patron-authored-prompts">5. Patron-authored prompts</a></li><li><a href="#6-audit-and-tracing">6. Audit and tracing</a></li><li><a href="#7-console-where-am-i">7. Console: where am I</a></li><li><a href="#8-intake-never-lose-a-posting">8. Intake: never lose a posting</a></li><li><a href="#9-claude-only-reliability">9. Claude-only reliability</a></li><li><a href="#10-storage-and-reach">10. Storage and reach</a></li><li><a href="#build-order">Build order</a></li><li><a href="#risks">Risks</a></li><li><a href="#decisions-the-patron-has-not-mentioned">Decisions the patron has not mentioned</a></li><li><a href="#questions-for-the-patron">Questions for the patron</a></li><li><a href="#outside-sources">Outside sources</a></li><li><a href="#where-the-research-pages-have-drifted">Where the research pages have drifted</a></li></ul><h2>Related</h2><ul><li><a href="requirements.md">requirements.md</a></li><li><a href="patron-notes-2026-09-29.md">patron notes</a></li><li><a href="../firstmate/index.html">Firstmate research site</a></li><li><a href="../TERMINOLOGY.md">TERMINOLOGY.md</a></li></ul></nav>
+<main id="main">
+<article id="top">
+<p class="breadcrumb">Guildmaster › Vision</p>
+<h1>Guildmaster consultation</h1>
+<p>A Firstmate-informed answer to the patron's first requirements: what Firstmate already does for each one, what is missing or works against it, and what Guildmaster should do instead.</p>
+<p>This answers <a href="requirements.md">requirements.md</a>, which restates <a href="patron-notes-2026-09-29.md">the patron's notes of 2026-09-29</a>. Vocabulary is <a href="../TERMINOLOGY.md">TERMINOLOGY.md</a>'s, including the patron's ruling that the role once called Chapter Master is now the <strong>Party Leader</strong>. This page is the illustrated form of <a href="consultation.md">consultation.md</a>; the Markdown file holds the same text.</p>
+<p><strong>Evidence.</strong> Firstmate citations such as <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-brief.sh#L400-L402"><code class="cite">bin/fm-brief.sh:400-402</code></a> are paths in the Firstmate repository read at commit <code>29213a09</code> (2026-09-28), read-only. The <a href="../firstmate/index.html">Firstmate research pages</a> in this repository were read against the older commit <code>ada21f5b</code>; they are linked for depth, but 124 commits separate the two, so their line numbers have drifted and a few facts have changed (listed in <a href="#where-the-research-pages-have-drifted">Where the research pages have drifted</a>). Outside sources are cited by URL. Everything under "Recommendation" is advice, not fact, and nothing here is built yet.</p>
+<h2 id="the-answer-in-brief">The answer in brief</h2>
+<p>The vision is sound, and it is not a smaller Firstmate: it turns Firstmate inside out.</p>
+<ul><li><strong>Firstmate is task-centred with a thick supervisor.</strong> The first mate plans, briefs, watches and lands every task; secondmates exist, but they are "idle by default and act only on work routed by the main firstmate" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L141"><code class="cite">AGENTS.md:141</code></a>), their chat is never read ("Nobody reads this chat", <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-brief.sh#L405-L406"><code class="cite">bin/fm-brief.sh:405-406</code></a>), and each task follows what the patron called "start something, finish it off".</li><li><strong>Guildmaster, as the patron describes it, is focus-centred with a thin supervisor.</strong> A Party Leader per ticket, project, recurring job or incident lives for weeks or months, the patron works <em>inside</em> it, it dispatches its own Adventurers, and the Guildmaster is a lobby that knows everything and says little.</li></ul>
+<p>Firstmate already contains most of the parts: isolated per-supervisor homes, charters, a backlog, captain holds, status events, a fleet ledger, a W3C trace carrier, Claude hooks and a status-line mod. But almost every default points the other way: secondmates have no kinds and no schedule, worktrees come from a recycled pool reset to the default branch, every task gets a new branch that teardown deletes, the worker rule forbids pushing any branch but its own, delivery is worded for GitHub, relaunch throws away the conversation, and Firstmate emits no trace spans at all.</p>
+<p><strong>Recommendation.</strong> Do not fork Firstmate. Build Guildmaster fresh, small and Claude-only, around one idea: <strong>a posting is never held only in a conversation</strong>. Every posting, phase and notice lives in one small SQLite register behind a <code>gm</code> command; people-facing text (charters, playbooks, prompts, field reports, screenshots) lives in plain files; Claude Code hooks enforce the rules the prompts state. Start with one Party Leader for one real ticket, before the Guildmaster itself exists (<a href="#build-order">Build order</a>).</p>
+<h2 id="the-proposed-shape">The proposed shape</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 980 600" role="img" aria-labelledby="gmv-shape-t">
+  <title id="gmv-shape-t">Proposed Guildmaster shape: the patron works inside one Party Leader at a time; each Party Leader dispatches Adventurers into git worktrees of the patron's existing repositories</title>
+  <defs>
+    <marker id="gmv-shape-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+  <text class="c4-diagram-title" x="20" y="28">Proposed shape (recommendation, not built)</text>
+
+  <g class="c4-person">
+    <circle cx="95" cy="232" r="18"/>
+    <rect x="25" y="252" width="140" height="70" rx="14"/>
+    <text class="c4-label" x="95" y="280">Patron</text>
+    <text class="c4-desc" x="95" y="300">Sends postings, rules</text>
+  </g>
+
+  <g class="c4-system">
+    <rect x="250" y="50" width="220" height="90" rx="8"/>
+    <text class="c4-label" x="360" y="80">Guildmaster</text>
+    <text class="c4-tech" x="360" y="98">[Claude Code session]</text>
+    <text class="c4-desc" x="360" y="118">Lobby: routes, remembers, answers</text>
+  </g>
+
+  <g class="c4-boundary">
+    <rect x="235" y="190" width="250" height="295" rx="6"/>
+    <text x="245" y="208">Party Leaders, one per focus</text>
+  </g>
+  <g class="c4-container">
+    <rect x="250" y="218" width="220" height="56" rx="8"/>
+    <text class="c4-label" x="360" y="242">CRM-1234</text>
+    <text class="c4-tech" x="360" y="260">[ticket · phase: dev-test]</text>
+  </g>
+  <g class="c4-container">
+    <rect x="250" y="283" width="220" height="56" rx="8"/>
+    <text class="c4-label" x="360" y="307">Saved views</text>
+    <text class="c4-tech" x="360" y="325">[project · phase: build]</text>
+  </g>
+  <g class="c4-container">
+    <rect x="250" y="348" width="220" height="56" rx="8"/>
+    <text class="c4-label" x="360" y="372">Nightly export</text>
+    <text class="c4-tech" x="360" y="390">[recurring · next 02:00]</text>
+  </g>
+  <g class="c4-container">
+    <rect x="250" y="413" width="220" height="56" rx="8"/>
+    <text class="c4-label" x="360" y="437">Outage 09-28</text>
+    <text class="c4-tech" x="360" y="455">[incident · diagnosing]</text>
+  </g>
+
+  <g class="c4-boundary">
+    <rect x="545" y="190" width="190" height="295" rx="6"/>
+    <text x="555" y="208">Camps (git worktrees)</text>
+  </g>
+  <g class="c4-component">
+    <rect x="560" y="220" width="160" height="60" rx="8"/>
+    <text class="c4-label" x="640" y="245">Adventurer</text>
+    <text class="c4-tech" x="640" y="264">[Task-Fix-login]</text>
+  </g>
+  <g class="c4-component">
+    <rect x="560" y="300" width="160" height="60" rx="8"/>
+    <text class="c4-label" x="640" y="325">Adventurer</text>
+    <text class="c4-tech" x="640" y="344">[Task-Add-export]</text>
+  </g>
+  <g class="c4-component">
+    <rect x="560" y="380" width="160" height="60" rx="8"/>
+    <text class="c4-label" x="640" y="405">Scout</text>
+    <text class="c4-tech" x="640" y="424">[Task-Why-500s]</text>
+  </g>
+
+  <g class="c4-external">
+    <rect x="790" y="215" width="170" height="60" rx="8"/>
+    <text class="c4-label" x="875" y="240">Your repositories</text>
+    <text class="c4-tech" x="875" y="259">[existing clones on disk]</text>
+  </g>
+  <g class="c4-external">
+    <rect x="790" y="305" width="170" height="60" rx="8"/>
+    <text class="c4-label" x="875" y="330">GitLab</text>
+    <text class="c4-tech" x="875" y="349">[dev branch · MRs]</text>
+  </g>
+  <g class="c4-external">
+    <rect x="790" y="395" width="170" height="60" rx="8"/>
+    <text class="c4-label" x="875" y="420">Claude Code</text>
+    <text class="c4-tech" x="875" y="439">[every agent runs here]</text>
+  </g>
+
+  <g class="c4-datastore">
+    <path d="M250,530 a75,10 0 0,0 150,0 a75,10 0 0,0 -150,0 v45 a75,10 0 0,0 150,0 v-45"/>
+    <text class="c4-label" x="325" y="560">Guild register</text>
+    <text class="c4-tech" x="325" y="576">[SQLite, via gm]</text>
+  </g>
+  <g class="c4-datastore">
+    <path d="M450,530 a75,10 0 0,0 150,0 a75,10 0 0,0 -150,0 v45 a75,10 0 0,0 150,0 v-45"/>
+    <text class="c4-label" x="525" y="560">Chapter Houses</text>
+    <text class="c4-tech" x="525" y="576">[Markdown files]</text>
+  </g>
+  <g class="c4-datastore">
+    <path d="M650,530 a75,10 0 0,0 150,0 a75,10 0 0,0 -150,0 v45 a75,10 0 0,0 150,0 v-45"/>
+    <text class="c4-label" x="725" y="560">Trace store</text>
+    <text class="c4-tech" x="725" y="576">[Jaeger, OTLP]</text>
+  </g>
+
+  <g class="c4-rel"><path d="M150,252 C170,190 205,115 248,100" marker-end="url(#gmv-shape-arrow)"/></g>
+  <g class="c4-rel"><path d="M167,300 L233,300" marker-start="url(#gmv-shape-arrow)" marker-end="url(#gmv-shape-arrow)"/></g>
+  <g class="c4-rel c4-rel-async"><path d="M360,188 L360,142" marker-end="url(#gmv-shape-arrow)"/></g>
+  <g class="c4-rel"><path d="M487,330 L543,330" marker-end="url(#gmv-shape-arrow)"/></g>
+  <g class="c4-rel"><path d="M737,245 L788,245" marker-end="url(#gmv-shape-arrow)"/></g>
+  <g class="c4-rel"><path d="M737,335 L788,335" marker-end="url(#gmv-shape-arrow)"/></g>
+  <g class="c4-rel"><path d="M325,487 L325,518" marker-end="url(#gmv-shape-arrow)"/></g>
+  <g class="c4-rel"><path d="M430,487 C445,505 500,505 522,518" marker-end="url(#gmv-shape-arrow)"/></g>
+  <g class="c4-rel c4-rel-async"><path d="M640,487 C650,505 700,505 722,518" marker-end="url(#gmv-shape-arrow)"/></g>
+
+  <g class="c4-rel-num"><circle cx="186" cy="170" r="9"/><text x="186" y="174">1</text></g>
+  <g class="c4-rel-num"><circle cx="200" cy="300" r="9"/><text x="200" y="304">2</text></g>
+  <g class="c4-rel-num"><circle cx="360" cy="165" r="9"/><text x="360" y="169">3</text></g>
+  <g class="c4-rel-num"><circle cx="515" cy="330" r="9"/><text x="515" y="334">4</text></g>
+  <g class="c4-rel-num"><circle cx="762" cy="245" r="9"/><text x="762" y="249">5</text></g>
+  <g class="c4-rel-num"><circle cx="762" cy="335" r="9"/><text x="762" y="339">6</text></g>
+  <g class="c4-rel-num"><circle cx="325" cy="502" r="9"/><text x="325" y="506">7</text></g>
+  <g class="c4-rel-num"><circle cx="474" cy="502" r="9"/><text x="474" y="506">8</text></g>
+  <g class="c4-rel-num"><circle cx="680" cy="502" r="9"/><text x="680" y="506">9</text></g>
+
+  <g class="c4-legend">
+    <rect class="c4-legend-frame" x="20" y="370" width="190" height="162" rx="6"/>
+    <text class="c4-legend-heading" x="32" y="390">Legend</text>
+    <g class="c4-person"><rect x="32" y="400" width="16" height="12" rx="3"/></g><text x="56" y="411">Person</text>
+    <g class="c4-system"><rect x="32" y="420" width="16" height="12" rx="3"/></g><text x="56" y="431">Guildmaster</text>
+    <g class="c4-container"><rect x="32" y="440" width="16" height="12" rx="3"/></g><text x="56" y="451">Party Leader</text>
+    <g class="c4-component"><rect x="32" y="460" width="16" height="12" rx="3"/></g><text x="56" y="471">Adventurer</text>
+    <g class="c4-external"><rect x="32" y="480" width="16" height="12" rx="3"/></g><text x="56" y="491">Outside the guild</text>
+    <g class="c4-datastore"><rect x="32" y="500" width="16" height="12" rx="3"/></g><text x="56" y="511">Store</text>
+    <text x="32" y="526">Dashed arrow: asynchronous</text>
+  </g>
+</svg>
+</div>
+<figcaption>The recommended shape. Numbers key to the table below the figure. The Party Leader names are examples, not real work.</figcaption>
+</figure>
+<div class="table-wrap"><table><thead><tr><th>#</th><th>From → to</th><th>What passes</th></tr></thead><tbody><tr><td>1</td><td>Patron → Guildmaster</td><td>Opens or retires a focus; asks history ("what did Nightly export do last week?").</td></tr><tr><td>2</td><td>Patron ↔ Party Leader</td><td>The patron works inside one focus at a time; the Party Leader answers and prints one-line notices.</td></tr><tr><td>3</td><td>Party Leader → Guildmaster</td><td>Asynchronous: a short digest on each phase change or ruling, written to the register, never a chat relay.</td></tr><tr><td>4</td><td>Party Leader → Adventurer</td><td>One writ per posting, rendered from the patron's own prompt template.</td></tr><tr><td>5</td><td>Adventurer → your repositories</td><td><code>git worktree add</code> on the clone that already exists; removed when the job ends.</td></tr><tr><td>6</td><td>Adventurer → GitLab</td><td>Pushes the feature branch; merges into the shared development branch; opens the merge request to integration.</td></tr><tr><td>7</td><td>Party Leader → register</td><td>Postings, phases, leases, summons, audit events, via <code>gm</code> only.</td></tr><tr><td>8</td><td>Party Leader → Chapter House</td><td>Charter, playbook, notes, each posting's original words and screenshots, field reports.</td></tr><tr><td>9</td><td>Everyone → trace store</td><td>Spans derived from the register's events, exported as OpenTelemetry.</td></tr></tbody></table></div>
+<h2 id="how-each-section-reads">How each section reads</h2>
+<p>Each theme below has a table with one row per requirement: what Firstmate does today, and what is missing or works against the requirement. Then comes the recommendation for the theme and its trade-offs. Requirement numbers are <a href="requirements.md">requirements.md</a>'s.</p>
+<h2 id="0-and-1-party-leaders-long-lived-one-per-focus">0 and 1. Party Leaders: long-lived, one per focus</h2>
+<div class="table-wrap"><table><thead><tr><th>Req</th><th>Firstmate today</th><th>Missing or against</th></tr></thead><tbody><tr><td>0.1 orchestrator for the patron's needs</td><td>A general agent distro with thirteen harness adapters (<a class="cite" href="https://github.com/kunchenguid/firstmate/tree/29213a09322a35d87b2f8acc29c415f3f860cb64/.agents/skills/harness-adapters/references/harness/"><code class="cite">.agents/skills/harness-adapters/references/harness/</code></a>) and six terminal backends (<a class="cite" href="https://github.com/kunchenguid/firstmate/tree/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/backends/"><code class="cite">bin/backends/</code></a>, <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/codex-app-backend.md"><code class="cite">docs/codex-app-backend.md</code></a>); see <a href="../firstmate/components/crew/harnesses.html">crew/harnesses</a> and <a href="../firstmate/components/crew/backends.html">crew/backends</a>.</td><td>Most of its size serves generality the patron does not need.</td></tr><tr><td>0.2 Party Leaders are the point</td><td>Secondmates exist: "a crewmate with an isolated firstmate home and a charter, not a second architecture" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L24"><code class="cite">AGENTS.md:24</code></a>).</td><td>The first mate remains the centre; secondmates are an optional delegation layer.</td></tr><tr><td>1.1 one per focus</td><td>A secondmate owns a <em>scope</em>, routed "by the nature of the work against each registered secondmate scope" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L170"><code class="cite">AGENTS.md:170</code></a>); the only example of scope variation is "issue triage versus feature development" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/architecture.md#L335"><code class="cite">docs/architecture.md:335</code></a>).</td><td>A scope is a standing domain, not a ticket. Nothing creates one per ticket.</td></tr><tr><td>1.2 lives weeks or months, survives restarts</td><td>Persistent by default: "Do not exit just because your queue is empty" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-brief.sh#L446"><code class="cite">bin/fm-brief.sh:446</code></a>). "A restart must be a non-event because durable state ... not conversation memory, are authoritative" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L128"><code class="cite">AGENTS.md:128</code></a>). Dead mates are respawned at session start (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-bootstrap.sh#L691-L720"><code class="cite">bin/fm-bootstrap.sh:691-720</code></a>) and on a watcher tick (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/configuration.md#L2349"><code class="cite">docs/configuration.md:2349</code></a>).</td><td>Recovery only runs while a primary session and watcher are alive; nothing restarts the primary after a reboot. <code>resume</code> is not a verb; a relaunch starts a fresh conversation (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/agent-control.md#L58-L61"><code class="cite">docs/agent-control.md:58-61</code></a>), and "the cost of that guarantee is the conversation" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-secondmate-restart.sh#L19"><code class="cite">bin/fm-secondmate-restart.sh:19</code></a>).</td></tr><tr><td>1.3 takes care of its own work</td><td>The mate supervises its own crew in its own home; the parent does not "reconstruct or supervise a secondmate's child tree" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L143"><code class="cite">AGENTS.md:143</code></a>).</td><td>Fits.</td></tr><tr><td>1.4 kinds</td><td>Crew kinds are <code>ship</code>, <code>scout</code>, <code>secondmate</code> (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-spawn.sh#L223-L225"><code class="cite">bin/fm-spawn.sh:223-225</code></a>). Secondmates vary only by local or remote route, with or without projects, and greenfield or inherited records (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/.agents/skills/secondmate-provisioning/SKILL.md#L20-L31"><code class="cite">.agents/skills/secondmate-provisioning/SKILL.md:20-31</code></a>, <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/.agents/skills/secondmate-provisioning/SKILL.md#L55-L58"><code class="cite">.agents/skills/secondmate-provisioning/SKILL.md:55-58</code></a>, <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/.agents/skills/secondmate-provisioning/SKILL.md#L164-L182"><code class="cite">.agents/skills/secondmate-provisioning/SKILL.md:164-182</code></a>).</td><td>No ticket, project, recurring or incident kind.</td></tr><tr><td>1.5 recurring schedule</td><td>None. No cron, launchd job or recurring-work concept exists for work; the mail poll "itself has no scheduler" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-mail.sh#L28-L29"><code class="cite">bin/fm-mail.sh:28-29</code></a>); watcher checks run every 300 s only while a supervision cycle is live (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-mail-check.sh#L12-L18"><code class="cite">bin/fm-mail-check.sh:12-18</code></a>); a process-event watch fires "at most once" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-procevent-when.sh#L1-L35"><code class="cite">bin/fm-procevent-when.sh:1-35</code></a>); harness cron and schedule tools are blocked on primaries (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-subagent-pretool-check.sh#L58"><code class="cite">bin/fm-subagent-pretool-check.sh:58</code></a>). The nearest thing is a backlog time gate or <code>hold --until</code> (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L364"><code class="cite">AGENTS.md:364</code></a>, <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L368"><code class="cite">AGENTS.md:368</code></a>).</td><td>Absent.</td></tr><tr><td>1.6 dispatches its own Adventurers</td><td>Yes: a secondmate runs the full firstmate machinery for its own crew in its own home (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L57"><code class="cite">AGENTS.md:57</code></a>).</td><td>Fits, but it brings the whole first-mate contract (a 426-line <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md"><code class="cite">AGENTS.md</code></a>) into every mate.</td></tr><tr><td>1.7 never blocked, answers while work runs</td><td>Work runs in separate crew processes and returns through status files and a watcher that wakes the supervisor (<a href="../firstmate/components/supervision/watcher.html">supervision/watcher</a>). The mate is told "Nobody reads this chat" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-brief.sh#L405-L406"><code class="cite">bin/fm-brief.sh:405-406</code></a>).</td><td>The mate is built to be talked to by the parent, not by the patron. Long-turn stall alarms and missed wakes are open tickets (#2912, #2791 in <a href="../firstmate/issues/status-inbox-and-wake.html">issues/status-inbox-and-wake</a>).</td></tr></tbody></table></div>
+<p><strong>Recommendation.</strong></p>
+<ol><li><strong>A Party Leader is its records, not its process.</strong> Its identity is a row in the register plus a Chapter House directory; a Claude Code session is only its current body. A session that ends, compacts, crashes or is rotated loses nothing, because a new session reads the charter, the playbook and <code>gm brief &lt;party&gt;</code> (its postings, phase, open rulings, last notices) at start. This keeps Firstmate's best rule ("a restart must be a non-event", <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L128"><code class="cite">AGENTS.md:128</code></a>) and is the only safe way to live for months, because a months-long Claude conversation will compact many times (Firstmate tickets #95, on malformed tool calls as long sessions grow, and #4796, asking for automatic persistence before compaction, <a href="../firstmate/issues/context-and-session-stability.html">issues/context-and-session-stability</a>).</li><li><strong>Kinds are a column plus a playbook file.</strong> <code>ticket</code>, <code>project</code>, <code>recurring</code>, <code>incident</code> to start; each kind names its playbook (see section 4) and its default prompt template (section 5). No kind-specific code until a kind proves it needs some.</li><li><strong>The patron talks to the Party Leader directly.</strong> Each Party Leader gets its own terminal tab or tmux window named after it; the patron switches tabs to switch focus. This departs from TERMINOLOGY.md's "the patron's single point of contact" for the Guildmaster, so it is question Q1.</li><li><strong>Adventurers run outside the Party Leader's turn.</strong> The Party Leader never does the work itself; <code>gm dispatch &lt;posting&gt;</code> starts a headless <code>claude -p</code> run in the posting's camp as a background process and returns at once. Claude Code already supports this shape: a background command "immediately returns a background task ID" and "Claude Code can respond to new prompts while the command continues executing in the background" (<a href="https://code.claude.com/docs/en/interactive-mode#background-bash-commands">https://code.claude.com/docs/en/interactive-mode#background-bash-commands</a>). The Party Leader's turns stay short, so the patron can always get an answer; the Adventurer's finish lands in the register, and a Stop hook with <code>asyncRewake</code> (a background hook that "wakes Claude on exit code 2", <a href="https://code.claude.com/docs/en/hooks">https://code.claude.com/docs/en/hooks</a>) wakes the idle Party Leader to review it. Firstmate's Claude auto-arm uses the same hook mechanism (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-claude-stop-autoarm.sh#L1-L80"><code class="cite">bin/fm-claude-stop-autoarm.sh:1-80</code></a>).</li><li><strong>Recurring kinds are woken by the operating system, not by an agent.</strong> A launchd agent (macOS) or cron entry runs <code>gm wake &lt;party&gt;</code> on schedule; <code>gm</code> starts the Party Leader session if none is alive and hands it the due posting. Firstmate deliberately has no scheduler; Guildmaster needs one, but it should be the smallest possible one.</li></ol>
+<p><strong>Trade-offs.</strong> Talking directly to Party Leaders gives the patron focus and keeps the Guildmaster clean, but it means several live Claude sessions at once, which costs quota (section 9). A Party Leader that is "its records" must write everything down as it goes; that is a discipline the prompts ask for and the hooks enforce, not something Claude does by default. An OS scheduler cannot run while the laptop sleeps; a missed run must be caught up at wake, and "runs while I am away" needs an always-on machine, which conflicts with local-only (question Q11).</p>
+<h2 id="2-the-guildmaster-knows-but-does-not-tell">2. The Guildmaster knows, but does not tell</h2>
+<div class="table-wrap"><table><thead><tr><th>Req</th><th>Firstmate today</th><th>Missing or against</th></tr></thead><tbody><tr><td>2.1 Guildmaster context not polluted</td><td>Strong filtering already: "Routine internal supervision, heartbeats, retries, and crewmate churn stay inside your own home and must not touch that status file" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-brief.sh#L443"><code class="cite">bin/fm-brief.sh:443</code></a>); "the scripts report facts, the mate reports judgement" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/secondmate-parent-channel.md#L20"><code class="cite">docs/secondmate-parent-channel.md:20</code></a>); the parent "do[es] not read the secondmate's chat" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L172"><code class="cite">AGENTS.md:172</code></a>).</td><td>Fits. Every non-routine status line still wakes the first mate (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/architecture.md#L92"><code class="cite">docs/architecture.md:92</code></a>), so a busy mate is still a noisy one.</td></tr><tr><td>2.2 knows, but does not relay</td><td>Each home publishes <code>state/home-summary.json</code> (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-home-summary-refresh.sh#L1-L10"><code class="cite">bin/fm-home-summary-refresh.sh:1-10</code></a>), refreshed on status change and every 300 s (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/architecture.md#L142"><code class="cite">docs/architecture.md:142</code></a>); the parent reads bounded fields through <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-fleet-snapshot.sh#L79-L99"><code class="cite">bin/fm-fleet-snapshot.sh:79-99</code></a>, capped at 20 children, queued items and decisions and 256 KB per home (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-fleet-snapshot.sh#L160-L163"><code class="cite">bin/fm-fleet-snapshot.sh:160-163</code></a>). <code>/bearings</code> gives a four-part digest and forbids scraping chat (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/.agents/skills/bearings/SKILL.md#L58"><code class="cite">.agents/skills/bearings/SKILL.md:58</code></a>).</td><td>Firstmate's first mate is designed to <em>tell</em>: its job is to relay decisions and outcomes to the captain. Nothing marks information as "know, don't say".</td></tr><tr><td>2.3 answers history on request</td><td>History sources are the append-only parent status log, the last 10 Done rows (<code>done_keep = 10</code>, <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/configuration.md#L336"><code class="cite">docs/configuration.md:336</code></a>), pointers into the mate's <code>data/</code>, and an opt-in fleet ledger that mates do not inherit (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/fleet-ledger.md#L8-L10"><code class="cite">docs/fleet-ledger.md:8-10</code></a>).</td><td>No durable per-mate history; "what did X do last month?" means asking X.</td></tr></tbody></table></div>
+<p><strong>Recommendation.</strong></p>
+<ul><li>The Guildmaster's session holds only the <strong>roster</strong>: one line per Party Leader (id, kind, phase, open postings, needs-you count, last notice time), printed by <code>gm roster</code> at session start and after each phase-change digest.</li><li>Everything else is <strong>pull, not push</strong>: the Guildmaster answers "what happened with CRM-1234 in August?" by querying the register's event history (<code>gm history CRM-1234 --since 2026-08-01</code>), which is permanent, not by holding it in context or asking the Party Leader.</li><li>The Guildmaster's charter says what it may volunteer: nothing, except a Party Leader that is gone quiet or a ruling nobody has seen for a set time (question Q8). Needs-you counts are shown by the status line instead (section 7), so nothing depends on the Guildmaster speaking.</li></ul>
+<p><strong>Trade-offs.</strong> A quiet Guildmaster can let something rot unseen; the status line's guild-wide needs-you count is the guard against that. Keeping permanent event history means the register grows without bound; at one patron's scale that is megabytes a year, not a problem, but it needs a backup (see <a href="#decisions-the-patron-has-not-mentioned">Decisions the patron has not mentioned</a>).</p>
+<h2 id="3-repositories-and-camps">3. Repositories and camps</h2>
+<div class="table-wrap"><table><thead><tr><th>Req</th><th>Firstmate today</th><th>Missing or against</th></tr></thead><tbody><tr><td>3.1 a place per focus that tracks information</td><td>A secondmate home is a full Firstmate home with its own <code>data/</code>, <code>state/</code>, <code>config/</code>, <code>projects/</code> and backlog (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/configuration.md#L69-L99"><code class="cite">docs/configuration.md:69-99</code></a>); the seed copies the charter to <code>data/charter.md</code> (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-home-seed.sh#L5-L20"><code class="cite">bin/fm-home-seed.sh:5-20</code></a>).</td><td>Fits in spirit; heavy in practice (a whole Firstmate checkout per home).</td></tr><tr><td>3.2 repositories where they live, or clones</td><td>Projects are cloned: "Clone into <code>projects/&lt;name&gt;</code>" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/.agents/skills/project-management/SKILL.md#L34"><code class="cite">.agents/skills/project-management/SKILL.md:34</code></a>). The spawn accepts any directory on disk (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-spawn.sh#L2799-L2805"><code class="cite">bin/fm-spawn.sh:2799-2805</code></a>), but the session-start refresh fast-forwards the default branch and force-deletes gone-upstream branches in every clone under <code>projects/</code> (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-bootstrap.sh#L336-L344"><code class="cite">bin/fm-bootstrap.sh:336-344</code></a>, <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-fleet-sync.sh#L225-L254"><code class="cite">bin/fm-fleet-sync.sh:225-254</code></a>).</td><td>Pointing Firstmate's clone management at the patron's everyday clone would prune the patron's own branches.</td></tr><tr><td>3.3 a git worktree per job, removed when done</td><td>A treehouse pool slot is taken (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-spawn.sh#L4219"><code class="cite">bin/fm-spawn.sh:4219</code></a>), forced to a clean <code>origin/&lt;default&gt;</code> with <code>reset --hard</code> (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-spawn.sh#L3311-L3358"><code class="cite">bin/fm-spawn.sh:3311-3358</code></a>), and returned with <code>treehouse return --force</code> at teardown after <code>branch -D</code> of the local task branch (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-teardown.sh#L3587-L3607"><code class="cite">bin/fm-teardown.sh:3587-3607</code></a>).</td><td>A recycled pool, always based on the default branch (non-default base is open ticket #3411), and the branch is deleted at the end.</td></tr><tr><td>3.4 about twenty at once</td><td>"No concurrency cap" while the captain is present (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L196-L197"><code class="cite">AGENTS.md:196-197</code></a>); a default cap of 4 concurrent workers in away mode (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-afk-contract.sh#L124"><code class="cite">bin/fm-afk-contract.sh:124</code></a>, <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-spawn.sh#L1527-L1535"><code class="cite">bin/fm-spawn.sh:1527-1535</code></a>). A per-project lock refuses a contending spawn rather than queueing it: "contention refuses rather than waits" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-spawn.sh#L150-L165"><code class="cite">bin/fm-spawn.sh:150-165</code></a>).</td><td>Twenty is possible in principle; each spawn costs a fetch, a hard reset and up to 60 s of waiting (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-spawn.sh#L4253-L4276"><code class="cite">bin/fm-spawn.sh:4253-4276</code></a>).</td></tr></tbody></table></div>
+<p><strong>Recommendation.</strong></p>
+<ul><li><strong>Use the repositories where they already live.</strong> A Guildhall config file maps a repository name to its path on disk. Guildmaster never clones, fast-forwards, prunes or switches branches in that clone; its only writes there are <code>git fetch</code>, <code>git worktree add</code> and <code>git worktree remove</code>.</li><li><strong>Camps are plain git worktrees</strong> under the Guildhall (<code>camps/&lt;party&gt;/&lt;name&gt;</code>), made with <code>git worktree add</code> and removed with <code>git worktree remove</code> when the job ends. No pool, no reset of someone else's slot.</li><li><strong>A ticket's camp lives as long as the ticket.</strong> Git will not check the same branch out in two worktrees at once ("<code>git worktree add</code> refuses to create a new worktree when <code>&lt;commit-ish&gt;</code> is a branch name and is already checked out by another worktree", <a href="https://git-scm.com/docs/git-worktree">https://git-scm.com/docs/git-worktree</a>). Since requirement 4.2 says every posting on a ticket goes on <em>one</em> feature branch, a ticket has exactly one camp on that branch, and its contract postings take turns in it, one Adventurer at a time. That is also what "keep going through them one by one" (8.3) asks for. Surveys (read-only postings) can run in parallel in throwaway detached worktrees.</li><li><strong>Twenty streams means twenty camps across many Party Leaders, not twenty on one branch.</strong> The concurrency limit is set by quota, not by git (section 9).</li></ul>
+<p><strong>Trade-offs.</strong> One camp per ticket serialises contract work on that ticket; two independent fixes on the same ticket cannot run in parallel without a second branch, which the patron has ruled out. Working beside the patron's own clone means the patron's uncommitted work and Guildmaster's camps share one <code>.git</code>; <code>git worktree</code> is designed for exactly that, but a patron who runs <code>git worktree prune</code> or deletes a camp by hand can confuse the register (so <code>gm</code> must re-check with <code>git worktree list</code> at start, the way Firstmate's session start reconciles records with reality).</p>
+<h2 id="4-rules-of-engagement-phases-and-playbooks">4. Rules of engagement, phases and playbooks</h2>
+<div class="table-wrap"><table><thead><tr><th>Req</th><th>Firstmate today</th><th>Missing or against</th></tr></thead><tbody><tr><td>4.1 patron-written procedures</td><td>Per-project registry tokens are only delivery mode, <code>+yolo</code>, <code>branch=</code> and <code>forge=</code> (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-project-mode.sh#L27-L35"><code class="cite">bin/fm-project-mode.sh:27-35</code></a>); the registry "is explicitly not project documentation" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/.agents/skills/project-management/SKILL.md#L24-L25"><code class="cite">.agents/skills/project-management/SKILL.md:24-25</code></a>). Standing rules can live in the project's own committed <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md"><code class="cite">AGENTS.md</code></a> (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L151"><code class="cite">AGENTS.md:151</code></a>), one home-wide <code>config/brief-include.md</code> (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/configuration.md#L890-L899"><code class="cite">docs/configuration.md:890-899</code></a>), or a secondmate charter's "genuinely domain-specific hard rules" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/.agents/skills/secondmate-provisioning/SKILL.md#L33"><code class="cite">.agents/skills/secondmate-provisioning/SKILL.md:33</code></a>).</td><td>No per-kind or per-project procedure, and no phase model.</td></tr><tr><td>4.2 never a new branch within a ticket</td><td>The branch is always <code>&lt;prefix&gt;&lt;task-id&gt;</code> (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-spawn.sh#L1495-L1501"><code class="cite">bin/fm-spawn.sh:1495-1501</code></a>), prefix <code>fm/</code> by default and configurable (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-project-mode.sh#L5-L8"><code class="cite">bin/fm-project-mode.sh:5-8</code></a>). Requirements arriving during validation go to follow-up work (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/.agents/skills/validation-supervision/SKILL.md#L15"><code class="cite">.agents/skills/validation-supervision/SKILL.md:15</code></a>), which is a new task and a new branch; a task "cannot be rebound" to another PR (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-pr-merge.sh#L117-L120"><code class="cite">bin/fm-pr-merge.sh:117-120</code></a>).</td><td>This is exactly the patron's complaint: follow-up work gets a new branch by design.</td></tr><tr><td>4.3 the patron's GitLab flow</td><td>Three delivery modes: no-mistakes, direct-PR, local-only (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-dod-lib.sh#L393-L441"><code class="cite">bin/fm-dod-lib.sh:393-441</code></a>). Worker rule 1: "Never push to the default branch (push only your <code>$branch</code> branch)" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-dod-lib.sh#L153"><code class="cite">bin/fm-dod-lib.sh:153</code></a>). "Firstmate has no forge property for GitLab"; it derives the provider from the merge-request URL "<em>after the fact</em>" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/gerrit-forge-integration.md#L129-L130"><code class="cite">docs/gerrit-forge-integration.md:129-130</code></a>, forge values at <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-project-mode.sh#L55-L60"><code class="cite">bin/fm-project-mode.sh:55-60</code></a>); worker instructions say <code>gh-axi</code> (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-dod-lib.sh#L400-L401"><code class="cite">bin/fm-dod-lib.sh:400-401</code></a>); merging needs a successful head pipeline (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/gitlab-merge-watch.md#L239-L240"><code class="cite">docs/gitlab-merge-watch.md:239-240</code></a>); teardown's merged check calls <code>gh</code> only (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-teardown.sh#L1525-L1538"><code class="cite">bin/fm-teardown.sh:1525-1538</code></a>).</td><td>No shared development branch, no promotion step, and pushing to a branch other than the task's own is forbidden.</td></tr><tr><td>4.4 knows and shows its phase</td><td>Task states are backlog buckets (Queued, In flight, Done) and status verbs (<a href="../firstmate/components/backlog-and-decisions/buckets.html">backlog-and-decisions/buckets</a>).</td><td>No per-task phase.</td></tr><tr><td>4.5 a playbook per kind</td><td>Skills are supervisor procedures loaded by trigger (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L403-L406"><code class="cite">AGENTS.md:403-406</code></a>); workers never load them. Named playbooks exist for diagnosis, validation and stuck-worker recovery (<a class="cite" href="https://github.com/kunchenguid/firstmate/tree/29213a09322a35d87b2f8acc29c415f3f860cb64/.agents/skills/diagnostic-reasoning/"><code class="cite">.agents/skills/diagnostic-reasoning/</code></a>, <a class="cite" href="https://github.com/kunchenguid/firstmate/tree/29213a09322a35d87b2f8acc29c415f3f860cb64/.agents/skills/validation-supervision/"><code class="cite">.agents/skills/validation-supervision/</code></a>, <a class="cite" href="https://github.com/kunchenguid/firstmate/tree/29213a09322a35d87b2f8acc29c415f3f860cb64/.agents/skills/stuck-crewmate-recovery/"><code class="cite">.agents/skills/stuck-crewmate-recovery/</code></a>). Dispatch profiles pick harness, model and effort only (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/configuration.md#L984-L1019"><code class="cite">docs/configuration.md:984-1019</code></a>).</td><td>No per-task-type procedure.</td></tr></tbody></table></div>
+<p>The patron's own Firstmate home already knows this domain is different: a local, untracked skill in that home records that the workplace repositories are not Firstmate fleet projects, already use per-ticket worktrees, and send merge requests to integration. Guildmaster is, in effect, the tool for the work that Firstmate was told to stay out of.</p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 960 330" role="img" aria-labelledby="gmv-pb-t">
+  <title id="gmv-pb-t">The ticket playbook as phases: intake, camp, build, dev test, merge request, fix loop back to build on the same branch, sealed, closed</title>
+  <defs>
+    <marker id="gmv-pb-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+  <text class="c4-diagram-title" x="20" y="28">Ticket playbook: the patron's flow as phases</text>
+
+  <g class="gm-bar"><rect x="492" y="46" width="104" height="22" rx="4"/></g>
+  <text class="gm-note-strong" x="505" y="61">patron gate</text>
+  <g class="gm-bar"><rect x="724" y="46" width="104" height="22" rx="4"/></g>
+  <text class="gm-note-strong" x="737" y="61">patron gate</text>
+
+  <g class="c4-component"><rect x="20" y="80" width="104" height="64" rx="8"/>
+    <text class="c4-label" x="72" y="106">1 Intake</text><text class="c4-tech" x="72" y="124">[posting written]</text></g>
+  <g class="c4-component"><rect x="136" y="80" width="104" height="64" rx="8"/>
+    <text class="c4-label" x="188" y="106">2 Camp</text><text class="c4-tech" x="188" y="124">[worktree, branch]</text></g>
+  <g class="c4-component"><rect x="252" y="80" width="104" height="64" rx="8"/>
+    <text class="c4-label" x="304" y="106">3 Build</text><text class="c4-tech" x="304" y="124">[commit on branch]</text></g>
+  <g class="c4-component"><rect x="368" y="80" width="104" height="64" rx="8"/>
+    <text class="c4-label" x="420" y="106">4 Dev test</text><text class="c4-tech" x="420" y="124">[into development]</text></g>
+  <g class="c4-component"><rect x="484" y="80" width="120" height="64" rx="8"/>
+    <text class="c4-label" x="544" y="106">5 Merge request</text><text class="c4-tech" x="544" y="124">[to integration]</text></g>
+  <g class="c4-component"><rect x="616" y="80" width="104" height="64" rx="8"/>
+    <text class="c4-label" x="668" y="106">6 Fix loop</text><text class="c4-tech" x="668" y="124">[same branch]</text></g>
+  <g class="c4-component"><rect x="732" y="80" width="104" height="64" rx="8"/>
+    <text class="c4-label" x="784" y="106">7 Sealed</text><text class="c4-tech" x="784" y="124">[MR merged]</text></g>
+  <g class="c4-component"><rect x="848" y="80" width="96" height="64" rx="8"/>
+    <text class="c4-label" x="896" y="106">8 Closed</text><text class="c4-tech" x="896" y="124">[camp removed]</text></g>
+
+  <g class="c4-rel"><path d="M124,112 L134,112" marker-end="url(#gmv-pb-arrow)"/></g>
+  <g class="c4-rel"><path d="M240,112 L250,112" marker-end="url(#gmv-pb-arrow)"/></g>
+  <g class="c4-rel"><path d="M356,112 L366,112" marker-end="url(#gmv-pb-arrow)"/></g>
+  <g class="c4-rel"><path d="M472,112 L482,112" marker-end="url(#gmv-pb-arrow)"/></g>
+  <g class="c4-rel"><path d="M604,112 L614,112" marker-end="url(#gmv-pb-arrow)"/></g>
+  <g class="c4-rel"><path d="M720,112 L730,112" marker-end="url(#gmv-pb-arrow)"/></g>
+  <g class="c4-rel"><path d="M836,112 L846,112" marker-end="url(#gmv-pb-arrow)"/></g>
+  <g class="c4-rel"><path d="M668,146 C668,196 304,196 304,148" marker-end="url(#gmv-pb-arrow)"/>
+    <text class="c4-rel-label" x="486" y="190">bug found: fix on the same feature branch, re-test on development</text></g>
+
+  <text class="gm-note-strong" x="20" y="234">Rules the playbook enforces</text>
+  <text class="gm-note" x="20" y="256">The feature branch is chosen once, in phase 2, and written on the Party Leader's record. Every later posting on the ticket reuses it.</text>
+  <text class="gm-note" x="20" y="276">development is shared: merge into it, never rebase or force-push it. integration is reached only by a merge request from the feature branch.</text>
+  <text class="gm-note" x="20" y="296">The camp is removed at phase 8. A fix after sealing reopens the ticket at phase 6 on the same branch, never a new one.</text>
+  <text class="gm-note" x="20" y="316">Where the two patron gates sit is a recommendation; the patron decides them (open question Q6).</text>
+</svg>
+</div>
+<figcaption>The ticket kind's playbook, recommended from requirement 4.3. Branch names such as <code>development</code> and <code>integration</code> are the patron's words; the real names belong in the playbook file.</figcaption>
+</figure>
+<p><strong>Recommendation.</strong></p>
+<ul><li><strong>A playbook is a Markdown file per kind</strong> in the Guildhall (<code>playbooks/ticket.md</code>, <code>playbooks/incident.md</code>, ...), written by the patron. It lists the phases in order, what must be true to leave each phase, which phases need the patron's word, and the git operations allowed in each.</li><li><strong>Rules of engagement are a Markdown file per repository or project</strong> (<code>rules/&lt;repo&gt;.md</code>): branch names (<code>development</code>, <code>integration</code>, feature-branch pattern), merge style, what never happens (force-push to a shared branch, a push to integration). The Party Leader's session loads its kind's playbook and its repositories' rules at start.</li><li><strong>The register holds the phase.</strong> <code>gm phase CRM-1234 dev-test</code> records a phase change as an event; the status line and the Guildmaster read it from there.</li><li><strong>The branch is written down once.</strong> In phase 2 the Party Leader records <code>branch=feature/CRM-1234</code> on the ticket's row; <code>gm</code> refuses to create another branch for that ticket, and every writ names the recorded branch.</li><li><strong>Rules that matter are enforced by hooks, not only asked for.</strong> A Claude Code <code>PreToolUse</code> hook can refuse a tool call before it runs. Guildmaster's hook reads the camp's recorded branch and rules and blocks, for example, <code>git checkout -b</code> or <code>git switch -c</code> inside a ticket camp, <code>git push --force</code> to <code>development</code>, and any push to <code>integration</code>. Firstmate already enforces its own safety rules this way (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-arm-pretool-check.sh"><code class="cite">bin/fm-arm-pretool-check.sh</code></a>, <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-cd-pretool-check.sh"><code class="cite">bin/fm-cd-pretool-check.sh</code></a>, <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-subagent-pretool-check.sh"><code class="cite">bin/fm-subagent-pretool-check.sh</code></a>).</li><li>The ticket playbook in the figure is the recommended first playbook; the patron confirms the phases, names and gates (questions Q4 to Q6).</li></ul>
+<p><strong>Trade-offs.</strong> Hook enforcement needs a small command parser; a determined agent can reach the same effect by an unusual command the hook does not recognise, so the hook is a guard rail, not a sandbox. Playbooks as free Markdown are easy to write but only as strict as the prompts reading them; putting phase names in a short machine-readable header (a few <code>phase:</code> lines) lets <code>gm</code> validate <code>gm phase</code> calls without parsing prose.</p>
+<h2 id="5-patron-authored-prompts">5. Patron-authored prompts</h2>
+<div class="table-wrap"><table><thead><tr><th>Req</th><th>Firstmate today</th><th>Missing or against</th></tr></thead><tbody><tr><td>5.1 the patron writes the prompts</td><td>Crew briefs are hard-coded heredocs in <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-brief.sh"><code class="cite">bin/fm-brief.sh</code></a> (ship <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-brief.sh#L615-L664"><code class="cite">bin/fm-brief.sh:615-664</code></a>, scout <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-brief.sh#L544-L588"><code class="cite">bin/fm-brief.sh:544-588</code></a>, secondmate charter <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-brief.sh#L383-L451"><code class="cite">bin/fm-brief.sh:383-451</code></a>); only two slots, <code>{TASK}</code> and <code>{FIRSTMATE_SPEC}</code>, are filled, and by the first mate, not the operator (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L381-L385"><code class="cite">AGENTS.md:381-385</code></a>); "The scaffold is a safety contract, not a suggestion" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L394"><code class="cite">AGENTS.md:394</code></a>). A fixed worker-role block (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-dod-lib.sh#L108-L122"><code class="cite">bin/fm-dod-lib.sh:108-122</code></a>) and a fixed Claude <code>--append-system-prompt</code> (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-spawn.sh#L1988-L1990"><code class="cite">bin/fm-spawn.sh:1988-1990</code></a>) are added at launch. The operator's only injection point is <code>config/brief-include.md</code>, appended last and ranked lowest, per home, never in charters (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/configuration.md#L890-L899"><code class="cite">docs/configuration.md:890-899</code></a>). The secondmate charter text (<code>FM_SECONDMATE_CHARTER</code>, <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-brief.sh#L374-L375"><code class="cite">bin/fm-brief.sh:374-375</code></a>) and its copy in <code>data/charter.md</code>, which the spawn prefers (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-spawn.sh#L2977-L2981"><code class="cite">bin/fm-spawn.sh:2977-2981</code></a>), are operator-editable. The supervision branch prompt is deliberately not configurable (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-branch-prompt.sh#L6-L23"><code class="cite">bin/fm-branch-prompt.sh:6-23</code></a>).</td><td>The patron's guess ("I think first mate does this, but I'm not 100% sure") is half right: charters yes, crew prompts no.</td></tr><tr><td>5.2 audit of which prompt was given</td><td>Each brief survives teardown in <code>data/&lt;id&gt;/brief.md</code> and <code>launch-brief.md</code> (<a href="../firstmate/components/prompts-and-skills/briefs.html">prompts-and-skills/briefs</a>).</td><td>No versioning, no record of which template produced a brief.</td></tr></tbody></table></div>
+<p><strong>Recommendation.</strong></p>
+<ul><li><strong>Every prompt is a patron-owned file</strong> in the Guildhall's <code>prompts/</code> directory: <code>guildmaster.md</code>, <code>party-leader/&lt;kind&gt;.md</code>, <code>adventurer/contract.md</code>, <code>adventurer/survey.md</code>. <code>gm</code> ships sensible first versions; after that they are the patron's.</li><li><strong>Templates have a few named slots and nothing hidden.</strong> <code>gm writ &lt;posting&gt;</code> fills <code>{{posting}}</code>, <code>{{original_words}}</code>, <code>{{branch}}</code>, <code>{{phase}}</code>, <code>{{rules}}</code>, <code>{{playbook}}</code> and writes the result to the posting's folder. Nothing is appended behind the patron's back; what the Adventurer reads is exactly the file.</li><li><strong><code>gm</code> checks a template instead of overriding it.</strong> <code>gm prompts check</code> fails a template that lacks the notice instruction or the branch slot, the few things the machinery depends on. This keeps the patron in charge while catching a template that would break the loop.</li><li><strong>Every rendered writ is recorded</strong> with the template's path and content hash as an audit event, so "which prompt did Task-Fix-login get, and from which version of the template?" has an answer (5.2).</li><li><strong>Claude's own layers stay in play.</strong> A project's <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/CLAUDE.md"><code class="cite">CLAUDE.md</code></a> still loads in the camp (Firstmate relies on the same, <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-brief.sh#L659-L661"><code class="cite">bin/fm-brief.sh:659-661</code></a>); <code>--append-system-prompt</code> is used only for text that is itself a patron template.</li></ul>
+<p><strong>Trade-offs.</strong> Firstmate hard-codes its safety text so that no one can accidentally delete it; handing all text to the patron trades that safety for control, and <code>gm prompts check</code> plus the hooks in section 4 are what buy some of it back. Long, patron-written templates also cost tokens on every dispatch; the templates should stay short and point at the playbook and rules files rather than repeat them.</p>
+<h2 id="6-audit-and-tracing">6. Audit and tracing</h2>
+<div class="table-wrap"><table><thead><tr><th>Req</th><th>Firstmate today</th><th>Missing or against</th></tr></thead><tbody><tr><td>6.1 durable record of what was triggered, when, by whom</td><td>Per-task status log <code>state/&lt;id&gt;.status</code>, append-only <code>state [key=..] [at=&lt;epoch&gt;]: text</code> (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-brief.sh#L342-L346"><code class="cite">bin/fm-brief.sh:342-346</code></a>), deleted at teardown (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-classify-lib.sh#L1725"><code class="cite">bin/fm-classify-lib.sh:1725</code></a>). Opt-in fleet ledger <code>state/fleet-ledger.jsonl</code> with five events: <code>task.dispatched</code>, <code>task.status</code>, <code>task.pr_ready</code>, <code>task.merged</code>, <code>task.cleaned_up</code> (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/fleet-ledger.md#L17-L45"><code class="cite">docs/fleet-ledger.md:17-45</code></a>), at-least-once, never rotated, per home and not inherited (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/fleet-ledger.md#L8-L10"><code class="cite">docs/fleet-ledger.md:8-10</code></a>). Routed requests to a secondmate keep created, delivered and resolved times (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-pending-reply-lib.sh#L22-L67"><code class="cite">bin/fm-pending-reply-lib.sh:22-67</code></a>).</td><td>Spread across many files; the richest ones are deleted at teardown; ledger off by default.</td></tr><tr><td>6.2 Jaeger-style trace view</td><td>A W3C <code>traceparent</code> carrier, "default-off, source-owned, vendor-neutral, and deliberately narrow" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/trace-context.md#L5"><code class="cite">docs/trace-context.md:5</code></a>), minted per task (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-trace-context-lib.sh#L205-L212"><code class="cite">bin/fm-trace-context-lib.sh:205-212</code></a>), exported into the pane as <code>TRACEPARENT</code> and recorded in the task meta (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-spawn.sh#L4829-L4838"><code class="cite">bin/fm-spawn.sh:4829-4838</code></a>). "Firstmate emits no spans of its own" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/trace-context.md#L84"><code class="cite">docs/trace-context.md:84</code></a>); "Firstmate learns nothing about OpenTelemetry, any exporter, collector, storage, or UI" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/trace-context.md#L111"><code class="cite">docs/trace-context.md:111</code></a>).</td><td>No spans, no exporter, and nothing reads the carrier.</td></tr><tr><td>6.3 count rotations and loops</td><td>Scattered counters: a secondmate relaunch record "the captain can count to see frequency" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-secondmate-liveness-lib.sh#L88-L95"><code class="cite">bin/fm-secondmate-liveness-lib.sh:88-95</code></a>), a global wake sequence (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-wake-lib.sh#L2010-L2021"><code class="cite">bin/fm-wake-lib.sh:2010-2021</code></a>), watcher poll counts (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-watch.sh#L2990-L3004"><code class="cite">bin/fm-watch.sh:2990-3004</code></a>), busy/idle sequence per incarnation (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-busy-lib.sh#L14-L25"><code class="cite">bin/fm-busy-lib.sh:14-25</code></a>). Per-turn token cost is logged for the supervision host only (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-supervision-engine-lib.sh#L383-L391"><code class="cite">bin/fm-supervision-engine-lib.sh:383-391</code></a>).</td><td>No per-task loop count; crew tokens recorded nowhere.</td></tr><tr><td>6.4 trace follows every hop</td><td>Captain to first mate: no carrier. First mate to secondmate: the mate's own task carrier. Secondmate to crew: each crew task "roots its own per-task trace", deliberately (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/trace-context.md#L44-L47"><code class="cite">docs/trace-context.md:44-47</code></a>, <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/trace-context.md#L66"><code class="cite">docs/trace-context.md:66</code></a>).</td><td>By design, the hops are separate traces with no parent link.</td></tr></tbody></table></div>
+<p><strong>Recommendation.</strong></p>
+<ul><li><strong>One events table is the audit.</strong> Every <code>gm</code> call and every hook writes one row: time, actor (guildmaster, party, adventurer, hook, patron), event kind, posting id, and trace fields (<code>trace_id</code>, <code>span_id</code>, <code>parent_span_id</code>). Nothing is deleted at teardown.</li><li><strong>A posting is a trace.</strong> The trace starts when the patron's message becomes a posting; the Party Leader's classify turn, the dispatch, the Adventurer run and its tool calls, the push, each notice and the patron's acceptance are spans under it. This is the opposite of Firstmate's "each routed task roots its own trace" rule, and it is what the patron asked to see: the whole conversation from Guildmaster to Party Leader to Adventurer as one picture.</li><li><strong>Adventurer spans come from Claude Code itself.</strong> Claude Code has beta OpenTelemetry tracing (<code>CLAUDE_CODE_ENABLE_TELEMETRY=1</code>, <code>CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1</code>, <code>OTEL_TRACES_EXPORTER=otlp</code>) with a <code>claude_code.interaction</code> span per prompt and <code>claude_code.llm_request</code> and <code>claude_code.tool</code> spans under it. Crucially, "in Agent SDK and non-interactive sessions started with <code>-p</code>, Claude Code also reads <code>TRACEPARENT</code> ... from its own environment" (<a href="https://code.claude.com/docs/en/monitoring-usage">https://code.claude.com/docs/en/monitoring-usage</a>). So <code>gm dispatch</code> sets <code>TRACEPARENT</code> to the posting's dispatch span, and every model call and tool call the Adventurer makes nests under the posting with no Guildmaster code at all.</li><li><strong>Party Leader and Guildmaster spans come from <code>gm</code> and hooks.</strong> "Interactive sessions ignore inbound <code>TRACEPARENT</code>" (same page), so their turns cannot be parented natively. <code>gm</code> writes a span for each of its own calls, and <code>UserPromptSubmit</code> and <code>Stop</code> hooks bracket each turn, carrying Claude Code's <code>prompt_id</code> so the two sources can be matched.</li><li><strong>Counting answers "how many times did it go round".</strong> Tool spans, test runs, wakes, relaunches and retries are all rows or spans with a kind; a count per posting is one query.</li><li><strong>The viewer is optional and last.</strong> <code>gm trace &lt;posting&gt;</code> prints a text waterfall from SQLite with no extra software. For the Jaeger view, run Jaeger locally; it is "built on top of the OpenTelemetry Collector framework" and accepts OTLP on ports 4317 and 4318 (<a href="https://www.jaegertracing.io/docs/latest/architecture/">https://www.jaegertracing.io/docs/latest/architecture/</a>), so both Claude Code's spans and <code>gm trace export</code>'s spans go straight to it.</li></ul>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 940 390" role="img" aria-labelledby="gmv-tr-t">
+  <title id="gmv-tr-t">One posting as a trace: a root span for the posting with child spans for the Party Leader's turns, the Adventurer run, its tool calls, the push, and the notices</title>
+  <text class="c4-diagram-title" x="20" y="28">One posting as one trace (what a Jaeger view would show)</text>
+
+  <text class="gm-note" x="330" y="56">0 min</text>
+  <text class="gm-note" x="480" y="56">10</text>
+  <text class="gm-note" x="630" y="56">20</text>
+  <text class="gm-note" x="780" y="56">30</text>
+  <line class="gm-axis" x1="330" y1="62" x2="330" y2="370"/>
+  <line class="gm-axis" x1="480" y1="62" x2="480" y2="370"/>
+  <line class="gm-axis" x1="630" y1="62" x2="630" y2="370"/>
+  <line class="gm-axis" x1="780" y1="62" x2="780" y2="370"/>
+
+  <text class="gm-note-strong" x="20" y="86">posting Task-Fix-login</text>
+  <g class="gm-span-gm"><rect x="330" y="72" width="560" height="20" rx="3"/><text class="gm-span-text" x="336" y="86">trace root · patron message → closed</text></g>
+
+  <text class="gm-note" x="36" y="116">party-leader.turn classify</text>
+  <g class="gm-span-cm"><rect x="330" y="102" width="12" height="20" rx="3"/></g>
+  <text class="gm-note" x="348" y="116">received, queued (3 of 5)</text>
+
+  <text class="gm-note" x="36" y="146">party-leader.dispatch</text>
+  <g class="gm-span-cm"><rect x="375" y="132" width="10" height="20" rx="3"/></g>
+  <text class="gm-note" x="391" y="146">writ from prompts/adventurer/contract.md @ 3f2a</text>
+
+  <text class="gm-note" x="36" y="176">adventurer.run</text>
+  <g class="gm-span-adv"><rect x="385" y="162" width="345" height="20" rx="3"/><text class="gm-span-text" x="391" y="176">claude -p in camp CRM-1234 · feature/CRM-1234</text></g>
+
+  <text class="gm-note" x="52" y="206">tool Read ×9 · Edit ×7</text>
+  <g class="gm-span-adv"><rect x="392" y="192" width="6" height="20" rx="2"/><rect x="420" y="192" width="6" height="20" rx="2"/><rect x="455" y="192" width="6" height="20" rx="2"/><rect x="497" y="192" width="6" height="20" rx="2"/><rect x="560" y="192" width="6" height="20" rx="2"/></g>
+
+  <text class="gm-note" x="52" y="236">tool Bash npm test ×3</text>
+  <g class="gm-span-adv"><rect x="520" y="222" width="36" height="20" rx="2"/><rect x="590" y="222" width="36" height="20" rx="2"/><rect x="660" y="222" width="36" height="20" rx="2"/></g>
+  <text class="gm-note" x="700" y="236">2 failed, 1 passed</text>
+
+  <text class="gm-note" x="52" y="266">git push feature/CRM-1234</text>
+  <g class="gm-span-ext"><rect x="700" y="252" width="14" height="20" rx="2"/></g>
+
+  <text class="gm-note" x="52" y="296">git merge into development</text>
+  <g class="gm-span-ext"><rect x="716" y="282" width="14" height="20" rx="2"/></g>
+  <text class="gm-note" x="736" y="296">rule check: allowed</text>
+
+  <text class="gm-note" x="36" y="326">party-leader.turn review</text>
+  <g class="gm-span-cm"><rect x="732" y="312" width="16" height="20" rx="3"/></g>
+  <text class="gm-note" x="754" y="326">notice: done: pushed</text>
+
+  <text class="gm-note" x="36" y="356">patron accepts</text>
+  <g class="gm-span-gm"><rect x="880" y="342" width="10" height="20" rx="3"/></g>
+  <text class="gm-note" x="760" y="356">notice: closed</text>
+</svg>
+</div>
+<figcaption>An illustration, not real data. The rows under <em>adventurer.run</em> would come from Claude Code's own tracing, parented through <code>TRACEPARENT</code>; the other rows are spans <code>gm</code> and the hooks write into the register and export as OpenTelemetry. Counts such as <em>Bash npm test ×3</em> answer "how many times did it go round".</figcaption>
+</figure>
+<p><strong>Trade-offs.</strong> Claude Code's tracing is beta, and its span names are not the OpenTelemetry GenAI names (<code>invoke_agent</code>, <code>execute_tool</code>), which are themselves still "Development" status (<a href="https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-agent-spans.md">https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-agent-spans.md</a>); expect renames. Two span sources (Claude Code's exporter and <code>gm</code>'s register) mean the register alone holds the Guildmaster-level story but not every tool call; if the patron wants one local store of everything, a small OpenTelemetry Collector can write to Jaeger and to a file at once. Jaeger's quick-start image keeps "transient in-memory storage" (<a href="https://www.jaegertracing.io/docs/latest/getting-started/">https://www.jaegertracing.io/docs/latest/getting-started/</a>), so the register, not Jaeger, is the permanent record. Claude Code's spans "redact user prompt text, tool input details, and tool content by default" (<a href="https://code.claude.com/docs/en/monitoring-usage">https://code.claude.com/docs/en/monitoring-usage</a>); seeing <em>which</em> command ran needs <code>OTEL_LOG_TOOL_DETAILS=1</code>, which puts work content into the trace store, so it must stay on the patron's machine (see <a href="#decisions-the-patron-has-not-mentioned">Decisions the patron has not mentioned</a>).</p>
+<h2 id="7-console-where-am-i">7. Console: where am I</h2>
+<div class="table-wrap"><table><thead><tr><th>Req</th><th>Firstmate today</th><th>Missing or against</th></tr></thead><tbody><tr><td>7.1 always see where I am</td><td>No Claude Code status line: the tracked <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/.claude/settings.json"><code class="cite">.claude/settings.json</code></a> configures hooks only and has no <code>statusLine</code>. "Where am I" is on demand: <code>/bearings</code> prints Captain's Call, Recently Landed, Underway, Charted Next (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/.agents/skills/bearings/SKILL.md#L145-L179"><code class="cite">.agents/skills/bearings/SKILL.md:145-179</code></a>); <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-fleet-view.sh#L1-L96"><code class="cite">bin/fm-fleet-view.sh:1-96</code></a> renders tables; <code>fm-inbox.sh status</code> is a read-only view "safe to run in a loop" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-inbox.sh#L14-L16"><code class="cite">bin/fm-inbox.sh:14-16</code></a>).</td><td>Nothing on screen all the time, and no phase to show.</td></tr><tr><td>7.2 multitask without losing my place</td><td>One first-mate conversation carries every task; secondmates are not meant to be talked to.</td><td>The patron's stated biggest problem with Firstmate.</td></tr><tr><td>7.3 control what the console shows</td><td>Calm (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/calm.md"><code class="cite">docs/calm.md</code></a>) hides tool rows, operational rows and short mid-turn notes and turns the spinner into a sailboat, but only through Claude Code's early-access function hooks, which Firstmate never enables (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/calm.md#L182-L195"><code class="cite">docs/calm.md:182-195</code></a>). The Pi Calm extension only clears its status slot (<code>.pi/extensions/fm-calm.ts:429</code>).</td><td>Calm <em>removes</em> noise; nothing <em>adds</em> orientation.</td></tr></tbody></table></div>
+<p><strong>What AI-DLC v2 actually does.</strong> The patron remembered AWS AI-DLC "manipulating" the top and bottom bars. AI-DLC v2 (current release v2.10.0, <a href="https://github.com/awslabs/aidlc-workflows">https://github.com/awslabs/aidlc-workflows</a>) uses exactly the Claude Code surfaces available to Guildmaster: its <code>harness/claude/settings.json</code> sets a <code>statusLine</code> command that prints <code>[AIDLC] PHASE [▓▓▓▓▓░░░░░] n/m &gt; Display Name -- Agent</code> from a per-intent <code>aidlc-state.md</code> file, and uses <code>companyAnnouncements</code> to show the phase list at start (<a href="https://github.com/awslabs/aidlc-workflows/blob/main/harness/claude/settings.json">https://github.com/awslabs/aidlc-workflows/blob/main/harness/claude/settings.json</a>, <a href="https://github.com/awslabs/aidlc-workflows/blob/main/docs/reference/06-hooks-and-tools.md">https://github.com/awslabs/aidlc-workflows/blob/main/docs/reference/06-hooks-and-tools.md</a>). Its gates are Claude Code hooks: a <code>PreToolUse</code> plan-approval guard and state-transition guard, a <code>UserPromptSubmit</code> hook (<code>record-human-turn</code>) that records a <code>HUMAN_TURN</code> event the approval gate requires, and a <code>Stop</code> hook whose purpose is to "keep it running until the engine reports a terminal <code>done</code>, <code>parked</code>, or informational <code>notice</code>" (same page). AI-DLC's own docs call its audit write guard "a guardrail, not a security boundary" (<a href="https://github.com/awslabs/aidlc-workflows/blob/main/docs/guide/10-state-and-audit.md">https://github.com/awslabs/aidlc-workflows/blob/main/docs/guide/10-state-and-audit.md</a>). That is strong evidence the recommended design below is buildable today.</p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 900 420" role="img" aria-labelledby="gmv-con-t">
+  <title id="gmv-con-t">Mock-up of a Party Leader's terminal: a tab title naming the focus and phase, one-line notices in the conversation, and a three-line status line at the bottom</title>
+  <text class="c4-diagram-title" x="20" y="28">What the patron would see in one Party Leader's tab (mock-up)</text>
+
+  <g class="gm-term">
+    <rect x="20" y="44" width="860" height="360" rx="8"/>
+    <rect x="20" y="44" width="860" height="30" rx="8"/>
+    <text class="gm-term-muted" x="36" y="64">● ● ●</text>
+    <text class="gm-term-accent" x="110" y="64">CRM-1234 · dev-test</text>
+    <text class="gm-term-muted" x="290" y="64">│ Saved views · build │ Nightly export · idle │ Outage 09-28 · needs you</text>
+
+    <text class="gm-term-muted" x="40" y="104">&gt; the export button is grey on Safari, screenshot attached, fix it</text>
+    <text x="40" y="128">Task-Add-export received · queued 2 of 3 (CSV export button disabled on Safari)</text>
+    <text x="40" y="152">Task-Fix-login done: pushed to feature/CRM-1234, merged into development</text>
+    <text x="40" y="176">Task-Fix-login needs you: keep the old /login?next= URL working? (login redirect loses query)</text>
+    <text class="gm-term-muted" x="40" y="200">&gt; yes keep it, and what was Task-Why-500s about again?</text>
+    <text x="40" y="224">Task-Why-500s (why checkout returns 500 after deploy) · survey · done 09-27 · report ready</text>
+    <text class="gm-term-muted" x="40" y="242">  your words, 09-26 14:02: "prod checkout 500s since this morning, find out why"</text>
+
+    <rect x="36" y="262" width="828" height="34" rx="4"/>
+    <text class="gm-term-muted" x="48" y="284">&gt; _</text>
+
+    <text class="gm-term-accent" x="40" y="326">▸ CRM-1234 · ticket · phase 4/8 dev-test [▓▓▓▓░░░░] · feature/CRM-1234</text>
+    <text x="40" y="350">postings 1 active · 2 queued · 1 parked · 1 needs you · next Task-Add-export</text>
+    <text class="gm-term-muted" x="40" y="374">guild 4 parties · 2 need you (Outage 09-28, CRM-1234) · ctx 41% · Opus</text>
+  </g>
+
+  <text class="gm-note" x="610" y="326">← status line, line 1: where am I</text>
+  <text class="gm-note" x="610" y="350">← line 2: this focus's postings</text>
+  <text class="gm-note" x="610" y="374">← line 3: the rest of the guild</text>
+</svg>
+</div>
+<figcaption>A mock-up of the recommendation, not a screenshot. The tab strip is the terminal's own, titled by Claude Code from the session name; the three bottom lines are one <code>statusLine</code> command (<code>gm statusline</code>) printing three rows. Every notice carries its posting's one-line summary in parentheses.</figcaption>
+</figure>
+<p><strong>Recommendation.</strong></p>
+<ul><li><strong>One tab per Party Leader, titled by Claude Code.</strong> <code>gm open CRM-1234</code> starts the session with <code>--name CRM-1234</code>, a display name "shown in <code>/resume</code> and the terminal title" (<a href="https://code.claude.com/docs/en/cli-reference">https://code.claude.com/docs/en/cli-reference</a>); a <code>SessionStart</code> hook can also set it (<code>sessionTitle</code>, "the same effect as <code>/rename</code>") or emit an OSC title sequence through the hooks' <code>terminalSequence</code> field (<a href="https://code.claude.com/docs/en/hooks">https://code.claude.com/docs/en/hooks</a>). Switching tabs is switching focus.</li><li><strong>A three-line status line</strong> from one command, <code>gm statusline</code>, which reads the session's JSON on stdin (<code>session_name</code>, <code>workspace.git_worktree</code>, <code>context_window.used_percentage</code>, <code>model</code>) and the register (<a href="https://code.claude.com/docs/en/statusline">https://code.claude.com/docs/en/statusline</a>): line 1 the focus, kind, phase and branch; line 2 this focus's postings; line 3 the rest of the guild. "Each <code>echo</code> ... displays as a separate row", so three lines are supported. Set <code>refreshInterval</code> (a few seconds), because event-driven refreshes "can go quiet when the main session is idle ... while a coordinator waits on background subagents", which is exactly a Party Leader waiting on Adventurers.</li><li><strong>A "you were here" recap on return.</strong> A <code>SessionStart</code> hook injects <code>gm where</code> (phase, last three notices, next posting, anything that needs the patron) as <code>additionalContext</code>, and the Party Leader's first line back is that recap. This is what makes switching between twenty things survivable.</li><li><strong>Optional bars outside Claude Code.</strong> A tmux status bar or an iTerm2 badge can run <code>gm roster --short</code> for a guild-wide line; this is the "top bar" if the patron wants one (question Q19).</li><li><strong>Calm is not needed first.</strong> Hiding tool rows helps, but the patron asked for orientation, not silence; add a custom output style later if the transcript is too noisy.</li></ul>
+<p><strong>Trade-offs.</strong> Several Claude sessions each running a status-line script every few seconds is cheap (the script reads SQLite), but a slow script is cancelled ("If a new update triggers while your script is still running, Claude Code cancels the in-flight script"), so <code>gm statusline</code> must return in milliseconds. The status line's <code>rate_limits</code> field "appears only for claude.ai Pro and Max subscribers", so on a Team or Enterprise seat quota cannot be shown from that field (section 9).</p>
+<h2 id="8-intake-never-lose-a-posting">8. Intake: never lose a posting</h2>
+<div class="table-wrap"><table><thead><tr><th>Req</th><th>Firstmate today</th><th>Missing or against</th></tr></thead><tbody><tr><td>8.1 every item becomes a posting at once, with what came with it</td><td>The first mate files a backlog item in <code>data/backlog.md</code> through tasks-axi before dispatch (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L205"><code class="cite">AGENTS.md:205</code></a>, <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L359-L377"><code class="cite">AGENTS.md:359-377</code></a>). The captain's words are kept only in each brief's <code>## Captain&#x27;s intent</code> (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L216"><code class="cite">AGENTS.md:216</code></a>, <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L382"><code class="cite">AGENTS.md:382</code></a>). The only code-owned record of raw captain prompts is the opt-in supervision-host mirror (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-host-mirror.sh#L11-L16"><code class="cite">bin/fm-host-mirror.sh:11-16</code></a>). Screenshots are handled only for relay mentions (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/.agents/skills/fmx-respond/SKILL.md#L115-L171"><code class="cite">.agents/skills/fmx-respond/SKILL.md:115-171</code></a>).</td><td>Filing is the model's job, not the code's; nothing guarantees that ten rapid messages become ten items, and screenshots have nowhere to live.</td></tr><tr><td>8.2 postings belong to their focus</td><td>Routed work lives in the mate's own backlog (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L362-L363"><code class="cite">AGENTS.md:362-363</code></a>).</td><td>Fits.</td></tr><tr><td>8.3 one by one, never dropped</td><td>Backlog buckets and a completion gate (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-captain-hold.sh"><code class="cite">bin/fm-captain-hold.sh</code></a>, <a href="../firstmate/components/backlog-and-decisions/completion-gate.html">backlog-and-decisions/completion-gate</a>).</td><td>Nothing enforces that every patron message produced a row.</td></tr><tr><td>8.4 setting aside is explicit</td><td>Captain holds carry a one-line reason and optional <code>--until</code> (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-captain-hold.sh#L52-L54"><code class="cite">bin/fm-captain-hold.sh:52-54</code></a>, <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-captain-hold.sh#L831"><code class="cite">bin/fm-captain-hold.sh:831</code></a>); bearings shows holds as live, blocked, dated or aged after 14 days (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-fleet-snapshot.sh#L36-L37"><code class="cite">bin/fm-fleet-snapshot.sh:36-37</code></a>).</td><td>A deferral date is only noticed at the next bearings or snapshot; no watcher fires when it arrives.</td></tr><tr><td>8.5 see every posting and where it stands</td><td><a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-fleet-view.sh"><code class="cite">bin/fm-fleet-view.sh</code></a> and <code>/bearings</code>; the Done list keeps 10 (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/configuration.md#L336"><code class="cite">docs/configuration.md:336</code></a>).</td><td>Workable for tasks the first mate filed; misses anything it never filed.</td></tr><tr><td>8.6 one-line notices</td><td>Status lines are one line each, but they go to the supervisor, not the patron (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-brief.sh#L342-L346"><code class="cite">bin/fm-brief.sh:342-346</code></a>).</td><td>No patron-facing notice grammar.</td></tr><tr><td>8.7 stable readable ids</td><td>Task ids allow <code>[A-Za-z0-9._-]</code> up to 64 characters (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-pr-lib.sh#L99-L116"><code class="cite">bin/fm-pr-lib.sh:99-116</code></a>).</td><td>The id is the first mate's choice and dies with the task's state at teardown.</td></tr><tr><td>8.8 context comes back with the item</td><td>Startup prints the backlog without bodies (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-session-start.sh#L419-L420"><code class="cite">bin/fm-session-start.sh:419-420</code></a>); open decisions are cut to 220 bytes each and 4000 in total (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-wake-drain.sh#L466-L505"><code class="cite">bin/fm-wake-drain.sh:466-505</code></a>); bearings must not use hold or body prose (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/.agents/skills/bearings/SKILL.md#L51"><code class="cite">.agents/skills/bearings/SKILL.md:51</code></a>).</td><td>Context is deliberately trimmed when an item resurfaces, which is the opposite of 8.8.</td></tr></tbody></table></div>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 900 320" role="img" aria-labelledby="gmv-lc-t">
+  <title id="gmv-lc-t">Posting lifecycle: received, queued, active, done, closed, with parked and needs-you side states, each transition printing a one-line notice</title>
+  <defs>
+    <marker id="gmv-lc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+  <text class="c4-diagram-title" x="20" y="28">One posting, from the patron's message to closed</text>
+
+  <text class="gm-note" x="20" y="74">Task-Fix-login received</text>
+  <text class="gm-note" x="200" y="74">Task-Fix-login queued (3 of 5)</text>
+  <text class="gm-note" x="380" y="74">Task-Fix-login started</text>
+  <text class="gm-note" x="560" y="74">Task-Fix-login done: pushed</text>
+  <text class="gm-note" x="740" y="74">Task-Fix-login closed</text>
+
+  <g class="c4-component"><rect x="20" y="86" width="140" height="56" rx="8"/>
+    <text class="c4-label" x="90" y="110">received</text><text class="c4-tech" x="90" y="128">[words + screenshot kept]</text></g>
+  <g class="c4-component"><rect x="200" y="86" width="140" height="56" rx="8"/>
+    <text class="c4-label" x="270" y="110">queued</text><text class="c4-tech" x="270" y="128">[ordered, on the board]</text></g>
+  <g class="c4-component"><rect x="380" y="86" width="140" height="56" rx="8"/>
+    <text class="c4-label" x="450" y="110">active</text><text class="c4-tech" x="450" y="128">[an Adventurer holds it]</text></g>
+  <g class="c4-component"><rect x="560" y="86" width="140" height="56" rx="8"/>
+    <text class="c4-label" x="630" y="110">done</text><text class="c4-tech" x="630" y="128">[result recorded]</text></g>
+  <g class="c4-component"><rect x="740" y="86" width="140" height="56" rx="8"/>
+    <text class="c4-label" x="810" y="110">closed</text><text class="c4-tech" x="810" y="128">[patron accepted]</text></g>
+
+  <g class="c4-container"><rect x="200" y="214" width="140" height="56" rx="8"/>
+    <text class="c4-label" x="270" y="238">parked</text><text class="c4-tech" x="270" y="256">[reason + wake condition]</text></g>
+  <g class="c4-container"><rect x="380" y="214" width="140" height="56" rx="8"/>
+    <text class="c4-label" x="450" y="238">needs you</text><text class="c4-tech" x="450" y="256">[a ruling, with context]</text></g>
+
+  <text class="gm-note" x="200" y="292">Task-Fix-login parked: waits for dev deploy</text>
+  <text class="gm-note" x="420" y="310">Task-Fix-login needs you: keep old URL?</text>
+
+  <g class="c4-rel"><path d="M160,114 L198,114" marker-end="url(#gmv-lc-arrow)"/></g>
+  <g class="c4-rel"><path d="M340,114 L378,114" marker-end="url(#gmv-lc-arrow)"/></g>
+  <g class="c4-rel"><path d="M520,114 L558,114" marker-end="url(#gmv-lc-arrow)"/></g>
+  <g class="c4-rel"><path d="M700,114 L738,114" marker-end="url(#gmv-lc-arrow)"/></g>
+  <g class="c4-rel"><path d="M400,144 C390,180 330,190 316,212" marker-end="url(#gmv-lc-arrow)"/>
+    <text class="c4-rel-label" x="382" y="186">set aside</text></g>
+  <g class="c4-rel"><path d="M236,212 L236,146" marker-end="url(#gmv-lc-arrow)"/>
+    <text class="c4-rel-label" x="236" y="184">wake met</text></g>
+  <g class="c4-rel"><path d="M470,144 L470,212" marker-end="url(#gmv-lc-arrow)"/></g>
+  <g class="c4-rel"><path d="M500,212 L500,146" marker-end="url(#gmv-lc-arrow)"/>
+    <text class="c4-rel-label" x="540" y="184">answered</text></g>
+</svg>
+</div>
+<figcaption>Recommended posting states. Every arrow prints exactly one notice line; the examples above and below the states are what the patron would see. Nothing leaves the board except by reaching <em>closed</em>.</figcaption>
+</figure>
+<p><strong>Recommendation.</strong></p>
+<ul><li><strong>Capture is code, classification is the model.</strong> A <code>UserPromptSubmit</code> hook, which receives the full <code>prompt</code> text (<a href="https://code.claude.com/docs/en/hooks">https://code.claude.com/docs/en/hooks</a>), writes every patron message in a Party Leader's session into the register as an <em>unsorted</em> inbox row, verbatim, before Claude sees it. The Party Leader's job is to sort each row into new postings, a steer of an existing posting, or a question, through <code>gm post</code>, <code>gm steer</code> or <code>gm answered</code>.</li><li><strong>The turn cannot end with anything unsorted.</strong> A <code>Stop</code> hook refuses to let the Party Leader stop while its session has unsorted rows (exit code 2 on <code>Stop</code> "Prevents Claude from stopping, continues the conversation", same page). This is the mechanical answer to "it forgot about some tasks", and it is the same approach AI-DLC v2 takes with its human-turn and continue-workflow hooks. Firstmate's turn-end guard is the precedent in this lineage (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/turnend-guard.md"><code class="cite">docs/turnend-guard.md</code></a>).</li><li><strong>Posting ids are made by <code>gm</code>, in the patron's format.</strong> <code>gm post</code> takes a verb and a short slug and returns a guild-wide unique id such as <code>Task-Fix-login</code> (a numeric suffix only on collision). The id never changes and never dies; the patron can type it anywhere (<code>gm show Task-Fix-login</code>, or just "Task-Fix-login: keep the old URL" in the Party Leader's chat, which the sorter treats as a steer).</li><li><strong>Every notice carries its context.</strong> The notice grammar is <code>&lt;id&gt; &lt;verb&gt;[: detail] (&lt;one-line summary&gt;)</code>, with verbs from a closed list: <code>received</code>, <code>queued</code>, <code>started</code>, <code>parked</code>, <code>needs you</code>, <code>resumed</code>, <code>done</code>, <code>failed</code>, <code>closed</code>. The summary in parentheses is what makes a resurfaced item recognisable; <code>gm show &lt;id&gt;</code> gives the rest: the patron's original words with their time, attachments, phase, every notice so far, and the last Adventurer result.</li><li><strong>Parked means parked with a reason and a wake condition.</strong> <code>gm park &lt;id&gt; --why &quot;waits for dev deploy&quot; --until &lt;time or event&gt;</code>; the status line counts parked postings, and <code>gm</code> resurfaces a posting whose condition is met instead of waiting for someone to look.</li><li><strong>Screenshots go into the posting's folder.</strong> How they get there is open: see the callout.</li></ul>
+<div class="callout unclear"><p><strong>Screenshots are not settled by the documentation.</strong> The <code>UserPromptSubmit</code> hook is documented to receive the prompt <em>text</em>, with pasted text expanded in place; the hooks reference says nothing about pasted images. Until that is tested, the dependable path is a drop folder (<code>gm attach &lt;id&gt; &lt;file&gt;</code>, or the Party Leader copying a dragged-in file path into the posting's folder). Question Q18 asks how the patron sends screenshots today.</p></div>
+<p><strong>Alternatives considered.</strong> Claude Code's own task list (<code>TaskCreate</code>, <code>TaskList</code>, shareable across sessions with <code>CLAUDE_CODE_TASK_LIST_ID</code>, <a href="https://code.claude.com/docs/en/interactive-mode#task-list">https://code.claude.com/docs/en/interactive-mode#task-list</a>) is tempting, but it lives in Claude's private directory, is on by default only for older models (<a href="https://code.claude.com/docs/en/tools-reference#task-tool-availability">https://code.claude.com/docs/en/tools-reference#task-tool-availability</a>), and cannot hold the patron's original words, phases or notices; the register can import from it later if useful.</p>
+<p><strong>Trade-offs.</strong> Capturing every message verbatim also captures chit-chat; sorting it costs a little of each turn, and "question" is a valid sort, so nothing is forced into a posting. A Stop hook that blocks can loop if <code>gm</code> is broken; like Firstmate's guard, it needs a block budget and a loud failure (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/turnend-guard.md"><code class="cite">docs/turnend-guard.md</code></a> describes Firstmate's block budget of 3).</p>
+<h2 id="9-claude-only-reliability">9. Claude-only reliability</h2>
+<div class="table-wrap"><table><thead><tr><th>Req</th><th>Firstmate today</th><th>Missing or against</th></tr></thead><tbody><tr><td>9.1 Claude Code only</td><td>Harness-agnostic by design: adapters for Claude and many others (<a href="../firstmate/components/crew/harnesses.html">crew/harnesses</a>); "<code>resume</code> is not a verb" because resume differs across adapters (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/agent-control.md#L58-L61"><code class="cite">docs/agent-control.md:58-61</code></a>).</td><td>Much of Firstmate's complexity exists to support harnesses the patron does not use.</td></tr><tr><td>9.2 tight control, no avoidable errors, work keeps moving</td><td>Claude-specific machinery exists and is battle-tested: <code>SessionStart</code>, <code>PreToolUse</code>, <code>UserPromptSubmit</code> and <code>Stop</code> hooks in <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/.claude/settings.json"><code class="cite">.claude/settings.json</code></a>; workspace trust pre-registered (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-claude-trust.sh#L1-L60"><code class="cite">bin/fm-claude-trust.sh:1-60</code></a>); a Stop auto-arm (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-claude-stop-autoarm.sh#L1-L80"><code class="cite">bin/fm-claude-stop-autoarm.sh:1-80</code></a>); a turn-end guard (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/turnend-guard.md"><code class="cite">docs/turnend-guard.md</code></a>); a subagent guard created after the 2026-07-22 loss of untracked subagent work (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/subagent-guard.md#L9-L26"><code class="cite">docs/subagent-guard.md:9-26</code></a>); a wedge escalation after 240 s of a quiet working pane (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-watch.sh#L327"><code class="cite">bin/fm-watch.sh:327</code></a>). Quota is ranked across providers (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/.agents/skills/quota-array-dispatch/SKILL.md#L39-L118"><code class="cite">.agents/skills/quota-array-dispatch/SKILL.md:39-118</code></a>) with an optional low-quota wake (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-procevent-quota.sh#L1-L20"><code class="cite">bin/fm-procevent-quota.sh:1-20</code></a>). No <code>PreCompact</code> hook (open ticket #4796).</td><td>Good parts to copy; no compaction hook; quota logic is built for many providers.</td></tr><tr><td>9.3 others later, without building for them</td><td>Everything is behind harness adapters.</td><td>The seam is right; its breadth is not needed now.</td></tr></tbody></table></div>
+<p><strong>Recommendation.</strong></p>
+<ul><li><strong>Use Claude Code's own surfaces fully</strong>, since no other familiar needs supporting: <code>SessionStart</code> (charter, playbook, <code>gm where</code>), <code>UserPromptSubmit</code> (capture), <code>PreToolUse</code> (rules), <code>PostToolUse</code> (audit rows), <code>PreCompact</code> (write a "where I am" note to the register before context is squeezed, the gap Firstmate's #4796 describes), <code>Stop</code> (never end unsorted; <code>asyncRewake</code> for Adventurer events), <code>StopFailure</code> (a <code>rate_limit</code> matcher records a quota event and pauses dispatch). All are in the hooks reference (<a href="https://code.claude.com/docs/en/hooks">https://code.claude.com/docs/en/hooks</a>).</li><li><strong>Adventurers are <code>claude -p</code> runs with explicit permissions.</strong> Each gets a pre-trusted camp, an explicit permission mode and allowed-tool list, the patron's writ as its prompt, and <code>TRACEPARENT</code>. Headless runs are what read inbound trace context, and they exit cleanly, which is easy to supervise.</li><li><strong>Background sessions are a later option.</strong> Claude Code's agent view (<code>claude --bg</code>, <code>claude agents --json</code>) supervises background sessions, restarts crashed ones, and survives sleep (<a href="https://code.claude.com/docs/en/agent-view">https://code.claude.com/docs/en/agent-view</a>). It is a research preview and cannot be combined with <code>-p</code>, so it is not the first foundation; it is a good fit later for Party Leaders themselves.</li><li><strong>Quota is the real limit.</strong> "Running ten agents in parallel uses quota roughly ten times as fast as running one" (<a href="https://code.claude.com/docs/en/agent-view">https://code.claude.com/docs/en/agent-view</a>); Team and Enterprise seats have a five-hour and a weekly allowance "shared with Claude chat and Cowork" (<a href="https://code.claude.com/docs/en/costs">https://code.claude.com/docs/en/costs</a>); for 429s the docs advise "Reduce concurrency ... avoid running many parallel subagents" (<a href="https://code.claude.com/docs/en/errors">https://code.claude.com/docs/en/errors</a>). <code>gm</code> should hold a guild-wide cap on live Adventurers (start at 3), queue beyond it, and show the queue in the status line.</li><li><strong>"Push things" needs credentials that work headless.</strong> GitLab SSH keys or a <code>glab</code> token must be usable from a <code>claude -p</code> run without a prompt; the <code>PreToolUse</code> rules then decide <em>which</em> pushes are allowed (section 4).</li><li><strong>Keep one seam.</strong> Only one <code>gm</code> function knows how to start a familiar; everything else talks to the register. That is enough to add another provider later.</li></ul>
+<p><strong>Trade-offs.</strong> Leaning on Claude Code features couples Guildmaster to a fast-moving product (the hooks reference lists dozens of events, and tracing and agent view are beta or preview); <code>gm doctor</code> should check the installed Claude Code version and the hook schema at start. A dispatch cap slows bursts; that is the point.</p>
+<h2 id="10-storage-and-reach">10. Storage and reach</h2>
+<div class="table-wrap"><table><thead><tr><th>Req</th><th>Firstmate today</th><th>Missing or against</th></tr></thead><tbody><tr><td>10.1 files at the edges, SQLite at the core</td><td>No Firstmate document states why it uses files. The nearest statements: "all state lives on disk and in the active session backend" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/README.md#L53"><code class="cite">README.md:53</code></a>); "durable state and live backend inventory, not conversation memory, are authoritative" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L128"><code class="cite">AGENTS.md:128</code></a>); "the existing backlog remains the only durable work database" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/captain-hold-lifecycle.md#L29"><code class="cite">docs/captain-hold-lifecycle.md:29</code></a>). The cost is hand-built machinery: symlink locks with owner directories, pid files and dead-owner reaping (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-wake-lib.sh#L572-L584"><code class="cite">bin/fm-wake-lib.sh:572-584</code></a>), lease files (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-lease-lib.sh#L1-L40"><code class="cite">bin/fm-lease-lib.sh:1-40</code></a>), and read cursors keyed on file identity, where "an in-place edit of the same size is not detected" (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-classify-lib.sh#L1102"><code class="cite">bin/fm-classify-lib.sh:1102</code></a>).</td><td>Every coordination feature re-solves concurrency by hand.</td></tr><tr><td>10.2 no remote homes</td><td>Remote secondmates over SSH are a whole area (<a href="../firstmate/components/remote/index.html">remote</a>).</td><td>Not needed now.</td></tr></tbody></table></div>
+<div class="callout unclear"><p><strong>The update-restart race is not documented.</strong> The earlier conversation named "the update restart colliding with the watcher's automatic relaunch" as an example. Firstmate's docs and ticket snapshot do not describe it. Reading the code, the update restart goes through <code>fm-control.sh relaunch</code> under <code>state/.control-&lt;id&gt;.lock</code> (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-secondmate-restart.sh#L175"><code class="cite">bin/fm-secondmate-restart.sh:175</code></a>, <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-control.sh#L311-L315"><code class="cite">bin/fm-control.sh:311-315</code></a>), while the watcher's liveness tick holds a different lock, <code>state/.secondmate-liveness-&lt;id&gt;.lock</code> (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-secondmate-liveness-lib.sh#L74-L77"><code class="cite">bin/fm-secondmate-liveness-lib.sh:74-77</code></a>), may kill the endpoint and respawn it (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-secondmate-liveness-lib.sh#L282-L296"><code class="cite">bin/fm-secondmate-liveness-lib.sh:282-296</code></a>), and is documented as serialising only against the session-start sweep (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-watch.sh#L1035-L1037"><code class="cite">bin/fm-watch.sh:1035-1037</code></a>). The two share only the per-spawn lock (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-spawn.sh#L1661-L1665"><code class="cite">bin/fm-spawn.sh:1661-1665</code></a>). That leaves a plausible window, unconfirmed by running anything, and it is the kind of bug one transaction would close.</p></div>
+<p><strong>Recommendation.</strong></p>
+<ul><li><strong>SQLite for everything that coordinates</strong>: parties, postings, inbox rows, phases, leases, the summons queue, rulings, events and spans. Use WAL mode, a busy timeout, and <code>BEGIN IMMEDIATE</code> for every write: in WAL mode "readers do not block writers and a writer does not block readers", but there can "only be one writer at a time" (<a href="https://sqlite.org/wal.html">https://sqlite.org/wal.html</a>), and a deferred transaction that later writes may fail with <code>SQLITE_BUSY</code> (<a href="https://sqlite.org/lang_transaction.html">https://sqlite.org/lang_transaction.html</a>). Claims are one statement with <code>RETURNING</code> (available "since version 3.35.0", <a href="https://sqlite.org/lang_returning.html">https://sqlite.org/lang_returning.html</a>).</li><li><strong>Files for everything a person writes or reads</strong>: charters, playbooks, rules, prompt templates, notes, field reports, screenshots, each posting's original words. The register stores their paths and hashes.</li><li><strong>Only <code>gm</code> touches the database.</strong> Agents call <code>gm</code>; no prompt ever contains SQL. <code>gm export</code> writes a readable Markdown snapshot of the quest board for people and for grep.</li><li><strong>Local disk only.</strong> "WAL does not work over a network filesystem" (<a href="https://sqlite.org/wal.html">https://sqlite.org/wal.html</a>), which suits the patron's "no remote homes for now".</li></ul>
+<p><strong>Prior art.</strong> Beads, an agent issue tracker often cited for pairing SQLite with a git-tracked JSONL file, has since moved: its README says it is "powered by Dolt", and its changelog for 0.58.0 says the SQLite backend was removed, with <code>.beads/issues.jsonl</code> now "an export for viewers and interchange, not the source of truth" (<a href="https://github.com/gastownhall/beads">https://github.com/gastownhall/beads</a>; a later changelog entry mentions SQLite again, so its current status is unclear). The lesson worth borrowing is the split itself: a database as the truth, readable files as an export. Its atomic <code>--claim</code> and "ready" query are good shapes for <code>gm</code>.</p>
+<p><strong>Trade-offs.</strong> A database is opaque to <code>cat</code> and to an agent's ordinary file tools, so debugging needs <code>gm</code> or <code>sqlite3</code>; that is the price of transactions. A single file is a single point of loss, so backups are not optional (see <a href="#decisions-the-patron-has-not-mentioned">Decisions the patron has not mentioned</a>). Moving to several machines later means putting the register behind a small server; keeping <code>gm</code> the only door keeps that possible.</p>
+<h2 id="build-order">Build order</h2>
+<p>The smallest useful first slice attacks the patron's two sharpest pains, lost postings and "where am I", for one real ticket, before any Guildmaster or Adventurer exists.</p>
+<ol><li><strong>One ticket that never forgets.</strong> The register and <code>gm</code> (<code>open</code>, <code>post</code>, <code>list</code>, <code>show</code>, <code>park</code>, <code>phase</code>, <code>notice</code>, <code>statusline</code>, <code>where</code>); one Party Leader for one real ticket, started by <code>gm open</code> as a named interactive Claude Code session in the ticket's camp (a <code>git worktree</code> of the existing clone on the ticket's feature branch); the patron's charter, the ticket playbook and one repository's rules as files; the <code>UserPromptSubmit</code> capture and <code>Stop</code> guard; the three-line status line. In this slice the Party Leader still does the work itself, one posting at a time: a deliberate, temporary shortfall against requirements 1.6 and 1.7 that slice 2 removes. <em>Done when</em> the patron can send ten items in a row, walk away, come back, and see all ten with their words and states.</li><li><strong>Adventurers and enforced rules.</strong> <code>gm dispatch</code> runs a headless <code>claude -p</code> Adventurer in the camp, one contract at a time per ticket and surveys in parallel; results land in the register and wake the Party Leader; <code>PreToolUse</code> rules enforce the branch and shared-branch rules; <code>TRACEPARENT</code> is set per posting. <em>Done when</em> the patron can keep talking to the Party Leader while an Adventurer works, and a follow-up bug on the ticket lands on the same feature branch.</li><li><strong>Several Party Leaders and the Guildmaster lobby.</strong> <code>gm roster</code>, a Guildmaster session holding only the roster, phase-change digests, history questions answered from events, one tab per Party Leader, the guild line in every status line.</li><li><strong>Audit and trace view.</strong> Prompt templates owned by the patron with hashes recorded per writ; <code>gm trace</code> as a text waterfall; OTLP export and Claude Code's beta tracing into a local Jaeger.</li><li><strong>The other kinds.</strong> <code>incident</code> (survey-heavy, ends in a field report), <code>recurring</code> (a launchd agent calling <code>gm wake</code>), <code>project</code> (several tickets under one focus).</li><li><strong>Hardening.</strong> A muster at every start that reconciles the register with <code>git worktree list</code> and live sessions; nightly backups; the quota cap and rate-limit pause; the <code>PreCompact</code> note; ending idle sessions and waking them on demand.</li></ol>
+<h2 id="risks">Risks</h2>
+<ol><li><strong>Rebuilding Firstmate by accident.</strong> Firstmate's <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md"><code class="cite">AGENTS.md</code></a> is 426 lines and its <a class="cite" href="https://github.com/kunchenguid/firstmate/tree/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/"><code class="cite">bin/</code></a> holds about two hundred scripts, most of them for generality the patron does not need. Keep a written "not doing" list: other familiars, remote homes, backends other than a terminal tab, automatic merging.</li><li><strong>Months-long sessions decay.</strong> Long Claude sessions compact and degrade (Firstmate tickets #95, #2362, #4796). Treat every Party Leader session as disposable and the register as the memory, and rotate sessions deliberately.</li><li><strong>Rules that live only in prompts get skipped.</strong> The branch rule is the patron's concrete example. Every rule that matters needs a hook; AI-DLC reached the same conclusion.</li><li><strong>The shared development branch is shared.</strong> A wrong merge or force-push there is seen by the whole team. It needs a hook and probably a patron gate (Q5, Q6).</li><li><strong>Quota.</strong> Several live Party Leaders plus Adventurers on one seat can exhaust a five-hour or weekly window, and the docs warn that "a single burst of heavy activity ... can exhaust the weekly allowance" (<a href="https://code.claude.com/docs/en/errors">https://code.claude.com/docs/en/errors</a>).</li><li><strong>Claude Code moves fast.</strong> Hooks, tracing (beta) and agent view (research preview) will change; pin a known-good version and check it with <code>gm doctor</code>.</li><li><strong>Hooks are guard rails, not a sandbox.</strong> A model can find a command the hook does not parse; do not give Adventurers credentials they must never use.</li><li><strong>Screenshot capture is unproven</strong> (section 8 callout).</li><li><strong>One camp per ticket serialises contract work</strong> on that ticket; the patron's "never a new branch" rule makes that unavoidable.</li><li><strong>A laptop sleeps.</strong> Recurring jobs miss runs while it does, and a reboot kills live sessions; the muster must catch up missed runs and restart what should be running.</li></ol>
+<h2 id="decisions-the-patron-has-not-mentioned">Decisions the patron has not mentioned</h2>
+<ul><li><strong>Cost and quota.</strong> How many Adventurers may run at once; what happens at the limit (queue, pause, cheaper model); which model each role uses (Q13, Q14).</li><li><strong>Security and credentials.</strong> Which GitLab credentials headless runs may use and with what scope; which repositories are push-enabled; which secret files stay out of every session's reach (Firstmate treats <code>.env</code> as captain-private, <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md#L48"><code class="cite">AGENTS.md:48</code></a>); whether traces may contain command text; whether company policy allows prompt and code content in a local trace store.</li><li><strong>Commit identity.</strong> Whose name is on the commits, and whether AI co-author trailers are allowed on work repositories. Firstmate strips them with a commit-msg hook (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-git-strip-ai-trailers.sh"><code class="cite">bin/fm-git-strip-ai-trailers.sh</code></a>, <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/configuration.md#L978"><code class="cite">docs/configuration.md:978</code></a>); the patron's employer may have a policy.</li><li><strong>Approval rules.</strong> Which steps of each playbook need the patron's word, and whether any kind gets standing authority (Q6).</li><li><strong>A Party Leader idle for weeks.</strong> Recommended: its session ends after a set idle time, its records stay, and the next posting or scheduled run starts a fresh session that reads them. The status line shows it as dormant, not gone (Q17).</li><li><strong>Ending.</strong> What closes a ticket (merged to integration, released, verified in production), what happens to its camp and branch, and how long its history is kept.</li><li><strong>Multi-machine later.</strong> SQLite on local disk is a single-machine decision; say so now, and keep <code>gm</code> the only door so it can change.</li><li><strong>Backups.</strong> The register and the Chapter Houses are the guild's memory. Recommended: a nightly <code>sqlite3 ... &quot;.backup&quot;</code> copy beside the patron's normal machine backup, plus <code>gm export</code> into a private git repository.</li><li><strong>Ticket system.</strong> Whether a ticket Party Leader reads the ticket from the tracker, and whether the guild ever writes back (Q15).</li><li><strong>Coexistence with Firstmate.</strong> Whether Firstmate keeps running alongside, and which repositories belong to which, so two supervisors never share a clone (Q16).</li><li><strong>Notifications away from the terminal.</strong> Hooks can raise desktop notifications through OSC 9 or 777 (<code>terminalSequence</code>, <a href="https://code.claude.com/docs/en/hooks">https://code.claude.com/docs/en/hooks</a>); decide which events deserve one.</li></ul>
+<h2 id="questions-for-the-patron">Questions for the patron</h2>
+<p>Questions marked <strong>(slice 1)</strong> block the first build slice.</p>
+<ol><li><strong>(slice 1)</strong> Where do you talk day to day: inside each Party Leader's own tab, with the Guildmaster as a quiet lobby (recommended), or always through the Guildmaster? TERMINOLOGY.md calls the Guildmaster "the patron's single point of contact", so the first answer means revising that definition.</li><li>What is a playbook called? TERMINOLOGY.md has <strong>Grimoire</strong> ("a loadable procedure for one kind of work, read only when its trigger fires"); reuse it for per-kind playbooks, or add a new term?</li><li><strong>(slice 1)</strong> What does "be able to push things" mean: <code>git push</code> to GitLab without being asked, work that keeps moving without stalls, or both?</li><li><strong>(slice 1)</strong> For each repository: the exact names of the shared development branch and the integration branch, the feature-branch pattern (for example <code>feature/CRM-1234</code>), who creates the feature branch, and whether "push to development" means merging the feature branch into development or something else.</li><li>May the guild merge into the shared development branch without asking each time, given teammates share it?</li><li><strong>(slice 1)</strong> Which steps need your word: merging into development, opening the merge request, marking it ready, merging it, anything after?</li><li><strong>(slice 1)</strong> Is <code>Task-&lt;Verb&gt;-&lt;Slug&gt;</code> (for example <code>Task-Fix-login</code>) the id format you want? Unique across the whole guild or within one Party Leader? Should the ticket key appear in it?</li><li>Where should notices appear: only in the Party Leader's chat, also in one guild-wide feed, as desktop notifications? And may the Guildmaster volunteer anything at all (for example a Party Leader gone quiet)?</li><li><strong>(slice 1)</strong> Do you approve the storage split: files for what people write and read, SQLite behind <code>gm</code> for coordination?</li><li>Tracing: start with a built-in text waterfall and add a local Jaeger (Docker) in slice 4, or Jaeger from the start?</li><li>Recurring jobs: which ones, how often, what each produces, what happens when one fails, and must they run while the laptop sleeps (which needs an always-on machine)?</li><li>Incidents: what does an incident Party Leader produce (a field report, a fix, a timeline), what may it read (logs, dashboards, production data), and when is it over?</li><li>Which Claude plan or seat do you have, and how many Party Leaders and Adventurers do you expect to have running at once?</li><li>Which model should each role use (Guildmaster, Party Leader, Adventurer)?</li><li>Should a ticket Party Leader read the ticket from your tracker, and should the guild ever write back to it?</li><li>During the transition, does Firstmate keep running, and which repositories belong to which system?</li><li>After how long without work should a Party Leader's session end (its records kept), and what retires a Party Leader for good?</li><li>How do you send screenshots today: pasted into Claude Code, dragged in as a file, or as a path?</li><li>Which terminal and multiplexer do you use (iTerm2 tabs, tmux, an IDE terminal), and what exactly should the top and bottom bars show?</li><li><strong>(slice 1)</strong> What should <code>gm</code> be written in: Python with its standard library, shell with the <code>sqlite3</code> tool, or TypeScript?</li><li>Terms that may need to follow the rename to Party Leader (not renamed in this change): <strong>Chapter House</strong> is now defined as "a party leader's own guildhall", which mixes the guild-chapter image with the adventuring-party one; keep it or rename it? The Party Leader definition also still says "Idle by default, acts only on routed work", which a recurring Party Leader woken by a schedule, and a patron talking to it directly, both stretch; revise it?</li></ol>
+<h2 id="outside-sources">Outside sources</h2>
+<ul><li>Claude Code hooks reference (events, blocking, <code>additionalContext</code>, <code>sessionTitle</code>, <code>terminalSequence</code>, <code>asyncRewake</code>): <a href="https://code.claude.com/docs/en/hooks">https://code.claude.com/docs/en/hooks</a></li><li>Claude Code status line (fields on stdin, multiple lines, <code>refreshInterval</code>, <code>rate_limits</code> availability): <a href="https://code.claude.com/docs/en/statusline">https://code.claude.com/docs/en/statusline</a></li><li>Claude Code background Bash commands and task list: <a href="https://code.claude.com/docs/en/interactive-mode">https://code.claude.com/docs/en/interactive-mode</a></li><li>Claude Code CLI reference (<code>--name</code> sets the session's display name and terminal title): <a href="https://code.claude.com/docs/en/cli-reference">https://code.claude.com/docs/en/cli-reference</a></li><li>Claude Code monitoring and OpenTelemetry (metrics, events, beta traces, <code>TRACEPARENT</code> in and out, redaction): <a href="https://code.claude.com/docs/en/monitoring-usage">https://code.claude.com/docs/en/monitoring-usage</a></li><li>Claude Code agent view and background sessions (<code>claude --bg</code>, <code>claude agents --json</code>, quota note): <a href="https://code.claude.com/docs/en/agent-view">https://code.claude.com/docs/en/agent-view</a></li><li>Claude Code scheduled tasks (<code>/loop</code> and cron tasks are session-scoped and "expire 7 days after creation", with "no catch-up for missed fires"), which is why recurring Party Leaders need an OS scheduler: <a href="https://code.claude.com/docs/en/scheduled-tasks">https://code.claude.com/docs/en/scheduled-tasks</a></li><li>Claude Code costs and plan allowances: <a href="https://code.claude.com/docs/en/costs">https://code.claude.com/docs/en/costs</a>; errors and rate limits: <a href="https://code.claude.com/docs/en/errors">https://code.claude.com/docs/en/errors</a></li><li>AWS AI-DLC workflows (v2 status line, state file, hook-enforced gates): <a href="https://github.com/awslabs/aidlc-workflows">https://github.com/awslabs/aidlc-workflows</a>, <a href="https://github.com/awslabs/aidlc-workflows/blob/main/docs/reference/06-hooks-and-tools.md">https://github.com/awslabs/aidlc-workflows/blob/main/docs/reference/06-hooks-and-tools.md</a>, <a href="https://github.com/awslabs/aidlc-workflows/blob/main/docs/guide/10-state-and-audit.md">https://github.com/awslabs/aidlc-workflows/blob/main/docs/guide/10-state-and-audit.md</a></li><li>W3C Trace Context (the <code>traceparent</code> format): <a href="https://www.w3.org/TR/trace-context/">https://www.w3.org/TR/trace-context/</a></li><li>OpenTelemetry OTLP (ports 4317 and 4318, JSON encoding): <a href="https://opentelemetry.io/docs/specs/otlp/">https://opentelemetry.io/docs/specs/otlp/</a></li><li>OpenTelemetry GenAI agent spans (Development status): <a href="https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-agent-spans.md">https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-agent-spans.md</a></li><li>Jaeger architecture and getting started: <a href="https://www.jaegertracing.io/docs/latest/architecture/">https://www.jaegertracing.io/docs/latest/architecture/</a>, <a href="https://www.jaegertracing.io/docs/latest/getting-started/">https://www.jaegertracing.io/docs/latest/getting-started/</a></li><li>otel-cli, for emitting spans from shell scripts: <a href="https://github.com/tobert/otel-cli">https://github.com/tobert/otel-cli</a></li><li>SQLite WAL, transactions and <code>RETURNING</code>: <a href="https://sqlite.org/wal.html">https://sqlite.org/wal.html</a>, <a href="https://sqlite.org/lang_transaction.html">https://sqlite.org/lang_transaction.html</a>, <a href="https://sqlite.org/lang_returning.html">https://sqlite.org/lang_returning.html</a></li><li>git worktree (a branch checked out in only one worktree): <a href="https://git-scm.com/docs/git-worktree">https://git-scm.com/docs/git-worktree</a></li><li>Beads: <a href="https://github.com/gastownhall/beads">https://github.com/gastownhall/beads</a></li></ul>
+<h2 id="where-the-research-pages-have-drifted">Where the research pages have drifted</h2>
+<p>The pages under <code>../firstmate/</code> were read against Firstmate commit <code>ada21f5b</code>; this consultation read <code>29213a09</code>, 124 commits later. Differences that matter here:</p>
+<ul><li>Line numbers have moved almost everywhere, most in <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md"><code class="cite">AGENTS.md</code></a> (now 426 lines), <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-spawn.sh"><code class="cite">bin/fm-spawn.sh</code></a> (about +400 lines) and <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-brief.sh"><code class="cite">bin/fm-brief.sh</code></a>. Some rules the pages quote from <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md"><code class="cite">AGENTS.md</code></a> now live in skills, for example the teardown rules in <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/.agents/skills/ship-landing/SKILL.md#L23-L29"><code class="cite">.agents/skills/ship-landing/SKILL.md:23-29</code></a>.</li><li>Branch names are no longer always <code>fm/&lt;id&gt;</code>: the prefix is configurable per project or task (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-project-mode.sh#L5-L8"><code class="cite">bin/fm-project-mode.sh:5-8</code></a>).</li><li>Gerrit forge support and <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-forge-detect.sh"><code class="cite">bin/fm-forge-detect.sh</code></a> were added; neither is on the delivery pages.</li><li>The worker's draft check now uses <code>gh-axi pr view</code> and looks for <code>draft: no</code>.</li><li>Operational input to Claude now goes through a record-backed doorbell (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-operational-input.sh#L8-L36"><code class="cite">bin/fm-operational-input.sh:8-36</code></a>), which the operational-input page predates.</li><li>A <code>UserPromptSubmit</code> and <code>Stop</code> host-mirror hook was added (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-host-mirror.sh"><code class="cite">bin/fm-host-mirror.sh</code></a>), which the Claude auto-arm page does not show.</li><li>The brief's project-memory rule was reversed: workers must no longer add knowledge to a project's <a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/AGENTS.md"><code class="cite">AGENTS.md</code></a> or run <code>fm-ensure-agents-md.sh</code> (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/bin/fm-brief.sh#L659-L661"><code class="cite">bin/fm-brief.sh:659-661</code></a>), unlike the text the briefs page quotes.</li><li>The secondmate parent-channel page's marked-reply row is outdated; the live doc adds a pending-reply guard (<a class="cite" href="https://github.com/kunchenguid/firstmate/blob/29213a09322a35d87b2f8acc29c415f3f860cb64/docs/secondmate-parent-channel.md#L32"><code class="cite">docs/secondmate-parent-channel.md:32</code></a>).</li></ul>
+</article>
+</main>
+</div>
+</body>
+</html>
