@@ -3,6 +3,7 @@
 A Firstmate-informed answer to the patron's first requirements: what Firstmate already does for each one, what is missing or works against it, and what Guildmaster should do instead.
 
 This answers [requirements.md](requirements.md), which restates [the patron's notes of 2026-09-29](patron-notes-2026-09-29.md).
+The patron's [first answers](patron-answers-2026-09-29.md) settle several of the questions at the end and add three requirements; [What the first answers settled](#what-the-first-answers-settled) lists the changes.
 Vocabulary is [TERMINOLOGY.md](../TERMINOLOGY.md)'s, including the patron's ruling that the role once called Chapter Master is now the **Party Leader**.
 The same content is laid out as a page with diagrams in [consultation.html](consultation.html); open it from disk.
 
@@ -23,8 +24,24 @@ But almost every default points the other way: secondmates have no kinds and no 
 
 **Recommendation.** Do not fork Firstmate.
 Build Guildmaster fresh, small and Claude-only, around one idea: **a posting is never held only in a conversation**.
-Every posting, phase and notice lives in one small SQLite register behind a `gm` command; people-facing text (charters, playbooks, prompts, field reports, screenshots) lives in plain files; Claude Code hooks enforce the rules the prompts state.
+Every posting, phase and notice lives in one small register behind a `gm` command (SQLite recommended; the patron has questioned that, Q9); people-facing text (charters, playbooks, prompts, field reports, screenshots) lives in plain files; Claude Code hooks enforce the rules the prompts state.
 Start with one Party Leader for one real ticket, before the Guildmaster itself exists ([Build order](#build-order)).
+
+## What the first answers settled
+
+| Question or requirement | The patron's answer | Where it changes this consultation |
+| --- | --- | --- |
+| Q1 where the patron talks | Inside each Party Leader's own tab; the Guildmaster is "a quiet front desk that can sometimes talk to a Party Leader". | Section 1 recommendation 3 is confirmed; section 2 adds how the Guildmaster talks to a Party Leader (requirement 2.4). |
+| Q3 "push things" | Work that keeps moving without stalls; each playbook says when to push. | Section 4 adds per-playbook push rules (4.6); section 9 treats stalls, not credentials, as the problem. |
+| Q4 branch names | Deferred: "overview first". | Stays open; the playbook keeps `development`, `integration` and `master` as the patron's words. |
+| Q5 merging into development | Settled by the Q3 example rule: pushing to the shared development branch is allowed. | Section 4 and the playbook figure. |
+| Q6 approvals | "Most likely opening the merge request needs the patron's word." | Section 4 (4.7) and the playbook figure's first gate. |
+| Q7 ids | `Task-<Verb>-<Slug>` was an example; focuses need meaningful names that still show which ticket belongs to which project; the reference must resolve unambiguously. | Section 8 revises naming and adds `gm resolve`. |
+| Q9 storage | The patron asks why SQLite is needed if agents can read and write files. | Stays open; the supervising agent will explain the trade-off in chat. Section 10 notes the challenge. |
+| Q20 language | Fast and portable; bash preferred, as in Firstmate. | Section 10 and the build order assume bash. |
+| New: persistence without remembering to save | Resumption must need no re-explaining. | Section 1 (1.8). |
+| New: catch and correct rule-breakers | Supervisors must catch and correct a worker that breaks the rules. | Section 4 (4.8). |
+| New: reduce quota use | Quota already runs out with many Firstmate sessions. | Section 9 (9.4). |
 
 ## The proposed shape
 
@@ -61,6 +78,7 @@ Requirement numbers are [requirements.md](requirements.md)'s.
 | 1.5 recurring schedule | None. No cron, launchd job or recurring-work concept exists for work; the mail poll "itself has no scheduler" (`bin/fm-mail.sh:28-29`); watcher checks run every 300 s only while a supervision cycle is live (`bin/fm-mail-check.sh:12-18`); a process-event watch fires "at most once" (`bin/fm-procevent-when.sh:1-35`); harness cron and schedule tools are blocked on primaries (`bin/fm-subagent-pretool-check.sh:58`). The nearest thing is a backlog time gate or `hold --until` (`AGENTS.md:364`, `AGENTS.md:368`). | Absent. |
 | 1.6 dispatches its own Adventurers | Yes: a secondmate runs the full firstmate machinery for its own crew in its own home (`AGENTS.md:57`). | Fits, but it brings the whole first-mate contract (a 426-line `AGENTS.md`) into every mate. |
 | 1.7 never blocked, answers while work runs | Work runs in separate crew processes and returns through status files and a watcher that wakes the supervisor ([supervision/watcher](../firstmate/components/supervision/watcher.html)). The mate is told "Nobody reads this chat" (`bin/fm-brief.sh:405-406`). | The mate is built to be talked to by the parent, not by the patron. Long-turn stall alarms and missed wakes are open tickets (#2912, #2791 in [issues/status-inbox-and-wake](../firstmate/issues/status-inbox-and-wake.html)). |
+| 1.8 nothing depends on remembering to save | Saving open work is a model task: `/stow` asks the model to "Sweep the current session for uncaptured durable knowledge, file it to disk, persist the open work records this session knows are unfiled" (`.agents/skills/stow/SKILL.md:1-6`), and the update restart first asks each secondmate to record "the open work it holds only in conversation" (`bin/fm-secondmate-restart.sh:19-37`). One thing is already captured by code: a captain's answer to a hold is stored as "the captain's exact words" (`bin/fm-captain-hold.sh:56-66`). After a clear or compaction the session-start digest is re-emitted (`docs/sessionstart-nudge.md:68-80`). There is no `PreCompact` hook (open ticket #4796). | The patron has seen `/stow` miss or save the wrong thing. A model asked to summarise its own conversation will sometimes be wrong. |
 
 **Recommendation.**
 
@@ -71,9 +89,9 @@ Requirement numbers are [requirements.md](requirements.md)'s.
 2. **Kinds are a column plus a playbook file.**
    `ticket`, `project`, `recurring`, `incident` to start; each kind names its playbook (see section 4) and its default prompt template (section 5).
    No kind-specific code until a kind proves it needs some.
-3. **The patron talks to the Party Leader directly.**
+3. **The patron talks to the Party Leader directly** (confirmed by the patron's answer to Q1).
    Each Party Leader gets its own terminal tab or tmux window named after it; the patron switches tabs to switch focus.
-   This departs from TERMINOLOGY.md's "the patron's single point of contact" for the Guildmaster, so it is question Q1.
+   This departs from TERMINOLOGY.md's definition of the Guildmaster as "the patron's single point of contact"; revising that definition is question Q21.
 4. **Adventurers run outside the Party Leader's turn.**
    The Party Leader never does the work itself; `gm dispatch <posting>` starts a headless `claude -p` run in the posting's camp as a background process and returns at once.
    Claude Code already supports this shape: a background command "immediately returns a background task ID" and "Claude Code can respond to new prompts while the command continues executing in the background" (<https://code.claude.com/docs/en/interactive-mode#background-bash-commands>).
@@ -81,6 +99,16 @@ Requirement numbers are [requirements.md](requirements.md)'s.
 5. **Recurring kinds are woken by the operating system, not by an agent.**
    A launchd agent (macOS) or cron entry runs `gm wake <party>` on schedule; `gm` starts the Party Leader session if none is alive and hands it the due posting.
    Firstmate deliberately has no scheduler; Guildmaster needs one, but it should be the smallest possible one.
+
+6. **Saving is a side effect of acting, never a separate step** (requirement 1.8).
+   The model is never asked to remember to save. Everything the resumption needs is written by code at the moment it happens:
+   - the patron's words, by the `UserPromptSubmit` hook (section 8);
+   - every posting, phase, park, ruling and notice, because the only way to do those things is a `gm` call, and `gm` writes the record;
+   - every Adventurer's result, by `gm dispatch` when the run exits;
+   - the patron's answers to questions, stored verbatim as rulings and shown again whenever the same question comes up. Firstmate's exact-words hold answers are the precedent (`bin/fm-captain-hold.sh:56-66`).
+
+   Resumption reads only those records: a `SessionStart` hook injects `gm where`, which is built from the register and never from a model's summary. `PreCompact` and `SessionEnd` hooks add a code-built snapshot (the camp's git status and the open postings) and never ask the model.
+   The test for this requirement: kill a Party Leader's session mid-posting, start a new one, and the patron types nothing but "continue".
 
 **Trade-offs.**
 Talking directly to Party Leaders gives the patron focus and keeps the Guildmaster clean, but it means several live Claude sessions at once, which costs quota (section 9).
@@ -94,12 +122,14 @@ An OS scheduler cannot run while the laptop sleeps; a missed run must be caught 
 | 2.1 Guildmaster context not polluted | Strong filtering already: "Routine internal supervision, heartbeats, retries, and crewmate churn stay inside your own home and must not touch that status file" (`bin/fm-brief.sh:443`); "the scripts report facts, the mate reports judgement" (`docs/secondmate-parent-channel.md:20`); the parent "do[es] not read the secondmate's chat" (`AGENTS.md:172`). | Fits. Every non-routine status line still wakes the first mate (`docs/architecture.md:92`), so a busy mate is still a noisy one. |
 | 2.2 knows, but does not relay | Each home publishes `state/home-summary.json` (`bin/fm-home-summary-refresh.sh:1-10`), refreshed on status change and every 300 s (`docs/architecture.md:142`); the parent reads bounded fields through `bin/fm-fleet-snapshot.sh:79-99`, capped at 20 children, queued items and decisions and 256 KB per home (`bin/fm-fleet-snapshot.sh:160-163`). `/bearings` gives a four-part digest and forbids scraping chat (`.agents/skills/bearings/SKILL.md:58`). | Firstmate's first mate is designed to *tell*: its job is to relay decisions and outcomes to the captain. Nothing marks information as "know, don't say". |
 | 2.3 answers history on request | History sources are the append-only parent status log, the last 10 Done rows (`done_keep = 10`, `docs/configuration.md:336`), pointers into the mate's `data/`, and an opt-in fleet ledger that mates do not inherit (`docs/fleet-ledger.md:8-10`). | No durable per-mate history; "what did X do last month?" means asking X. |
+| 2.4 the Guildmaster can sometimes talk to a Party Leader | The first mate steers any worker "with ordinary text through fail-closed `fm-send`: the message becomes a durable record in the task's steering inbox" (`AGENTS.md:209`), and routed secondmate requests carry a correlation id with a recorded expected reply (`bin/fm-pending-reply-lib.sh:22-67`). | Fits; Guildmaster needs the same thing with less machinery. |
 
 **Recommendation.**
 
 - The Guildmaster's session holds only the **roster**: one line per Party Leader (id, kind, phase, open postings, needs-you count, last notice time), printed by `gm roster` at session start and after each phase-change digest.
 - Everything else is **pull, not push**: the Guildmaster answers "what happened with CRM-1234 in August?" by querying the register's event history (`gm history CRM-1234 --since 2026-08-01`), which is permanent, not by holding it in context or asking the Party Leader.
 - The Guildmaster's charter says what it may volunteer: nothing, except a Party Leader that is gone quiet or a ruling nobody has seen for a set time (question Q8). Needs-you counts are shown by the status line instead (section 7), so nothing depends on the Guildmaster speaking.
+- **The front desk can pass a note** (requirement 2.4). `gm tell <party> "<text>"` writes a runner record into that Party Leader's inbox, the same inbox the patron's own messages land in, so the Party Leader's `Stop` guard makes it sort the note like any other message (section 8). The note, and any reply, is an event in the register. When the Guildmaster may do this unasked is question Q22.
 
 **Trade-offs.** A quiet Guildmaster can let something rot unseen; the status line's guild-wide needs-you count is the guard against that. Keeping permanent event history means the register grows without bound; at one patron's scale that is megabytes a year, not a problem, but it needs a backup (see [Decisions the patron has not mentioned](#decisions-the-patron-has-not-mentioned)).
 
@@ -130,6 +160,9 @@ An OS scheduler cannot run while the laptop sleeps; a missed run must be caught 
 | 4.3 the patron's GitLab flow | Three delivery modes: no-mistakes, direct-PR, local-only (`bin/fm-dod-lib.sh:393-441`). Worker rule 1: "Never push to the default branch (push only your `$branch` branch)" (`bin/fm-dod-lib.sh:153`). "Firstmate has no forge property for GitLab"; it derives the provider from the merge-request URL "*after the fact*" (`docs/gerrit-forge-integration.md:129-130`, forge values at `bin/fm-project-mode.sh:55-60`); worker instructions say `gh-axi` (`bin/fm-dod-lib.sh:400-401`); merging needs a successful head pipeline (`docs/gitlab-merge-watch.md:239-240`); teardown's merged check calls `gh` only (`bin/fm-teardown.sh:1525-1538`). | No shared development branch, no promotion step, and pushing to a branch other than the task's own is forbidden. |
 | 4.4 knows and shows its phase | Task states are backlog buckets (Queued, In flight, Done) and status verbs ([backlog-and-decisions/buckets](../firstmate/components/backlog-and-decisions/buckets.html)). | No per-task phase. |
 | 4.5 a playbook per kind | Skills are supervisor procedures loaded by trigger (`AGENTS.md:403-406`); workers never load them. Named playbooks exist for diagnosis, validation and stuck-worker recovery (`.agents/skills/diagnostic-reasoning/`, `.agents/skills/validation-supervision/`, `.agents/skills/stuck-crewmate-recovery/`). Dispatch profiles pick harness, model and effort only (`docs/configuration.md:984-1019`). | No per-task-type procedure. |
+| 4.6 each playbook says when to push | Worker rule 1 is the only push rule, and it is the same for every task: "Never push to the default branch (push only your `$branch` branch)" (`bin/fm-dod-lib.sh:153`). | No per-playbook push rules; pushing to a shared branch is forbidden outright. |
+| 4.7 the merge request needs the patron's word | Merge authority exists ("yolo", [delivery/merge-authority](../firstmate/components/delivery/merge-authority.html)); a direct-PR worker opens its own pull request as its definition of done (`bin/fm-dod-lib.sh:400-401`). | The gate is at merging, not at opening. |
+| 4.8 catch and correct a worker that breaks the rules | The guard hooks protect the supervisor session only (`.claude/settings.json`). A worker's generated hooks only report busy and idle (`bin/fm-spawn.sh:4470-4476`); its rules are brief text (`bin/fm-dod-lib.sh:153`). Catching a breach depends on the supervisor looking: `bin/fm-peek.sh` prints "the tail of a crewmate endpoint (bounded, for cheap diagnosis)" (`bin/fm-peek.sh:1-4`), and correction is a steer (`AGENTS.md:209`). The validation pipeline reviews changes before a PR ([delivery/validation-pipeline](../firstmate/components/delivery/validation-pipeline.html)). | Prevention and detection both depend on the model noticing. |
 
 The patron's own Firstmate home already knows this domain is different: a local, untracked skill in that home records that the workplace repositories are not Firstmate fleet projects, already use per-ticket worktrees, and send merge requests to integration.
 Guildmaster is, in effect, the tool for the work that Firstmate was told to stay out of.
@@ -143,7 +176,13 @@ Guildmaster is, in effect, the tool for the work that Firstmate was told to stay
 - **The register holds the phase.** `gm phase CRM-1234 dev-test` records a phase change as an event; the status line and the Guildmaster read it from there.
 - **The branch is written down once.** In phase 2 the Party Leader records `branch=feature/CRM-1234` on the ticket's row; `gm` refuses to create another branch for that ticket, and every writ names the recorded branch.
 - **Rules that matter are enforced by hooks, not only asked for.** A Claude Code `PreToolUse` hook can refuse a tool call before it runs. Guildmaster's hook reads the camp's recorded branch and rules and blocks, for example, `git checkout -b` or `git switch -c` inside a ticket camp, `git push --force` to `development`, and any push to `integration`. Firstmate already enforces its own safety rules this way (`bin/fm-arm-pretool-check.sh`, `bin/fm-cd-pretool-check.sh`, `bin/fm-subagent-pretool-check.sh`).
-- The ticket playbook in the figure is the recommended first playbook; the patron confirms the phases, names and gates (questions Q4 to Q6).
+- **Push rules live in the playbook** (requirement 4.6, the patron's answer to Q3). The ticket playbook starts from the patron's own example: pushing the feature branch and merging it into the shared `development` branch is allowed, so the change can be validated on the development domains and APIs; `integration` is reached only through a merge request; `master` never. The hook reads these rules from the playbook, so changing a rule is editing a file, not code.
+- **Opening the merge request is a patron gate** (requirement 4.7, the answer to Q6). The Party Leader prepares the merge request (title, description, what was tested on development) and marks the posting *needs you*; only the patron's yes opens it.
+- **Catch, then correct** (requirement 4.8). Firstmate's workers carry no guard hooks and are caught only when the supervisor looks. Guildmaster puts the guard in the Adventurer's own camp and adds a check after every run:
+  - *Prevent:* the `PreToolUse` rules above run inside every Adventurer session, not only the Party Leader's, and a denial tells the Adventurer which rule it hit.
+  - *Detect:* when an Adventurer exits, `gm check <posting>` compares git facts with the rules: the camp is still on the recorded branch, no new branches exist, nothing was pushed except to allowed branches, and no commits exist outside the feature branch. It checks facts, not the model's own account of what it did.
+  - *Correct:* a failed check reopens the posting with a correction writ that quotes the broken rule and the evidence. A second failure on the same posting goes to the patron as *needs you*, with the evidence attached.
+- The ticket playbook in the figure is the recommended first playbook; the patron confirms the phases and names later (Q4 is deferred).
 
 **Trade-offs.** Hook enforcement needs a small command parser; a determined agent can reach the same effect by an unusual command the hook does not recognise, so the hook is a guard rail, not a sandbox. Playbooks as free Markdown are easy to write but only as strict as the prompts reading them; putting phase names in a short machine-readable header (a few `phase:` lines) lets `gm` validate `gm phase` calls without parsing prose.
 
@@ -232,7 +271,11 @@ That is strong evidence the recommended design below is buildable today.
 
 - **Capture is code, classification is the model.** A `UserPromptSubmit` hook, which receives the full `prompt` text (<https://code.claude.com/docs/en/hooks>), writes every patron message in a Party Leader's session into the register as an *unsorted* inbox row, verbatim, before Claude sees it. The Party Leader's job is to sort each row into new postings, a steer of an existing posting, or a question, through `gm post`, `gm steer` or `gm answered`.
 - **The turn cannot end with anything unsorted.** A `Stop` hook refuses to let the Party Leader stop while its session has unsorted rows (exit code 2 on `Stop` "Prevents Claude from stopping, continues the conversation", same page). This is the mechanical answer to "it forgot about some tasks", and it is the same approach AI-DLC v2 takes with its human-turn and continue-workflow hooks. Firstmate's turn-end guard is the precedent in this lineage (`docs/turnend-guard.md`).
-- **Posting ids are made by `gm`, in the patron's format.** `gm post` takes a verb and a short slug and returns a guild-wide unique id such as `Task-Fix-login` (a numeric suffix only on collision). The id never changes and never dies; the patron can type it anywhere (`gm show Task-Fix-login`, or just "Task-Fix-login: keep the old URL" in the Party Leader's chat, which the sorter treats as a steer).
+- **Names that mean something, references that cannot be misread** (requirement 8.7, the patron's answer to Q7).
+  - *A focus has a meaningful name*, for example `saved-views` for a big project or `export-csv` for a ticket's feature. A ticket's tracker key (`CRM-1234`) is kept as an alias, not as the name. A ticket focus may name a parent project, so the roster and status line show the relationship: `saved-views › export-csv (CRM-1234)`.
+  - *A posting inside a focus* keeps the `Task-<Verb>-<Slug>` shape the patron accepted, for example `Task-Fix-login`, unique across the guild (a numeric suffix only on collision). The id never changes and never dies.
+  - *Every reference goes through `gm resolve`*, which accepts a posting id, a focus name, a ticket key or an unambiguous prefix and returns exactly one record, or refuses and lists the candidates. The prompts tell every agent to resolve before acting and never to guess, which is what "a reference the AI resolves unambiguously" needs.
+  - The patron can type any of these anywhere: `gm show Task-Fix-login`, or just "Task-Fix-login: keep the old URL" in the Party Leader's chat, which the sorter treats as a steer.
 - **Every notice carries its context.** The notice grammar is `<id> <verb>[: detail] (<one-line summary>)`, with verbs from a closed list: `received`, `queued`, `started`, `parked`, `needs you`, `resumed`, `done`, `failed`, `closed`. The summary in parentheses is what makes a resurfaced item recognisable; `gm show <id>` gives the rest: the patron's original words with their time, attachments, phase, every notice so far, and the last Adventurer result.
 - **Parked means parked with a reason and a wake condition.** `gm park <id> --why "waits for dev deploy" --until <time or event>`; the status line counts parked postings, and `gm` resurfaces a posting whose condition is met instead of waiting for someone to look.
 - **Screenshots go into the posting's folder.** How they get there is open: see the callout.
@@ -251,6 +294,7 @@ That is strong evidence the recommended design below is buildable today.
 | 9.1 Claude Code only | Harness-agnostic by design: adapters for Claude and many others ([crew/harnesses](../firstmate/components/crew/harnesses.html)); "`resume` is not a verb" because resume differs across adapters (`docs/agent-control.md:58-61`). | Much of Firstmate's complexity exists to support harnesses the patron does not use. |
 | 9.2 tight control, no avoidable errors, work keeps moving | Claude-specific machinery exists and is battle-tested: `SessionStart`, `PreToolUse`, `UserPromptSubmit` and `Stop` hooks in `.claude/settings.json`; workspace trust pre-registered (`bin/fm-claude-trust.sh:1-60`); a Stop auto-arm (`bin/fm-claude-stop-autoarm.sh:1-80`); a turn-end guard (`docs/turnend-guard.md`); a subagent guard created after the 2026-07-22 loss of untracked subagent work (`docs/subagent-guard.md:9-26`); a wedge escalation after 240 s of a quiet working pane (`bin/fm-watch.sh:327`). Quota is ranked across providers (`.agents/skills/quota-array-dispatch/SKILL.md:39-118`) with an optional low-quota wake (`bin/fm-procevent-quota.sh:1-20`). No `PreCompact` hook (open ticket #4796). | Good parts to copy; no compaction hook; quota logic is built for many providers. |
 | 9.3 others later, without building for them | Everything is behind harness adapters. | The seam is right; its breadth is not needed now. |
+| 9.4 use less quota than Firstmate | Each wake is a model turn for the supervisor: every wake-handling turn starts by draining the wake queue (`AGENTS.md:263`), and routine secondmate status waking the primary is an open ticket (#2959, [issues/status-inbox-and-wake](../firstmate/issues/status-inbox-and-wake.html)). Every secondmate is a full supervisor session whose job description is the whole 48 KB `AGENTS.md` ("The local `AGENTS.md` is your job description", `bin/fm-brief.sh:396`). The supervision host starts a new conversation every 20 turns (`bin/fm-supervision-host.sh:150-151`). Firstmate does protect the prompt cache for its supervision branch, whose prompt must stay "byte-identical" because "the branch's provider prompt cache only pays off while the request prefix stays byte-identical" (`bin/fm-branch-prompt.sh:6-23`). | Supervision is done by model turns; many large, long-lived sessions. |
 
 **Recommendation.**
 
@@ -258,7 +302,14 @@ That is strong evidence the recommended design below is buildable today.
 - **Adventurers are `claude -p` runs with explicit permissions.** Each gets a pre-trusted camp, an explicit permission mode and allowed-tool list, the patron's writ as its prompt, and `TRACEPARENT`. Headless runs are what read inbound trace context, and they exit cleanly, which is easy to supervise.
 - **Background sessions are a later option.** Claude Code's agent view (`claude --bg`, `claude agents --json`) supervises background sessions, restarts crashed ones, and survives sleep (<https://code.claude.com/docs/en/agent-view>). It is a research preview and cannot be combined with `-p`, so it is not the first foundation; it is a good fit later for Party Leaders themselves.
 - **Quota is the real limit.** "Running ten agents in parallel uses quota roughly ten times as fast as running one" (<https://code.claude.com/docs/en/agent-view>); Team and Enterprise seats have a five-hour and a weekly allowance "shared with Claude chat and Cowork" (<https://code.claude.com/docs/en/costs>); for 429s the docs advise "Reduce concurrency ... avoid running many parallel subagents" (<https://code.claude.com/docs/en/errors>). `gm` should hold a guild-wide cap on live Adventurers (start at 3), queue beyond it, and show the queue in the status line.
-- **"Push things" needs credentials that work headless.** GitLab SSH keys or a `glab` token must be usable from a `claude -p` run without a prompt; the `PreToolUse` rules then decide *which* pushes are allowed (section 4).
+- **"Push things" means no stalls** (the patron's answer to Q3). The commonest stall is a permission prompt with nobody there to answer it; this consultation's own `git push` stopped on one. So the camp's `PreToolUse` hook answers for the playbook: it returns `allow` for operations the playbook permits and `deny` for those it forbids (`permissionDecision` accepts allow, deny, ask or defer, <https://code.claude.com/docs/en/hooks>). The only prompts left are the gates the playbook names, such as opening the merge request. GitLab SSH keys or a `glab` token must also work from a headless run.
+- **Spend quota only on judgement** (requirement 9.4). The model should run only when something needs deciding. These are the levers, roughly largest first:
+  - *No model turns for supervision.* Code watches: hooks, `gm` and exit codes record every event, and a model is woken only when an event needs a decision (an Adventurer finished, a check failed, the patron wrote). Firstmate spends a supervisor turn on every wake.
+  - *Few live sessions.* A Party Leader's session ends when idle and starts again on demand from its records (requirement 1.8 makes that free). Claude Code's own agent view already does this for background sessions: one that is finished or waiting and "unattached for about an hour" has its process stopped, and "the conversation stays on disk" (<https://code.claude.com/docs/en/agent-view>).
+  - *Small, stable prompts.* A charter plus the current phase of the playbook, not a 48 KB contract. Keep each prompt's opening text the same across calls so it stays cached; Firstmate's prefix-stability contract (`bin/fm-branch-prompt.sh:6-23`) is the model to copy.
+  - *The right model per role*: a strong model where judgement lives, a cheaper one for surveys and routine Adventurers (question Q14).
+  - *A dispatch cap*, as above.
+  - *Measure it.* Claude Code's telemetry exports `claude_code.cost.usage` and `claude_code.token.usage` (<https://code.claude.com/docs/en/monitoring-usage>). `gm` records cost per posting and per Party Leader, so "where did the quota go" has an answer.
 - **Keep one seam.** Only one `gm` function knows how to start a familiar; everything else talks to the register. That is enough to add another provider later.
 
 **Trade-offs.** Leaning on Claude Code features couples Guildmaster to a fast-moving product (the hooks reference lists dozens of events, and tracing and agent view are beta or preview); `gm doctor` should check the installed Claude Code version and the hook schema at start. A dispatch cap slows bursts; that is the point.
@@ -269,6 +320,7 @@ That is strong evidence the recommended design below is buildable today.
 | --- | --- | --- |
 | 10.1 files at the edges, SQLite at the core | No Firstmate document states why it uses files. The nearest statements: "all state lives on disk and in the active session backend" (`README.md:53`); "durable state and live backend inventory, not conversation memory, are authoritative" (`AGENTS.md:128`); "the existing backlog remains the only durable work database" (`docs/captain-hold-lifecycle.md:29`). The cost is hand-built machinery: symlink locks with owner directories, pid files and dead-owner reaping (`bin/fm-wake-lib.sh:572-584`), lease files (`bin/fm-lease-lib.sh:1-40`), and read cursors keyed on file identity, where "an in-place edit of the same size is not detected" (`bin/fm-classify-lib.sh:1102`). | Every coordination feature re-solves concurrency by hand. |
 | 10.2 no remote homes | Remote secondmates over SSH are a whole area ([remote](../firstmate/components/remote/index.html)). | Not needed now. |
+| 10.3 bash, fast and portable | Firstmate is bash: 192 of the 207 entries in `bin/` are shell scripts (`bin/`). | Fits; Firstmate shows bash scales to a large system, and also how much hand-built concurrency that takes (above). |
 
 > [!unclear]
 > **The update-restart race is not documented.** The earlier conversation named "the update restart colliding with the watcher's automatic relaunch" as an example. Firstmate's docs and ticket snapshot do not describe it. Reading the code, the update restart goes through `fm-control.sh relaunch` under `state/.control-<id>.lock` (`bin/fm-secondmate-restart.sh:175`, `bin/fm-control.sh:311-315`), while the watcher's liveness tick holds a different lock, `state/.secondmate-liveness-<id>.lock` (`bin/fm-secondmate-liveness-lib.sh:74-77`), may kill the endpoint and respawn it (`bin/fm-secondmate-liveness-lib.sh:282-296`), and is documented as serialising only against the session-start sweep (`bin/fm-watch.sh:1035-1037`). The two share only the per-spawn lock (`bin/fm-spawn.sh:1661-1665`). That leaves a plausible window, unconfirmed by running anything, and it is the kind of bug one transaction would close.
@@ -280,6 +332,10 @@ That is strong evidence the recommended design below is buildable today.
 - **Only `gm` touches the database.** Agents call `gm`; no prompt ever contains SQL. `gm export` writes a readable Markdown snapshot of the quest board for people and for grep.
 - **Local disk only.** "WAL does not work over a network filesystem" (<https://sqlite.org/wal.html>), which suits the patron's "no remote homes for now".
 
+**The patron's challenge (Q9, open).** The patron asks why SQLite is needed at all if agents can read and write files freely, since the agents, not the patron, will read the coordination files. That is a fair challenge to the recommendation above. It stays open until the supervising agent has talked the trade-off through with the patron. If the answer is files, the files still belong behind `gm`, for the same reason as above: no agent hand-edits coordination state.
+
+**Language (Q20, answered).** The patron prefers bash: fast, portable between machines, and the same technology as Firstmate. `gm` in bash works with either storage answer. With SQLite it calls the `sqlite3` command-line tool; with files it follows Firstmate's lock and lease patterns. Portability means checking the macOS and Linux differences Firstmate already handles (bash versions, `sed -i`, `date`).
+
 **Prior art.** Beads, an agent issue tracker often cited for pairing SQLite with a git-tracked JSONL file, has since moved: its README says it is "powered by Dolt", and its changelog for 0.58.0 says the SQLite backend was removed, with `.beads/issues.jsonl` now "an export for viewers and interchange, not the source of truth" (<https://github.com/gastownhall/beads>; a later changelog entry mentions SQLite again, so its current status is unclear). The lesson worth borrowing is the split itself: a database as the truth, readable files as an export. Its atomic `--claim` and "ready" query are good shapes for `gm`.
 
 **Trade-offs.** A database is opaque to `cat` and to an agent's ordinary file tools, so debugging needs `gm` or `sqlite3`; that is the price of transactions. A single file is a single point of loss, so backups are not optional (see [Decisions the patron has not mentioned](#decisions-the-patron-has-not-mentioned)). Moving to several machines later means putting the register behind a small server; keeping `gm` the only door keeps that possible.
@@ -289,16 +345,16 @@ That is strong evidence the recommended design below is buildable today.
 The smallest useful first slice attacks the patron's two sharpest pains, lost postings and "where am I", for one real ticket, before any Guildmaster or Adventurer exists.
 
 1. **One ticket that never forgets.**
-   The register and `gm` (`open`, `post`, `list`, `show`, `park`, `phase`, `notice`, `statusline`, `where`); one Party Leader for one real ticket, started by `gm open` as a named interactive Claude Code session in the ticket's camp (a `git worktree` of the existing clone on the ticket's feature branch); the patron's charter, the ticket playbook and one repository's rules as files; the `UserPromptSubmit` capture and `Stop` guard; the three-line status line.
+   The register and `gm` in bash (`open`, `post`, `resolve`, `list`, `show`, `park`, `phase`, `notice`, `statusline`, `where`); one Party Leader for one real ticket, started by `gm open` as a named interactive Claude Code session in the ticket's camp (a `git worktree` of the existing clone on the ticket's feature branch); the patron's charter, the ticket playbook and one repository's rules as files; the `UserPromptSubmit` capture and `Stop` guard; the `SessionStart` resume from records (requirement 1.8); the three-line status line.
    In this slice the Party Leader still does the work itself, one posting at a time: a deliberate, temporary shortfall against requirements 1.6 and 1.7 that slice 2 removes.
-   *Done when* the patron can send ten items in a row, walk away, come back, and see all ten with their words and states.
+   *Done when* the patron can send ten items in a row, walk away, come back, and see all ten with their words and states, and a killed session resumes with nothing re-explained.
 2. **Adventurers and enforced rules.**
-   `gm dispatch` runs a headless `claude -p` Adventurer in the camp, one contract at a time per ticket and surveys in parallel; results land in the register and wake the Party Leader; `PreToolUse` rules enforce the branch and shared-branch rules; `TRACEPARENT` is set per posting.
+   `gm dispatch` runs a headless `claude -p` Adventurer in the camp, one contract at a time per ticket and surveys in parallel; results land in the register and wake the Party Leader; `PreToolUse` rules in every camp allow or deny from the playbook's push rules; `gm check` runs after every Adventurer and reopens a posting that broke a rule; the dispatch cap; `TRACEPARENT` is set per posting.
    *Done when* the patron can keep talking to the Party Leader while an Adventurer works, and a follow-up bug on the ticket lands on the same feature branch.
 3. **Several Party Leaders and the Guildmaster lobby.**
    `gm roster`, a Guildmaster session holding only the roster, phase-change digests, history questions answered from events, one tab per Party Leader, the guild line in every status line.
 4. **Audit and trace view.**
-   Prompt templates owned by the patron with hashes recorded per writ; `gm trace` as a text waterfall; OTLP export and Claude Code's beta tracing into a local Jaeger.
+   Prompt templates owned by the patron with hashes recorded per writ; cost per posting; `gm trace` as a text waterfall; OTLP export and Claude Code's beta tracing into a local Jaeger.
 5. **The other kinds.**
    `incident` (survey-heavy, ends in a field report), `recurring` (a launchd agent calling `gm wake`), `project` (several tickets under one focus).
 6. **Hardening.**
@@ -309,8 +365,8 @@ The smallest useful first slice attacks the patron's two sharpest pains, lost po
 1. **Rebuilding Firstmate by accident.** Firstmate's `AGENTS.md` is 426 lines and its `bin/` holds about two hundred scripts, most of them for generality the patron does not need. Keep a written "not doing" list: other familiars, remote homes, backends other than a terminal tab, automatic merging.
 2. **Months-long sessions decay.** Long Claude sessions compact and degrade (Firstmate tickets #95, #2362, #4796). Treat every Party Leader session as disposable and the register as the memory, and rotate sessions deliberately.
 3. **Rules that live only in prompts get skipped.** The branch rule is the patron's concrete example. Every rule that matters needs a hook; AI-DLC reached the same conclusion.
-4. **The shared development branch is shared.** A wrong merge or force-push there is seen by the whole team. It needs a hook and probably a patron gate (Q5, Q6).
-5. **Quota.** Several live Party Leaders plus Adventurers on one seat can exhaust a five-hour or weekly window, and the docs warn that "a single burst of heavy activity ... can exhaust the weekly allowance" (<https://code.claude.com/docs/en/errors>).
+4. **The shared development branch is shared.** The patron allows pushing to it (Q3), so a wrong merge or force-push there is seen by the whole team. The hook must deny force-pushes and rebases there, and `gm check` must catch anything the hook missed.
+5. **Quota.** The patron already runs out with Firstmate (requirement 9.4). Several live Party Leaders plus Adventurers on one seat can exhaust a five-hour or weekly window, and the docs warn that "a single burst of heavy activity ... can exhaust the weekly allowance" (<https://code.claude.com/docs/en/errors>).
 6. **Claude Code moves fast.** Hooks, tracing (beta) and agent view (research preview) will change; pin a known-good version and check it with `gm doctor`.
 7. **Hooks are guard rails, not a sandbox.** A model can find a command the hook does not parse; do not give Adventurers credentials they must never use.
 8. **Screenshot capture is unproven** (section 8 callout).
@@ -333,17 +389,17 @@ The smallest useful first slice attacks the patron's two sharpest pains, lost po
 
 ## Questions for the patron
 
-Questions marked **(slice 1)** block the first build slice.
+Questions marked **(slice 1)** block the first build slice. Questions the patron has answered are marked **(answered)** with the answer in brief; the full answers are in [patron-answers-2026-09-29.md](patron-answers-2026-09-29.md).
 
-1. **(slice 1)** Where do you talk day to day: inside each Party Leader's own tab, with the Guildmaster as a quiet lobby (recommended), or always through the Guildmaster? TERMINOLOGY.md calls the Guildmaster "the patron's single point of contact", so the first answer means revising that definition.
+1. **(answered)** Where do you talk day to day? *Inside each Party Leader's own tab; the Guildmaster is a quiet front desk that can sometimes talk to a Party Leader.* The TERMINOLOGY.md wording this touches is now part of Q21.
 2. What is a playbook called? TERMINOLOGY.md has **Grimoire** ("a loadable procedure for one kind of work, read only when its trigger fires"); reuse it for per-kind playbooks, or add a new term?
-3. **(slice 1)** What does "be able to push things" mean: `git push` to GitLab without being asked, work that keeps moving without stalls, or both?
-4. **(slice 1)** For each repository: the exact names of the shared development branch and the integration branch, the feature-branch pattern (for example `feature/CRM-1234`), who creates the feature branch, and whether "push to development" means merging the feature branch into development or something else.
-5. May the guild merge into the shared development branch without asking each time, given teammates share it?
-6. **(slice 1)** Which steps need your word: merging into development, opening the merge request, marking it ready, merging it, anything after?
-7. **(slice 1)** Is `Task-<Verb>-<Slug>` (for example `Task-Fix-login`) the id format you want? Unique across the whole guild or within one Party Leader? Should the ticket key appear in it?
+3. **(answered)** What does "be able to push things" mean? *Work that keeps moving without stalls; each playbook says when to push, and its rules must be followed.*
+4. **(deferred by the patron: "overview first")** For each repository: the exact names of the shared development branch and the integration branch, the feature-branch pattern (for example `feature/CRM-1234`), who creates the feature branch, and whether "push to development" means merging the feature branch into development or something else.
+5. **(answered by the Q3 example rule)** May the guild merge into the shared development branch without asking each time? *Yes: pushing to the shared development branch is allowed so the change can be validated there.*
+6. **(answered)** Which steps need your word? *Most likely opening the merge request.* Whether anything else needs it stays open.
+7. **(answered in part)** Is `Task-<Verb>-<Slug>` the id format you want? *It was an example; it is acceptable for tasks inside a focus; focuses need meaningful names that still show which ticket belongs to which project; the reference must resolve unambiguously.* How focuses are named is question Q23.
 8. Where should notices appear: only in the Party Leader's chat, also in one guild-wide feed, as desktop notifications? And may the Guildmaster volunteer anything at all (for example a Party Leader gone quiet)?
-9. **(slice 1)** Do you approve the storage split: files for what people write and read, SQLite behind `gm` for coordination?
+9. **(slice 1, open)** Do you approve the storage split: files for what people write and read, SQLite behind `gm` for coordination? *The patron asks why SQLite is needed if agents can read and write files; the trade-off is being explained in chat.*
 10. Tracing: start with a built-in text waterfall and add a local Jaeger (Docker) in slice 4, or Jaeger from the start?
 11. Recurring jobs: which ones, how often, what each produces, what happens when one fails, and must they run while the laptop sleeps (which needs an always-on machine)?
 12. Incidents: what does an incident Party Leader produce (a field report, a fix, a timeline), what may it read (logs, dashboards, production data), and when is it over?
@@ -354,8 +410,10 @@ Questions marked **(slice 1)** block the first build slice.
 17. After how long without work should a Party Leader's session end (its records kept), and what retires a Party Leader for good?
 18. How do you send screenshots today: pasted into Claude Code, dragged in as a file, or as a path?
 19. Which terminal and multiplexer do you use (iTerm2 tabs, tmux, an IDE terminal), and what exactly should the top and bottom bars show?
-20. **(slice 1)** What should `gm` be written in: Python with its standard library, shell with the `sqlite3` tool, or TypeScript?
-21. Terms that may need to follow the rename to Party Leader (not renamed in this change): **Chapter House** is now defined as "a party leader's own guildhall", which mixes the guild-chapter image with the adventuring-party one; keep it or rename it? The Party Leader definition also still says "Idle by default, acts only on routed work", which a recurring Party Leader woken by a schedule, and a patron talking to it directly, both stretch; revise it?
+20. **(answered)** What should `gm` be written in? *Bash, fast and portable between machines, the same technology as Firstmate unless there is a reason not to.*
+21. Terms that may need to follow the rename to Party Leader (not renamed in this change): **Chapter House** is now defined as "a party leader's own guildhall", which mixes the guild-chapter image with the adventuring-party one; keep it or rename it? The Party Leader definition also still says "Idle by default, acts only on routed work", which a recurring Party Leader woken by a schedule, and a patron talking to it directly, both stretch; revise it? And since the patron works inside each Party Leader's tab (Q1), should the Guildmaster's definition, "The patron's single point of contact", change to something like "the patron's front desk"?
+22. When may the Guildmaster talk to a Party Leader unasked (requirement 2.4): only to pass on something the patron said at the front desk, or also to ask a quiet Party Leader how it stands? May it ever steer one?
+23. How should a focus be named (Q7 follow-up)? Would the patron give each project and feature a short name when it is opened (for example `saved-views`, `export-csv`), with the ticket key kept as an alias? Or should the Party Leader propose a name from the ticket's title for the patron to accept?
 
 ## Outside sources
 

@@ -1,7 +1,7 @@
 # Guildmaster requirements, first pass
 
 This restates the patron's notes of 2026-09-29 ([patron-notes-2026-09-29.md](patron-notes-2026-09-29.md)) as a numbered list grouped by theme.
-The notes, including the addition relayed later the same day, are the source record; where this file and the notes disagree, the notes win.
+The notes, including the addition relayed later the same day, are the source record, together with the patron's first answers ([patron-answers-2026-09-29.md](patron-answers-2026-09-29.md)); where this file and those records disagree, the records win.
 Every requirement quotes the sentence it comes from.
 The priority on each is a recommendation, not the patron's ruling, using MoSCoW: **Must** (the first useful Guildmaster fails without it), **Should** (wanted soon after), **Could** (worth doing when cheap), **Won't** (explicitly not now).
 
@@ -65,6 +65,10 @@ Priority: **Must**.
 Source (relayed addition): "It must not be blocked: it should be able to answer the patron without losing what it was doing or getting stuck."
 Priority: **Must**.
 
+1.8. Nothing depends on the model remembering to save. Every Party Leader resumes after a restart, compaction or pause with no re-explaining, and the patron never has to repeat an answer already given.
+Source (patron answers): "(a) persistence must not depend on the model remembering to save: the patron has seen Firstmate's stow miss or save the wrong information, forcing them to repeat answers; resumption must need no re-explaining."
+Priority: **Must**.
+
 ## 2. The Guildmaster knows, but does not tell
 
 2.1. The Guildmaster's own context is not filled with the detail of each Party Leader's work.
@@ -78,6 +82,10 @@ Priority: **Must**.
 2.3. When asked, the Guildmaster can answer from history: what a Party Leader did, when, and what came of it.
 Source: "some information and he could tell me some historical facts, let's say."
 Priority: **Should**.
+
+2.4. The patron works inside each Party Leader's own tab. The Guildmaster is a quiet front desk that can sometimes talk to a Party Leader itself.
+Source (patron answers): "Q1: The patron works inside each Party Leader's own tab; the Guildmaster is a quiet front desk that can sometimes talk to a Party Leader."
+Priority: **Must**.
 
 ## 3. Repositories and camps
 
@@ -111,6 +119,7 @@ Priority: **Must**.
 
 4.3. The ticket kind follows the patron's delivery flow from A to Z:
 bring in the repository, create a worktree, do the work, push to the shared development branch for testing, then open a merge request from the feature branch to the integration branch, then keep pushing fixes to the same feature branch.
+The exact branch names per repository are deferred to a later stage (answer to Q4).
 Source: "So I needed to know about the process of how we deploy things or what's the procedure from A to Z, as in we bring in the repository, we create a work tree on it, we work on it, we push it to development branch where we're testing it, which is a shared branch, and then eventually we bring our feature branch and do a merge request to integration and then we might still find some bugs so we still need to push on that feature branch, not create new branches."
 Priority: **Must**.
 
@@ -121,6 +130,18 @@ Priority: **Must**.
 4.5. Each kind of Party Leader has its own playbook; a kind without delivery phases (incident, recurring job) still has one.
 Source: "So maybe there's like a run book or playbook, whatever it's called, for each of these types."
 Priority: **Should** (the ticket playbook in 4.3 is **Must**).
+
+4.6. Each playbook says when to push, as written rules that must be followed. The patron's example for the ticket kind: pushing to the shared development branch is allowed, so the change can be validated on the development domains and APIs; integration is reached only through a merge request; master never.
+Source (patron answers): "Q3 ("push things"): ... Each playbook/workflow says when to push. Example rule: pushing to the shared development branch is allowed so the change can be validated on the development domains and APIs; integration only via a merge request; master never. Rules like these are written down per playbook and must be followed."
+Priority: **Must**.
+
+4.7. Opening the merge request needs the patron's word.
+Source (patron answers): "Q6 (approvals): most likely opening the merge request needs the patron's word."
+Priority: **Must** (the patron said "most likely"; other gates stay open).
+
+4.8. A supervisor catches a worker that breaks the rules and corrects it.
+Source (patron answers): "(b) Supervisors must catch and correct a worker that breaks the rules, as Firstmate sometimes does."
+Priority: **Must**.
 
 ## 5. Patron-authored prompts
 
@@ -191,7 +212,10 @@ Source: "and keeping me up to date" and (relayed addition) "The Chapter Master s
 Priority: **Must**.
 
 8.7. Every posting has a stable, readable id, such as Task-Fix-XYZ, that the patron can use to ask for more about that posting or to steer it.
+The id is a reference the agents resolve unambiguously. Inside a focus, `Task-<Verb>-<Slug>` is acceptable unless something better exists.
+Focuses themselves get names more meaningful than a ticket number, while still showing which ticket belongs to which project or feature.
 Source (relayed addition): "Simple messages, where the patron can take the task id, such as Task-Fix-XYZ, and get more information or steer it."
+Source (patron answers): "Q7 (ids): `Task-<Verb>-<Slug>` was only an example. The patron has both tickets and big projects, wants something more meaningful than a ticket number, but also wants to see which ticket belongs to which project or feature. For tasks inside a focus, Task-Verb-Slug is acceptable unless something better exists; the key need is a reference the AI resolves unambiguously."
 Priority: **Must**.
 
 8.8. Whenever a posting is brought back to the patron, its context comes with it: the original words, the screenshot, and what it was about.
@@ -206,20 +230,31 @@ Priority: **Must**.
 
 9.2. Guildmaster drives Claude as tightly as it can: no avoidable errors, and work keeps moving, including pushing changes.
 Source: "So I need to kind of control cloud as best as possible and not get any errors and be able to push things."
-Priority: **Must**. What "push things" means is open question Q3 in the consultation.
+Answer to Q3: "push things" means work that keeps moving without stalls; when to push is each playbook's rule (4.6).
+Source (patron answers): "Q3 ("push things"): work that keeps moving without stalls."
+Priority: **Must**.
 
 9.3. Other providers or local models may come later; nothing built now should make them impossible, but nothing is built for them now.
 Source: "I might utilize other ones at a later state or maybe local models until then."
 Priority: **Won't** (for now), with **Could** for keeping the familiar behind one seam.
 
+9.4. Guildmaster uses markedly less Claude quota than Firstmate does for the same work.
+Source (patron answers): "(c) Claude quota already runs out with many Firstmate sessions; the design must reduce quota use."
+Priority: **Must**.
+
 ## 10. Storage and reach
 
-These two come from the same conversation, summarised in the patron notes, not from the quoted words.
+10.1 and 10.2 come from the same conversation, summarised in the patron notes, not from the quoted words; 10.3 comes from the patron's answers.
 
 10.1. Plain files where agents write and people read; SQLite for the coordination core (posting state, locks, the summons queue, rulings, leases), reached only through a small command-line tool so no agent writes SQL.
 Source: the supervising agent's suggestion recorded in the patron notes; the patron has not ruled on it.
 Priority: **Should** (a recommendation awaiting the patron's word, open question Q9).
+The patron has questioned it: "Q9 (storage): the patron questions why SQLite is needed if agents can read and write files freely, noting that the patron will not read those coordination files, the agents will." The question stays open.
 
 10.2. Remote homes (Party Leaders on other machines over SSH) are not needed.
 Source: "The patron then said remote homes are not needed for now."
 Priority: **Won't** (for now).
+
+10.3. Guildmaster is written in bash, the same technology as Firstmate, unless there is a reason not to; it must be fast and portable between machines.
+Source (patron answers): "Q20 (language): wants it fast and portable between machines; bash would be preferred, the same technology as Firstmate unless there is a reason not to."
+Priority: **Should**.
