@@ -11,6 +11,7 @@ This repository is at its beginning. The vocabulary comes first, because every l
 - [TERMINOLOGY.md](TERMINOLOGY.md) is the single owner of the project's vocabulary. Read it before writing anything else here.
 - `firstmate/` holds the research into the prior system this one succeeds, kept separate from Guildmaster's own design.
 - `vision/` holds Guildmaster's own design material: the patron's notes, the requirements drawn from them, a Firstmate-informed consultation, and the [step 1 design](vision/step-1-design.md).
+- [vision/roadmap.md](vision/roadmap.md) is the tracked build plan: each step's goal, scope, done-when criteria, status and links.
 - `bin/gm` is the `gm` command; `templates/` holds the first charter, ticket playbook and repository rules it copies into the Guildhall; `tests/` holds its test suite and an end-to-end demonstration.
 
 ## Step 1: one ticket that never forgets
