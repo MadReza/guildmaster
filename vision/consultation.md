@@ -344,6 +344,8 @@ The patron agreed to SQLite with build-order step 1 ([step-1-design.md](step-1-d
 
 ## Build order
 
+Progress on these steps, with each step's status and links, is tracked in [roadmap.md](roadmap.md).
+
 The smallest useful first slice attacks the patron's two sharpest pains, lost postings and "where am I", for one real ticket, before any Guildmaster or Adventurer exists.
 
 1. **One ticket that never forgets.**
