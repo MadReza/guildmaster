@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 781" width="1000" height="781" role="img" aria-labelledby="t d">
+<title id="t">One posting as one trace: the span tree</title>
+<desc id="d">A posting is the root span. Under it: each exchange with the patron (capture hook, the Party Leader turn with its model calls, tool calls, MCP call and subagent, and the Stop hook), the dispatch of an Adventurer with its run, model calls, tool calls and the rules check, a second exchange, and the final notice. The Party Leader session is a separate trace joined to the exchanges it served by span links.</desc>
+<style>
+  .bg { fill: #ffffff; stroke: #d9dcd8; }
+  .title { font: 600 17px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #1d2125; }
+  .sub { font: 12.5px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #5a636b; }
+  .lbl { font: 13px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #1d2125; }
+  .lbl0 { font: 600 13.5px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #1d2125; }
+  .tag { font: 11.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #5a636b; }
+  .guide { stroke: #c4c9c4; stroke-width: 1; fill: none; }
+  .axis { stroke: #d9dcd8; stroke-width: 1; }
+  .gm { fill: #2f7d6d; }
+  .hook { fill: #d08a1f; }
+  .native { fill: #3f86cf; }
+  .link { stroke: #7a7f86; stroke-width: 1.4; stroke-dasharray: 5 4; fill: none; }
+  .zebra { fill: #f4f5f3; }
+  @media (prefers-color-scheme: dark) {
+    .bg { fill: #1c2024; stroke: #343a40; }
+    .title, .lbl, .lbl0 { fill: #e3e6e8; }
+    .sub, .tag { fill: #9aa3ab; }
+    .guide { stroke: #4a5157; }
+    .axis { stroke: #343a40; }
+    .gm { fill: #4fae9a; }
+    .hook { fill: #e0a548; }
+    .native { fill: #6aa6e3; }
+    .link { stroke: #9aa3ab; }
+    .zebra { fill: #22272c; }
+  }
+</style>
+<rect class="bg" x="0.5" y="0.5" width="999" height="780" rx="8"/>
+<text class="title" x="24" y="34">One posting, one trace</text>
+<text class="sub" x="24" y="56">An illustrative posting. Left: the parent/child tree with each span’s name. Right: when each span ran, from the patron’s message to the final notice.</text>
+<text class="tag" x="448" y="78">span name</text>
+<text class="tag" x="600" y="78">time →</text>
+<rect class="zebra" x="12" y="119" width="976" height="27"/>
+<rect class="zebra" x="12" y="173" width="976" height="27"/>
+<rect class="zebra" x="12" y="227" width="976" height="27"/>
+<rect class="zebra" x="12" y="281" width="976" height="27"/>
+<rect class="zebra" x="12" y="335" width="976" height="27"/>
+<rect class="zebra" x="12" y="389" width="976" height="27"/>
+<rect class="zebra" x="12" y="443" width="976" height="27"/>
+<rect class="zebra" x="12" y="497" width="976" height="27"/>
+<rect class="zebra" x="12" y="551" width="976" height="27"/>
+<line class="axis" x1="600" y1="86" x2="600" y2="605"/>
+<line class="axis" x1="976" y1="86" x2="976" y2="605"/>
+<path class="guide" d="M29,111.5 V132.5 H40"/>
+<path class="guide" d="M49,138.5 V159.5 H60"/>
+<path class="guide" d="M49,138.5 V186.5 H60"/>
+<path class="guide" d="M69,192.5 V213.5 H80"/>
+<path class="guide" d="M69,192.5 V240.5 H80"/>
+<path class="guide" d="M89,246.5 V267.5 H100"/>
+<path class="guide" d="M69,192.5 V294.5 H80"/>
+<path class="guide" d="M69,192.5 V321.5 H80"/>
+<path class="guide" d="M89,327.5 V348.5 H100"/>
+<path class="guide" d="M109,354.5 V375.5 H120"/>
+<path class="guide" d="M49,138.5 V402.5 H60"/>
+<path class="guide" d="M29,111.5 V429.5 H40"/>
+<path class="guide" d="M49,435.5 V456.5 H60"/>
+<path class="guide" d="M69,462.5 V483.5 H80"/>
+<path class="guide" d="M69,462.5 V510.5 H80"/>
+<path class="guide" d="M49,435.5 V537.5 H60"/>
+<path class="guide" d="M29,111.5 V564.5 H40"/>
+<path class="guide" d="M29,111.5 V591.5 H40"/>
+<text class="lbl0" x="24" y="110.0">posting appt-v2#12 fix-owner-empty</text>
+<text class="tag" x="448" y="110.0">guild.posting</text>
+<rect class="gm" x="600.0" y="99" width="376.0" height="13" rx="2"/>
+<text class="lbl" x="44" y="137.0">exchange 1: the patron's message, then the reply</text>
+<text class="tag" x="448" y="137.0">guild.exchange</text>
+<rect class="hook" x="600.0" y="126" width="86.5" height="13" rx="2"/>
+<text class="lbl" x="64" y="164.0">UserPromptSubmit: capture verbatim</text>
+<text class="tag" x="448" y="164.0">guild.hook</text>
+<rect class="hook" x="600.0" y="153" width="5.3" height="13" rx="2"/>
+<text class="lbl" x="64" y="191.0">Party Leader turn</text>
+<text class="tag" x="448" y="191.0">invoke_agent</text>
+<rect class="native" x="605.3" y="180" width="75.6" height="13" rx="2"/>
+<text class="lbl" x="84" y="218.0">model call  opus · effort high</text>
+<text class="tag" x="448" y="218.0">chat</text>
+<rect class="native" x="607.5" y="207" width="18.8" height="13" rx="2"/>
+<text class="lbl" x="84" y="245.0">Bash: gm notice 12 started</text>
+<text class="tag" x="448" y="245.0">execute_tool</text>
+<rect class="native" x="628.6" y="234" width="6.8" height="13" rx="2"/>
+<text class="lbl" x="104" y="272.0">notice: started</text>
+<text class="tag" x="448" y="272.0">guild.notice</text>
+<rect class="gm" x="630.8" y="261" width="4.0" height="13" rx="2"/>
+<text class="lbl" x="84" y="299.0">MCP: jira getIssue</text>
+<text class="tag" x="448" y="299.0">execute_tool</text>
+<rect class="native" x="636.8" y="288" width="6.8" height="13" rx="2"/>
+<text class="lbl" x="84" y="326.0">Agent: Explore subagent</text>
+<text class="tag" x="448" y="326.0">execute_tool</text>
+<rect class="native" x="645.1" y="315" width="22.6" height="13" rx="2"/>
+<text class="lbl" x="104" y="353.0">subagent Explore</text>
+<text class="tag" x="448" y="353.0">invoke_agent</text>
+<rect class="native" x="646.2" y="342" width="19.9" height="13" rx="2"/>
+<text class="lbl" x="124" y="380.0">model call  haiku</text>
+<text class="tag" x="448" y="380.0">chat</text>
+<rect class="native" x="647.4" y="369" width="17.3" height="13" rx="2"/>
+<text class="lbl" x="64" y="407.0">Stop: guard checks the board</text>
+<text class="tag" x="448" y="407.0">guild.hook</text>
+<rect class="hook" x="680.8" y="396" width="5.6" height="13" rx="2"/>
+<text class="lbl" x="44" y="434.0">dispatch Adventurer (contract)</text>
+<text class="tag" x="448" y="434.0">guild.dispatch</text>
+<rect class="gm" x="694.0" y="423" width="199.3" height="13" rx="2"/>
+<text class="lbl" x="64" y="461.0">Adventurer run  claude -p</text>
+<text class="tag" x="448" y="461.0">invoke_agent</text>
+<rect class="native" x="696.3" y="450" width="182.0" height="13" rx="2"/>
+<text class="lbl" x="84" y="488.0">model calls  sonnet · effort medium</text>
+<text class="tag" x="448" y="488.0">chat</text>
+<rect class="native" x="697.8" y="477" width="18.8" height="13" rx="2"/>
+<rect class="native" x="735.4" y="477" width="18.8" height="13" rx="2"/>
+<rect class="native" x="776.7" y="477" width="18.8" height="13" rx="2"/>
+<rect class="native" x="825.6" y="477" width="22.6" height="13" rx="2"/>
+<rect class="native" x="859.4" y="477" width="16.9" height="13" rx="2"/>
+<text class="lbl" x="84" y="515.0">tool calls  Read · Edit · Bash</text>
+<text class="tag" x="448" y="515.0">execute_tool</text>
+<rect class="native" x="718.4" y="504" width="15.0" height="13" rx="2"/>
+<rect class="native" x="756.0" y="504" width="18.8" height="13" rx="2"/>
+<rect class="native" x="797.4" y="504" width="26.3" height="13" rx="2"/>
+<rect class="native" x="850.0" y="504" width="7.5" height="13" rx="2"/>
+<text class="lbl" x="64" y="542.0">check: the rules held</text>
+<text class="tag" x="448" y="542.0">guild.check</text>
+<rect class="gm" x="880.1" y="531" width="11.3" height="13" rx="2"/>
+<text class="lbl" x="44" y="569.0">exchange 2: addition “#12 also the edit form”</text>
+<text class="tag" x="448" y="569.0">guild.exchange</text>
+<rect class="hook" x="900.8" y="558" width="41.4" height="13" rx="2"/>
+<text class="lbl" x="44" y="596.0">notice: done</text>
+<text class="tag" x="448" y="596.0">guild.notice</text>
+<rect class="gm" x="969.2" y="585" width="4.5" height="13" rx="2"/>
+<text class="lbl0" x="24" y="645">A separate trace per Party Leader session, joined by span links</text>
+<text class="lbl" x="24" y="676">Party Leader session appt-v2 (one Claude Code session)</text>
+<text class="tag" x="448" y="676">guild.session</text>
+<rect class="hook" x="600.0" y="663" width="376.0" height="13" rx="2"/>
+<text class="sub" x="24" y="699">Starts at SessionStart, ends at SessionEnd; compactions are events on it. It serves many postings for weeks, so it is never their root.</text>
+<path class="link" d="M606.0,661 C606.0,623 606.0,170 606.0,140"/>
+<path class="link" d="M906.8,661 C906.8,623 906.8,602 906.8,572"/>
+<rect class="gm" x="24" y="717" width="22" height="11" rx="2"/>
+<text class="sub" x="54" y="727">gm’s own spans, from the register</text>
+<rect class="hook" x="297.79999999999995" y="717" width="22" height="11" rx="2"/>
+<text class="sub" x="327.79999999999995" y="727">gm’s hook handlers in Claude Code</text>
+<rect class="native" x="571.5999999999999" y="717" width="22" height="11" rx="2"/>
+<text class="sub" x="601.5999999999999" y="727">Claude Code’s own telemetry, joined by id</text>
+<path class="link" d="M898.1999999999998,722 H924.1999999999998"/>
+<text class="sub" x="932.1999999999998" y="727">span link</text>
+</svg>

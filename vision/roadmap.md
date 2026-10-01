@@ -2,6 +2,7 @@
 
 The single tracked record of Guildmaster's build plan and its progress.
 The steps are those of the [Build order](consultation.md#build-order) in [consultation.md](consultation.md), with step 1 as built in [step-1-design.md](step-1-design.md).
+On 2026-09-30 the patron made tracing the next step, so it moved from fourth to second: the consultation's step 4 is step 2 here, and its steps 2 and 3 are steps 3 and 4.
 Vocabulary is [TERMINOLOGY.md](../TERMINOLOGY.md)'s.
 
 **How to update this file.** Whoever finishes or starts a step updates that step's status and links in the same PR as the work.
@@ -9,9 +10,9 @@ Vocabulary is [TERMINOLOGY.md](../TERMINOLOGY.md)'s.
 | # | Step | Status |
 | --- | --- | --- |
 | 1 | One ticket that never forgets | Done |
-| 2 | Adventurers and enforced rules | Next |
-| 3 | Several Party Leaders and the Guildmaster lobby | Planned |
-| 4 | Audit and trace view | Planned |
+| 2 | Tracing and audit | Next |
+| 3 | Adventurers and enforced rules | Planned |
+| 4 | Several Party Leaders and the Guildmaster lobby | Planned |
 | 5 | The other kinds | Planned |
 | 6 | Hardening | Planned |
 
@@ -22,21 +23,34 @@ Vocabulary is [TERMINOLOGY.md](../TERMINOLOGY.md)'s.
 **Goal.** Attack the patron's two sharpest pains, lost postings and "where am I", for one real ticket, before any Guildmaster or Adventurer exists.
 
 **Scope.** The register and `gm` in bash (`open`, `post`, `resolve`, `list`, `show`, `park`, `phase`, `notice`, `statusline`, `where`); one Party Leader for one real ticket, started by `gm open` as a named interactive Claude Code session in the ticket's camp (a `git worktree` of the existing clone on the ticket's feature branch); the patron's charter, the ticket playbook and one repository's rules as files; the `UserPromptSubmit` capture and `Stop` guard; the `SessionStart` resume from records (requirement 1.8); the three-line status line.
-In this step the Party Leader still does the work itself, one posting at a time: a deliberate, temporary shortfall against requirements 1.6 and 1.7 that step 2 removes.
+In this step the Party Leader still does the work itself, one posting at a time: a deliberate, temporary shortfall against requirements 1.6 and 1.7 that step 3 (Adventurers) removes.
 
 **Done when** the patron can send ten items in a row, walk away, come back, and see all ten with their words and states, and a killed session resumes with nothing re-explained.
 
-## Step 2: Adventurers and enforced rules
+## Step 2: Tracing and audit
 
-**Status:** Next. No PR yet.
+**Status:** Next. Design in [tracing-design.md](tracing-design.md), on the landscape in [tracing-research.md](tracing-research.md); no build PR yet.
+Moved forward from fourth place at the patron's request of 2026-09-30: "let's determine what's the best way of tracing. I think that should be our next step."
+
+**Goal.** Show what was triggered, when and by whom, and let the patron see a posting's whole path as one trace: each message and reply, each tool, MCP and subagent call, each hook, each Party Leader session and Adventurer run, with the model, effort, time and cost of each.
+
+**Scope.** The build plan in [tracing-design.md](tracing-design.md#build-plan): spans in the register with `gm trace` as a text waterfall and `gm stats` for the derived measures (time to first reply, exchanges, steps to success, cost per posting); Claude Code's own telemetry into a local collector and imported into the register; optionally a local Jaeger.
+The Adventurer spans the design defines are built with step 3, where Adventurers first exist; so are the writ template hashes the consultation put in this step, since writs arrive there too.
+
+**Done when** (proposed in [tracing-design.md](tracing-design.md#build-plan), for the patron's agreement): the patron sends a message, the Party Leader answers it with a tool call, an MCP call and a subagent, and `gm trace` shows that tree with its times, tool names, model and effort; `gm stats` gives time to first reply, exchanges, steps, and tokens and cost per posting by model and effort; and nothing is sent anywhere but `127.0.0.1`.
+
+## Step 3: Adventurers and enforced rules
+
+**Status:** Planned. No PR yet. It was the next step until the patron moved tracing ahead of it on 2026-09-30.
 
 **Goal.** The Party Leader stays answerable while Adventurers do the work, and the rules the playbook states are enforced, not only asked for.
 
 **Scope.** `gm dispatch` runs a headless `claude -p` Adventurer in the camp, one contract at a time per ticket and surveys in parallel; results land in the register and wake the Party Leader; `PreToolUse` rules in every camp allow or deny from the playbook's push rules; `gm check` runs after every Adventurer and reopens a posting that broke a rule; the dispatch cap; `TRACEPARENT` is set per posting.
+With it come the Adventurer spans of [tracing-design.md](tracing-design.md#how-the-trace-context-travels) (the dispatch span, `TRACEPARENT`, a preassigned `--session-id`, the resource attributes, the run's result) and the hash of each writ and its template.
 
 **Done when** the patron can keep talking to the Party Leader while an Adventurer works, and a follow-up bug on the ticket lands on the same feature branch.
 
-## Step 3: Several Party Leaders and the Guildmaster lobby
+## Step 4: Several Party Leaders and the Guildmaster lobby
 
 **Status:** Planned. No PR yet.
 
@@ -45,16 +59,6 @@ In this step the Party Leader still does the work itself, one posting at a time:
 **Scope.** `gm roster`, a Guildmaster session holding only the roster, phase-change digests, history questions answered from events, one tab per Party Leader, the guild line in every status line.
 
 **Done when:** not yet stated in [consultation.md](consultation.md#build-order); whoever starts this step writes it, with the patron's agreement, in the PR that starts it.
-
-## Step 4: Audit and trace view
-
-**Status:** Planned. No PR yet.
-
-**Goal.** Show what was triggered, when and by whom, and let the patron see a posting's whole path as one trace.
-
-**Scope.** Prompt templates owned by the patron with hashes recorded per writ; cost per posting; `gm trace` as a text waterfall; OTLP export and Claude Code's beta tracing into a local Jaeger.
-
-**Done when:** not yet stated in [consultation.md](consultation.md#build-order); to be written when the step starts.
 
 ## Step 5: The other kinds
 
@@ -88,8 +92,9 @@ From [patron-answers-2026-09-29.md](patron-answers-2026-09-29.md) and [step-1-de
 - Each playbook says when to push: pushing to the shared development branch is allowed, `integration` only through a merge request, `master` never (Q3, Q5).
 - Opening a merge request needs the patron's word (Q6).
 - Persistence never depends on the model remembering to save, supervisors catch and correct a worker that breaks the rules, and quota use must fall (the patron's three new requirements).
+- Tracing is the next step, ahead of Adventurers (the patron, 2026-09-30).
 
 ## Open questions
 
 The still-open questions are in [consultation.md](consultation.md#questions-for-the-patron); the ones not marked answered there are Q2, Q8, Q10 to Q19, Q21 and Q22, and Q4 (branch names), which the patron deferred.
-Those that most affect the next steps: Q4 (the branch names the push rules need), Q13 and Q14 (quota and models, for the dispatch cap), Q22 (when the Guildmaster may talk to a Party Leader unasked) and Q21 (terms that may follow the rename).
+Those that most affect the next steps: Q10 (the trace viewer, with a recommendation in [tracing-design.md](tracing-design.md#storage-and-viewer)) and the tracing design's own [questions](tracing-design.md#questions-for-the-patron), Q4 (the branch names the push rules need), Q13 and Q14 (quota and models, for the dispatch cap), Q22 (when the Guildmaster may talk to a Party Leader unasked) and Q21 (terms that may follow the rename).

@@ -7,7 +7,7 @@ Vocabulary is [TERMINOLOGY.md](../TERMINOLOGY.md)'s.
 **Done when** the patron can send ten items in a row, walk away, come back, and see all ten with their words and states, and a killed session resumes with nothing re-explained.
 `tests/demo.sh` shows both with a real Claude Code session in a throwaway repository; `tests/run.sh` covers the parts without a model.
 
-In this step the Party Leader still does the work itself, one posting at a time (the shortfall against requirements 1.6 and 1.7 that step 2 removes).
+In this step the Party Leader still does the work itself, one posting at a time (the shortfall against requirements 1.6 and 1.7 that the Adventurers step, step 3 in [roadmap.md](roadmap.md), removes).
 
 ## What the patron agreed with this step
 
