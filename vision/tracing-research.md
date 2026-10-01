@@ -190,7 +190,7 @@ Every hook gets `session_id`, `prompt_id`, `transcript_path`, `cwd` and `hook_ev
 
 On 2026-09-30, on the patron's Mac, three short headless runs exported Claude Code's telemetry to a throwaway receiver on `127.0.0.1:4318` (a 25-line Python program writing OTLP/HTTP JSON to files; Docker was not running, and nothing needed an account).
 Run 1 used Haiku 4.5 with `--effort low`, a preassigned `--session-id`, a hook on 11 events recording its input and environment, a one-tool stdio MCP server recording every message, and a prompt that ran one Bash command, called the MCP tool and started a subagent; it cost $0.052.
-Runs 2 and 3 were one-line prompts, by argument and by `stream-json` input, without content capture.
+Runs 2 and 3 were one-line prompts, by argument and by `stream-json` input, without content capture; the three cost $0.072 by Claude Code's own estimate.
 The receiver was stopped afterwards; the runs' own transcripts remain in Claude Code's store under `~/.claude/projects/`.
 
 What arrived, and how it compares with the documentation:
