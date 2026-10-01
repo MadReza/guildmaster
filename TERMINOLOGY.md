@@ -56,6 +56,7 @@ Where a term replaces one from Firstmate, the Firstmate column records the origi
 | **Charter** | The guildmaster's entire job description. Loaded at every start, and binding. | `AGENTS.md` |
 | **Quest Board** | The durable queue of postings, their dependencies, and their history. | backlog |
 | **Ledger** | An append-only record of events for one posting. A wake event, never current truth. | status log |
+| **Register** | The one store behind `gm` that holds the quest board, the ledgers and every patron message word for word. Nothing but `gm` reads or writes it. | (none: state spread across files) |
 | **Lorebook** | Durable operational knowledge local to one guildhall: facts learned the hard way. | learnings |
 | **Standing Orders** | The patron's recorded preferences and working style. | captain preferences |
 | **Archive** | Everything durable and private to one guildhall. | `data/` |

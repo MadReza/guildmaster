@@ -248,8 +248,8 @@ Priority: **Must**.
 
 10.1. Plain files where agents write and people read; SQLite for the coordination core (posting state, locks, the summons queue, rulings, leases), reached only through a small command-line tool so no agent writes SQL.
 Source: the supervising agent's suggestion recorded in the patron notes; the patron has not ruled on it.
-Priority: **Should** (a recommendation awaiting the patron's word, open question Q9).
-The patron has questioned it: "Q9 (storage): the patron questions why SQLite is needed if agents can read and write files freely, noting that the patron will not read those coordination files, the agents will." The question stays open.
+Priority: **Must** (agreed by the patron with build-order step 1; it was a recommendation awaiting the patron's word, question Q9).
+The patron has questioned it: "Q9 (storage): the patron questions why SQLite is needed if agents can read and write files freely, noting that the patron will not read those coordination files, the agents will." The patron then agreed to SQLite with build-order step 1: SQLite through the `sqlite3` command-line tool for postings and state, plain files for prompts, playbooks and reports, neither touched except through `gm` ([step-1-design.md](step-1-design.md)).
 
 10.2. Remote homes (Party Leaders on other machines over SSH) are not needed.
 Source: "The patron then said remote homes are not needed for now."

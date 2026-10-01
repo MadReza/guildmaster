@@ -1,0 +1,1095 @@
+#!/usr/bin/env bash
+# gm: the Guildmaster's single command. Step 1: one ticket that never forgets.
+set -euo pipefail
+
+gm_realpath() {
+  local p=$1 l
+  while [ -L "$p" ]; do
+    l=$(readlink "$p")
+    case $l in /*) p=$l ;; *) p=$(dirname "$p")/$l ;; esac
+  done
+  printf '%s/%s' "$(cd "$(dirname "$p")" && pwd -P)" "$(basename "$p")"
+}
+
+GM_SELF=$(gm_realpath "${BASH_SOURCE[0]}")
+GM_ROOT=$(cd "$(dirname "$GM_SELF")/.." && pwd -P)
+GM_TEMPLATES=$GM_ROOT/templates
+GM_HALL=${GM_HALL:-$HOME/.guildmaster}
+case $GM_HALL in /*) ;; *) GM_HALL=$PWD/$GM_HALL ;; esac
+GM_DB=$GM_HALL/register.db
+GM_SCHEMA_VERSION=1
+GM_STOP_BUDGET=${GM_STOP_BUDGET:-3}
+GM_NOW="strftime('%Y-%m-%dT%H:%M:%SZ','now')"
+GM_STOPWORDS="a an the to of in on at for and or but is are was were be been it its this that these those i me my we our you your he she they them please can could would should will just also so here there now then some any with from into about as by if not do does did have has had get got make let lets s t m ll re ve d ok okay hey hi hello"
+
+gm_die() { printf 'gm: %s\n' "$*" >&2; exit 1; }
+
+gm_q() {
+  local s=$1 sq="'"
+  printf "'%s'" "${s//$sq/$sq$sq}"
+}
+
+gm_qn() {
+  if [ -n "$1" ]; then gm_q "$1"; else printf 'NULL'; fi
+}
+
+gm_shq() {
+  local s=$1 sq="'"
+  printf "'%s'" "${s//$sq/$sq\\$sq$sq}"
+}
+
+gm_sql() {
+  sqlite3 -bail -batch -noheader -separator "$(printf '\t')" -cmd '.timeout 15000' -cmd 'PRAGMA foreign_keys=ON' "$GM_DB" "$@"
+}
+
+gm_json_field() {
+  sqlite3 -batch :memory: "SELECT json_extract(CAST(readfile($(gm_q "$1")) AS TEXT),$(gm_q "\$.$2"));" 2>/dev/null || true
+}
+
+gm_tmp() {
+  mkdir -p "$GM_HALL/tmp"
+  mktemp "$GM_HALL/tmp/gm.XXXXXX"
+}
+
+gm_db_init() {
+  mkdir -p "$GM_HALL"
+  local tmp=$GM_DB.init.$$
+  rm -f "$tmp"
+  sqlite3 -bail -batch "$tmp" >/dev/null <<SQL
+PRAGMA journal_mode=WAL;
+BEGIN IMMEDIATE;
+CREATE TABLE focus(
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  kind TEXT NOT NULL DEFAULT 'ticket',
+  repo TEXT NOT NULL,
+  camp TEXT NOT NULL UNIQUE,
+  branch TEXT NOT NULL,
+  phase TEXT,
+  opened_at TEXT NOT NULL
+);
+CREATE TABLE ticket(
+  key TEXT PRIMARY KEY,
+  focus_id INTEGER NOT NULL REFERENCES focus(id)
+);
+CREATE TABLE message(
+  id INTEGER PRIMARY KEY,
+  focus_id INTEGER REFERENCES focus(id),
+  at TEXT NOT NULL,
+  session_id TEXT,
+  prompt_id TEXT,
+  words TEXT NOT NULL,
+  disposition TEXT NOT NULL CHECK (disposition IN ('posting','addition','command','unplaced')),
+  posting_id INTEGER REFERENCES posting(id),
+  sorted_at TEXT
+);
+CREATE TABLE posting(
+  id INTEGER PRIMARY KEY,
+  focus_id INTEGER NOT NULL REFERENCES focus(id),
+  num INTEGER NOT NULL,
+  slug TEXT NOT NULL,
+  words TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('received','queued','active','parked','needs-you','done','failed','closed')),
+  park_why TEXT,
+  park_until TEXT,
+  message_id INTEGER REFERENCES message(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (focus_id, num)
+);
+CREATE TABLE event(
+  id INTEGER PRIMARY KEY,
+  at TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  focus_id INTEGER REFERENCES focus(id),
+  posting_id INTEGER REFERENCES posting(id),
+  session_id TEXT,
+  verb TEXT,
+  detail TEXT,
+  line TEXT
+);
+CREATE TABLE guard(
+  session_id TEXT PRIMARY KEY,
+  blocks INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX posting_state ON posting(focus_id, state);
+CREATE INDEX message_focus ON message(focus_id, sorted_at);
+CREATE INDEX event_focus ON event(focus_id, id);
+CREATE INDEX event_posting ON event(posting_id, id);
+PRAGMA user_version=$GM_SCHEMA_VERSION;
+COMMIT;
+SQL
+  # ln refuses an existing target, so exactly one concurrent first caller installs its register.
+  ln "$tmp" "$GM_DB" 2>/dev/null || true
+  rm -f "$tmp" "$tmp-wal" "$tmp-shm"
+}
+
+gm_db_ensure() {
+  [ -s "$GM_DB" ] || gm_db_init
+}
+
+# Event and notice summaries quote the start of the patron's own words.
+gm_summary_sql() {
+  printf "substr(replace(replace(trim(%s),char(10),' '),char(13),' '),1,60)||CASE WHEN length(trim(%s))>60 THEN '…' ELSE '' END" "$1" "$1"
+}
+
+gm_slugify() {
+  local text w out='' n=0
+  text=$(printf '%s' "$1" | head -c 400 | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C tr -c 'a-z0-9' ' ')
+  set -f
+  for w in $text; do
+    case " $GM_STOPWORDS " in *" $w "*) continue ;; esac
+    out=${out:+$out-}$w
+    n=$((n + 1))
+    [ "$n" -ge 4 ] && break
+  done
+  set +f
+  out=${out:0:40}
+  out=${out%-}
+  printf '%s' "${out:-posting}"
+}
+
+gm_valid_slug() {
+  local re='^[a-z0-9][a-z0-9-]{0,39}$'
+  [[ $1 =~ $re ]]
+}
+
+gm_context_focus() {
+  if [ -n "${GM_FOCUS:-}" ]; then
+    printf '%s' "$GM_FOCUS"
+    return
+  fi
+  [ -s "$GM_DB" ] || return 0
+  local pwd_p
+  pwd_p=$(pwd -P)
+  gm_sql "SELECT name FROM focus WHERE camp=$(gm_q "$pwd_p") OR substr($(gm_q "$pwd_p"),1,length(camp)+1)=camp||'/' ORDER BY length(camp) DESC LIMIT 1;"
+}
+
+gm_focus_id() {
+  gm_sql "SELECT id FROM focus WHERE name=$(gm_q "$1");"
+}
+
+gm_focus_field() {
+  gm_sql "SELECT $2 FROM focus WHERE name=$(gm_q "$1");"
+}
+
+gm_require_focus() {
+  local f=${1:-}
+  [ -n "$f" ] || f=$(gm_context_focus)
+  [ -n "$f" ] || gm_die "no focus here: run inside a camp, set GM_FOCUS, or name the focus"
+  [ -n "$(gm_focus_id "$f")" ] || gm_die "no focus named '$f'"
+  printf '%s' "$f"
+}
+
+# Prints "posting<TAB>id<TAB>canonical" or "focus<TAB>id<TAB>name" for exactly one match.
+gm_resolve() {
+  local ref=$1 ctx fname='' num='' slug='' word='' ticket='' sql
+  local re_num='^#?([0-9]+)$'
+  local re_qnum='^([a-z0-9][a-z0-9-]*)?#([0-9]+)$'
+  local re_qslug='^([a-z0-9][a-z0-9-]*)?#([a-z0-9][a-z0-9-]*)$'
+  local re_ticket='^[A-Za-z][A-Za-z0-9]*-[0-9]+$'
+  local re_word='^[a-z0-9][a-z0-9-]*$'
+  gm_db_ensure
+  ctx=$(gm_context_focus)
+  if [[ $ref =~ $re_num ]]; then
+    num=${BASH_REMATCH[1]}
+  elif [[ $ref =~ $re_qnum ]]; then
+    fname=${BASH_REMATCH[1]}
+    num=${BASH_REMATCH[2]}
+  elif [[ $ref =~ $re_qslug ]]; then
+    fname=${BASH_REMATCH[1]}
+    slug=${BASH_REMATCH[2]}
+  elif [[ $ref =~ $re_ticket ]]; then
+    ticket=$(printf '%s' "$ref" | tr '[:lower:]' '[:upper:]')
+  elif [[ $ref =~ $re_word ]]; then
+    word=$ref
+  else
+    gm_die "cannot read '$ref' as a reference (try 12, #12, focus#12, focus, or a ticket key)"
+  fi
+  local scope
+  if [ -n "$fname" ]; then
+    scope="f.name=$(gm_q "$fname")"
+  elif [ -n "$ctx" ]; then
+    scope="f.name=$(gm_q "$ctx")"
+  else
+    scope="1"
+  fi
+  if [ -n "$num" ]; then
+    sql="SELECT 'posting', p.id, f.name||'#'||p.num||' '||p.slug FROM posting p JOIN focus f ON f.id=p.focus_id WHERE $scope AND p.num=$num ORDER BY f.name;"
+  elif [ -n "$slug" ]; then
+    sql="SELECT 'posting', p.id, f.name||'#'||p.num||' '||p.slug FROM posting p JOIN focus f ON f.id=p.focus_id WHERE $scope AND p.slug=$(gm_q "$slug") ORDER BY f.name, p.num;"
+  elif [ -n "$ticket" ]; then
+    sql="SELECT 'focus', f.id, f.name FROM ticket t JOIN focus f ON f.id=t.focus_id WHERE t.key=$(gm_q "$ticket");"
+  else
+    sql="SELECT 'focus', id, name FROM focus WHERE name=$(gm_q "$word")
+         UNION ALL
+         SELECT 'posting', p.id, f.name||'#'||p.num||' '||p.slug FROM posting p JOIN focus f ON f.id=p.focus_id WHERE $scope AND p.slug=$(gm_q "$word");"
+  fi
+  local out count
+  out=$(gm_sql "$sql")
+  count=$(printf '%s' "$out" | grep -c . || true)
+  if [ "$count" -eq 0 ]; then
+    gm_die "nothing matches '$ref'${ctx:+ in focus $ctx}"
+  elif [ "$count" -gt 1 ]; then
+    {
+      printf "gm: '%s' is ambiguous; name one of:\n" "$ref"
+      printf '%s\n' "$out" | cut -f3 | sed 's/^/  /'
+    } >&2
+    exit 1
+  fi
+  printf '%s\n' "$out"
+}
+
+gm_resolve_posting() {
+  local kind id canon out
+  out=$(gm_resolve "$1") || exit 1
+  IFS=$'\t' read -r kind id canon <<<"$out"
+  [ "$kind" = posting ] || gm_die "'$1' names the focus $canon, not a posting"
+  printf '%s' "$id"
+}
+
+gm_hall_file() {
+  local rel=$1 src=$2
+  local dst=$GM_HALL/$rel
+  if [ ! -e "$dst" ]; then
+    mkdir -p "$(dirname "$dst")"
+    cp "$src" "$dst"
+  fi
+  printf '%s' "$dst"
+}
+
+gm_playbook_path() { printf '%s' "$GM_HALL/playbooks/$1.md"; }
+gm_rules_path() { printf '%s' "$GM_HALL/rules/$(basename "$1").md"; }
+gm_charter_path() { printf '%s' "$GM_HALL/charter.md"; }
+
+gm_setting() {
+  local file=$1 key=$2
+  [ -f "$file" ] || return 0
+  sed -n "s/^$key:[[:space:]]*\\([^[:space:]].*\\)\$/\\1/p" "$file" | head -n 1 | sed 's/[[:space:]]*$//'
+}
+
+gm_phases() {
+  local file=$1
+  [ -f "$file" ] || return 0
+  sed -n 's/^phase:[[:space:]]*\([a-z0-9][a-z0-9-]*\).*$/\1/p' "$file"
+}
+
+gm_phase_position() {
+  local phase=$1 file=$2 i=0 n p pos=''
+  n=$(gm_phases "$file" | grep -c . || true)
+  for p in $(gm_phases "$file"); do
+    i=$((i + 1))
+    [ "$p" = "$phase" ] && pos="$i/$n"
+  done
+  printf '%s' "$pos"
+}
+
+gm_gm_command() {
+  local onpath
+  onpath=$(command -v gm 2>/dev/null || true)
+  if [ -n "$onpath" ] && [ "$(gm_realpath "$onpath")" = "$GM_SELF" ]; then
+    printf 'gm'
+  else
+    printf 'bash %s' "$GM_SELF"
+  fi
+}
+
+gm_usage() {
+  cat <<'EOF'
+usage: gm <command> [arguments]
+
+  open <focus> --repo <path> [--ticket KEY]... [--branch NAME] [--base REF] [--kind ticket] [--no-launch]
+                          record a focus, make its camp, install its Claude Code hooks, start its Party Leader
+  open <focus>            start the Party Leader of an existing focus again (a fresh session resumes from records)
+  post [--slug S] [--from REF] <words|->
+                          add a posting to the current focus (state received)
+  resolve <ref>           print the one record a reference names: 12, #12, focus#12, focus#slug, focus, KEY-123
+  list [--all] [--state S] [focus]
+                          postings of the current focus (or every focus at the front desk)
+  show <ref>              a posting with the patron's words, additions and history
+  notice <ref> <verb> [detail] [--slug S]
+                          record an event and print its one-line notice
+                          verbs: queued started resumed needs-you done failed closed update
+  park <ref> --why TEXT [--until TIME-OR-EVENT]
+                          set a posting aside, visibly, with a reason
+  phase [focus] [phase]   show or set the focus's playbook phase
+  where [focus]           the resume summary, built from the register
+  statusline              the Claude Code status line (reads the session JSON on stdin)
+
+Environment: GM_HALL (default ~/.guildmaster), GM_FOCUS (focus context override).
+EOF
+}
+
+gm_cmd_open() {
+  local focus='' repo='' branch='' base='' kind=ticket launch=1 tickets=''
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --repo) repo=${2:?--repo needs a path}; shift 2 ;;
+      --ticket) tickets="$tickets $(printf '%s' "${2:?--ticket needs a key}" | tr '[:lower:]' '[:upper:]')"; shift 2 ;;
+      --branch) branch=${2:?--branch needs a name}; shift 2 ;;
+      --base) base=${2:?--base needs a ref}; shift 2 ;;
+      --kind) kind=${2:?--kind needs a kind}; shift 2 ;;
+      --no-launch) launch=0; shift ;;
+      -*) gm_die "open: unknown option $1" ;;
+      *) [ -z "$focus" ] || gm_die "open: one focus at a time"; focus=$1; shift ;;
+    esac
+  done
+  local re_focus='^[a-z0-9][a-z0-9-]{0,31}$' re_key='^[A-Z][A-Z0-9]*-[0-9]+$' t
+  [[ $focus =~ $re_focus ]] || gm_die "open: a focus name is lowercase letters, digits and dashes, for example appt-v2"
+  for t in $tickets; do [[ $t =~ $re_key ]] || gm_die "open: '$t' is not a ticket key like CRM-8965"; done
+  [ "$kind" = ticket ] || gm_die "open: step 1 knows only the ticket kind"
+  gm_db_ensure
+
+  local fid camp
+  fid=$(gm_focus_id "$focus")
+  if [ -n "$fid" ]; then
+    local rec_repo
+    rec_repo=$(gm_focus_field "$focus" repo)
+    if [ -n "$repo" ] && [ "$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null || true)" != "$rec_repo" ]; then
+      gm_die "open: focus $focus already works on $rec_repo"
+    fi
+    [ -z "$branch" ] || [ "$branch" = "$(gm_focus_field "$focus" branch)" ] || gm_die "open: focus $focus is recorded on branch $(gm_focus_field "$focus" branch); its branch never changes"
+    repo=$rec_repo
+    branch=$(gm_focus_field "$focus" branch)
+    camp=$(gm_focus_field "$focus" camp)
+    kind=$(gm_focus_field "$focus" kind)
+    if [ ! -d "$camp" ]; then
+      git -C "$repo" worktree add "$camp" "$branch" >&2 || gm_die "open: could not make the camp again at $camp"
+    fi
+  else
+    [ -n "$repo" ] || gm_die "open: a new focus needs --repo <path to an existing clone>"
+    [ -d "$repo" ] || gm_die "open: no directory $repo"
+    repo=$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null) || gm_die "open: $repo is not a git working tree"
+    repo=$(cd "$repo" && pwd -P)
+    local taken
+    set -f
+    for t in $tickets; do
+      taken=$(gm_sql "SELECT f.name FROM ticket t JOIN focus f ON f.id=t.focus_id WHERE t.key=$(gm_q "$t");")
+      [ -z "$taken" ] || gm_die "open: ticket $t is already attached to focus $taken"
+    done
+    set +f
+    local rules first_ticket='' pattern
+    rules=$(gm_hall_file "rules/$(basename "$repo").md" "$GM_TEMPLATES/rules/repository.md")
+    set -f
+    for t in $tickets; do first_ticket=${first_ticket:-$t}; done
+    set +f
+    if [ -z "$branch" ]; then
+      pattern=$(gm_setting "$rules" feature-branch)
+      pattern=${pattern:-feature/\{ticket\}}
+      branch=${pattern//\{ticket\}/${first_ticket:-$focus}}
+      branch=${branch//\{focus\}/$focus}
+    fi
+    git check-ref-format --branch "$branch" >/dev/null 2>&1 || gm_die "open: '$branch' is not a valid branch name"
+    mkdir -p "$GM_HALL/camps"
+    camp=$GM_HALL/camps/$focus
+    [ ! -e "$camp" ] || gm_die "open: $camp already exists but no focus $focus is recorded"
+    if git -C "$repo" show-ref --verify --quiet "refs/heads/$branch"; then
+      git -C "$repo" worktree add "$camp" "$branch" >&2 || gm_die "open: git would not check out $branch in a new camp (is it checked out in another worktree?)"
+    elif [ -n "$(git -C "$repo" for-each-ref --format='%(refname)' "refs/remotes/*/$branch")" ]; then
+      git -C "$repo" worktree add "$camp" "$branch" >&2 || gm_die "open: git would not track the remote $branch in a new camp"
+    else
+      if [ -z "$base" ]; then
+        base=$(gm_setting "$rules" base-branch)
+      fi
+      if [ -z "$base" ]; then
+        if git -C "$repo" rev-parse --verify -q origin/HEAD >/dev/null; then base=origin/HEAD; else base=HEAD; fi
+      fi
+      git -C "$repo" worktree add -b "$branch" "$camp" "$base" >&2 || gm_die "open: could not create $branch from $base in a new camp"
+    fi
+    camp=$(cd "$camp" && pwd -P)
+    local ticket_sql=''
+    set -f
+    for t in $tickets; do
+      ticket_sql="$ticket_sql INSERT INTO ticket(key, focus_id) SELECT $(gm_q "$t"), id FROM focus WHERE name=$(gm_q "$focus");"
+    done
+    set +f
+    if ! gm_sql <<SQL
+BEGIN IMMEDIATE;
+INSERT INTO focus(name, kind, repo, camp, branch, phase, opened_at)
+  VALUES ($(gm_q "$focus"), $(gm_q "$kind"), $(gm_q "$repo"), $(gm_q "$camp"), $(gm_q "$branch"), NULL, $GM_NOW);
+$ticket_sql
+INSERT INTO event(at, actor, kind, focus_id, detail, line)
+  SELECT $GM_NOW, 'patron', 'focus.opened', id, $(gm_q "repo $repo, branch $branch, camp $camp"), name||' opened on '||branch FROM focus WHERE name=$(gm_q "$focus");
+COMMIT;
+SQL
+    then
+      git -C "$repo" worktree remove "$camp" >&2 || true
+      gm_die "open: could not record focus $focus in the register"
+    fi
+    fid=$(gm_focus_id "$focus")
+  fi
+  if [ -n "$tickets" ] && [ -n "$fid" ]; then
+    local add=''
+    set -f
+    for t in $tickets; do add="$add INSERT OR IGNORE INTO ticket(key, focus_id) VALUES ($(gm_q "$t"), $fid);"; done
+    set +f
+    gm_sql "BEGIN IMMEDIATE; $add COMMIT;"
+  fi
+  gm_hall_file "rules/$(basename "$repo").md" "$GM_TEMPLATES/rules/repository.md" >/dev/null
+  gm_hall_file "playbooks/$kind.md" "$GM_TEMPLATES/playbooks/$kind.md" >/dev/null
+  gm_hall_file charter.md "$GM_TEMPLATES/charter.md" >/dev/null
+  gm_install_camp "$focus" "$camp"
+  local playbook phase0
+  playbook=$(gm_playbook_path "$kind")
+  if [ -z "$(gm_focus_field "$focus" phase)" ]; then
+    phase0=$(gm_phases "$playbook" | head -n 1)
+    [ -z "$phase0" ] || gm_set_phase "$focus" "$phase0" gm >/dev/null
+  fi
+  printf '%s is open: camp %s on branch %s\n' "$focus" "$camp" "$branch"
+  local claude=${GM_CLAUDE:-claude}
+  if [ "$launch" = 1 ] && [ -t 0 ] && [ -t 1 ] && command -v "$claude" >/dev/null 2>&1; then
+    cd "$camp"
+    exec "$claude" --name "$focus"
+  fi
+  printf 'Start its Party Leader with: cd %s && claude --name %s\n' "$(gm_shq "$camp")" "$focus"
+}
+
+gm_install_camp() {
+  local focus=$1 camp=$2 settings dir exclude prefix gmcmd
+  dir=$camp/.claude
+  settings=$dir/settings.local.json
+  if [ -e "$settings" ] && ! grep -q '"GM_FOCUS"' "$settings"; then
+    gm_die "open: $settings exists and was not written by gm; move it aside first"
+  fi
+  if git -C "$camp" ls-files --error-unmatch .claude/settings.local.json >/dev/null 2>&1; then
+    gm_die "open: the repository tracks .claude/settings.local.json; gm will not overwrite a tracked file"
+  fi
+  mkdir -p "$dir"
+  prefix="GM_HALL=$(gm_shq "$GM_HALL") GM_FOCUS=$(gm_shq "$focus") bash $(gm_shq "$GM_SELF")"
+  gmcmd="bash $GM_SELF"
+  local tmp
+  tmp=$(gm_tmp)
+  sqlite3 -batch :memory: >"$tmp" <<SQL
+SELECT json_object(
+  'env', json_object('GM_HALL', $(gm_q "$GM_HALL"), 'GM_FOCUS', $(gm_q "$focus")),
+  'permissions', json_object('allow', json_array('Bash(gm *)', $(gm_q "Bash($gmcmd *)"))),
+  'hooks', json_object(
+    'SessionStart', json_array(json_object('hooks', json_array(
+      json_object('type','command','command', $(gm_q "$prefix hook session-start")),
+      json_object('type','command','command', $(gm_q "$prefix hook charter"))))),
+    'UserPromptSubmit', json_array(json_object('hooks', json_array(
+      json_object('type','command','command', $(gm_q "$prefix hook prompt"))))),
+    'Stop', json_array(json_object('hooks', json_array(
+      json_object('type','command','command', $(gm_q "$prefix hook stop"))))),
+    'PreCompact', json_array(json_object('hooks', json_array(
+      json_object('type','command','command', $(gm_q "$prefix hook precompact")))))
+  ),
+  'statusLine', json_object('type','command','command', $(gm_q "$prefix statusline"), 'refreshInterval', 5)
+);
+SQL
+  mv "$tmp" "$settings"
+  if ! git -C "$camp" check-ignore -q .claude/settings.local.json 2>/dev/null; then
+    exclude=$(git -C "$camp" rev-parse --git-path info/exclude)
+    case $exclude in /*) ;; *) exclude=$camp/$exclude ;; esac
+    mkdir -p "$(dirname "$exclude")"
+    printf '%s\n' '/.claude/settings.local.json' >>"$exclude"
+  fi
+}
+
+gm_new_posting_sql() {
+  # $1 focus name, $2 slug base, $3 SQL expression for the words, $4 actor, $5 session, $6 message id SQL or NULL
+  local f
+  f=$(gm_q "$1")
+  cat <<SQL
+INSERT INTO posting(focus_id, num, slug, words, state, message_id, created_at, updated_at)
+  SELECT f.id, n.n,
+         CASE WHEN EXISTS (SELECT 1 FROM posting WHERE focus_id=f.id AND slug=$(gm_q "$2")) THEN $(gm_q "$2")||'-'||n.n ELSE $(gm_q "$2") END,
+         $3, 'received', $6, $GM_NOW, $GM_NOW
+  FROM focus f, (SELECT COALESCE(MAX(p.num),0)+1 AS n FROM posting p JOIN focus g ON g.id=p.focus_id WHERE g.name=$f) n
+  WHERE f.name=$f;
+INSERT INTO v VALUES ('posting', last_insert_rowid());
+INSERT INTO event(at, actor, kind, focus_id, posting_id, session_id, verb, line)
+  SELECT $GM_NOW, $(gm_q "$4"), 'notice', p.focus_id, p.id, $(gm_qn "$5"), 'received',
+         f.name||'#'||p.num||' '||p.slug||' received ("'||$(gm_summary_sql p.words)||'")'
+  FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.id=(SELECT id FROM v WHERE k='posting');
+SQL
+}
+
+gm_cmd_post() {
+  local slug='' from='' words='' focus
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --slug) slug=${2:?--slug needs a value}; shift 2 ;;
+      --from) from=${2:?--from needs a reference}; shift 2 ;;
+      -) words=$(cat); shift ;;
+      -*) gm_die "post: unknown option $1" ;;
+      *) words=${words:+$words }$1; shift ;;
+    esac
+  done
+  [ -n "$words" ] || gm_die "post: give the posting's words"
+  gm_db_ensure
+  focus=$(gm_require_focus)
+  if [ -n "$slug" ]; then
+    gm_valid_slug "$slug" || gm_die "post: a slug is up to 40 lowercase letters, digits and dashes"
+  else
+    slug=$(gm_slugify "$words")
+  fi
+  local from_sql='' from_id='' msg_sql=NULL
+  if [ -n "$from" ]; then
+    from_id=$(gm_resolve_posting "$from")
+    msg_sql="(SELECT message_id FROM posting WHERE id=$from_id)"
+    from_sql="INSERT INTO event(at, actor, kind, focus_id, posting_id, detail, line)
+      SELECT $GM_NOW, 'party-leader', 'posting.split', p.focus_id, p.id, 'from posting '||$from_id,
+             f.name||'#'||p.num||' '||p.slug||' split from '||(SELECT g.name||'#'||o.num FROM posting o JOIN focus g ON g.id=o.focus_id WHERE o.id=$from_id)
+      FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.id=(SELECT id FROM v WHERE k='posting');"
+  fi
+  gm_sql <<SQL
+CREATE TEMP TABLE v(k TEXT PRIMARY KEY, id INTEGER);
+BEGIN IMMEDIATE;
+$(gm_new_posting_sql "$focus" "$slug" "$(gm_q "$words")" party-leader "" "$msg_sql")
+$from_sql
+SELECT line FROM event WHERE posting_id=(SELECT id FROM v WHERE k='posting') AND verb='received';
+COMMIT;
+SQL
+}
+
+gm_verb_state() {
+  case $1 in
+    queued) printf queued ;;
+    started | resumed) printf active ;;
+    needs-you) printf needs-you ;;
+    done) printf 'done' ;;
+    failed) printf failed ;;
+    closed) printf closed ;;
+    parked) printf parked ;;
+    update) printf '' ;;
+    *) return 1 ;;
+  esac
+}
+
+gm_record_notice() {
+  # $1 posting id, $2 verb, $3 detail, $4 new state or '', $5 slug or '', $6 park why, $7 park until, $8 actor
+  local pid=$1 verb=$2 detail=$3 state=$4 slug=$5 why=$6 until=$7 actor=$8
+  local state_sql slug_sql park_sql shown
+  shown=$verb
+  [ "$verb" = needs-you ] && shown='needs you'
+  if [ -n "$state" ]; then state_sql="state=$(gm_q "$state"),"; else state_sql=''; fi
+  if [ -n "$slug" ]; then slug_sql="slug=$(gm_q "$slug"),"; else slug_sql=''; fi
+  if [ "$state" = parked ]; then
+    park_sql="park_why=$(gm_q "$why"), park_until=$(gm_qn "$until"),"
+  elif [ -n "$state" ]; then
+    park_sql="park_why=NULL, park_until=NULL,"
+  else
+    park_sql=''
+  fi
+  local tail
+  tail="CASE WHEN $(gm_q "$detail")<>'' THEN ': '||$(gm_q "$detail") ELSE '' END"
+  if [ "$state" = parked ] && [ -n "$until" ]; then
+    tail="$tail||' (until '||$(gm_q "$until")||')'"
+  fi
+  gm_sql <<SQL
+BEGIN IMMEDIATE;
+UPDATE posting SET $state_sql $slug_sql $park_sql updated_at=$GM_NOW WHERE id=$pid;
+UPDATE message SET sorted_at=$GM_NOW WHERE posting_id=$pid AND sorted_at IS NULL;
+INSERT INTO event(at, actor, kind, focus_id, posting_id, session_id, verb, detail, line)
+  SELECT $GM_NOW, $(gm_q "$actor"), 'notice', p.focus_id, p.id, NULL, $(gm_q "$verb"), $(gm_qn "$detail"),
+         f.name||'#'||p.num||' '||p.slug||' '||$(gm_q "$shown")||$tail||' ("'||$(gm_summary_sql p.words)||'")'
+  FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.id=$pid;
+SELECT line FROM event WHERE id=last_insert_rowid();
+COMMIT;
+SQL
+}
+
+gm_cmd_notice() {
+  local ref='' verb='' detail='' slug='' state pid cur
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --slug) slug=${2:?--slug needs a value}; shift 2 ;;
+      *)
+        if [ -z "$ref" ]; then ref=$1
+        elif [ -z "$verb" ]; then verb=$1
+        else detail=${detail:+$detail }$1
+        fi
+        shift ;;
+    esac
+  done
+  [ -n "$ref" ] && [ -n "$verb" ] || gm_die "notice: gm notice <ref> <verb> [detail]"
+  verb=$(printf '%s' "$verb" | tr '[:upper:]_' '[:lower:]-')
+  [ "$verb" = needs ] && verb=needs-you
+  [ "$verb" != parked ] || gm_die "notice: use gm park <ref> --why ... to park a posting"
+  state=$(gm_verb_state "$verb") || gm_die "notice: unknown verb '$verb' (queued started resumed needs-you done failed closed update)"
+  if [ "$verb" = needs-you ] || [ "$verb" = failed ]; then
+    [ -n "$detail" ] || gm_die "notice: '$verb' needs a detail saying what the patron must decide or what failed"
+  fi
+  pid=$(gm_resolve_posting "$ref")
+  if [ -n "$slug" ]; then
+    gm_valid_slug "$slug" || gm_die "notice: a slug is up to 40 lowercase letters, digits and dashes"
+    cur=$(gm_sql "SELECT state FROM posting WHERE id=$pid;")
+    [ "$cur" = received ] || gm_die "notice: a posting's slug can only be set while it is received"
+  fi
+  gm_record_notice "$pid" "$verb" "$detail" "$state" "$slug" "" "" party-leader
+}
+
+gm_cmd_park() {
+  local ref='' why='' until=''
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --why) why=${2:?--why needs a reason}; shift 2 ;;
+      --until) until=${2:?--until needs a time or event}; shift 2 ;;
+      -*) gm_die "park: unknown option $1" ;;
+      *) [ -z "$ref" ] || gm_die "park: one posting at a time"; ref=$1; shift ;;
+    esac
+  done
+  [ -n "$ref" ] || gm_die "park: gm park <ref> --why TEXT [--until TIME-OR-EVENT]"
+  [ -n "$why" ] || gm_die "park: a parked posting needs --why"
+  local pid
+  pid=$(gm_resolve_posting "$ref")
+  gm_record_notice "$pid" parked "$why" parked "" "$why" "$until" party-leader
+}
+
+gm_set_phase() {
+  local focus=$1 phase=$2 actor=$3 kind playbook pos
+  kind=$(gm_focus_field "$focus" kind)
+  playbook=$(gm_playbook_path "$kind")
+  if [ -n "$(gm_phases "$playbook")" ] && ! gm_phases "$playbook" | grep -qx "$phase"; then
+    gm_die "phase: '$phase' is not a phase of $playbook (phases: $(gm_phases "$playbook" | tr '\n' ' '))"
+  fi
+  pos=$(gm_phase_position "$phase" "$playbook")
+  gm_sql <<SQL
+BEGIN IMMEDIATE;
+UPDATE focus SET phase=$(gm_q "$phase") WHERE name=$(gm_q "$focus");
+INSERT INTO event(at, actor, kind, focus_id, verb, detail, line)
+  SELECT $GM_NOW, $(gm_q "$actor"), 'phase', id, 'phase', $(gm_q "$phase"), name||' phase: '||$(gm_q "$phase")||$(gm_q "${pos:+ ($pos)}") FROM focus WHERE name=$(gm_q "$focus");
+SELECT line FROM event WHERE id=last_insert_rowid();
+COMMIT;
+SQL
+}
+
+gm_cmd_phase() {
+  local focus='' phase=''
+  gm_db_ensure
+  case $# in
+    0) focus=$(gm_require_focus) ;;
+    1)
+      if [ -n "$(gm_context_focus)" ]; then
+        focus=$(gm_require_focus)
+        phase=$1
+      else
+        focus=$(gm_require_focus "$1")
+      fi ;;
+    2) focus=$(gm_require_focus "$1"); phase=$2 ;;
+    *) gm_die "phase: gm phase [focus] [phase]" ;;
+  esac
+  if [ -z "$phase" ]; then
+    local cur playbook pos=''
+    cur=$(gm_focus_field "$focus" phase)
+    playbook=$(gm_playbook_path "$(gm_focus_field "$focus" kind)")
+    [ -z "$cur" ] || pos=$(gm_phase_position "$cur" "$playbook")
+    printf '%s phase: %s%s\n' "$focus" "${cur:-unset}" "${pos:+ ($pos)}"
+    printf 'phases: %s\n' "$(gm_phases "$playbook" | tr '\n' ' ' | sed 's/ $//')"
+    return
+  fi
+  gm_set_phase "$focus" "$phase" party-leader
+}
+
+gm_cmd_resolve() {
+  [ $# -eq 1 ] || gm_die "resolve: gm resolve <ref>"
+  local out
+  out=$(gm_resolve "$1") || exit 1
+  printf '%s\n' "$out" | cut -f3
+}
+
+gm_cmd_list() {
+  local all=0 state='' focus='' where
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --all) all=1; shift ;;
+      --state) state=${2:?--state needs a state}; shift 2 ;;
+      -*) gm_die "list: unknown option $1" ;;
+      *) focus=$1; shift ;;
+    esac
+  done
+  gm_db_ensure
+  [ -n "$focus" ] || focus=$(gm_context_focus)
+  [ -z "$focus" ] || focus=$(gm_require_focus "$focus")
+  where="1"
+  [ -z "$focus" ] || where="f.name=$(gm_q "$focus")"
+  if [ -n "$state" ]; then
+    where="$where AND p.state=$(gm_q "$state")"
+  elif [ "$all" = 0 ]; then
+    where="$where AND p.state NOT IN ('done','closed')"
+  fi
+  gm_sql <<SQL
+SELECT printf('%-36s %-10s %s  "%s"%s',
+              f.name||'#'||p.num||' '||p.slug, p.state, substr(p.updated_at,1,16),
+              $(gm_summary_sql p.words),
+              CASE WHEN p.state='parked' THEN '  why: '||p.park_why||COALESCE(', until '||p.park_until,'') ELSE '' END)
+FROM posting p JOIN focus f ON f.id=p.focus_id
+WHERE $where
+ORDER BY f.name, CASE p.state WHEN 'active' THEN 0 WHEN 'needs-you' THEN 1 WHEN 'received' THEN 2 WHEN 'queued' THEN 3 WHEN 'parked' THEN 4 ELSE 5 END, p.num;
+SQL
+}
+
+gm_cmd_show() {
+  [ $# -eq 1 ] || gm_die "show: gm show <ref>"
+  local kind id canon out
+  out=$(gm_resolve "$1") || exit 1
+  IFS=$'\t' read -r kind id canon <<<"$out"
+  if [ "$kind" = focus ]; then
+    gm_where "$canon"
+    return
+  fi
+  gm_sql <<SQL
+SELECT f.name||'#'||p.num||' '||p.slug||'  ['||p.state||']'
+       ||CASE WHEN p.state='parked' THEN char(10)||'parked: '||p.park_why||COALESCE(' (until '||p.park_until||')','') ELSE '' END
+       ||char(10)||'focus '||f.name||' · branch '||f.branch||' · phase '||COALESCE(f.phase,'unset')
+       ||char(10)||char(10)||'The patron''s words, '||p.created_at||':'||char(10)||p.words
+FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.id=$id;
+SELECT char(10)||'Addition, '||m.at||':'||char(10)||m.words
+FROM message m WHERE m.posting_id=$id AND m.disposition='addition' ORDER BY m.id;
+SELECT char(10)||'History:';
+SELECT '  '||e.at||'  '||COALESCE(e.line, e.kind) FROM event e WHERE e.posting_id=$id ORDER BY e.id;
+SQL
+}
+
+gm_where() {
+  local focus=$1 fid kind camp playbook rules repo pos phase
+  fid=$(gm_focus_id "$focus")
+  kind=$(gm_focus_field "$focus" kind)
+  camp=$(gm_focus_field "$focus" camp)
+  repo=$(gm_focus_field "$focus" repo)
+  phase=$(gm_focus_field "$focus" phase)
+  playbook=$(gm_playbook_path "$kind")
+  rules=$(gm_rules_path "$repo")
+  pos=''
+  [ -z "$phase" ] || pos=$(gm_phase_position "$phase" "$playbook")
+  gm_sql <<SQL
+SELECT 'Resume summary for focus '||f.name||' ('||f.kind||COALESCE('; tickets '||(SELECT group_concat(key, ', ') FROM ticket WHERE focus_id=f.id),'')||'), built by gm from the register at '||$GM_NOW||'.'
+  ||char(10)||'This session is the Party Leader of '||f.name||'. Camp: '||f.camp||' on branch '||f.branch||' (repository '||f.repo||').'
+  ||char(10)||'Phase: '||COALESCE(f.phase,'unset')||$(gm_q "${pos:+ ($pos of the playbook)}")||'.'
+  ||char(10)||'Files: charter '||$(gm_q "$(gm_charter_path)")||', playbook '||$(gm_q "$playbook")||', rules '||$(gm_q "$rules")||'.'
+  ||char(10)||'The gm command here is: '||$(gm_q "$(gm_gm_command)")
+FROM focus f WHERE f.id=$fid;
+SELECT 'Postings: '||count(*)||' in all'||COALESCE(' — '||(
+  SELECT group_concat(n||' '||state, ', ') FROM (SELECT state, count(*) n FROM posting WHERE focus_id=$fid GROUP BY state
+    ORDER BY CASE state WHEN 'active' THEN 0 WHEN 'needs-you' THEN 1 WHEN 'received' THEN 2 WHEN 'queued' THEN 3 WHEN 'parked' THEN 4 WHEN 'failed' THEN 5 WHEN 'done' THEN 6 ELSE 7 END)),'')||'.'
+FROM posting WHERE focus_id=$fid;
+SELECT char(10)||'Active (claimed, in progress):' WHERE EXISTS (SELECT 1 FROM posting WHERE focus_id=$fid AND state='active');
+SELECT '- #'||num||' '||slug||', the patron''s words ('||created_at||'): "'||substr(words,1,800)||CASE WHEN length(words)>800 THEN '…' ELSE '' END||'"'
+  ||COALESCE((SELECT group_concat(char(10)||'  the patron''s addition ('||at||'): "'||substr(words,1,400)||CASE WHEN length(words)>400 THEN '…' ELSE '' END||'"', '')
+               FROM (SELECT at, words FROM message WHERE posting_id=p.id AND disposition='addition' ORDER BY id)),'')
+  ||COALESCE(char(10)||'  last notice: '||(SELECT line FROM event WHERE posting_id=p.id AND kind='notice' ORDER BY id DESC LIMIT 1),'')
+FROM posting p WHERE focus_id=$fid AND state='active' ORDER BY num;
+SELECT char(10)||'Needs the patron:' WHERE EXISTS (SELECT 1 FROM posting WHERE focus_id=$fid AND state='needs-you');
+SELECT '- #'||num||' '||slug||': '||COALESCE((SELECT detail FROM event WHERE posting_id=p.id AND verb='needs-you' ORDER BY id DESC LIMIT 1),'')
+  ||char(10)||'  the patron''s words ('||created_at||'): "'||substr(words,1,500)||CASE WHEN length(words)>500 THEN '…' ELSE '' END||'"'
+  ||COALESCE((SELECT group_concat(char(10)||'  the patron''s addition ('||at||'): "'||substr(words,1,400)||CASE WHEN length(words)>400 THEN '…' ELSE '' END||'"', '')
+               FROM (SELECT at, words FROM message WHERE posting_id=p.id AND disposition='addition' ORDER BY id)),'')
+FROM posting p WHERE focus_id=$fid AND state='needs-you' ORDER BY num;
+SELECT char(10)||'Received, not yet sorted (each needs a recorded state):' WHERE EXISTS (SELECT 1 FROM posting WHERE focus_id=$fid AND state='received');
+SELECT '- #'||num||' '||slug||' ('||created_at||'): "'||substr(words,1,500)||CASE WHEN length(words)>500 THEN '…' ELSE '' END||'"'
+FROM posting p WHERE focus_id=$fid AND state='received' ORDER BY num LIMIT 15;
+SELECT char(10)||'Additions not yet acknowledged:' WHERE EXISTS (SELECT 1 FROM message WHERE focus_id=$fid AND disposition='addition' AND sorted_at IS NULL);
+SELECT '- to #'||p.num||' '||p.slug||' ('||m.at||'): "'||substr(m.words,1,400)||CASE WHEN length(m.words)>400 THEN '…' ELSE '' END||'"'
+FROM message m JOIN posting p ON p.id=m.posting_id WHERE m.focus_id=$fid AND m.disposition='addition' AND m.sorted_at IS NULL ORDER BY m.id LIMIT 10;
+SELECT char(10)||'Queued, in order:' WHERE EXISTS (SELECT 1 FROM posting WHERE focus_id=$fid AND state='queued');
+SELECT '- #'||num||' '||slug||': "'||$(gm_summary_sql words)||'"'
+  ||COALESCE(' (+'||NULLIF((SELECT count(*) FROM message WHERE posting_id=p.id AND disposition='addition'),0)||' addition, gm show '||num||')','')
+FROM posting p WHERE focus_id=$fid AND state='queued' ORDER BY num LIMIT 20;
+SELECT '  … and '||(count(*)-20)||' more (gm list)' FROM posting WHERE focus_id=$fid AND state='queued' HAVING count(*)>20;
+SELECT char(10)||'Parked:' WHERE EXISTS (SELECT 1 FROM posting WHERE focus_id=$fid AND state='parked');
+SELECT '- #'||num||' '||slug||': '||park_why||COALESCE(' (until '||park_until||')','')
+  ||CASE WHEN park_until GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*' AND park_until<=$GM_NOW THEN ' — its time has come' ELSE '' END
+FROM posting WHERE focus_id=$fid AND state='parked' ORDER BY num LIMIT 15;
+SELECT char(10)||'Failed:' WHERE EXISTS (SELECT 1 FROM posting WHERE focus_id=$fid AND state='failed');
+SELECT '- #'||num||' '||slug||': '||COALESCE((SELECT detail FROM event WHERE posting_id=p.id AND verb='failed' ORDER BY id DESC LIMIT 1),'')
+FROM posting p WHERE focus_id=$fid AND state='failed' ORDER BY num LIMIT 10;
+SELECT char(10)||'Last notices:' WHERE EXISTS (SELECT 1 FROM event WHERE focus_id=$fid AND line IS NOT NULL);
+SELECT '- '||substr(at,12,5)||' '||line FROM (SELECT at, line, id FROM event WHERE focus_id=$fid AND line IS NOT NULL ORDER BY id DESC LIMIT 8) ORDER BY id;
+SELECT char(10)||'Last patron messages, verbatim:' WHERE EXISTS (SELECT 1 FROM message WHERE focus_id=$fid);
+SELECT '- '||at||COALESCE(' → #'||(SELECT num FROM posting WHERE id=m.posting_id),'')||': "'||substr(words,1,300)||CASE WHEN length(words)>300 THEN '…' ELSE '' END||'"'
+FROM (SELECT * FROM message WHERE focus_id=$fid ORDER BY id DESC LIMIT 5) m ORDER BY id;
+SELECT char(10)||'Next on the board: '||CASE
+  WHEN EXISTS (SELECT 1 FROM posting WHERE focus_id=$fid AND state='received') THEN 'the received postings need a state; then '
+  ELSE '' END
+  ||COALESCE((SELECT '#'||num||' '||slug||' is active and unfinished.' FROM posting WHERE focus_id=$fid AND state='active' ORDER BY num LIMIT 1),
+             (SELECT '#'||num||' '||slug||' is first in the queue.' FROM posting WHERE focus_id=$fid AND state='queued' ORDER BY num LIMIT 1),
+             'nothing is queued.');
+SQL
+  if [ -d "$camp" ]; then
+    printf '\nCamp git state (from git, now):\n'
+    git -C "$camp" log -1 --format='HEAD %h %s' 2>/dev/null || true
+    git -C "$camp" status --short --branch 2>/dev/null | head -n 20 || true
+  else
+    printf '\nThe camp %s is missing; gm open %s makes it again.\n' "$camp" "$focus"
+  fi
+}
+
+gm_cmd_where() {
+  local focus
+  gm_db_ensure
+  focus=$(gm_require_focus "${1:-}")
+  gm_where "$focus"
+}
+
+gm_cmd_statusline() {
+  local input focus fid kind playbook phase pos ctx='' model='' cwd=''
+  input=$(cat || true)
+  [ -n "$input" ] || input='{}'
+  [ -s "$GM_DB" ] || { printf 'gm · no register yet\n'; return 0; }
+  IFS='|' read -r ctx model cwd <<<"$(sqlite3 -batch -separator '|' :memory: "SELECT CAST(round(json_extract(j,'\$.context_window.used_percentage')) AS INTEGER), json_extract(j,'\$.model.display_name'), json_extract(j,'\$.workspace.current_dir') FROM (SELECT $(gm_q "$input") AS j);" 2>/dev/null || true)"
+  focus=${GM_FOCUS:-}
+  if [ -z "$focus" ] && [ -n "$cwd" ]; then
+    focus=$(cd "$cwd" 2>/dev/null && gm_context_focus || true)
+  fi
+  if [ -z "$focus" ] || [ -z "$(gm_focus_id "$focus")" ]; then
+    printf 'gm · no focus here\n'
+    return 0
+  fi
+  fid=$(gm_focus_id "$focus")
+  kind=$(gm_focus_field "$focus" kind)
+  phase=$(gm_focus_field "$focus" phase)
+  playbook=$(gm_playbook_path "$kind")
+  pos=''
+  [ -z "$phase" ] || pos=$(gm_phase_position "$phase" "$playbook")
+  gm_sql <<SQL
+SELECT '▸ '||f.name||' · '||f.kind||COALESCE(' · '||(SELECT group_concat(key, ',') FROM ticket WHERE focus_id=f.id),'')
+  ||' · phase '||$(gm_q "${pos:+$pos }")||COALESCE(f.phase,'unset')||' · '||f.branch
+FROM focus f WHERE f.id=$fid;
+SELECT 'postings '||COALESCE((
+  SELECT group_concat(n||' '||CASE state WHEN 'needs-you' THEN 'need you' ELSE state END, ' · ') FROM (
+    SELECT state, count(*) n FROM posting WHERE focus_id=$fid AND state NOT IN ('done','closed') GROUP BY state
+    ORDER BY CASE state WHEN 'active' THEN 0 WHEN 'needs-you' THEN 1 WHEN 'received' THEN 2 WHEN 'queued' THEN 3 WHEN 'parked' THEN 4 ELSE 5 END)),'none open')
+  ||' · '||(SELECT count(*) FROM posting WHERE focus_id=$fid AND state IN ('done','closed'))||' done'
+  ||COALESCE(' · next #'||(SELECT num||' '||slug FROM posting WHERE focus_id=$fid AND state='queued' ORDER BY num LIMIT 1),'');
+SELECT 'guild '||(SELECT count(*) FROM focus)||' focus'||CASE WHEN (SELECT count(*) FROM focus)=1 THEN '' ELSE 'es' END
+  ||COALESCE(' · need you elsewhere: '||(SELECT group_concat(name||' '||n, ', ') FROM (
+      SELECT f.name, count(*) n FROM posting p JOIN focus f ON f.id=p.focus_id WHERE f.id<>$fid AND p.state='needs-you' GROUP BY f.name)),'')
+  ||$(gm_q "${ctx:+ · ctx $ctx%}${model:+ · $model}");
+SQL
+}
+
+gm_hook_prompt() {
+  local tmp out spill
+  tmp=$(gm_tmp)
+  cat >"$tmp"
+  if out=$(gm_hook_prompt_record "$tmp") && [ -n "$out" ]; then
+    rm -f "$tmp"
+    gm_hook_json UserPromptSubmit "$out"
+  else
+    mkdir -p "$GM_HALL/spill"
+    spill=$GM_HALL/spill/$(date +%Y%m%dT%H%M%S)-$$.json
+    mv "$tmp" "$spill"
+    gm_hook_json UserPromptSubmit "gm could not write this patron message to the register; the raw message is saved at $spill." \
+      "gm could not record your message in the register; it is saved at $spill"
+  fi
+}
+
+# Runs without errexit (called from a condition); its status is the register write's.
+gm_hook_prompt_record() {
+  local tmp=$1 focus words sid pid first reftarget='' kind id canon disposition
+  focus=${GM_FOCUS:-}
+  words=$(gm_json_field "$tmp" prompt)
+  sid=$(gm_json_field "$tmp" session_id)
+  pid=$(gm_json_field "$tmp" prompt_id)
+  local wsql
+  wsql="json_extract(CAST(readfile($(gm_q "$tmp")) AS TEXT),'\$.prompt')"
+  first=$(printf '%s' "$words" | sed -n '/[^[:space:]]/{p;q;}')
+  local re_ref='^[[:space:]]*(([a-z0-9][a-z0-9-]*)?#[0-9]+)([^0-9a-z-]|$)'
+  if [[ $first =~ $re_ref ]]; then
+    reftarget=$(gm_resolve "${BASH_REMATCH[1]}" 2>/dev/null) || reftarget=''
+  fi
+  if [ -n "$reftarget" ]; then
+    IFS=$'\t' read -r kind id canon <<<"$reftarget"
+  fi
+  case $first in
+    /*) disposition='command' ;;
+    *) if [ -n "$reftarget" ]; then disposition=addition; else disposition=posting; fi ;;
+  esac
+  [ -n "$focus" ] && [ -s "$GM_DB" ] && [ -n "$(gm_focus_id "$focus" 2>/dev/null)" ] || disposition=unplaced
+  local sql
+  case $disposition in
+    posting)
+      sql="$(gm_new_posting_sql "$focus" "$(gm_slugify "$words")" "$wsql" patron "$sid" "NULL")
+UPDATE posting SET message_id=(SELECT id FROM v WHERE k='message') WHERE id=(SELECT id FROM v WHERE k='posting');
+UPDATE message SET posting_id=(SELECT id FROM v WHERE k='posting') WHERE id=(SELECT id FROM v WHERE k='message');
+SELECT 'gm recorded this patron message verbatim as posting '||f.name||'#'||p.num||' '||p.slug||' (state received). Its notice line: '||(SELECT line FROM event WHERE posting_id=p.id AND verb='received')
+FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.id=(SELECT id FROM v WHERE k='posting');" ;;
+    addition)
+      sql="UPDATE message SET posting_id=$id WHERE id=(SELECT id FROM v WHERE k='message');
+INSERT INTO event(at, actor, kind, focus_id, posting_id, session_id, line)
+  SELECT $GM_NOW, 'patron', 'posting.addition', p.focus_id, p.id, $(gm_qn "$sid"), f.name||'#'||p.num||' '||p.slug||' addition from the patron'
+  FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.id=$id;
+SELECT 'gm recorded this patron message verbatim as an addition to posting '||f.name||'#'||p.num||' '||p.slug||' (state '||p.state||'). The posting''s words: \"'||$(gm_summary_sql p.words)||'\"'
+FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.id=$id;" ;;
+    command) sql="SELECT 'gm recorded this slash command verbatim; it is not a posting.';" ;;
+    unplaced) sql="SELECT 'gm recorded this message verbatim, but no focus named '||$(gm_q "${focus:-?}")||' is in the register, so it is not a posting.';" ;;
+  esac
+  local focus_sql=NULL
+  [ "$disposition" = unplaced ] || focus_sql="(SELECT id FROM focus WHERE name=$(gm_q "$focus"))"
+  gm_db_ensure
+  gm_sql <<SQL
+CREATE TEMP TABLE v(k TEXT PRIMARY KEY, id INTEGER);
+BEGIN IMMEDIATE;
+INSERT INTO message(focus_id, at, session_id, prompt_id, words, disposition)
+  VALUES ($focus_sql, $GM_NOW, $(gm_qn "$sid"), $(gm_qn "$pid"), $wsql, $(gm_q "$disposition"));
+INSERT INTO v VALUES ('message', last_insert_rowid());
+INSERT INTO guard(session_id, blocks) VALUES ($(gm_q "${sid:-none}"), 0) ON CONFLICT(session_id) DO UPDATE SET blocks=0;
+$sql
+COMMIT;
+SQL
+}
+
+gm_hook_json() {
+  # $1 event, $2 additionalContext, $3 optional systemMessage, $4 optional sessionTitle
+  local f expr
+  f=$(gm_tmp)
+  printf '%s' "$2" >"$f"
+  expr="json_object('hookSpecificOutput', json_object('hookEventName', $(gm_q "$1"), 'additionalContext', CAST(readfile($(gm_q "$f")) AS TEXT)))"
+  [ -z "${4:-}" ] || expr="json_set($expr, '\$.hookSpecificOutput.sessionTitle', $(gm_q "$4"))"
+  [ -z "${3:-}" ] || expr="json_set($expr, '\$.systemMessage', $(gm_q "$3"))"
+  sqlite3 -batch :memory: "SELECT $expr;"
+  rm -f "$f"
+}
+
+gm_hook_session_start() {
+  local tmp source sid focus text
+  tmp=$(gm_tmp)
+  cat >"$tmp"
+  focus=${GM_FOCUS:-}
+  source=$(gm_json_field "$tmp" source)
+  sid=$(gm_json_field "$tmp" session_id)
+  rm -f "$tmp"
+  if [ -z "$focus" ] || [ ! -s "$GM_DB" ] || [ -z "$(gm_focus_id "$focus")" ]; then
+    gm_hook_json SessionStart "gm has no focus named '${focus:-?}' in the register at $GM_DB, so there is nothing to resume." "gm: no focus '${focus:-?}' in $GM_DB"
+    return
+  fi
+  gm_sql "BEGIN IMMEDIATE; INSERT INTO event(at, actor, kind, focus_id, session_id, detail) SELECT $GM_NOW, 'hook', 'session.start', id, $(gm_qn "$sid"), $(gm_qn "$source") FROM focus WHERE name=$(gm_q "$focus"); COMMIT;"
+  text=$(gm_where "$focus")
+  if [ "${#text}" -gt 9500 ]; then
+    text="${text:0:9400}
+(The summary was cut to fit; run gm where for the rest.)"
+  fi
+  gm_hook_json SessionStart "$text" "" "$focus"
+}
+
+gm_hook_charter() {
+  cat >/dev/null
+  local focus=${GM_FOCUS:-} charter playbook rules text repo
+  [ -n "$focus" ] && [ -s "$GM_DB" ] && [ -n "$(gm_focus_id "$focus")" ] || return 0
+  repo=$(gm_focus_field "$focus" repo)
+  charter=$(gm_charter_path)
+  playbook=$(gm_playbook_path "$(gm_focus_field "$focus" kind)")
+  rules=$(gm_rules_path "$repo")
+  text="The Party Leader's charter, playbook and repository rules, as the patron wrote them in $GM_HALL."
+  local f
+  for f in "$charter" "$playbook" "$rules"; do
+    if [ -f "$f" ]; then
+      text="$text
+
+----- $f -----
+$(cat "$f")"
+    else
+      text="$text
+
+----- $f is missing -----"
+    fi
+  done
+  if [ "${#text}" -gt 9500 ]; then
+    text="The charter, playbook and rules are too long to load here together. Read them before acting: $charter, $playbook, $rules.
+
+$(head -c 8000 "$charter")"
+  fi
+  gm_hook_json SessionStart "$text"
+}
+
+gm_hook_stop() {
+  local tmp focus sid bg pending blocks
+  tmp=$(gm_tmp)
+  cat >"$tmp"
+  focus=${GM_FOCUS:-}
+  [ -n "$focus" ] && [ -s "$GM_DB" ] && [ -n "$(gm_focus_id "$focus" 2>/dev/null)" ] || { rm -f "$tmp"; return 0; }
+  sid=$(gm_json_field "$tmp" session_id)
+  bg=$(sqlite3 -batch :memory: "SELECT COALESCE(json_array_length(CAST(readfile($(gm_q "$tmp")) AS TEXT),'\$.background_tasks'),0);" 2>/dev/null || echo 0)
+  rm -f "$tmp"
+  local fid
+  fid=$(gm_focus_id "$focus")
+  pending=$(gm_sql <<SQL
+SELECT '- '||f.name||'#'||p.num||' '||p.slug||' is received and has no recorded state yet.'
+FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.focus_id=$fid AND p.state='received' ORDER BY p.num;
+SELECT '- '||f.name||'#'||p.num||' '||p.slug||' is active (claimed) and its outcome is not recorded.'
+FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.focus_id=$fid AND p.state='active' AND $bg=0 ORDER BY p.num;
+SELECT '- the patron''s addition to '||f.name||'#'||p.num||' '||p.slug||' ('||m.at||') is not acknowledged by a notice yet.'
+FROM message m JOIN posting p ON p.id=m.posting_id JOIN focus f ON f.id=p.focus_id
+WHERE m.focus_id=$fid AND m.disposition='addition' AND m.sorted_at IS NULL ORDER BY m.id;
+SQL
+) || { gm_hook_stop_message "gm stop guard could not read the register at $GM_DB; this turn ends unchecked."; return 0; }
+  if [ -z "$pending" ]; then
+    gm_sql "BEGIN IMMEDIATE; INSERT INTO guard(session_id, blocks) VALUES ($(gm_q "${sid:-none}"), 0) ON CONFLICT(session_id) DO UPDATE SET blocks=0; COMMIT;" >/dev/null 2>&1 || true
+    return 0
+  fi
+  blocks=$(gm_sql "BEGIN IMMEDIATE; INSERT INTO guard(session_id, blocks) VALUES ($(gm_q "${sid:-none}"), 1) ON CONFLICT(session_id) DO UPDATE SET blocks=blocks+1; SELECT blocks FROM guard WHERE session_id=$(gm_q "${sid:-none}"); COMMIT;" 2>/dev/null || echo 999)
+  if [ "$blocks" -gt "$GM_STOP_BUDGET" ]; then
+    gm_sql "BEGIN IMMEDIATE; UPDATE guard SET blocks=0 WHERE session_id=$(gm_q "${sid:-none}"); INSERT INTO event(at, actor, kind, focus_id, session_id, detail) VALUES ($GM_NOW, 'hook', 'guard.gave-up', $fid, $(gm_qn "$sid"), $(gm_q "$pending")); COMMIT;" >/dev/null 2>&1 || true
+    gm_hook_stop_message "gm stop guard gave up after $GM_STOP_BUDGET blocks; still unrecorded:
+$pending"
+    return 0
+  fi
+  local reason="These postings in $focus need a recorded state before the turn ends:
+$pending
+Record each with gm notice <n> <queued|started|needs-you|done|failed|closed> [detail] or gm park <n> --why TEXT, then show the patron each notice line."
+  local f
+  f=$(gm_tmp)
+  printf '%s' "$reason" >"$f"
+  sqlite3 -batch :memory: "SELECT json_object('decision','block','reason',CAST(readfile($(gm_q "$f")) AS TEXT));"
+  rm -f "$f"
+}
+
+gm_hook_stop_message() {
+  local f
+  f=$(gm_tmp)
+  printf '%s' "$1" >"$f"
+  sqlite3 -batch :memory: "SELECT json_object('systemMessage',CAST(readfile($(gm_q "$f")) AS TEXT));"
+  rm -f "$f"
+}
+
+gm_hook_precompact() {
+  local tmp focus sid trigger camp snap fid
+  tmp=$(gm_tmp)
+  cat >"$tmp"
+  focus=${GM_FOCUS:-}
+  [ -n "$focus" ] && [ -s "$GM_DB" ] && [ -n "$(gm_focus_id "$focus" 2>/dev/null)" ] || { rm -f "$tmp"; return 0; }
+  sid=$(gm_json_field "$tmp" session_id)
+  trigger=$(gm_json_field "$tmp" trigger)
+  rm -f "$tmp"
+  fid=$(gm_focus_id "$focus")
+  camp=$(gm_focus_field "$focus" camp)
+  snap="compaction ($trigger); camp git:
+$(git -C "$camp" log -1 --format='HEAD %h %s' 2>/dev/null || true)
+$(git -C "$camp" status --short --branch 2>/dev/null | head -n 40 || true)
+open postings:
+$(gm_sql "SELECT '#'||num||' '||slug||' '||state FROM posting WHERE focus_id=$fid AND state NOT IN ('done','closed') ORDER BY num;")"
+  gm_sql "BEGIN IMMEDIATE; INSERT INTO event(at, actor, kind, focus_id, session_id, detail) VALUES ($GM_NOW, 'hook', 'session.compact', $fid, $(gm_qn "$sid"), $(gm_q "$snap")); COMMIT;" >/dev/null 2>&1 || true
+}
+
+gm_cmd_hook() {
+  local which=${1:-}
+  case $which in
+    prompt) gm_hook_prompt ;;
+    session-start) gm_hook_session_start ;;
+    charter) gm_hook_charter ;;
+    stop) gm_hook_stop ;;
+    precompact) gm_hook_precompact ;;
+    *) gm_die "hook: unknown hook '$which'" ;;
+  esac
+}
+
+command -v sqlite3 >/dev/null 2>&1 || gm_die "gm needs the sqlite3 command"
+cmd=${1:-help}
+[ $# -eq 0 ] || shift
+case $cmd in
+  open) gm_cmd_open "$@" ;;
+  post) gm_cmd_post "$@" ;;
+  resolve) gm_cmd_resolve "$@" ;;
+  list | ls) gm_cmd_list "$@" ;;
+  show) gm_cmd_show "$@" ;;
+  notice) gm_cmd_notice "$@" ;;
+  park) gm_cmd_park "$@" ;;
+  phase) gm_cmd_phase "$@" ;;
+  where) gm_cmd_where "$@" ;;
+  statusline) gm_cmd_statusline "$@" ;;
+  hook) gm_cmd_hook "$@" ;;
+  help | -h | --help) gm_usage ;;
+  *) gm_usage >&2; exit 1 ;;
+esac
