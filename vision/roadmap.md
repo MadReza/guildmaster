@@ -34,10 +34,11 @@ Moved forward from fourth place at the patron's request of 2026-09-30: "let's de
 
 **Goal.** Show what was triggered, when and by whom, and let the patron see a posting's whole path as one trace: each message and reply, each tool, MCP and subagent call, each hook, each Party Leader session and Adventurer run, with the model, effort, time and cost of each.
 
-**Scope.** The build plan in [tracing-design.md](tracing-design.md#build-plan): spans in the register with `gm trace` as a text waterfall and `gm stats` for the derived measures (time to first reply, exchanges, steps to success, cost per posting); Claude Code's own telemetry into a local collector and imported into the register; optionally a local Jaeger.
+**Scope.** The build plan in [tracing-design.md](tracing-design.md#build-plan): spans in the register, one row per span with a JSON attribute column, with `gm trace` as a text waterfall, `gm stats` for the derived measures (time to first reply, exchanges, steps to success, cost per posting), each a query and never stored, and `gm stats --compare <selection>` to see what sets a selection apart; Claude Code's own telemetry into a local collector and imported into the register; optionally a local Jaeger.
+The three habits taken from the Honeycomb study ([honeycomb/lessons.html](../honeycomb/lessons.html)) are in the design: wide span rows, identifying details on every span, and `--compare`.
 The Adventurer spans the design defines are built with step 3, where Adventurers first exist; so are the writ template hashes the consultation put in this step, since writs arrive there too.
 
-**Done when** (proposed in [tracing-design.md](tracing-design.md#build-plan), for the patron's agreement): the patron sends a message, the Party Leader answers it with a tool call, an MCP call and a subagent, and `gm trace` shows that tree with its times, tool names, model and effort; `gm stats` gives time to first reply, exchanges, steps, and tokens and cost per posting by model and effort; and nothing is sent anywhere but `127.0.0.1`.
+**Done when** (proposed in [tracing-design.md](tracing-design.md#build-plan), for the patron's agreement): the patron sends a message, the Party Leader answers it with a tool call, an MCP call and a subagent, and `gm trace` shows that tree with its times, tool names, model and effort; `gm stats` gives time to first reply, exchanges, steps, and tokens and cost per posting by model and effort; `gm stats --compare` ranks what sets a selection apart; and nothing is sent anywhere but `127.0.0.1`.
 
 ## Step 3: Adventurers and enforced rules
 

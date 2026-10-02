@@ -4,6 +4,7 @@ How Guildmaster traces its work: one posting as one trace, built from the regist
 It answers the patron's request of 2026-09-30, quoted below, and requirements 6.1 to 6.4 in [requirements.md](requirements.md).
 The landscape it rests on (standards, what Claude Code emits, tracing tools, how other orchestrators trace, and a local test of Claude Code 2.1.286) is in [tracing-research.md](tracing-research.md); a claim here without its own link is sourced there.
 Vocabulary is [TERMINOLOGY.md](../TERMINOLOGY.md)'s.
+Three habits taken from the study of Honeycomb, whose lessons are in [honeycomb/lessons.html](../honeycomb/lessons.html), are folded in: one complete row per span with an open attribute set ([Storage](#storage-and-viewer)), identifying details on every span with every measure a query ([Guild attributes](#guild-attributes), [Derived measures](#derived-measures)), and `gm stats --compare` ([Comparing a selection](#comparing-a-selection)).
 Nothing here is built yet; [the build plan](#build-plan) says in what order it would be.
 
 ## The patron's words
@@ -39,7 +40,8 @@ As relayed on 2026-09-30, unedited:
 4. **Claude Code's own telemetry is the per-call truth.** Model, effort, tokens, cost, retries and time to first token come from its `api_request` events and `llm_request` spans. `gm` does not re-derive them from transcripts, whose format "is internal to Claude Code and changes between versions" and whose repeated entries per message made another tool record only 20.8% of cache-read tokens.
 5. **Local by default.** Telemetry goes only to `127.0.0.1`; prompt, response and tool-content capture stay off; identity attributes are dropped before storage. Prompts and work code are company material.
 6. **Standard names where they exist.** Agent, model-call and tool spans use the OpenTelemetry GenAI names (`invoke_agent`, `chat`, `execute_tool`, `gen_ai.*`); everything Guildmaster-specific is `guild.*`. The GenAI conventions are all in Development status, with no release to pin, so `gm` names the commit of `open-telemetry/semantic-conventions-genai` it follows (`b31e9e8`, 2026-09-30) and expects renames.
-7. **Tracing never stops work.** A span that cannot be written is dropped and counted; no hook blocks and no dispatch fails because of tracing.
+7. **Every measure is a query.** No count, total or duration is stored beside the spans; time to first reply, steps, cost and the rest are computed from span rows when asked, so a new measure never needs a migration or a backfill. This is principle 3 in the terms of Honeycomb's rule that "any aggregation that is performed at write time is actively harmful" ([honeycomb/lessons.html](../honeycomb/lessons.html#cardinality)).
+8. **Tracing never stops work.** A span that cannot be written is dropped and counted; no hook blocks and no dispatch fails because of tracing.
 
 ## The span tree
 
@@ -134,10 +136,15 @@ The conventions also leave open whether a separate `claude -p` process is a CLIE
 | `guild.mcp.server` | string | The MCP server's name, from the hooks' `mcp_server.name`. |
 | `guild.tool.summary` | string | The first 200 characters of a Bash command or a file path, kept 30 days ([Retention and redaction](#retention-and-redaction)). |
 | `guild.background` | bool | A subagent or Adventurer that ran in the background. |
-| `guild.dispatch.kind`, `guild.writ.sha256` | string | Contract or survey, and the hash of the rendered writ and its template (requirement 5.2). |
+| `guild.dispatch.kind` | string | Contract or survey. |
+| `guild.writ.sha256` | string | The hash of the rendered writ and its template (requirement 5.2). On the dispatch span and on every span of the Adventurer's run: its `invoke_agent`, model-call, tool-call and subagent spans, which `gm` stamps when it re-parents them at import by session id. |
+| `guild.camp.commit` | string | The camp's `HEAD` commit (`git rev-parse HEAD` in the camp) when the span ended, so a slow or failed span can be tied to the code it ran against. Stamped on every span `gm` or its hooks write; a span imported from Claude Code's telemetry takes the commit last recorded for its session at or before its end. |
 | `guild.exit_code`, `guild.turns` | int | From the Adventurer's process and its result. |
 | `guild.check.result`, `guild.check.rule` | string | The rules check's outcome and the rule it found broken. |
 | `guild.session.source`, `guild.session.end_reason` | string | `SessionStart`'s `source` and `SessionEnd`'s `reason`. |
+
+These are the identifying details of [the Honeycomb study](../honeycomb/lessons.html#cardinality): the ids a metrics system drops are the ones that explain a bad run, so each goes on every span instead of being summed away.
+`guild.posting`, `session.id`, `prompt.id`, `agent_id`, `gen_ai.tool.call.id`, `guild.writ.sha256` and `guild.camp.commit` are very-high-cardinality, and stay on every span for that reason.
 
 Claude Code's own correlation keys keep their names: `session.id`, `prompt.id`, `agent_id`, and `tool_use_id` (as `gen_ai.tool.call.id`).
 
@@ -189,6 +196,7 @@ Claude Code's own correlation keys keep their names: `session.id`, `prompt.id`, 
 ## Derived measures
 
 All are queries over the register; `gm stats <posting|focus>` prints them, and `gm trace` heads each posting with the main ones.
+None is stored: a posting's total time, step counts and cost are computed from its span rows each time, so a measure added later applies to every posting already traced.
 
 | Measure | Definition |
 | --- | --- |
@@ -211,12 +219,54 @@ appt-v2#12 fix-owner-empty  done
   cost $1.92 est.: opus-5-5/high $0.38 (party leader) · sonnet-5-5/medium $1.51 (adventurers) · haiku-4-5/none $0.03
 ```
 
+### Comparing a selection
+
+`gm stats --compare <selection>` asks what is different about the spans, exchanges or postings the patron picked.
+It is the BubbleUp of [honeycomb/lessons.html](../honeycomb/lessons.html#bubbleup): for every attribute value, the share of the selection that has it against the share of everything else (the baseline), sorted by the largest difference.
+The patron's questions are comparative: why a posting needed three exchanges when most need one, why some model calls are slow.
+A selection is anything the measures above define: `chat` spans slower than 30 s, exchanges whose reply took over two minutes, postings not right first time, Adventurer runs whose check failed.
+
+```
+$ gm stats --compare 'chat spans slower than 30 s'          (illustrative)
+key                              value        selection  baseline
+gen_ai.request.model             opus-5-5        81.0%     22.4%
+gen_ai.request.reasoning.level   high            77.9%     35.0%
+guild.focus                      appt-v2         74.2%     30.1%
+guild.role                       party-leader    69.0%     41.7%
+guild.attempt                    2               18.3%      1.2%
+```
+
+It is one query over the `attrs` column, taken from the study and shown here for the slow-call selection (`sel` is 1 for a span in the selection and 0 for the baseline):
+
+```sql
+WITH s AS (
+  SELECT (end_ms - start_ms) > 30000 AS sel, attrs
+  FROM span WHERE name LIKE 'chat %'
+),
+tot AS (SELECT SUM(sel) AS n_sel, SUM(1 - sel) AS n_base FROM s),
+kv  AS (SELECT s.sel, j.key, CAST(j.value AS TEXT) AS value
+        FROM s, json_each(s.attrs) AS j)
+SELECT key, value,
+       ROUND(100.0 * SUM(sel)     / tot.n_sel,  1) AS pct_selection,
+       ROUND(100.0 * SUM(1 - sel) / tot.n_base, 1) AS pct_baseline
+FROM kv, tot
+GROUP BY key, value
+ORDER BY ABS(1.0 * SUM(sel) / tot.n_sel - 1.0 * SUM(1 - sel) / tot.n_base) DESC
+LIMIT 10;
+```
+
+Honeycomb's scoring formula is not published, so this is the simplest version, not a copy.
+Its own caveat applies: very-high-cardinality fields "may not have a meaningful 'baseline'", so `gm` leaves the ids out of the ranking: `guild.posting`, `guild.posting.slug`, `guild.message.id`, `session.id`, `prompt.id`, `agent_id`, `gen_ai.tool.call.id`, `gen_ai.response.id`, `guild.writ.sha256` and `guild.camp.commit`, and any attribute with a distinct value on more than half the spans it appears on.
+The ranking also skips the fixed columns that define the selection, since duration trivially separates a selection chosen by duration.
+Where the selection is empty or the baseline is, it prints that and no table.
+
 ## Storage and viewer
 
 Ranked, cheapest and most local first; [tracing-research.md](tracing-research.md#tools) compares the tools.
 
 1. **The register and `gm trace`: first, and always.**
    A `span` table and a `span_link` table in the register; `gm trace <posting>` prints the text waterfall above and `gm stats` the measures.
+   The shape of `span` follows the first habit of [the Honeycomb study](../honeycomb/lessons.html#wide-rows): one wide row per span, with a few fixed columns and one JSON column for everything else.
    No new software, nothing leaves the machine, and the history is as permanent as the ledgers.
    It cannot draw a graphical timeline, and without Claude Code's telemetry it has no per-call tokens or cost for Party Leader turns.
 2. **Claude Code's telemetry into a local collector: next.**
@@ -232,6 +282,30 @@ Ranked, cheapest and most local first; [tracing-research.md](tracing-research.md
    Whichever viewer, its store is disposable: the register is the record.
 
 For the patron's question Q10 in [consultation.md](consultation.md#questions-for-the-patron): `gm trace` first, the local collector second, and Jaeger only if the text waterfall is not enough.
+
+### The span table
+
+```sql
+CREATE TABLE span (
+  trace_id  TEXT NOT NULL,
+  span_id   TEXT NOT NULL,
+  parent_id TEXT,                  -- NULL for a root
+  name      TEXT NOT NULL,         -- 'guild.posting', 'chat opus-5-5', 'execute_tool Bash'
+  start_ms  INTEGER NOT NULL,      -- epoch milliseconds
+  end_ms    INTEGER NOT NULL,
+  status    TEXT NOT NULL,         -- 'ok', 'error' or 'unset'
+  attrs     TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(attrs)),
+  PRIMARY KEY (trace_id, span_id)
+);
+CREATE INDEX span_parent ON span (trace_id, parent_id);
+CREATE INDEX span_start  ON span (start_ms);
+```
+
+- **Fixed columns are identity, place and time only.** Every other attribute of [Guild attributes](#guild-attributes) and every `gen_ai.*`, Claude Code and `error.type` key is a key in `attrs`, read with `json_extract` and `json_each`, which the `sqlite3` that `gm` already requires provides. A new attribute, a field Claude Code adds, or a `guild.*` key added with build step 3 needs no schema change, and an older span simply lacks it. A key that gets queried often can later get an index on `json_extract(attrs, '$.guild.posting')`, again with no change to the rows.
+- **Each span is written once, complete, when it ends.** There is no row that is opened and updated later. A span still running is not in `span`: the posting, message and session rows already say that a posting, an exchange or a session is open, and a small `open_span` table holds the start of a hook-bracketed span (`PreToolUse`, `SubagentStart`) until its closing hook inserts the finished row and deletes the open one. `gm trace` draws what is still open from those tables, ending at the current time. The muster closes an `open_span` row whose session was killed as a span with status `unset` and `guild.closed_by=muster`, ended at the last time seen.
+- **A posting reopened after its terminal notice** gets a new `guild.posting` span in the same trace, linked to the earlier one, rather than a rewritten row.
+- **`span_link`** holds `trace_id`, `span_id`, `linked_trace_id`, `linked_span_id` and a JSON `attrs`; the original Claude Code ids kept by [the mapping](#mapping-claude-codes-names) go there.
+- **Span events** (retries, compactions, give-ups) are a JSON array under the `events` key of `attrs`, so they need no table.
 
 ### Retention and redaction
 
@@ -250,16 +324,18 @@ This is build step 2 in [roadmap.md](roadmap.md), smallest useful slice first.
 Each slice is usable alone.
 
 1. **Spans from the register, and `gm trace`.**
-   Register schema 2: millisecond times (`%Y-%m-%dT%H:%M:%fZ`; step 1 records whole seconds), the posting's trace id, and the `span` and `span_link` tables, migrated in place from schema 1.
+   Register schema 2, migrated in place from schema 1 (`PRAGMA user_version` 1 to 2, in one transaction, run by the first `gm` command that finds schema 1): the posting gains its trace id and root span id, the `span`, `span_link` and `open_span` tables of [the span table](#the-span-table) are created, and times written from then on are millisecond (`%Y-%m-%dT%H:%M:%fZ`; step 1 records whole seconds). Nothing in schema 1 is rewritten or dropped; rows already there keep their whole-second times, and a posting made before the migration has no spans, only its ledger.
+   `span` has fixed columns for trace, span, parent, name, start, end and status, and one JSON `attrs` column for every other attribute; each span is written once, when it ends; and every attribute above, including `guild.camp.commit` on every span, is written into `attrs`.
    `gm` writes spans for its own commands and for the hooks it already has (`prompt`, `stop`, `session-start`, `precompact`), and adds `SessionEnd`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `SubagentStart`, `SubagentStop` and `StopFailure` handlers that only record and never block; `gm statusline` records model, effort and running cost per `prompt_id` when they change.
-   `gm trace <posting|focus>` prints the waterfall and `gm stats` the measures; `--follows` joins postings into a topic.
-   *Done when* the patron sends a message, the Party Leader answers it with a tool call, an MCP call and a subagent, and `gm trace appt-v2#12` shows that tree with its times, tool names, model and effort, while `gm stats` shows time to first reply, exchanges and steps; nothing new is installed; and `tests/run.sh` covers it from recorded hook payloads without a model.
+   `gm trace <posting|focus>` prints the waterfall and `gm stats` the measures, each computed from span rows and never stored; `--follows` joins postings into a topic.
+   `gm stats --compare <selection>` ([Comparing a selection](#comparing-a-selection)) is part of this slice: it is the one query above over the `attrs` column and needs nothing but the spans, so it is cheapest to build while the table is new. Its selections in this slice are the ones slice 1 can measure: slow `chat`, `execute_tool` and `guild.hook` spans, slow replies, and postings not right first time.
+   *Done when* the patron sends a message, the Party Leader answers it with a tool call, an MCP call and a subagent, and `gm trace appt-v2#12` shows that tree with its times, tool names, model and effort, while `gm stats` shows time to first reply, exchanges and steps; `gm stats --compare` ranks the attribute values of a selection against its baseline, with the ids left out; a new attribute added to a recorded span needs no schema change; nothing new is installed; and `tests/run.sh` covers it from recorded hook payloads without a model.
 2. **Claude Code's telemetry, locally.**
    `gm open` sets the exporter variables and `OTEL_RESOURCE_ATTRIBUTES` on the session it starts; a local collector configuration ships in `templates/`; `gm trace import` folds the telemetry into the register; `gm doctor` checks that the endpoint is loopback and the collector answers.
    *Done when* `gm stats` gives tokens and cost per posting by model, effort and role, matching Claude Code's `claude_code.cost.usage` for the same sessions to the cent, and the collector's configuration and `gm doctor` show that nothing is sent anywhere but `127.0.0.1`.
 3. **Adventurer spans** (with build step 3, Adventurers).
-   `gm dispatch` writes `guild.dispatch`, launches the run with `TRACEPARENT`, `--session-id`, `--model`, `--effort` and the resource attributes, keeps the `stream-json` result, and `gm check` writes `guild.check`; the writ's hash goes on the dispatch span.
-   *Done when* one posting with a Party Leader exchange and an Adventurer run reads as one tree in `gm trace`, with the run's model calls under its dispatch.
+   `gm dispatch` writes `guild.dispatch`, launches the run with `TRACEPARENT`, `--session-id`, `--model`, `--effort` and the resource attributes, keeps the `stream-json` result, and `gm check` writes `guild.check`; the writ's hash goes on the dispatch span and, at import, on every span of the run.
+   *Done when* one posting with a Party Leader exchange and an Adventurer run reads as one tree in `gm trace`, with the run's model calls under its dispatch, and `gm stats --compare 'Adventurer runs whose check failed'` can be asked by `guild.writ.sha256` and `guild.camp.commit` being on every span of the run.
 4. **A viewer** (optional).
    `gm trace export` to a local Jaeger.
    *Done when* the patron opens the Jaeger page on `localhost`, finds `appt-v2#12` by `guild.posting`, sees it as one waterfall including the Adventurer run, and stopping Jaeger loses nothing, because the register still holds it.
