@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Retriever · Honeycomb C4</title>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">C4 model › Level 3</p>
+<h1>Retriever</h1>
+<p class="lede">Honeycomb's own distributed column store and query engine: how it lays events out on disk, how a query fans out across nodes and Lambda functions, and how it stays correct while being restarted every week. All of it comes from Honeycomb engineers' talks, posts and book; its code is not public.</p>
+<p class="meta-line">Read on 2026-10-02. Up: <a href="containers.html">Containers</a>. Retriever's principal author is Ian Wilkes <a class="src" href="../sources.html#s-book-oe-1e">book-oe-1e</a>; the case study in chapter 16 of <em>Observability Engineering</em> (2022) is the most detailed public description, and a 2024 post calls the original 2017 talk "still pretty accurate" <a class="src" href="../sources.html#s-blog-virtual-datasets">blog-virtual-datasets</a>.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1260 760" role="img" aria-labelledby="rcmp-title rcmp-desc">
+<title id="rcmp-title">Retriever components (C4 level 3)</title>
+<desc id="rcmp-desc">Inside one Retriever shard: a writer consumes the shard's Kafka partition and appends to the open segment on local disk; finished segments are aged to S3 by an out-of-band process; a reader answers queries by scanning the needed column files, dispatches inner queries to peer Retrievers and Lambda invocations for S3 segments, and merges partial aggregates before replying.</desc>
+<defs><marker id="rcmp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="32">Retriever — Components (Level 3)</text>
+<g class="c4-boundary"><rect x="210" y="110" width="830" height="620" rx="10"/><text x="222" y="720">Retriever · one shard (two nodes, one per AZ, each doing all of this)</text></g>
+<g class="c4-datastore">
+<path d="M20,310 a85.0,10 0 0,0 170,0 a85.0,10 0 0,0 -170,0 v90 a85.0,10 0 0,0 170,0 v-90"/>
+<text class="c4-label" x="105.0" y="346.0">Kafka partition</text>
+<text class="c4-tech" x="105.0" y="362.0">[retriever-mutation-N]</text>
+<text class="c4-desc" x="105.0" y="378.0">One partition per</text>
+<text class="c4-desc" x="105.0" y="392.0">shard</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="174" y="312" width="13" height="13" rx="3"/><text x="180.5" y="322">S</text></g>
+<g class="c4-external">
+<rect x="520" y="20" width="230" height="64" rx="8"/>
+<text class="c4-label" x="635.0" y="49.5">Poodle or a peer Retriever</text>
+<text class="c4-desc" x="635.0" y="65.5">Sends a query</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="734" y="24" width="13" height="13" rx="3"/><text x="740.5" y="34">S</text></g>
+<g class="c4-component">
+<rect x="240" y="260" width="230" height="110" rx="8"/>
+<text class="c4-label" x="355.0" y="291.0">Writer</text>
+<text class="c4-tech" x="355.0" y="307.0">[ingest worker process]</text>
+<text class="c4-desc" x="355.0" y="323.0">Consumes the partition, appends</text>
+<text class="c4-desc" x="355.0" y="337.0">each field to its column file,</text>
+<text class="c4-desc" x="355.0" y="351.0">checkpoints the offset locally</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="454" y="264" width="13" height="13" rx="3"/><text x="460.5" y="274">S</text></g>
+<g class="c4-datastore">
+<path d="M240,460 a115.0,10 0 0,0 230,0 a115.0,10 0 0,0 -230,0 v80 a115.0,10 0 0,0 230,0 v-80"/>
+<text class="c4-label" x="355.0" y="491.0">Open segment</text>
+<text class="c4-tech" x="355.0" y="507.0">[local NVMe]</text>
+<text class="c4-desc" x="355.0" y="523.0">Append-only; queryable while</text>
+<text class="c4-desc" x="355.0" y="537.0">written, flushed on demand</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="454" y="462" width="13" height="13" rx="3"/><text x="460.5" y="472">S</text></g>
+<g class="c4-datastore">
+<path d="M510,460 a115.0,10 0 0,0 230,0 a115.0,10 0 0,0 -230,0 v80 a115.0,10 0 0,0 230,0 v-80"/>
+<text class="c4-label" x="625.0" y="491.0">Finished segments</text>
+<text class="c4-tech" x="625.0" y="507.0">[local NVMe]</text>
+<text class="c4-desc" x="625.0" y="523.0">Read-only; min and max</text>
+<text class="c4-desc" x="625.0" y="537.0">timestamps in metadata</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="724" y="462" width="13" height="13" rx="3"/><text x="730.5" y="472">S</text></g>
+<g class="c4-component">
+<rect x="510" y="600" width="230" height="92" rx="8"/>
+<text class="c4-label" x="625.0" y="629.0">Segment ager</text>
+<text class="c4-tech" x="625.0" y="645.0">[out-of-band process]</text>
+<text class="c4-desc" x="625.0" y="661.0">Compacts, LZ4, uploads; one node</text>
+<text class="c4-desc" x="625.0" y="675.0">of the pair uploads, peer checks</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="724" y="604" width="13" height="13" rx="3"/><text x="730.5" y="614">S</text></g>
+<g class="c4-component">
+<rect x="520" y="150" width="230" height="100" rx="8"/>
+<text class="c4-label" x="635.0" y="183.0">Reader</text>
+<text class="c4-tech" x="635.0" y="199.0">[query process]</text>
+<text class="c4-desc" x="635.0" y="215.0">Picks segments by time; reads</text>
+<text class="c4-desc" x="635.0" y="229.0">only the columns a query uses</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="734" y="154" width="13" height="13" rx="3"/><text x="740.5" y="164">S</text></g>
+<g class="c4-component">
+<rect x="790" y="150" width="220" height="100" rx="8"/>
+<text class="c4-label" x="900.0" y="183.0">Merge</text>
+<text class="c4-tech" x="900.0" y="199.0">[per group]</text>
+<text class="c4-desc" x="900.0" y="215.0">Combines partials from itself,</text>
+<text class="c4-desc" x="900.0" y="229.0">peers and Lambda; top K</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="994" y="154" width="13" height="13" rx="3"/><text x="1000.5" y="164">S</text></g>
+<g class="c4-component">
+<rect x="790" y="320" width="220" height="110" rx="8"/>
+<text class="c4-label" x="900.0" y="351.0">Fan-out</text>
+<text class="c4-tech" x="900.0" y="367.0">[inner queries · Lambda]</text>
+<text class="c4-desc" x="900.0" y="383.0">Peers for other partitions; one</text>
+<text class="c4-desc" x="900.0" y="397.0">Lambda per ~8 S3 segments;</text>
+<text class="c4-desc" x="900.0" y="411.0">re-asks the slowest 10%</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="994" y="324" width="13" height="13" rx="3"/><text x="1000.5" y="334">S</text></g>
+<g class="c4-datastore">
+<path d="M790,510 a110.0,10 0 0,0 220,0 a110.0,10 0 0,0 -220,0 v80 a110.0,10 0 0,0 220,0 v-80"/>
+<text class="c4-label" x="900.0" y="541.0">Retriever MySQL</text>
+<text class="c4-tech" x="900.0" y="557.0">[RDS]</text>
+<text class="c4-desc" x="900.0" y="573.0">The storage engine's own</text>
+<text class="c4-desc" x="900.0" y="587.0">database; contents not public</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="994" y="512" width="13" height="13" rx="3"/><text x="1000.5" y="522">S</text></g>
+<g class="c4-container">
+<rect x="1070" y="150" width="170" height="90" rx="8"/>
+<text class="c4-label" x="1155.0" y="185.0">Peer Retrievers</text>
+<text class="c4-tech" x="1155.0" y="201.0">[other shards]</text>
+<text class="c4-desc" x="1155.0" y="217.0">Same components</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="1224" y="154" width="13" height="13" rx="3"/><text x="1230.5" y="164">S</text></g>
+<g class="c4-container">
+<rect x="1070" y="320" width="170" height="100" rx="8"/>
+<text class="c4-label" x="1155.0" y="353.0">retriever-segment</text>
+<text class="c4-tech" x="1155.0" y="369.0">[AWS Lambda]</text>
+<text class="c4-desc" x="1155.0" y="385.0">Mapper over S3</text>
+<text class="c4-desc" x="1155.0" y="399.0">segments</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="1224" y="324" width="13" height="13" rx="3"/><text x="1230.5" y="334">S</text></g>
+<g class="c4-datastore">
+<path d="M1070,610 a85.0,10 0 0,0 170,0 a85.0,10 0 0,0 -170,0 v80 a85.0,10 0 0,0 170,0 v-80"/>
+<text class="c4-label" x="1155.0" y="641.0">Segment archive</text>
+<text class="c4-tech" x="1155.0" y="657.0">[Amazon S3]</text>
+<text class="c4-desc" x="1155.0" y="673.0">Finished segments</text>
+<text class="c4-desc" x="1155.0" y="687.0">to 60 days</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="1224" y="612" width="13" height="13" rx="3"/><text x="1230.5" y="622">S</text></g>
+<g class="c4-rel">
+<path d="M190,330 L240,316" marker-end="url(#rcmp-arrow)"/>
+<text class="c4-rel-label" x="214" y="306">consumes</text>
+</g>
+<g class="c4-rel">
+<path d="M355,370 L355,450" marker-end="url(#rcmp-arrow)"/>
+<text class="c4-rel-label" x="380" y="412">appends</text>
+</g>
+<g class="c4-rel">
+<path d="M470,500 L510,500" marker-end="url(#rcmp-arrow)"/>
+<text class="c4-rel-label" x="490" y="490">rolls</text>
+</g>
+<g class="c4-rel">
+<path d="M625,550 L625,600" marker-end="url(#rcmp-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M740,646 C900,690 1000,680 1070,650" marker-end="url(#rcmp-arrow)"/>
+<text class="c4-rel-label" x="930" y="680">uploads</text>
+</g>
+<g class="c4-rel">
+<path d="M635,84 L635,150" marker-end="url(#rcmp-arrow)"/>
+<text class="c4-rel-label" x="660" y="120">query</text>
+</g>
+<g class="c4-rel">
+<path d="M580,250 C560,330 470,400 420,450" marker-end="url(#rcmp-arrow)"/>
+<text class="c4-rel-label" x="520" y="345">scans columns</text>
+</g>
+<g class="c4-rel">
+<path d="M625,250 L625,450" marker-end="url(#rcmp-arrow)"/>
+<text class="c4-rel-label" x="650" y="380">scans</text>
+</g>
+<g class="c4-rel">
+<path d="M750,200 L790,200" marker-end="url(#rcmp-arrow)"/>
+<text class="c4-rel-label" x="770" y="190">partials</text>
+</g>
+<g class="c4-rel">
+<path d="M720,250 L790,330" marker-end="url(#rcmp-arrow)"/>
+<text class="c4-rel-label" x="760" y="300">dispatch</text>
+</g>
+<g class="c4-rel">
+<path d="M1010,350 L1070,215" marker-end="url(#rcmp-arrow)"/>
+<text class="c4-rel-label" x="1012" y="292">inner queries</text>
+</g>
+<g class="c4-rel">
+<path d="M1010,380 L1070,370" marker-end="url(#rcmp-arrow)"/>
+<text class="c4-rel-label" x="1040" y="362">invokes</text>
+</g>
+<g class="c4-rel">
+<path d="M1155,420 L1155,600" marker-end="url(#rcmp-arrow)"/>
+<text class="c4-rel-label" x="1180" y="512">reads</text>
+</g>
+<g class="c4-rel">
+<path d="M790,170 C760,110 760,70 750,60" marker-end="url(#rcmp-arrow)"/>
+<text class="c4-rel-label" x="790" y="96">result</text>
+</g>
+<g class="c4-legend">
+<rect class="c4-legend-frame" x="20" y="470" width="180" height="222" rx="6"/>
+<text class="c4-legend-heading" x="32" y="490">Legend</text>
+<g class="c4-component"><rect x="32" y="502" width="32" height="16" rx="3"/></g>
+<text x="74" y="514">Component</text>
+<g class="c4-container"><rect x="32" y="526" width="32" height="16" rx="3"/></g>
+<text x="74" y="538">Container</text>
+<g class="c4-datastore"><path d="M32,553 a16,3 0 0,0 32,0 a16,3 0 0,0 -32,0 v10 a16,3 0 0,0 32,0 v-10"/></g>
+<text x="74" y="562">Store</text>
+<g class="c4-external"><rect x="32" y="574" width="32" height="16" rx="3"/></g>
+<text x="74" y="586">Caller</text>
+<g class="c4-rel"><path d="M32,606 L64,606"/></g>
+<text x="74" y="610">Call or data flow</text>
+<g class="hc-badge hc-badge-doc"><rect x="41" y="623" width="13" height="13" rx="3"/><text x="47.5" y="633">D</text></g>
+<text x="74" y="634">Documented</text>
+<g class="hc-badge hc-badge-stated"><rect x="41" y="645" width="13" height="13" rx="3"/><text x="47.5" y="655">S</text></g>
+<text x="74" y="656">Stated in a talk or blog</text>
+<g class="hc-badge hc-badge-inferred"><rect x="41" y="667" width="13" height="13" rx="3"/><text x="47.5" y="677">I</text></g>
+<text x="74" y="678">Inferred by this site</text>
+</g>
+</svg>
+</div>
+<figcaption>Level 3. Component names are this site's labels for roles that Honeycomb describes; Honeycomb names only the writer and the reader processes. Every part is stated in a Honeycomb talk, post or book.</figcaption>
+</figure>
+
+<h2 id="why">Why a column store of its own</h2>
+<p>Sam Stokes's 2017 talk introduced Retriever as "a custom-built database inspired by Scuba", Facebook's in-memory analytics store, that "ingests events from Kafka, and chooses disk over memory, using an efficient column-oriented storage model" <span class="prov prov-stated">talk/blog</span> <a class="src" href="../sources.html#s-strangeloop-2017">strangeloop-2017</a>. Scuba kept "data completely in memory on hundreds of servers each with 144 GB RAM" <a class="src" href="../sources.html#s-scuba-paper">scuba-paper</a>; Honeycomb's extra constraints were "multi-tenancy, cost to serve, and the limited resources of a startup" <a class="src" href="../sources.html#s-strangeloop-2017">strangeloop-2017</a>. The design goals in Christine Yen's 2017 deck were "read-time aggregation", the "ability to reconstruct raw rows", "flexible schemas and sparse rows", fast "best effort" reads and near-real-time behaviour <a class="src" href="../sources.html#s-yen-under-the-hood">yen-under-the-hood</a>. The principle that follows: "There should be no indexes, so you don't need to decide which column is 'fast' before you start writing data" <a class="src" href="../sources.html#s-blog-column-store">blog-column-store</a>. Majors's own framing: "we have not written a database, we've written a storage engine" <a class="src" href="../sources.html#s-shipit-11">shipit-11</a>. <a href="../engineering.html#column-store">Engineering decisions</a> weighs the choice.</p>
+
+<h2 id="components">Components</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Component</th><th>What it does</th><th>Provenance</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><strong>Writer</strong></td><td>Consumes the shard's Kafka partition and appends "a continuous stream of data" to disk: "one file for each unique field" per segment, appending "the data for each field to the appropriate file". It keeps its Kafka offset itself, globally and in each segment's metadata, and refuses to process if offsets jump unexpectedly.</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-blog-virtual-datasets">blog-virtual-datasets</a> <a class="src" href="../sources.html#s-blog-dec-2025">blog-dec-2025</a> <a class="src" href="../sources.html#s-blog-kafka-2026">blog-kafka-2026</a></td></tr>
+<tr><td><strong>Open segment</strong></td><td>Append-only; "open column files are always queryable and ... the query process can force a flush of partial files for reading".</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-book-oe-1e">book-oe-1e</a></td></tr>
+<tr><td><strong>Finished segments</strong></td><td>A segment is finalised "as read-only" with "the final oldest and newest timestamps"; that metadata is the only index. Segments are frozen as they are, not compacted in layers.</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-book-oe-1e">book-oe-1e</a> <a class="src" href="../sources.html#s-blog-column-store">blog-column-store</a></td></tr>
+<tr><td><strong>Segment ager</strong></td><td>An out-of-band process moves segments from live, to read-only on disk, to read-only in S3, to tombstoned and deleted when data ages out. Archived copies are compacted and LZ4-compressed; one node of the pair uploads and the other spot-checks that its output is identical.</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-blog-murder-mystery">blog-murder-mystery</a> <a class="src" href="../sources.html#s-book-oe-1e">book-oe-1e</a> <a class="src" href="../sources.html#s-blog-secondary-storage">blog-secondary-storage</a></td></tr>
+<tr><td><strong>Reader</strong></td><td>"Receives queries and uses data on disk to calculate aggregations and return results"; a separate process from the writer, sharing only the filesystem, so a query spike cannot hold up ingest.</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-blog-virtual-datasets">blog-virtual-datasets</a> <a class="src" href="../sources.html#s-book-oe-1e">book-oe-1e</a></td></tr>
+<tr><td><strong>Fan-out</strong></td><td>The Retriever that receives a query "sends off inner queries to all of those Retrievers" that hold the dataset's partitions; for S3-resident segments it "spins up a Lambda for each eight or so segments". Once 90% of segment requests complete, the remaining 10% are asked again "without canceling the still-pending requests".</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-qcon-2022">qcon-2022</a> <a class="src" href="../sources.html#s-book-oe-1e">book-oe-1e</a></td></tr>
+<tr><td><strong>Merge</strong></td><td>Partial aggregates are sent "to a single worker for each GROUP", merged, then sorted and cut to the top K. A fully distributed merge for many-group, many-node queries arrived in 2018, with speedups of five times or more in extreme cases.</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-book-oe-1e">book-oe-1e</a> <a class="src" href="../sources.html#s-blog-speeding-2018">blog-speeding-2018</a></td></tr>
+<tr><td><strong>Retriever MySQL</strong></td><td>"Our storage engine also has its own MySQL database that we discuss less often"; as of 2020 it had seen only two migrations. What it holds is not described.</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-blog-meta-review-2020">blog-meta-review-2020</a></td></tr>
+</tbody></table></div>
+
+<h2 id="layout">Segments and column files</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1100 560" role="img" aria-labelledby="rlay-title rlay-desc">
+<title id="rlay-title">Retriever on-disk layout: segments of column files</title>
+<desc id="rlay-desc">One dataset partition holds a series of segment directories. Each segment has a metadata record with its minimum and maximum timestamps and the Kafka offset, and one file per field that appeared in it. The open segment is still being appended to. A column file stores row sequence numbers paired with values, so rows that lack the field take no space.</desc>
+<defs><marker id="rlay-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="32">Retriever — on-disk layout (illustrative)</text>
+<text class="hc-note" x="20" y="54">dataset / partition 7 / segments … each segment is a directory; each field seen in it is one file</text>
+<g class="c4-boundary"><rect x="20" y="70" width="210" height="440" rx="10"/><text x="32" y="92">segment 41 · finished</text></g>
+<g class="c4-datastore"><rect x="35" y="104" width="180" height="62" rx="6"/><text class="c4-label" x="125" y="124">metadata</text><text class="c4-desc" x="125" y="141">09:00:02 → 09:58:41</text><text class="c4-desc" x="125" y="156">offset 8,104,220</text></g>
+<g class="hc-col hc-col-time"><rect x="35" y="180" width="180" height="38" rx="4"/><text x="125" y="203">timestamp</text></g>
+<g class="hc-col"><rect x="35" y="230" width="180" height="38" rx="4"/><text x="125" y="253">duration_ms</text></g>
+<g class="hc-col"><rect x="35" y="280" width="180" height="38" rx="4"/><text x="125" y="303">service.name</text></g>
+<g class="hc-col"><rect x="35" y="330" width="180" height="38" rx="4"/><text x="125" y="353">http.route</text></g>
+<g class="hc-col"><rect x="35" y="380" width="180" height="38" rx="4"/><text x="125" y="403">user.id</text></g>
+<g class="hc-col"><rect x="35" y="430" width="180" height="38" rx="4"/><text x="125" y="453">error</text></g>
+<g class="c4-boundary"><rect x="250" y="70" width="210" height="440" rx="10"/><text x="262" y="92">segment 42 · finished</text></g>
+<g class="c4-datastore"><rect x="265" y="104" width="180" height="62" rx="6"/><text class="c4-label" x="355" y="124">metadata</text><text class="c4-desc" x="355" y="141">09:58:41 → 10:51:09</text><text class="c4-desc" x="355" y="156">offset 9,104,220</text></g>
+<g class="hc-col hc-col-time"><rect x="265" y="180" width="180" height="38" rx="4"/><text x="355" y="203">timestamp</text></g>
+<g class="hc-col"><rect x="265" y="230" width="180" height="38" rx="4"/><text x="355" y="253">duration_ms</text></g>
+<g class="hc-col"><rect x="265" y="280" width="180" height="38" rx="4"/><text x="355" y="303">service.name</text></g>
+<g class="hc-col"><rect x="265" y="330" width="180" height="38" rx="4"/><text x="355" y="353">http.route</text></g>
+<g class="hc-col"><rect x="265" y="380" width="180" height="38" rx="4"/><text x="355" y="403">user.id</text></g>
+<g class="hc-col"><rect x="265" y="430" width="180" height="38" rx="4"/><text x="355" y="453">app.build_id</text></g>
+<g class="c4-boundary"><rect x="480" y="70" width="210" height="440" rx="10"/><text x="492" y="92">segment 43 · open</text></g>
+<g class="c4-datastore"><rect x="495" y="104" width="180" height="62" rx="6"/><text class="c4-label" x="585" y="124">metadata</text><text class="c4-desc" x="585" y="141">10:51:09 → now</text><text class="c4-desc" x="585" y="156">offset 9,487,630</text></g>
+<g class="hc-col hc-col-time"><rect x="495" y="180" width="180" height="38" rx="4"/><text x="585" y="203">timestamp</text></g>
+<g class="hc-col"><rect x="495" y="230" width="180" height="38" rx="4"/><text x="585" y="253">duration_ms</text></g>
+<g class="hc-col"><rect x="495" y="280" width="180" height="38" rx="4"/><text x="585" y="303">service.name</text></g>
+<g class="hc-col"><rect x="495" y="330" width="180" height="38" rx="4"/><text x="585" y="353">http.route</text></g>
+<g class="hc-col"><rect x="495" y="380" width="180" height="38" rx="4"/><text x="585" y="403">user.id</text></g>
+<text class="hc-note" x="495" y="438">still appended to; readers can</text>
+<text class="hc-note" x="495" y="454">force a flush and query it</text>
+<g class="c4-boundary"><rect x="730" y="70" width="350" height="440" rx="10"/><text x="742" y="92">inside duration_ms, segment 43</text></g>
+<g class="c4-rel"><path d="M675,249 L730,200" marker-end="url(#rlay-arrow)"/></g>
+<text class="hc-note-strong" x="760" y="128">row</text><text class="hc-note-strong" x="880" y="128">value</text>
+<g class="hc-col"><rect x="755" y="140" width="90" height="34" rx="4"/><text x="800" y="162">0</text></g>
+<g class="hc-col hc-col-time"><rect x="855" y="140" width="110" height="34" rx="4"/><text x="910" y="162">183.2</text></g>
+<g class="hc-col"><rect x="755" y="184" width="90" height="34" rx="4"/><text x="800" y="206">1</text></g>
+<g class="hc-col hc-col-time"><rect x="855" y="184" width="110" height="34" rx="4"/><text x="910" y="206">12.7</text></g>
+<g class="hc-col"><rect x="755" y="228" width="90" height="34" rx="4"/><text x="800" y="250">3</text></g>
+<g class="hc-col hc-col-time"><rect x="855" y="228" width="110" height="34" rx="4"/><text x="910" y="250">960.1</text></g>
+<g class="hc-col"><rect x="755" y="272" width="90" height="34" rx="4"/><text x="800" y="294">4</text></g>
+<g class="hc-col hc-col-time"><rect x="855" y="272" width="110" height="34" rx="4"/><text x="910" y="294">41.0</text></g>
+<g class="hc-col"><rect x="755" y="316" width="90" height="34" rx="4"/><text x="800" y="338">5</text></g>
+<g class="hc-col hc-col-time"><rect x="855" y="316" width="110" height="34" rx="4"/><text x="910" y="338">38.6</text></g>
+<text class="hc-note" x="755" y="380">Row 2 has no duration_ms, so it has no entry:</text>
+<text class="hc-note" x="755" y="396">sparse rows cost nothing, and a new field is</text>
+<text class="hc-note" x="755" y="412">just a new file. Nothing is indexed but time.</text>
+<text class="hc-note" x="755" y="444">Archived copies are dictionary-, sparse- or</text>
+<text class="hc-note" x="755" y="460">run-length-encoded, then LZ4-compressed.</text>
+<text class="hc-note" x="20" y="536">Field names, times and offsets are invented for the drawing; the structure is the one Honeycomb describes.</text>
+</svg>
+</div>
+<figcaption>Illustrative. Each dataset partition is a series of segment directories; each segment holds metadata and one file per field that appeared in it; each column file pairs row sequence numbers with values, so a missing field costs nothing <a class="src" href="../sources.html#s-blog-virtual-datasets">blog-virtual-datasets</a> <a class="src" href="../sources.html#s-book-oe-1e">book-oe-1e</a>.</figcaption>
+</figure>
+<p>"Each column file exists on disk as an array holding, alternately, sequence numbers for each row and the column's value for each row" <span class="prov prov-stated">talk/blog</span> <a class="src" href="../sources.html#s-book-oe-1e">book-oe-1e</a>. Out-of-order timestamps are tolerated because each segment records its own time window rather than sorting its rows <a class="src" href="../sources.html#s-book-oe-1e">book-oe-1e</a>. In 2017 there was "no compaction or compression" on the write path <a class="src" href="../sources.html#s-yen-under-the-hood">yen-under-the-hood</a>; compression arrived with S3 tiering, first gzip and then, from 2019, a "compression-friendly file layout" with LZ4 that made reads "around three times faster" <a class="src" href="../sources.html#s-blog-secondary-storage">blog-secondary-storage</a>.</p>
+<p>When a segment closes is reported differently over the years, which may reflect changes, simplification or both:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Source</th><th>Segment closes after</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>Ian Wilkes, 2019</td><td>"a roughly 1GB chunk of contiguous data"</td><td><a class="src" href="../sources.html#s-blog-secondary-storage">blog-secondary-storage</a></td></tr>
+<tr><td><em>Observability Engineering</em>, 2022</td><td>one hour, 250,000 records or 1 GB</td><td><a class="src" href="../sources.html#s-book-oe-1e">book-oe-1e</a></td></tr>
+<tr><td>Jessica Kerr, QCon 2022</td><td>about 12 hours, a million events or "a certain number of megabytes" ("I think")</td><td><a class="src" href="../sources.html#s-qcon-2022">qcon-2022</a></td></tr>
+<tr><td>Hazel Edmands, 2024</td><td>"every million events or every day (whichever comes first)"</td><td><a class="src" href="../sources.html#s-blog-virtual-datasets">blog-virtual-datasets</a></td></tr>
+</tbody></table></div>
+<p>Segments live on local NVMe for "the first few hours ... dynamic based on your write throughput", then age to S3 <a class="src" href="../sources.html#s-shipit-11">shipit-11</a>. S3 keys start with "a fixed-length hash code" computed "from the dataset id, the partition id, and the segment id" to spread load; a prefix delete missing its trailing slash quietly destroyed live segments for more than two years before it was found in 2022 <a class="src" href="../sources.html#s-blog-murder-mystery">blog-murder-mystery</a>.</p>
+<p>In 2024 Retriever gained <strong>virtual datasets</strong>: environments with thousands of small service datasets were mapped into shared container datasets with a synthetic <code>virtual_dataset</code> column, because reading "a growing number files from a growing number of segment directories" was failing internal query-time targets. Median query time in such environments fell "from around 20s ... to around 0.2 seconds" <span class="prov prov-stated">talk/blog</span> <a class="src" href="../sources.html#s-blog-virtual-datasets">blog-virtual-datasets</a>.</p>
+
+<h2 id="query">How a query runs</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1240 600" role="img" aria-labelledby="rqry-title rqry-desc">
+<title id="rqry-title">How a Retriever query runs</title>
+<desc id="rqry-desc">A query reaches one Retriever, which sends inner queries to every Retriever holding a partition of the dataset. Each one prunes segments by their time range, scans local segments itself and hands S3 segments to Lambda invocations of about eight segments each. Each segment yields mergeable partial aggregates, weighted by sample rate. Partials are merged per group, sorted and cut to the top K. Once 90 percent of segment requests finish, the rest are asked again and the first answer wins.</desc>
+<defs><marker id="rqry-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="32">How a query runs: fan out, scan, merge</text>
+<g class="c4-component">
+<rect x="20" y="70" width="185" height="110" rx="8"/>
+<text class="c4-label" x="112.5" y="115.5">1. Select segments</text>
+<text class="c4-desc" x="112.5" y="131.5">Keep segments whose min/max</text>
+<text class="c4-desc" x="112.5" y="145.5">time overlaps the query</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="189" y="74" width="13" height="13" rx="3"/><text x="195.5" y="84">S</text></g>
+<g class="c4-rel">
+<path d="M205,125 L225,125" marker-end="url(#rqry-arrow)"/>
+</g>
+<g class="c4-component">
+<rect x="225" y="70" width="185" height="110" rx="8"/>
+<text class="c4-label" x="317.5" y="115.5">2. Read columns</text>
+<text class="c4-desc" x="317.5" y="131.5">Open only the files for the</text>
+<text class="c4-desc" x="317.5" y="145.5">fields the query names</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="394" y="74" width="13" height="13" rx="3"/><text x="400.5" y="84">S</text></g>
+<g class="c4-rel">
+<path d="M410,125 L430,125" marker-end="url(#rqry-arrow)"/>
+</g>
+<g class="c4-component">
+<rect x="430" y="70" width="185" height="110" rx="8"/>
+<text class="c4-label" x="522.5" y="115.5">3. Filter rows</text>
+<text class="c4-desc" x="522.5" y="131.5">Apply WHERE, including</text>
+<text class="c4-desc" x="522.5" y="145.5">calculated fields</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="599" y="74" width="13" height="13" rx="3"/><text x="605.5" y="84">D</text></g>
+<g class="c4-rel">
+<path d="M615,125 L635,125" marker-end="url(#rqry-arrow)"/>
+</g>
+<g class="c4-component">
+<rect x="635" y="70" width="185" height="110" rx="8"/>
+<text class="c4-label" x="727.5" y="108.5">4. Aggregate</text>
+<text class="c4-desc" x="727.5" y="124.5">Per segment: counts, sums,</text>
+<text class="c4-desc" x="727.5" y="138.5">t-digest, HyperLogLog, each</text>
+<text class="c4-desc" x="727.5" y="152.5">row weighted by SampleRate</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="804" y="74" width="13" height="13" rx="3"/><text x="810.5" y="84">S</text></g>
+<g class="c4-rel">
+<path d="M820,125 L840,125" marker-end="url(#rqry-arrow)"/>
+</g>
+<g class="c4-component">
+<rect x="840" y="70" width="185" height="110" rx="8"/>
+<text class="c4-label" x="932.5" y="115.5">5. Merge per group</text>
+<text class="c4-desc" x="932.5" y="131.5">Each GROUP BY value merged</text>
+<text class="c4-desc" x="932.5" y="145.5">on one worker</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="1009" y="74" width="13" height="13" rx="3"/><text x="1015.5" y="84">S</text></g>
+<g class="c4-rel">
+<path d="M1025,125 L1045,125" marker-end="url(#rqry-arrow)"/>
+</g>
+<g class="c4-component">
+<rect x="1045" y="70" width="185" height="110" rx="8"/>
+<text class="c4-label" x="1137.5" y="115.5">6. Sort, top K</text>
+<text class="c4-desc" x="1137.5" y="131.5">ORDER BY, LIMIT;</text>
+<text class="c4-desc" x="1137.5" y="145.5">graph keeps top 50</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="1214" y="74" width="13" height="13" rx="3"/><text x="1220.5" y="84">S</text></g>
+<g class="c4-external">
+<rect x="20" y="250" width="220" height="80" rx="8"/>
+<text class="c4-label" x="130.0" y="280.0">Query</text>
+<text class="c4-tech" x="130.0" y="296.0">[from Poodle, a trigger or MCP]</text>
+<text class="c4-desc" x="130.0" y="312.0">JSON query spec</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="224" y="254" width="13" height="13" rx="3"/><text x="230.5" y="264">D</text></g>
+<g class="c4-container">
+<rect x="300" y="250" width="240" height="80" rx="8"/>
+<text class="c4-label" x="420.0" y="287.5">Receiving Retriever</text>
+<text class="c4-desc" x="420.0" y="303.5">Splits the query by partition</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="524" y="254" width="13" height="13" rx="3"/><text x="530.5" y="264">S</text></g>
+<g class="c4-rel">
+<path d="M240,290 L300,290" marker-end="url(#rqry-arrow)"/>
+</g>
+<g class="c4-container">
+<rect x="640" y="380" width="200" height="54" rx="8"/>
+<text class="c4-label" x="740.0" y="404.5">Retriever, partition 1</text>
+<text class="c4-desc" x="740.0" y="420.5">local segments scanned here</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="824" y="384" width="13" height="13" rx="3"/><text x="830.5" y="394">S</text></g>
+<g class="c4-rel">
+<path d="M540,300 C590,300 590,407 640,407" marker-end="url(#rqry-arrow)"/>
+</g>
+<g class="c4-container">
+<rect x="640" y="446" width="200" height="54" rx="8"/>
+<text class="c4-label" x="740.0" y="470.5">Retriever, partition 2</text>
+<text class="c4-desc" x="740.0" y="486.5">local segments scanned here</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="824" y="450" width="13" height="13" rx="3"/><text x="830.5" y="460">S</text></g>
+<g class="c4-rel">
+<path d="M540,300 C590,300 590,473 640,473" marker-end="url(#rqry-arrow)"/>
+</g>
+<g class="c4-container">
+<rect x="640" y="512" width="200" height="54" rx="8"/>
+<text class="c4-label" x="740.0" y="536.5">Retriever, partition n</text>
+<text class="c4-desc" x="740.0" y="552.5">local segments scanned here</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="824" y="516" width="13" height="13" rx="3"/><text x="830.5" y="526">S</text></g>
+<g class="c4-rel">
+<path d="M540,300 C590,300 590,539 640,539" marker-end="url(#rqry-arrow)"/>
+</g>
+<g class="c4-container">
+<rect x="930" y="380" width="140" height="54" rx="8"/>
+<text class="c4-label" x="1000.0" y="404.5">Lambda × 40</text>
+<text class="c4-desc" x="1000.0" y="420.5">~8 S3 segments each</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="1054" y="384" width="13" height="13" rx="3"/><text x="1060.5" y="394">S</text></g>
+<g class="c4-rel">
+<path d="M840,407 L930,407" marker-end="url(#rqry-arrow)"/>
+</g>
+<g class="c4-container">
+<rect x="930" y="446" width="140" height="54" rx="8"/>
+<text class="c4-label" x="1000.0" y="470.5">Lambda × 37</text>
+<text class="c4-desc" x="1000.0" y="486.5">~8 S3 segments each</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="1054" y="450" width="13" height="13" rx="3"/><text x="1060.5" y="460">S</text></g>
+<g class="c4-rel">
+<path d="M840,473 L930,473" marker-end="url(#rqry-arrow)"/>
+</g>
+<g class="c4-container">
+<rect x="930" y="512" width="140" height="54" rx="8"/>
+<text class="c4-label" x="1000.0" y="536.5">Lambda × 52</text>
+<text class="c4-desc" x="1000.0" y="552.5">~8 S3 segments each</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="1054" y="516" width="13" height="13" rx="3"/><text x="1060.5" y="526">S</text></g>
+<g class="c4-rel">
+<path d="M840,539 L930,539" marker-end="url(#rqry-arrow)"/>
+</g>
+<g class="c4-datastore">
+<path d="M1100,430 a60.0,10 0 0,0 120,0 a60.0,10 0 0,0 -120,0 v90 a60.0,10 0 0,0 120,0 v-90"/>
+<text class="c4-label" x="1160.0" y="473.0">S3</text>
+<text class="c4-tech" x="1160.0" y="489.0">[segments]</text>
+<text class="c4-desc" x="1160.0" y="505.0">older data</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="1204" y="432" width="13" height="13" rx="3"/><text x="1210.5" y="442">S</text></g>
+<g class="c4-rel">
+<path d="M1070,407 L1100,450" marker-end="url(#rqry-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M1070,473 L1100,475" marker-end="url(#rqry-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M1070,539 L1100,505" marker-end="url(#rqry-arrow)"/>
+</g>
+<text class="hc-note-strong" x="300" y="372">Same six steps on every shard, on local</text>
+<text class="hc-note" x="300" y="388">segments in-process and on S3 segments</text>
+<text class="hc-note" x="300" y="404">in Lambda; partials flow back the way</text>
+<text class="hc-note" x="300" y="420">they came and merge on the way up.</text>
+<text class="hc-note-strong" x="300" y="452">Hedging: once 90% of segment requests</text>
+<text class="hc-note" x="300" y="468">have answered, the other 10% are sent</text>
+<text class="hc-note" x="300" y="484">again and whichever copy returns first</text>
+<text class="hc-note" x="300" y="500">is used.</text>
+<text class="hc-note" x="20" y="590">Lambda counts are invented for the drawing. Lambda is used only when data is in S3: "If it's on local disk, then we're not."</text>
+</svg>
+</div>
+<figcaption>The six steps are the book's <a class="src" href="../sources.html#s-book-oe-1e">book-oe-1e</a>; the fan-out, the Lambda granularity and the hedging are from Kerr's talk and the book <a class="src" href="../sources.html#s-qcon-2022">qcon-2022</a>. Sketches and sample-rate weighting are documented <a class="src" href="../sources.html#s-docs-query-build">docs-query-build</a> <a class="src" href="../sources.html#s-docs-sampled-data">docs-sampled-data</a>.</figcaption>
+</figure>
+<ol>
+<li><strong>Prune by time.</strong> Segment metadata is "the closest thing we have to such an index" <a class="src" href="../sources.html#s-blog-column-store">blog-column-store</a>.</li>
+<li><strong>Read only what is named.</strong> A column store reads the files for the fields in SELECT, WHERE and GROUP BY and nothing else <a class="src" href="../sources.html#s-book-oe-1e">book-oe-1e</a>.</li>
+<li><strong>Compute at read time.</strong> "We only read at query time, we don't do any aggregation or indexing, even calculated columns are all done at query time. So we wind up being compute bound" <a class="src" href="../sources.html#s-infoq-podcast-kerr">infoq-podcast-kerr</a>.</li>
+<li><strong>Aggregate in mergeable form.</strong> "P99 is estimated using the t-digest algorithm"; "COUNT_DISTINCT is estimated using the HyperLogLog algorithm" <span class="prov prov-doc">documented</span> <a class="src" href="../sources.html#s-docs-query-build">docs-query-build</a>. Each event's <code>SampleRate</code> weights COUNT, SUM, AVG and percentiles; COUNT_DISTINCT is not corrected <span class="prov prov-doc">documented</span> <a class="src" href="../sources.html#s-docs-sampled-data">docs-sampled-data</a>. <a href="../sampling.html">Sampling and its maths</a> works through it.</li>
+<li><strong>Fan out.</strong> Local segments are scanned on the Retriever nodes; "if it's in S3, we're going to use a Lambda" <a class="src" href="../sources.html#s-qcon-2022">qcon-2022</a>. Each Lambda "reads the data from S3, decrypts it, looks at the files just that it needs to" and aggregates; its results, capped at 6 MB, travel back through S3 when large, and "the final reduce" happens "on our persistent Retriever instances" <a class="src" href="../sources.html#s-qcon-2022">qcon-2022</a>.</li>
+<li><strong>Merge and cut.</strong> One worker per group merges, then ORDER BY and LIMIT apply; graphs draw the top 50 groups regardless of LIMIT <span class="prov prov-doc">documented</span> <a class="src" href="../sources.html#s-docs-query-build">docs-query-build</a>.</li>
+</ol>
+<p>Lambda is "a force multiplier, with each of our own CPU cores overseeing the work of hundreds of others" <a class="src" href="../sources.html#s-blog-secondary-storage">blog-secondary-storage</a>. Its numbers, from the 2022 talk: median start about 50 ms with little difference between hot and cold starts; three to four times EC2's price per CPU-second but run "100 times less, at least"; a default burst limit of 500 that AWS had to raise <span class="prov prov-stated">talk/blog</span> <a class="src" href="../sources.html#s-qcon-2022">qcon-2022</a>. Honeycomb built the CONCURRENCY query operator "specifically for this case of how many Lambdas are we running at once" <a class="src" href="../sources.html#s-infoq-podcast-kerr">infoq-podcast-kerr</a>. The query engine is "designed as a best-effort querying system which is ok with occasional incorrect answers" <a class="src" href="../sources.html#s-blog-slo-challenges">blog-slo-challenges</a>, which its company values put as "99% right in milliseconds is better than 100% right in an hour" <a class="src" href="../sources.html#s-about-page">about-page</a>. Results of an identical query over an identical time span are cached in S3 for good <a class="src" href="../sources.html#s-qcon-2022">qcon-2022</a> <a class="src" href="../sources.html#s-blog-query-history">blog-query-history</a>.</p>
+
+<h2 id="durability">Staying correct while nodes die</h2>
+<ul>
+<li><strong>Two nodes per shard.</strong> "Each shard has two query nodes (in different AZs)" <a class="src" href="../sources.html#s-blog-kafka-may-2026">blog-kafka-may-2026</a>. Because ingestion is deterministic, "parallel ingestion workers consuming a single partition must produce identical output", so one uploads and the other checks <a class="src" href="../sources.html#s-book-oe-1e">book-oe-1e</a>. Honeycomb calls the result "not just exactly-once, but exactly-twice" <a class="src" href="../sources.html#s-blog-kafka-2026">blog-kafka-2026</a>.</li>
+<li><strong>Offsets are Retriever's, not Kafka's.</strong> Retriever "cannot consume a message it has already serialized and written to the columnar store", so it checkpoints offsets to local disk instead of committing them to Kafka, which ruled out MirrorMaker's offset translation in the 2026 Kafka migration <a class="src" href="../sources.html#s-blog-kafka-2026">blog-kafka-2026</a>. After the December 2025 Kafka incident it gained an offset-reset ability <a class="src" href="../sources.html#s-blog-dec-2025">blog-dec-2025</a>.</li>
+<li><strong>Replace, don't repair.</strong> A new node "needs to obtain the latest hourly full filesystem snapshot of its predecessor, along with the Kafka offset", then "replays for at most two hours"; one node is terminated on purpose every week <a class="src" href="../sources.html#s-blog-scaling-kafka">blog-scaling-kafka</a>. Honeycomb also keeps two Retriever clusters and switches between them as "a routine change" <a class="src" href="../sources.html#s-blog-what-comes-up">blog-what-comes-up</a>.</li>
+</ul>
+
+<h2 id="performance">Performance, as reported</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Date</th><th>Figure</th><th>What it measures</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>2018-11</td><td>median 250 ms, P90 1.3 s</td><td>customer queries at the storage back end</td><td><a class="src" href="../sources.html#s-blog-speeding-2018">blog-speeding-2018</a></td></tr>
+<tr><td>2019-12</td><td>about twice as fast</td><td>after pooling and reusing allocations, since "allocation and cleanup" could "eat the bulk of CPU time"</td><td><a class="src" href="../sources.html#s-blog-secondary-storage">blog-secondary-storage</a></td></tr>
+<tr><td>2021-07</td><td>1 s at p95</td><td>a target, not a measurement</td><td><a class="src" href="../sources.html#s-shipit-11">shipit-11</a></td></tr>
+<tr><td>2021-11</td><td>median 50 ms, p99 5 s; 700 TB in 500 million segment archives</td><td>the production cluster, over two months of data</td><td><a class="src" href="../sources.html#s-book-oe-1e">book-oe-1e</a></td></tr>
+<tr><td>2022-10</td><td>about 2 s typical, 5 s long; 5-minute timeout</td><td>queries as seen in the UI</td><td><a class="src" href="../sources.html#s-qcon-2022">qcon-2022</a></td></tr>
+<tr><td>2024-05</td><td>median 20 s → 0.2 s</td><td>environments with thousands of service datasets, after virtual datasets</td><td><a class="src" href="../sources.html#s-blog-virtual-datasets">blog-virtual-datasets</a></td></tr>
+</tbody></table></div>
+<p class="evidence">These measure different things and are not comparable with one another.</p>
+
+<div class="callout unclear"><span class="callout-title">Not settled by public sources</span>
+<ul>
+<li>Node, shard and partition counts after November 2021; the exact on-disk encodings and segment metadata schema; how S3 segments are encrypted (Kerr says the Lambda "decrypts it") <a class="src" href="../sources.html#s-qcon-2022">qcon-2022</a>.</li>
+<li>Whether Retriever still uses Lambda in 2026; the Private Cloud architecture still lists Lambda <span class="prov prov-inferred">inferred</span> <a class="src" href="../sources.html#s-docs-pc-arch">docs-pc-arch</a>.</li>
+<li>Whether the 2026 time-series metrics live in Retriever or in another engine <a class="src" href="../sources.html#s-blog-metrics-ga">blog-metrics-ga</a>.</li>
+<li>Which t-digest and HyperLogLog implementations are used; the book describes them as required, not how they are built <a class="src" href="../sources.html#s-book-oe-1e">book-oe-1e</a>.</li>
+</ul>
+</div>
+</article>
+</main>
+</div>
+<script src="../assets/nav-data.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

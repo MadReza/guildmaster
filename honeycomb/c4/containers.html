@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Containers · Honeycomb C4</title>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">C4 model › Level 2</p>
+<h1>Containers</h1>
+<p class="lede">The separately running services and separately kept stores inside one Honeycomb region, what each is responsible for, and how they talk. Honeycomb's internals are proprietary: everything here comes from its engineers' own posts, talks, incident reports and book, and anything this site had to infer is drawn in amber.</p>
+<p class="meta-line">Read on 2026-10-02. Up: <a href="context.html">System context</a>. Down: <a href="retriever.html">Retriever</a>, <a href="refinery.html">Refinery</a>.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1370 1150" role="img" aria-labelledby="cnt-title cnt-desc">
+<title id="cnt-title">Honeycomb containers (C4 level 2)</title>
+<desc id="cnt-desc">Inside one Honeycomb region: Shepherd ingests telemetry and writes it to one Kafka topic; Retriever consumes each partition into column files on local disk, ages finished segments to S3, and fans queries over S3 segments out to the retriever-segment Lambda function; Poodle, the web app, sends queries to Retriever and keeps every result in S3; Beagle streams events into per-minute SLO counts; Basset runs trigger queries and SLO notifications; other consumer groups build the Service Map and anomaly baselines; the hosted MCP server and Canvas serve AI agents. Numbers key into the interactions table.</desc>
+<defs><marker id="cnt-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="32">Honeycomb — Containers (Level 2)</text>
+<g class="c4-boundary"><rect x="20" y="180" width="1330" height="650" rx="10"/><text x="730" y="820">Honeycomb · one region (US or EU), on AWS · the same picture runs again as dogfood and as kibble</text></g>
+<g class="c4-external">
+<rect x="45" y="62" width="230" height="80" rx="8"/>
+<text class="c4-label" x="160.0" y="85.0">Telemetry senders</text>
+<text class="c4-tech" x="160.0" y="101.0">[SDKs · Collector · Refinery]</text>
+<text class="c4-desc" x="160.0" y="117.0">OTLP or Events API, with</text>
+<text class="c4-desc" x="160.0" y="131.0">an ingest key</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="259" y="66" width="13" height="13" rx="3"/><text x="265.5" y="76">D</text></g>
+<g class="c4-person">
+<circle cx="955.0" cy="56" r="20"/>
+<rect x="840" y="70" width="230" height="72" rx="16"/>
+<text class="c4-label" x="955.0" y="103.5">Engineers</text>
+<text class="c4-desc" x="955.0" y="119.5">Browser at ui.honeycomb.io</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="1054" y="74" width="13" height="13" rx="3"/><text x="1060.5" y="84">D</text></g>
+<g class="c4-external">
+<rect x="1105" y="62" width="230" height="80" rx="8"/>
+<text class="c4-label" x="1220.0" y="92.0">AI agents</text>
+<text class="c4-tech" x="1220.0" y="108.0">[MCP clients]</text>
+<text class="c4-desc" x="1220.0" y="124.0">mcp.honeycomb.io/mcp</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="1319" y="66" width="13" height="13" rx="3"/><text x="1325.5" y="76">D</text></g>
+<g class="c4-container">
+<rect x="45" y="220" width="230" height="92" rx="8"/>
+<text class="c4-label" x="160.0" y="249.0">Shepherd</text>
+<text class="c4-tech" x="160.0" y="265.0">[Go · api.honeycomb.io]</text>
+<text class="c4-desc" x="160.0" y="281.0">Authenticates, validates, converts</text>
+<text class="c4-desc" x="160.0" y="295.0">to protobuf, writes to Kafka</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="259" y="224" width="13" height="13" rx="3"/><text x="265.5" y="234">S</text></g>
+<g class="c4-datastore">
+<path d="M310,230 a115.0,10 0 0,0 230,0 a115.0,10 0 0,0 -230,0 v72 a115.0,10 0 0,0 230,0 v-72"/>
+<text class="c4-label" x="425.0" y="257.0">Main MySQL</text>
+<text class="c4-tech" x="425.0" y="273.0">[Amazon RDS]</text>
+<text class="c4-desc" x="425.0" y="289.0">Accounts, permissions, schemas;</text>
+<text class="c4-desc" x="425.0" y="303.0">never customer events</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="524" y="232" width="13" height="13" rx="3"/><text x="530.5" y="242">S</text></g>
+<g class="c4-datastore">
+<path d="M575,230 a115.0,10 0 0,0 230,0 a115.0,10 0 0,0 -230,0 v72 a115.0,10 0 0,0 230,0 v-72"/>
+<text class="c4-label" x="690.0" y="257.0">Query results</text>
+<text class="c4-tech" x="690.0" y="273.0">[Amazon S3]</text>
+<text class="c4-desc" x="690.0" y="289.0">Every result kept for good,</text>
+<text class="c4-desc" x="690.0" y="303.0">so permalinks outlive data</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="789" y="232" width="13" height="13" rx="3"/><text x="795.5" y="242">S</text></g>
+<g class="c4-container">
+<rect x="840" y="220" width="230" height="92" rx="8"/>
+<text class="c4-label" x="955.0" y="249.0">Poodle</text>
+<text class="c4-tech" x="955.0" y="265.0">[Go + React · web app]</text>
+<text class="c4-desc" x="955.0" y="281.0">Query builder, traces, boards,</text>
+<text class="c4-desc" x="955.0" y="295.0">SLO pages; calls Retriever</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="1054" y="224" width="13" height="13" rx="3"/><text x="1060.5" y="234">S</text></g>
+<g class="c4-datastore">
+<path d="M45,382 a247.5,10 0 0,0 495,0 a247.5,10 0 0,0 -495,0 v80 a247.5,10 0 0,0 495,0 v-80"/>
+<text class="c4-label" x="292.5" y="413.0">Kafka</text>
+<text class="c4-tech" x="292.5" y="429.0">[Apache Kafka 4.1.1 · KRaft on EKS, since 2026-05]</text>
+<text class="c4-desc" x="292.5" y="445.0">One topic, retriever-mutation; partitions per dataset,</text>
+<text class="c4-desc" x="292.5" y="459.0">three-AZ replicas; older log tiered to S3</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="524" y="384" width="13" height="13" rx="3"/><text x="530.5" y="394">S</text></g>
+<g class="c4-container">
+<rect x="575" y="372" width="230" height="100" rx="8"/>
+<text class="c4-label" x="690.0" y="405.0">Retriever</text>
+<text class="c4-tech" x="690.0" y="421.0">[Go · custom column store]</text>
+<text class="c4-desc" x="690.0" y="437.0">Writer and reader; one shard per</text>
+<text class="c4-desc" x="690.0" y="451.0">partition, two nodes per shard</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="789" y="376" width="13" height="13" rx="3"/><text x="795.5" y="386">S</text></g>
+<g class="c4-datastore">
+<path d="M840,382 a115.0,10 0 0,0 230,0 a115.0,10 0 0,0 -230,0 v80 a115.0,10 0 0,0 230,0 v-80"/>
+<text class="c4-label" x="955.0" y="413.0">Local segments</text>
+<text class="c4-tech" x="955.0" y="429.0">[NVMe instance store]</text>
+<text class="c4-desc" x="955.0" y="445.0">Recent segments: one file per</text>
+<text class="c4-desc" x="955.0" y="459.0">field, time is the only index</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="1054" y="384" width="13" height="13" rx="3"/><text x="1060.5" y="394">S</text></g>
+<g class="c4-container">
+<rect x="1105" y="372" width="230" height="100" rx="8"/>
+<text class="c4-label" x="1220.0" y="405.0">Hosted MCP and Canvas</text>
+<text class="c4-tech" x="1220.0" y="421.0">[mcp.honeycomb.io · AI services]</text>
+<text class="c4-desc" x="1220.0" y="437.0">Agent tools and AI investigations;</text>
+<text class="c4-desc" x="1220.0" y="451.0">internal structure not public</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="1319" y="376" width="13" height="13" rx="3"/><text x="1325.5" y="386">D</text></g>
+<g class="c4-container">
+<rect x="45" y="532" width="230" height="92" rx="8"/>
+<text class="c4-label" x="160.0" y="561.0">Beagle</text>
+<text class="c4-tech" x="160.0" y="577.0">[Go · Kafka consumer group]</text>
+<text class="c4-desc" x="160.0" y="593.0">Streams every event through each</text>
+<text class="c4-desc" x="160.0" y="607.0">SLI; computes SLO counts</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="259" y="536" width="13" height="13" rx="3"/><text x="265.5" y="546">S</text></g>
+<g class="c4-container">
+<rect x="310" y="532" width="230" height="92" rx="8"/>
+<text class="c4-label" x="425.0" y="561.0">Other stream consumers</text>
+<text class="c4-tech" x="425.0" y="577.0">[Kafka consumer groups · unnamed]</text>
+<text class="c4-desc" x="425.0" y="593.0">Service Map edges; Anomaly</text>
+<text class="c4-desc" x="425.0" y="607.0">Detection baselines</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="524" y="536" width="13" height="13" rx="3"/><text x="530.5" y="546">S</text></g>
+<g class="c4-container">
+<rect x="575" y="532" width="230" height="92" rx="8"/>
+<text class="c4-label" x="690.0" y="561.0">retriever-segment</text>
+<text class="c4-tech" x="690.0" y="577.0">[Go on arm64 · AWS Lambda]</text>
+<text class="c4-desc" x="690.0" y="593.0">Scans S3 segments in parallel;</text>
+<text class="c4-desc" x="690.0" y="607.0">returns partial aggregates</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="789" y="536" width="13" height="13" rx="3"/><text x="795.5" y="546">S</text></g>
+<g class="c4-datastore">
+<path d="M840,542 a115.0,10 0 0,0 230,0 a115.0,10 0 0,0 -230,0 v72 a115.0,10 0 0,0 230,0 v-72"/>
+<text class="c4-label" x="955.0" y="569.0">Segment archive</text>
+<text class="c4-tech" x="955.0" y="585.0">[Amazon S3]</text>
+<text class="c4-desc" x="955.0" y="601.0">Finished segments, LZ4, kept</text>
+<text class="c4-desc" x="955.0" y="615.0">until 60 days have passed</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="1054" y="544" width="13" height="13" rx="3"/><text x="1060.5" y="554">S</text></g>
+<g class="c4-container hc-inferred">
+<rect x="1105" y="532" width="230" height="92" rx="8"/>
+<text class="c4-label" x="1220.0" y="561.0">Time-series metrics store</text>
+<text class="c4-tech" x="1220.0" y="577.0">[engine not disclosed]</text>
+<text class="c4-desc" x="1220.0" y="593.0">Native metrics since 2026-03;</text>
+<text class="c4-desc" x="1220.0" y="607.0">its feed path is not public</text>
+</g><g class="hc-badge hc-badge-inferred"><rect x="1319" y="536" width="13" height="13" rx="3"/><text x="1325.5" y="546">I</text></g>
+<g class="c4-datastore">
+<path d="M45,696 a115.0,10 0 0,0 230,0 a115.0,10 0 0,0 -230,0 v72 a115.0,10 0 0,0 230,0 v-72"/>
+<text class="c4-label" x="160.0" y="723.0">SLO counts</text>
+<text class="c4-tech" x="160.0" y="739.0">[persistent store · not named]</text>
+<text class="c4-desc" x="160.0" y="755.0">Per-minute good and bad counts;</text>
+<text class="c4-desc" x="160.0" y="769.0">history beyond retention</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="259" y="698" width="13" height="13" rx="3"/><text x="265.5" y="708">D</text></g>
+<g class="c4-container">
+<rect x="310" y="686" width="230" height="92" rx="8"/>
+<text class="c4-label" x="425.0" y="715.0">Basset</text>
+<text class="c4-tech" x="425.0" y="731.0">[Go · ZooKeeper lock]</text>
+<text class="c4-desc" x="425.0" y="747.0">Runs trigger queries; evaluates</text>
+<text class="c4-desc" x="425.0" y="761.0">burn alerts; notifies</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="524" y="690" width="13" height="13" rx="3"/><text x="530.5" y="700">S</text></g>
+<g class="c4-container">
+<rect x="575" y="686" width="230" height="92" rx="8"/>
+<text class="c4-label" x="690.0" y="715.0">Doodle</text>
+<text class="c4-tech" x="690.0" y="731.0">[NodeJS]</text>
+<text class="c4-desc" x="690.0" y="747.0">Renders query charts as</text>
+<text class="c4-desc" x="690.0" y="761.0">images for Slack</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="789" y="690" width="13" height="13" rx="3"/><text x="795.5" y="700">S</text></g>
+<g class="c4-external">
+<rect x="310" y="880" width="495" height="80" rx="8"/>
+<text class="c4-label" x="557.5" y="910.0">Alert destinations</text>
+<text class="c4-tech" x="557.5" y="926.0">[Slack · PagerDuty · Teams · webhooks · email · ServiceNow]</text>
+<text class="c4-desc" x="557.5" y="942.0">Team-wide recipients of triggers and burn alerts</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="789" y="884" width="13" height="13" rx="3"/><text x="795.5" y="894">D</text></g>
+<g class="c4-external">
+<rect x="1105" y="880" width="230" height="80" rx="8"/>
+<text class="c4-label" x="1220.0" y="910.0">LLM providers</text>
+<text class="c4-tech" x="1220.0" y="926.0">[OpenAI · AWS Bedrock]</text>
+<text class="c4-desc" x="1220.0" y="942.0">Canvas, BubbleUp insights</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="1319" y="884" width="13" height="13" rx="3"/><text x="1325.5" y="894">D</text></g>
+<g class="c4-rel">
+<path d="M160,142 L160,220" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M275,266 L310,266" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M160,312 L160,372" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M540,422 L575,422" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M805,422 L840,422" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M955,472 L955,532" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M690,472 L690,532" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M805,578 L840,578" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M955,142 L955,220" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M880,312 L760,372" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel hc-inferred">
+<path d="M840,266 L805,266" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel c4-rel-async">
+<path d="M160,472 L160,532" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel c4-rel-async">
+<path d="M425,472 L425,532" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel hc-inferred">
+<path d="M160,624 L160,686" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel hc-inferred">
+<path d="M310,732 L275,732" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M540,700 C560,640 560,520 600,472" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M425,778 L425,880" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M690,778 L690,880" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M600,372 L520,312" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M1220,142 L1220,372" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel hc-inferred">
+<path d="M1105,400 L1070,312" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M1300,472 C1366,560 1366,800 1290,880" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-rel hc-inferred">
+<path d="M540,732 L575,732" marker-end="url(#cnt-arrow)"/>
+</g>
+<g class="c4-legend">
+<rect class="c4-legend-frame" x="45" y="860" width="230" height="270" rx="6"/>
+<text class="c4-legend-heading" x="57" y="880">Legend</text>
+<g class="c4-person"><rect x="57" y="892" width="32" height="16" rx="7"/></g>
+<text x="99" y="904">Person</text>
+<g class="c4-container"><rect x="57" y="916" width="32" height="16" rx="3"/></g>
+<text x="99" y="928">Container</text>
+<g class="c4-datastore"><path d="M57,943 a16,3 0 0,0 32,0 a16,3 0 0,0 -32,0 v10 a16,3 0 0,0 32,0 v-10"/></g>
+<text x="99" y="952">Store or queue</text>
+<g class="c4-external"><rect x="57" y="964" width="32" height="16" rx="3"/></g>
+<text x="99" y="976">External system</text>
+<g class="c4-rel"><path d="M57,996 L89,996"/></g>
+<text x="99" y="1000">Call or write</text>
+<g class="c4-rel c4-rel-async"><path d="M57,1020 L89,1020"/></g>
+<text x="99" y="1024">Consumes a stream</text>
+<g class="c4-rel hc-inferred"><path d="M57,1044 L89,1044"/></g>
+<text x="99" y="1048">Inferred relationship</text>
+<g class="hc-badge hc-badge-doc"><rect x="66" y="1061" width="13" height="13" rx="3"/><text x="72.5" y="1071">D</text></g>
+<text x="99" y="1072">Documented</text>
+<g class="hc-badge hc-badge-stated"><rect x="66" y="1083" width="13" height="13" rx="3"/><text x="72.5" y="1093">S</text></g>
+<text x="99" y="1094">Stated in a talk or blog</text>
+<g class="hc-badge hc-badge-inferred"><rect x="66" y="1105" width="13" height="13" rx="3"/><text x="72.5" y="1115">I</text></g>
+<text x="99" y="1116">Inferred by this site</text>
+</g>
+<g class="c4-rel-num"><circle cx="160" cy="181" r="9"/><text x="160" y="185">1</text></g>
+<g class="c4-rel-num"><circle cx="292" cy="252" r="9"/><text x="292" y="256">2</text></g>
+<g class="c4-rel-num"><circle cx="176" cy="342" r="9"/><text x="176" y="346">3</text></g>
+<g class="c4-rel-num"><circle cx="557" cy="408" r="9"/><text x="557" y="412">4</text></g>
+<g class="c4-rel-num"><circle cx="822" cy="408" r="9"/><text x="822" y="412">5</text></g>
+<g class="c4-rel-num"><circle cx="971" cy="502" r="9"/><text x="971" y="506">6</text></g>
+<g class="c4-rel-num"><circle cx="706" cy="502" r="9"/><text x="706" y="506">7</text></g>
+<g class="c4-rel-num"><circle cx="822" cy="564" r="9"/><text x="822" y="568">8</text></g>
+<g class="c4-rel-num"><circle cx="971" cy="181" r="9"/><text x="971" y="185">9</text></g>
+<g class="c4-rel-num"><circle cx="820" cy="342" r="9"/><text x="820" y="346">10</text></g>
+<g class="c4-rel-num"><circle cx="822" cy="252" r="9"/><text x="822" y="256">11</text></g>
+<g class="c4-rel-num"><circle cx="176" cy="502" r="9"/><text x="176" y="506">12</text></g>
+<g class="c4-rel-num"><circle cx="441" cy="502" r="9"/><text x="441" y="506">13</text></g>
+<g class="c4-rel-num"><circle cx="176" cy="655" r="9"/><text x="176" y="659">14</text></g>
+<g class="c4-rel-num"><circle cx="292" cy="718" r="9"/><text x="292" y="722">15</text></g>
+<g class="c4-rel-num"><circle cx="558" cy="600" r="9"/><text x="558" y="604">16</text></g>
+<g class="c4-rel-num"><circle cx="441" cy="830" r="9"/><text x="441" y="834">17</text></g>
+<g class="c4-rel-num"><circle cx="706" cy="830" r="9"/><text x="706" y="834">18</text></g>
+<g class="c4-rel-num"><circle cx="560" cy="342" r="9"/><text x="560" y="346">19</text></g>
+<g class="c4-rel-num"><circle cx="1236" cy="260" r="9"/><text x="1236" y="264">20</text></g>
+<g class="c4-rel-num"><circle cx="1088" cy="356" r="9"/><text x="1088" y="360">21</text></g>
+<g class="c4-rel-num"><circle cx="1352" cy="690" r="9"/><text x="1352" y="694">22</text></g>
+<g class="c4-rel-num"><circle cx="557" cy="718" r="9"/><text x="557" y="722">23</text></g>
+</svg>
+</div>
+<figcaption>Level 2. Numbers key into the <a href="#interactions">interactions table</a>. Dashed grey arrows consume the Kafka stream; dotted amber arrows and the amber box are inferred. Every name on the diagram appears in a public Honeycomb source; the unnamed boxes are labelled by their role.</figcaption>
+</figure>
+
+<h2 id="shape">The shape in one paragraph</h2>
+<p>Telemetry arrives at a thin, stateless ingest service, which writes it to one Kafka topic <span class="prov prov-stated">talk/blog</span> <a class="src" href="../sources.html#s-shipit-11">shipit-11</a> <a class="src" href="../sources.html#s-confluent-podcast">confluent-podcast</a>. Kafka is what lets the stateless ingest workers be restarted independently of the stateful storage engine, and it holds enough history that a storage bug can be fixed by replaying <a class="src" href="../sources.html#s-blog-scaling-kafka">blog-scaling-kafka</a>. Each partition is consumed by a pair of Retriever nodes that write column files to local disk and age them to S3; a query fans out across every Retriever holding the dataset and, for older data, across thousands of short Lambda invocations, then merges <a class="src" href="../sources.html#s-blog-kafka-may-2026">blog-kafka-may-2026</a> <a class="src" href="../sources.html#s-qcon-2022">qcon-2022</a>. Everything else, SLOs, the Service Map and anomaly baselines, is another reader of the same stream <a class="src" href="../sources.html#s-blog-kafka-may-2026">blog-kafka-may-2026</a>. There is no pre-aggregation anywhere on the write path: "we only read at query time, we don't do any aggregation or indexing, even calculated columns are all done at query time" <a class="src" href="../sources.html#s-infoq-podcast-kerr">infoq-podcast-kerr</a>.</p>
+
+<h2 id="catalogue">Container catalogue</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Container</th><th>Responsibility</th><th>Technology</th><th>Provenance</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><strong>Shepherd</strong></td><td>Ingest API behind <code>api.honeycomb.io</code>: rate limits, authentication, quota, schema bookkeeping, conversion to the internal format, write to Kafka. Stateless and autoscaled, holding 80–90% CPU in production.</td><td>Go</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-devops-2017">devops-2017</a> <a class="src" href="../sources.html#s-blog-m6g">blog-m6g</a> <a class="src" href="../sources.html#s-blog-chaos-1">blog-chaos-1</a> <a class="src" href="../sources.html#s-confluent-podcast">confluent-podcast</a></td></tr>
+<tr><td><strong>Kafka</strong></td><td>The buffer between ingest and storage, and the stream every consumer reads. "There is one Kafka topic at Honeycomb", <code>retriever-mutation</code>, with partitions assigned per dataset, "a few big partitions rather than many small ones", replicated across three zones, tiered to S3 and kept for hours to days. Since May 2026 open-source Apache Kafka 4.1.1 in KRaft mode on EKS, managed by Strimzi; before that Confluent Platform on EC2.</td><td>Apache Kafka</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-confluent-podcast">confluent-podcast</a> <a class="src" href="../sources.html#s-blog-sept-2021">blog-sept-2021</a> <a class="src" href="../sources.html#s-blog-kafka-lessons">blog-kafka-lessons</a> <a class="src" href="../sources.html#s-blog-scaling-ingest">blog-scaling-ingest</a> <a class="src" href="../sources.html#s-blog-kafka-2026">blog-kafka-2026</a></td></tr>
+<tr><td><strong>Retriever</strong></td><td>The custom distributed column store: a writer that appends the Kafka stream to column files, and a reader that answers queries from them. "We have not written a database, we've written a storage engine."</td><td>Go</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-strangeloop-2017">strangeloop-2017</a> <a class="src" href="../sources.html#s-blog-virtual-datasets">blog-virtual-datasets</a> <a class="src" href="../sources.html#s-shipit-11">shipit-11</a></td></tr>
+<tr><td><strong>Local segments</strong></td><td>Recent segments on each Retriever node's local NVMe disk; the first few hours, depending on write throughput.</td><td>NVMe instance store</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-shipit-11">shipit-11</a> <a class="src" href="../sources.html#s-blog-kafka-2026">blog-kafka-2026</a></td></tr>
+<tr><td><strong>Segment archive</strong></td><td>Finished, compressed segments in S3 under hash-prefixed keys, until data ages out at 60 days.</td><td>Amazon S3</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-blog-murder-mystery">blog-murder-mystery</a> <a class="src" href="../sources.html#s-blog-secondary-storage">blog-secondary-storage</a> <a class="src" href="../sources.html#s-docs-usage">docs-usage</a></td></tr>
+<tr><td><strong>retriever-segment</strong></td><td>The Lambda function that scans S3-resident segments for a query and returns partial aggregates; identical x86 and arm64 builds, 99% on arm64.</td><td>Go on AWS Lambda</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-blog-arm-future">blog-arm-future</a> <a class="src" href="../sources.html#s-qcon-2022">qcon-2022</a></td></tr>
+<tr><td><strong>Poodle</strong></td><td>The web application: query builder, results, traces, boards and the SLO pages. Calls Retriever for queries.</td><td>Go, React</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-devops-2017">devops-2017</a> <a class="src" href="../sources.html#s-blog-beagle">blog-beagle</a> <a class="src" href="../sources.html#s-gotime-35">gotime-35</a></td></tr>
+<tr><td><strong>Query results</strong></td><td>Every query result, cached and kept indefinitely, so permalinks and query history outlive the 60-day data.</td><td>Amazon S3</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-qcon-2022">qcon-2022</a> <a class="src" href="../sources.html#s-blog-query-history">blog-query-history</a> <a class="src" href="../sources.html#s-blog-infinite-retention">blog-infinite-retention</a></td></tr>
+<tr><td><strong>Main MySQL</strong></td><td>Accounts, permissions and data schemas: "No such database contains customer events, which are stored by Retriever". Retriever also has "its own MySQL database that we discuss less often".</td><td>Amazon RDS MySQL</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-blog-what-comes-up">blog-what-comes-up</a> <a class="src" href="../sources.html#s-blog-meta-review-2020">blog-meta-review-2020</a></td></tr>
+<tr><td><strong>Beagle</strong></td><td>SLO stream processor (since 2021): evaluates each SLI on every event as it streams past, instead of querying Retriever every minute.</td><td>Go, Kafka consumer group</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-blog-beagle">blog-beagle</a></td></tr>
+<tr><td><strong>Basset</strong></td><td>Alerting: supervised triggers in 2017, "does the burn alerts" in 2021, "processes Triggers and SLO notifications" in 2024.</td><td>Go</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-devops-2017">devops-2017</a> <a class="src" href="../sources.html#s-blog-beagle">blog-beagle</a> <a class="src" href="../sources.html#s-blog-chaos-1">blog-chaos-1</a></td></tr>
+<tr><td><strong>Doodle</strong></td><td>Renders query charts as images for Slack.</td><td>NodeJS</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-devops-2017">devops-2017</a> <a class="src" href="../sources.html#s-reinvent-2022">reinvent-2022</a></td></tr>
+<tr><td><strong>Other stream consumers</strong></td><td>Unnamed services for the Service Map's edges and for Anomaly Detection's per-service baselines.</td><td>Kafka consumer groups</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-blog-kafka-may-2026">blog-kafka-may-2026</a> <a class="src" href="../sources.html#s-blog-service-map-iter">blog-service-map-iter</a> <a class="src" href="../sources.html#s-docs-anomaly">docs-anomaly</a></td></tr>
+<tr><td><strong>SLO counts</strong></td><td>Per-minute good and bad counts per SLO, kept past data retention for the burndown and compliance graphs.</td><td>not named</td><td><span class="prov prov-doc">documented</span></td><td><a class="src" href="../sources.html#s-docs-slo-counts">docs-slo-counts</a> <a class="src" href="../sources.html#s-docs-slo-practice">docs-slo-practice</a></td></tr>
+<tr><td><strong>Hosted MCP and Canvas</strong></td><td>The AI surface: 30-odd MCP tools for agents, and Canvas investigations that call LLM providers.</td><td>not public</td><td><span class="prov prov-doc">documented</span></td><td><a class="src" href="../sources.html#s-docs-mcp-tools">docs-mcp-tools</a> <a class="src" href="../sources.html#s-docs-canvas">docs-canvas</a> <a class="src" href="../sources.html#s-docs-ai-policies">docs-ai-policies</a></td></tr>
+<tr><td><strong>Time-series metrics store</strong></td><td>"Native time series storage for infrastructure metrics", generally available since 2026-03-11, in a dedicated metrics dataset. Its engine and its feed path from ingest are not public; drawn as inferred.</td><td>not disclosed</td><td><span class="prov prov-inferred">inferred</span></td><td><a class="src" href="../sources.html#s-blog-metrics-ga">blog-metrics-ga</a> <a class="src" href="../sources.html#s-docs-metrics">docs-metrics</a></td></tr>
+</tbody></table></div>
+<p class="evidence">Service names: shepherd, retriever and poodle appear together in a 2020 post, "Honeycomb consists of our ingest workers (called 'shepherd'), Kafka, query workers ('retriever'), and frontends ('poodle')" <a class="src" href="../sources.html#s-blog-m6g">blog-m6g</a>; beagle, basset and poodle in a 2021 post on the SLO product <a class="src" href="../sources.html#s-blog-beagle">blog-beagle</a>; doodle and basset in a 2017 article by a Honeycomb engineer <a class="src" href="../sources.html#s-devops-2017">devops-2017</a>; the Lambda name <code>retriever-segment</code> in one 2022 post only <a class="src" href="../sources.html#s-blog-arm-future">blog-arm-future</a>. A 2022 conference slide lists the instance-based workloads as Shepherd, Retriever, Poodle, Doodle, Basset, Refinery and Kafka <a class="src" href="../sources.html#s-reinvent-2022">reinvent-2022</a>.</p>
+
+<h2 id="interactions">Interactions</h2>
+<div class="table-wrap"><table>
+<thead><tr><th class="num">#</th><th>From → to</th><th>What happens</th><th>Provenance</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td>Telemetry senders → Shepherd</td><td>OTLP over gRPC, HTTP/protobuf or HTTP/JSON, or Events API batches compressed with gzip or zstd; the key travels in <code>x-honeycomb-team</code>. An empty 202 from the Events API means "queued".</td><td><span class="prov prov-doc">documented</span></td><td><a class="src" href="../sources.html#s-docs-otel">docs-otel</a> <a class="src" href="../sources.html#s-docs-events-api">docs-events-api</a></td></tr>
+<tr><td class="num">2</td><td>Shepherd → Main MySQL</td><td>"Each Shepherd worker that receives customer data validates it against dataset schemas", held in an in-memory cache filled from the main database. A lock on that cache caused an eight-hour partial ingest outage in 2022.</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-blog-shepherd-cache">blog-shepherd-cache</a> <a class="src" href="../sources.html#s-blog-what-comes-up">blog-what-comes-up</a></td></tr>
+<tr><td class="num">3</td><td>Shepherd → Kafka</td><td>Five steps: "network read, authentication, payload decompression/serialization, reformatting into our internal protocol buffer format (with associated metadata lookups), and writing to Kafka". A batch is acknowledged only once it is enqueued, and ingest picks the partition itself, so it can route around unavailable ones.</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-blog-graviton4">blog-graviton4</a> <a class="src" href="../sources.html#s-blog-kafka-may-2026">blog-kafka-may-2026</a></td></tr>
+<tr><td class="num">4</td><td>Kafka → Retriever</td><td>Retriever "has as many shards as there are Kafka partitions, and each shard has two query nodes (in different AZs)". It keeps its own offsets on local disk instead of committing them to Kafka, and must never re-read a message it has already written: Honeycomb calls the pair "exactly-twice".</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-blog-kafka-may-2026">blog-kafka-may-2026</a> <a class="src" href="../sources.html#s-blog-kafka-2026">blog-kafka-2026</a></td></tr>
+<tr><td class="num">5</td><td>Retriever → Local segments</td><td>The writer appends each field's value to that field's file in the newest open segment; there are no indexes to maintain on the write path. <a href="retriever.html">Level 3</a> has the layout.</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-blog-virtual-datasets">blog-virtual-datasets</a> <a class="src" href="../sources.html#s-yen-under-the-hood">yen-under-the-hood</a></td></tr>
+<tr><td class="num">6</td><td>Local segments → Segment archive</td><td>"Closed segment directories older than a certain age are compacted ... and uploaded" to S3; one node of each pair uploads while its peer spot-checks. Only the most recent hours stay on local disk.</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-book-oe-1e">book-oe-1e</a> <a class="src" href="../sources.html#s-shipit-11">shipit-11</a></td></tr>
+<tr><td class="num">7</td><td>Retriever → retriever-segment</td><td>For S3-resident data only, Retriever "spins up a Lambda for each eight or so segments", fanning out onto "tens of thousands of Lambda workers"; local data is scanned on the Retriever nodes.</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-qcon-2022">qcon-2022</a> <a class="src" href="../sources.html#s-blog-arm-future">blog-arm-future</a></td></tr>
+<tr><td class="num">8</td><td>retriever-segment → Segment archive</td><td>The function "reads the data from S3, decrypts it, looks at the files just that it needs to. Does the aggregations" and returns a partial result, through S3 when it exceeds Lambda's 6 MB response limit.</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-qcon-2022">qcon-2022</a></td></tr>
+<tr><td class="num">9</td><td>Engineers → Poodle</td><td>The browser app at <code>ui.honeycomb.io</code>; Go serves it and React draws it.</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-devops-2017">devops-2017</a> <a class="src" href="../sources.html#s-gotime-35">gotime-35</a></td></tr>
+<tr><td class="num">10</td><td>Poodle → Retriever</td><td>"Our front-end web application called Poodle ... calls Retriever directly." The Retriever that receives a query sends inner queries to every Retriever holding the dataset's partitions and merges their results.</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-devops-2017">devops-2017</a> <a class="src" href="../sources.html#s-qcon-2022">qcon-2022</a></td></tr>
+<tr><td class="num">11</td><td>Poodle → Query results</td><td>Results of an identical query over an identical time span are cached and "actually stored in S3. This makes permalinks work"; Honeycomb "persists query results forever". Which service writes them is not stated.</td><td><span class="prov prov-inferred">inferred</span></td><td><a class="src" href="../sources.html#s-qcon-2022">qcon-2022</a> <a class="src" href="../sources.html#s-blog-query-history">blog-query-history</a></td></tr>
+<tr><td class="num">12</td><td>Kafka → Beagle</td><td>Beagle, "which does the stream processing" for SLOs, "consumes all messages of all datasets" through a consumer group and scales on CPU.</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-blog-beagle">blog-beagle</a> <a class="src" href="../sources.html#s-blog-sept-2021">blog-sept-2021</a></td></tr>
+<tr><td class="num">13</td><td>Kafka → Other stream consumers</td><td>"SLO processing, Service Maps, or Anomaly Detection features consume from the same topic partitions" through ordinary consumer groups. The Service Map service records "service-to-service calls (the 'edges' on a map)".</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-blog-kafka-may-2026">blog-kafka-may-2026</a> <a class="src" href="../sources.html#s-blog-service-map-iter">blog-service-map-iter</a></td></tr>
+<tr><td class="num">14</td><td>Beagle → SLO counts</td><td>The API serves "per-minute success and failure event counts for an SLO, updated approximately once per minute", with completed hours from a persistent historical store. That Beagle writes them is this site's reading.</td><td><span class="prov prov-inferred">inferred</span></td><td><a class="src" href="../sources.html#s-docs-slo-counts">docs-slo-counts</a> <a class="src" href="../sources.html#s-blog-beagle">blog-beagle</a></td></tr>
+<tr><td class="num">15</td><td>Basset → SLO counts</td><td>"Honeycomb aims to evaluate SLO Burn Alerts every minute", and Basset "does the burn alerts". How it reads the counts is not public.</td><td><span class="prov prov-inferred">inferred</span></td><td><a class="src" href="../sources.html#s-docs-slo-monitor">docs-slo-monitor</a> <a class="src" href="../sources.html#s-blog-beagle">blog-beagle</a></td></tr>
+<tr><td class="num">16</td><td>Basset → Retriever</td><td>A trigger runs its query at a set frequency over a set duration. Trigger queries carry the query source <code>trigger-cron</code> and spend Lambda time, so they run in the query engine; Basset "processes Triggers and SLO notifications" and holds a ZooKeeper lock.</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-docs-triggers">docs-triggers</a> <a class="src" href="../sources.html#s-blog-aws-costs">blog-aws-costs</a> <a class="src" href="../sources.html#s-blog-chaos-1">blog-chaos-1</a></td></tr>
+<tr><td class="num">17</td><td>Basset → Alert destinations</td><td>Notifications to the team's recipients: Slack, PagerDuty, Microsoft Teams, webhooks, email and ServiceNow.</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-blog-chaos-1">blog-chaos-1</a> <a class="src" href="../sources.html#s-docs-recipients">docs-recipients</a> <a class="src" href="../sources.html#s-blog-servicenow">blog-servicenow</a></td></tr>
+<tr><td class="num">18</td><td>Doodle → Slack</td><td>"A service called Doodle, written in NodeJS, which makes pretty pre-rendered pictures of queries for posting flattened images in Slack." Still on a 2022 service inventory as "Doodle (charts)".</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-devops-2017">devops-2017</a> <a class="src" href="../sources.html#s-reinvent-2022">reinvent-2022</a></td></tr>
+<tr><td class="num">19</td><td>Retriever → Main MySQL</td><td>Retriever updates "the records containing the last time we received data for any field or dataset", which tell Shepherd's cache which schemas to refresh. When those writes stopped in July 2023, a 68-minute total outage followed.</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-blog-what-comes-up">blog-what-comes-up</a></td></tr>
+<tr><td class="num">20</td><td>AI agents → Hosted MCP</td><td>MCP clients connect to <code>mcp.honeycomb.io/mcp</code> or the EU endpoint with OAuth or an API key; write scope is needed to create boards, triggers and SLOs.</td><td><span class="prov prov-doc">documented</span></td><td><a class="src" href="../sources.html#s-docs-mcp-config">docs-mcp-config</a> <a class="src" href="../sources.html#s-docs-mcp-tools">docs-mcp-tools</a></td></tr>
+<tr><td class="num">21</td><td>Hosted MCP → query tier</td><td>"The query tool has parity with the UI", so MCP queries reach the same query path. Which service it calls is not public.</td><td><span class="prov prov-inferred">inferred</span></td><td><a class="src" href="../sources.html#s-blog-mcp-ga">blog-mcp-ga</a></td></tr>
+<tr><td class="num">22</td><td>Hosted MCP and Canvas → LLM providers</td><td>Canvas and AI-assisted calculated fields use OpenAI and AWS Bedrock; BubbleUp insights use Bedrock.</td><td><span class="prov prov-doc">documented</span></td><td><a class="src" href="../sources.html#s-docs-ai-policies">docs-ai-policies</a></td></tr>
+<tr><td class="num">23</td><td>Basset → Doodle</td><td>Alert messages in Slack carry graph previews; that Basset asks Doodle for them is this site's reading.</td><td><span class="prov prov-inferred">inferred</span></td><td><a class="src" href="../sources.html#s-docs-slack">docs-slack</a> <a class="src" href="../sources.html#s-devops-2017">devops-2017</a></td></tr>
+</tbody></table></div>
+
+<h2 id="cross-cutting">What every container relies on</h2>
+<dl class="defs">
+<dt>Three copies of the whole picture <span class="prov prov-stated">talk/blog</span></dt>
+<dd>"We run three environments: production for our customers' telemetry, dogfood for analyzing production's telemetry, and kibble for observing dogfood in turn" <a class="src" href="../sources.html#s-blog-m6g">blog-m6g</a>. Production's own telemetry reaches dogfood through an internal Refinery cluster <a class="src" href="../sources.html#s-blog-graviton4">blog-graviton4</a>, and there is one Kafka cluster per environment in each of the two regions, six in all <a class="src" href="../sources.html#s-blog-kafka-2026">blog-kafka-2026</a>.</dd>
+<dt>Small, frequent, gated deploys <span class="prov prov-stated">talk/blog</span></dt>
+<dd>A cron job deploys "like every ten minutes", first to kibble, then dogfood, then production <a class="src" href="../sources.html#s-shipit-11">shipit-11</a>; production follows dogfood by about 20 minutes and stops automatically "if our SLOs don't match, if we get too many errors in dog food" <a class="src" href="../sources.html#s-qcon-2022">qcon-2022</a>.</dd>
+<dt>Failure is rehearsed <span class="prov prov-stated">talk/blog</span></dt>
+<dd>One Retriever node and one Kafka broker per cluster are terminated every week <a class="src" href="../sources.html#s-blog-scaling-kafka">blog-scaling-kafka</a>. A replacement Retriever restores its predecessor's hourly snapshot and Kafka offset and replays at most two hours <a class="src" href="../sources.html#s-blog-scaling-kafka">blog-scaling-kafka</a>. In 2024 Honeycomb "abruptly destroyed one third of the infrastructure in our production environment" to prove it survives losing a zone <a class="src" href="../sources.html#s-blog-chaos-1">blog-chaos-1</a>.</dd>
+<dt>Best effort by design <span class="prov prov-stated">talk/blog</span></dt>
+<dd>"Honeycomb is designed as a best-effort querying system which is ok with occasional incorrect answers" <a class="src" href="../sources.html#s-blog-slo-challenges">blog-slo-challenges</a>; percentiles are t-digest estimates and COUNT_DISTINCT a HyperLogLog estimate <span class="prov prov-doc">documented</span> <a class="src" href="../sources.html#s-docs-query-build">docs-query-build</a>.</dd>
+<dt>One codebase, two deployments <span class="prov prov-doc">documented</span></dt>
+<dd>Private Cloud "uses the same architecture and codebase as Honeycomb SaaS" <a class="src" href="../sources.html#s-docs-private-cloud">docs-private-cloud</a>, and its requirement to run Kafka on EKS was one reason for the 2026 Kafka migration <a class="src" href="../sources.html#s-blog-kafka-2026">blog-kafka-2026</a>.</dd>
+</dl>
+
+<div class="callout unclear"><span class="callout-title">Not settled by public sources</span>
+<ul>
+<li>Current Retriever topology. The last hard numbers are from November 2021: about 1,000 vCPU of Retriever and 30,000 peak concurrent Lambda executions <a class="src" href="../sources.html#s-book-oe-1e">book-oe-1e</a>. Published broker logs from 2024 show partition directories up to <code>retriever-mutation-53</code>, so at least 54 partitions <span class="prov prov-inferred">inferred</span> <a class="src" href="../sources.html#s-blog-tiered-io">blog-tiered-io</a>.</li>
+<li>Whether Retriever still fans out to Lambda in 2026. No recent post says so; the Private Cloud architecture still lists Lambda among its compute services <span class="prov prov-inferred">inferred</span> <a class="src" href="../sources.html#s-docs-pc-arch">docs-pc-arch</a>.</li>
+<li>How triggers are scheduled beyond the <code>trigger-cron</code> label and Basset's ZooKeeper lock; where Beagle keeps its state; how the result cache is keyed; where ElastiCache, which Private Cloud lists, is used <a class="src" href="../sources.html#s-blog-aws-costs">blog-aws-costs</a> <a class="src" href="../sources.html#s-blog-chaos-1">blog-chaos-1</a> <a class="src" href="../sources.html#s-docs-pc-arch">docs-pc-arch</a>.</li>
+<li>Which service serves the public REST API at <code>/1/</code> and <code>/2/</code>; it is not drawn.</li>
+</ul>
+</div>
+</article>
+</main>
+</div>
+<script src="../assets/nav-data.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

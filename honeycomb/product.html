@@ -1,0 +1,738 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Product tour · Honeycomb C4</title>
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">Start here</p>
+<h1>Product tour</h1>
+<p class="lede">What an engineer actually does in Honeycomb, from a graph to a cause: the query builder, heatmaps, BubbleUp, traces, the Service Map, SLOs and triggers, and the AI features added since 2023. Charts on this page are drawn from synthetic data to show how each feature works; none is a screenshot.</p>
+<p class="meta-line">Read on 2026-10-02. Feature availability by plan is on the <a href="index.html#pricing">overview</a>.</p>
+
+<h2 id="loop">The core analysis loop</h2>
+<p>Honeycomb's docs describe one workflow behind every feature: see something odd on a graph, select it, let BubbleUp say what is different about it, and then filter or group by that and look again, down to single traces <span class="prov prov-doc">documented</span> <a class="src" href="sources.html#s-docs-core-loop">docs-core-loop</a>. Majors's 2017 advice explains why this needs raw, wide events: "Any aggregation that is performed at write time is actively harmful to your ability to understand the health and experience of each request" <a class="src" href="sources.html#s-wb-best-practices">wb-best-practices</a>.</p>
+
+<h2 id="query">The query builder</h2>
+<p>A query is SELECT (labelled VISUALIZE until recently), WHERE, GROUP BY, ORDER BY, LIMIT and HAVING <a class="src" href="sources.html#s-docs-query-build">docs-query-build</a>. Its results are a graph per calculation and a table per group, and both are kept: "Honeycomb persists query results forever, so clicking into past queries is super fast" <span class="prov prov-stated">talk/blog</span> <a class="src" href="sources.html#s-blog-query-history">blog-query-history</a>. A permalink keeps working after the underlying data has aged out <a class="src" href="sources.html#s-blog-infinite-retention">blog-infinite-retention</a>. The <a href="data-model.html#query">data model</a> page lists every operator.</p>
+
+<h2 id="heatmap">Heatmaps and BubbleUp</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="chart hc-chart-dense" viewBox="0 0 700 360" role="img" aria-labelledby="hm-title hm-desc">
+<title id="hm-title">A latency heatmap with a selected band of slow requests</title>
+<desc id="hm-desc">Synthetic heatmap of duration_ms over 48 time buckets. Most requests sit between about 20 and 100 milliseconds. From bucket 30 to 38 a second band appears near 1 to 2 seconds; a selection box is drawn around it.</desc>
+<text class="hc-chart-title" x="20" y="24">HEATMAP(duration_ms), synthetic</text>
+<text class="hc-chart-sub" x="20" y="42">Each column is a histogram for one time bucket; the stronger the colour, the more events</text>
+<rect class="hc-h3" x="70" y="298" width="11" height="13" rx="1" data-tip="bucket 0: 4 events&#10;10–14 ms"><title>bucket 0: 4 events, 10–14 ms</title></rect>
+<rect class="hc-h5" x="70" y="284" width="11" height="13" rx="1" data-tip="bucket 0: 19 events&#10;14–20 ms"><title>bucket 0: 19 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="70" y="270" width="11" height="13" rx="1" data-tip="bucket 0: 40 events&#10;20–28 ms"><title>bucket 0: 40 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="70" y="256" width="11" height="13" rx="1" data-tip="bucket 0: 84 events&#10;28–40 ms"><title>bucket 0: 84 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="70" y="242" width="11" height="13" rx="1" data-tip="bucket 0: 124 events&#10;40–57 ms"><title>bucket 0: 124 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="70" y="228" width="11" height="13" rx="1" data-tip="bucket 0: 104 events&#10;57–80 ms"><title>bucket 0: 104 events, 57–80 ms</title></rect>
+<rect class="hc-h6" x="70" y="214" width="11" height="13" rx="1" data-tip="bucket 0: 38 events&#10;80–113 ms"><title>bucket 0: 38 events, 80–113 ms</title></rect>
+<rect class="hc-h3" x="70" y="200" width="11" height="13" rx="1" data-tip="bucket 0: 7 events&#10;113–160 ms"><title>bucket 0: 7 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="82" y="298" width="11" height="13" rx="1" data-tip="bucket 1: 2 events&#10;10–14 ms"><title>bucket 1: 2 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="82" y="284" width="11" height="13" rx="1" data-tip="bucket 1: 12 events&#10;14–20 ms"><title>bucket 1: 12 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="82" y="270" width="11" height="13" rx="1" data-tip="bucket 1: 46 events&#10;20–28 ms"><title>bucket 1: 46 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="82" y="256" width="11" height="13" rx="1" data-tip="bucket 1: 91 events&#10;28–40 ms"><title>bucket 1: 91 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="82" y="242" width="11" height="13" rx="1" data-tip="bucket 1: 145 events&#10;40–57 ms"><title>bucket 1: 145 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="82" y="228" width="11" height="13" rx="1" data-tip="bucket 1: 85 events&#10;57–80 ms"><title>bucket 1: 85 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="82" y="214" width="11" height="13" rx="1" data-tip="bucket 1: 26 events&#10;80–113 ms"><title>bucket 1: 26 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="82" y="200" width="11" height="13" rx="1" data-tip="bucket 1: 13 events&#10;113–160 ms"><title>bucket 1: 13 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="94" y="298" width="11" height="13" rx="1" data-tip="bucket 2: 2 events&#10;10–14 ms"><title>bucket 2: 2 events, 10–14 ms</title></rect>
+<rect class="hc-h5" x="94" y="284" width="11" height="13" rx="1" data-tip="bucket 2: 22 events&#10;14–20 ms"><title>bucket 2: 22 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="94" y="270" width="11" height="13" rx="1" data-tip="bucket 2: 36 events&#10;20–28 ms"><title>bucket 2: 36 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="94" y="256" width="11" height="13" rx="1" data-tip="bucket 2: 103 events&#10;28–40 ms"><title>bucket 2: 103 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="94" y="242" width="11" height="13" rx="1" data-tip="bucket 2: 125 events&#10;40–57 ms"><title>bucket 2: 125 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="94" y="228" width="11" height="13" rx="1" data-tip="bucket 2: 89 events&#10;57–80 ms"><title>bucket 2: 89 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="94" y="214" width="11" height="13" rx="1" data-tip="bucket 2: 32 events&#10;80–113 ms"><title>bucket 2: 32 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="94" y="200" width="11" height="13" rx="1" data-tip="bucket 2: 11 events&#10;113–160 ms"><title>bucket 2: 11 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="106" y="298" width="11" height="13" rx="1" data-tip="bucket 3: 2 events&#10;10–14 ms"><title>bucket 3: 2 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="106" y="284" width="11" height="13" rx="1" data-tip="bucket 3: 16 events&#10;14–20 ms"><title>bucket 3: 16 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="106" y="270" width="11" height="13" rx="1" data-tip="bucket 3: 57 events&#10;20–28 ms"><title>bucket 3: 57 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="106" y="256" width="11" height="13" rx="1" data-tip="bucket 3: 110 events&#10;28–40 ms"><title>bucket 3: 110 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="106" y="242" width="11" height="13" rx="1" data-tip="bucket 3: 100 events&#10;40–57 ms"><title>bucket 3: 100 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="106" y="228" width="11" height="13" rx="1" data-tip="bucket 3: 88 events&#10;57–80 ms"><title>bucket 3: 88 events, 57–80 ms</title></rect>
+<rect class="hc-h6" x="106" y="214" width="11" height="13" rx="1" data-tip="bucket 3: 40 events&#10;80–113 ms"><title>bucket 3: 40 events, 80–113 ms</title></rect>
+<rect class="hc-h3" x="106" y="200" width="11" height="13" rx="1" data-tip="bucket 3: 7 events&#10;113–160 ms"><title>bucket 3: 7 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="118" y="298" width="11" height="13" rx="1" data-tip="bucket 4: 1 events&#10;10–14 ms"><title>bucket 4: 1 events, 10–14 ms</title></rect>
+<rect class="hc-h5" x="118" y="284" width="11" height="13" rx="1" data-tip="bucket 4: 18 events&#10;14–20 ms"><title>bucket 4: 18 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="118" y="270" width="11" height="13" rx="1" data-tip="bucket 4: 43 events&#10;20–28 ms"><title>bucket 4: 43 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="118" y="256" width="11" height="13" rx="1" data-tip="bucket 4: 101 events&#10;28–40 ms"><title>bucket 4: 101 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="118" y="242" width="11" height="13" rx="1" data-tip="bucket 4: 129 events&#10;40–57 ms"><title>bucket 4: 129 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="118" y="228" width="11" height="13" rx="1" data-tip="bucket 4: 90 events&#10;57–80 ms"><title>bucket 4: 90 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="118" y="214" width="11" height="13" rx="1" data-tip="bucket 4: 29 events&#10;80–113 ms"><title>bucket 4: 29 events, 80–113 ms</title></rect>
+<rect class="hc-h3" x="118" y="200" width="11" height="13" rx="1" data-tip="bucket 4: 6 events&#10;113–160 ms"><title>bucket 4: 6 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="118" y="186" width="11" height="13" rx="1" data-tip="bucket 4: 3 events&#10;160–226 ms"><title>bucket 4: 3 events, 160–226 ms</title></rect>
+<rect class="hc-h2" x="130" y="298" width="11" height="13" rx="1" data-tip="bucket 5: 3 events&#10;10–14 ms"><title>bucket 5: 3 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="130" y="284" width="11" height="13" rx="1" data-tip="bucket 5: 15 events&#10;14–20 ms"><title>bucket 5: 15 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="130" y="270" width="11" height="13" rx="1" data-tip="bucket 5: 42 events&#10;20–28 ms"><title>bucket 5: 42 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="130" y="256" width="11" height="13" rx="1" data-tip="bucket 5: 107 events&#10;28–40 ms"><title>bucket 5: 107 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="130" y="242" width="11" height="13" rx="1" data-tip="bucket 5: 118 events&#10;40–57 ms"><title>bucket 5: 118 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="130" y="228" width="11" height="13" rx="1" data-tip="bucket 5: 93 events&#10;57–80 ms"><title>bucket 5: 93 events, 57–80 ms</title></rect>
+<rect class="hc-h6" x="130" y="214" width="11" height="13" rx="1" data-tip="bucket 5: 39 events&#10;80–113 ms"><title>bucket 5: 39 events, 80–113 ms</title></rect>
+<rect class="hc-h2" x="130" y="200" width="11" height="13" rx="1" data-tip="bucket 5: 3 events&#10;113–160 ms"><title>bucket 5: 3 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="142" y="298" width="11" height="13" rx="1" data-tip="bucket 6: 3 events&#10;10–14 ms"><title>bucket 6: 3 events, 10–14 ms</title></rect>
+<rect class="hc-h5" x="142" y="284" width="11" height="13" rx="1" data-tip="bucket 6: 17 events&#10;14–20 ms"><title>bucket 6: 17 events, 14–20 ms</title></rect>
+<rect class="hc-h5" x="142" y="270" width="11" height="13" rx="1" data-tip="bucket 6: 34 events&#10;20–28 ms"><title>bucket 6: 34 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="142" y="256" width="11" height="13" rx="1" data-tip="bucket 6: 120 events&#10;28–40 ms"><title>bucket 6: 120 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="142" y="242" width="11" height="13" rx="1" data-tip="bucket 6: 124 events&#10;40–57 ms"><title>bucket 6: 124 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="142" y="228" width="11" height="13" rx="1" data-tip="bucket 6: 78 events&#10;57–80 ms"><title>bucket 6: 78 events, 57–80 ms</title></rect>
+<rect class="hc-h6" x="142" y="214" width="11" height="13" rx="1" data-tip="bucket 6: 37 events&#10;80–113 ms"><title>bucket 6: 37 events, 80–113 ms</title></rect>
+<rect class="hc-h3" x="142" y="200" width="11" height="13" rx="1" data-tip="bucket 6: 6 events&#10;113–160 ms"><title>bucket 6: 6 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="142" y="186" width="11" height="13" rx="1" data-tip="bucket 6: 1 events&#10;160–226 ms"><title>bucket 6: 1 events, 160–226 ms</title></rect>
+<rect class="hc-h3" x="154" y="298" width="11" height="13" rx="1" data-tip="bucket 7: 4 events&#10;10–14 ms"><title>bucket 7: 4 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="154" y="284" width="11" height="13" rx="1" data-tip="bucket 7: 10 events&#10;14–20 ms"><title>bucket 7: 10 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="154" y="270" width="11" height="13" rx="1" data-tip="bucket 7: 49 events&#10;20–28 ms"><title>bucket 7: 49 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="154" y="256" width="11" height="13" rx="1" data-tip="bucket 7: 99 events&#10;28–40 ms"><title>bucket 7: 99 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="154" y="242" width="11" height="13" rx="1" data-tip="bucket 7: 137 events&#10;40–57 ms"><title>bucket 7: 137 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="154" y="228" width="11" height="13" rx="1" data-tip="bucket 7: 83 events&#10;57–80 ms"><title>bucket 7: 83 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="154" y="214" width="11" height="13" rx="1" data-tip="bucket 7: 27 events&#10;80–113 ms"><title>bucket 7: 27 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="154" y="200" width="11" height="13" rx="1" data-tip="bucket 7: 8 events&#10;113–160 ms"><title>bucket 7: 8 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="154" y="186" width="11" height="13" rx="1" data-tip="bucket 7: 3 events&#10;160–226 ms"><title>bucket 7: 3 events, 160–226 ms</title></rect>
+<rect class="hc-h4" x="166" y="284" width="11" height="13" rx="1" data-tip="bucket 8: 12 events&#10;14–20 ms"><title>bucket 8: 12 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="166" y="270" width="11" height="13" rx="1" data-tip="bucket 8: 66 events&#10;20–28 ms"><title>bucket 8: 66 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="166" y="256" width="11" height="13" rx="1" data-tip="bucket 8: 94 events&#10;28–40 ms"><title>bucket 8: 94 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="166" y="242" width="11" height="13" rx="1" data-tip="bucket 8: 117 events&#10;40–57 ms"><title>bucket 8: 117 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="166" y="228" width="11" height="13" rx="1" data-tip="bucket 8: 89 events&#10;57–80 ms"><title>bucket 8: 89 events, 57–80 ms</title></rect>
+<rect class="hc-h6" x="166" y="214" width="11" height="13" rx="1" data-tip="bucket 8: 35 events&#10;80–113 ms"><title>bucket 8: 35 events, 80–113 ms</title></rect>
+<rect class="hc-h3" x="166" y="200" width="11" height="13" rx="1" data-tip="bucket 8: 7 events&#10;113–160 ms"><title>bucket 8: 7 events, 113–160 ms</title></rect>
+<rect class="hc-h3" x="178" y="298" width="11" height="13" rx="1" data-tip="bucket 9: 4 events&#10;10–14 ms"><title>bucket 9: 4 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="178" y="284" width="11" height="13" rx="1" data-tip="bucket 9: 13 events&#10;14–20 ms"><title>bucket 9: 13 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="178" y="270" width="11" height="13" rx="1" data-tip="bucket 9: 44 events&#10;20–28 ms"><title>bucket 9: 44 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="178" y="256" width="11" height="13" rx="1" data-tip="bucket 9: 92 events&#10;28–40 ms"><title>bucket 9: 92 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="178" y="242" width="11" height="13" rx="1" data-tip="bucket 9: 145 events&#10;40–57 ms"><title>bucket 9: 145 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="178" y="228" width="11" height="13" rx="1" data-tip="bucket 9: 76 events&#10;57–80 ms"><title>bucket 9: 76 events, 57–80 ms</title></rect>
+<rect class="hc-h6" x="178" y="214" width="11" height="13" rx="1" data-tip="bucket 9: 39 events&#10;80–113 ms"><title>bucket 9: 39 events, 80–113 ms</title></rect>
+<rect class="hc-h3" x="178" y="200" width="11" height="13" rx="1" data-tip="bucket 9: 6 events&#10;113–160 ms"><title>bucket 9: 6 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="178" y="186" width="11" height="13" rx="1" data-tip="bucket 9: 1 events&#10;160–226 ms"><title>bucket 9: 1 events, 160–226 ms</title></rect>
+<rect class="hc-h1" x="190" y="298" width="11" height="13" rx="1" data-tip="bucket 10: 1 events&#10;10–14 ms"><title>bucket 10: 1 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="190" y="284" width="11" height="13" rx="1" data-tip="bucket 10: 11 events&#10;14–20 ms"><title>bucket 10: 11 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="190" y="270" width="11" height="13" rx="1" data-tip="bucket 10: 45 events&#10;20–28 ms"><title>bucket 10: 45 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="190" y="256" width="11" height="13" rx="1" data-tip="bucket 10: 111 events&#10;28–40 ms"><title>bucket 10: 111 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="190" y="242" width="11" height="13" rx="1" data-tip="bucket 10: 117 events&#10;40–57 ms"><title>bucket 10: 117 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="190" y="228" width="11" height="13" rx="1" data-tip="bucket 10: 89 events&#10;57–80 ms"><title>bucket 10: 89 events, 57–80 ms</title></rect>
+<rect class="hc-h6" x="190" y="214" width="11" height="13" rx="1" data-tip="bucket 10: 38 events&#10;80–113 ms"><title>bucket 10: 38 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="190" y="200" width="11" height="13" rx="1" data-tip="bucket 10: 8 events&#10;113–160 ms"><title>bucket 10: 8 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="202" y="298" width="11" height="13" rx="1" data-tip="bucket 11: 1 events&#10;10–14 ms"><title>bucket 11: 1 events, 10–14 ms</title></rect>
+<rect class="hc-h5" x="202" y="284" width="11" height="13" rx="1" data-tip="bucket 11: 20 events&#10;14–20 ms"><title>bucket 11: 20 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="202" y="270" width="11" height="13" rx="1" data-tip="bucket 11: 49 events&#10;20–28 ms"><title>bucket 11: 49 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="202" y="256" width="11" height="13" rx="1" data-tip="bucket 11: 107 events&#10;28–40 ms"><title>bucket 11: 107 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="202" y="242" width="11" height="13" rx="1" data-tip="bucket 11: 111 events&#10;40–57 ms"><title>bucket 11: 111 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="202" y="228" width="11" height="13" rx="1" data-tip="bucket 11: 81 events&#10;57–80 ms"><title>bucket 11: 81 events, 57–80 ms</title></rect>
+<rect class="hc-h6" x="202" y="214" width="11" height="13" rx="1" data-tip="bucket 11: 42 events&#10;80–113 ms"><title>bucket 11: 42 events, 80–113 ms</title></rect>
+<rect class="hc-h3" x="202" y="200" width="11" height="13" rx="1" data-tip="bucket 11: 7 events&#10;113–160 ms"><title>bucket 11: 7 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="202" y="186" width="11" height="13" rx="1" data-tip="bucket 11: 2 events&#10;160–226 ms"><title>bucket 11: 2 events, 160–226 ms</title></rect>
+<rect class="hc-h2" x="214" y="298" width="11" height="13" rx="1" data-tip="bucket 12: 3 events&#10;10–14 ms"><title>bucket 12: 3 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="214" y="284" width="11" height="13" rx="1" data-tip="bucket 12: 8 events&#10;14–20 ms"><title>bucket 12: 8 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="214" y="270" width="11" height="13" rx="1" data-tip="bucket 12: 47 events&#10;20–28 ms"><title>bucket 12: 47 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="214" y="256" width="11" height="13" rx="1" data-tip="bucket 12: 111 events&#10;28–40 ms"><title>bucket 12: 111 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="214" y="242" width="11" height="13" rx="1" data-tip="bucket 12: 128 events&#10;40–57 ms"><title>bucket 12: 128 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="214" y="228" width="11" height="13" rx="1" data-tip="bucket 12: 81 events&#10;57–80 ms"><title>bucket 12: 81 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="214" y="214" width="11" height="13" rx="1" data-tip="bucket 12: 34 events&#10;80–113 ms"><title>bucket 12: 34 events, 80–113 ms</title></rect>
+<rect class="hc-h3" x="214" y="200" width="11" height="13" rx="1" data-tip="bucket 12: 7 events&#10;113–160 ms"><title>bucket 12: 7 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="214" y="186" width="11" height="13" rx="1" data-tip="bucket 12: 1 events&#10;160–226 ms"><title>bucket 12: 1 events, 160–226 ms</title></rect>
+<rect class="hc-h3" x="226" y="284" width="11" height="13" rx="1" data-tip="bucket 13: 5 events&#10;14–20 ms"><title>bucket 13: 5 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="226" y="270" width="11" height="13" rx="1" data-tip="bucket 13: 47 events&#10;20–28 ms"><title>bucket 13: 47 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="226" y="256" width="11" height="13" rx="1" data-tip="bucket 13: 110 events&#10;28–40 ms"><title>bucket 13: 110 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="226" y="242" width="11" height="13" rx="1" data-tip="bucket 13: 130 events&#10;40–57 ms"><title>bucket 13: 130 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="226" y="228" width="11" height="13" rx="1" data-tip="bucket 13: 86 events&#10;57–80 ms"><title>bucket 13: 86 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="226" y="214" width="11" height="13" rx="1" data-tip="bucket 13: 32 events&#10;80–113 ms"><title>bucket 13: 32 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="226" y="200" width="11" height="13" rx="1" data-tip="bucket 13: 10 events&#10;113–160 ms"><title>bucket 13: 10 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="238" y="298" width="11" height="13" rx="1" data-tip="bucket 14: 2 events&#10;10–14 ms"><title>bucket 14: 2 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="238" y="284" width="11" height="13" rx="1" data-tip="bucket 14: 12 events&#10;14–20 ms"><title>bucket 14: 12 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="238" y="270" width="11" height="13" rx="1" data-tip="bucket 14: 47 events&#10;20–28 ms"><title>bucket 14: 47 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="238" y="256" width="11" height="13" rx="1" data-tip="bucket 14: 108 events&#10;28–40 ms"><title>bucket 14: 108 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="238" y="242" width="11" height="13" rx="1" data-tip="bucket 14: 111 events&#10;40–57 ms"><title>bucket 14: 111 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="238" y="228" width="11" height="13" rx="1" data-tip="bucket 14: 99 events&#10;57–80 ms"><title>bucket 14: 99 events, 57–80 ms</title></rect>
+<rect class="hc-h6" x="238" y="214" width="11" height="13" rx="1" data-tip="bucket 14: 35 events&#10;80–113 ms"><title>bucket 14: 35 events, 80–113 ms</title></rect>
+<rect class="hc-h3" x="238" y="200" width="11" height="13" rx="1" data-tip="bucket 14: 5 events&#10;113–160 ms"><title>bucket 14: 5 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="238" y="186" width="11" height="13" rx="1" data-tip="bucket 14: 1 events&#10;160–226 ms"><title>bucket 14: 1 events, 160–226 ms</title></rect>
+<rect class="hc-h1" x="250" y="298" width="11" height="13" rx="1" data-tip="bucket 15: 1 events&#10;10–14 ms"><title>bucket 15: 1 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="250" y="284" width="11" height="13" rx="1" data-tip="bucket 15: 10 events&#10;14–20 ms"><title>bucket 15: 10 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="250" y="270" width="11" height="13" rx="1" data-tip="bucket 15: 51 events&#10;20–28 ms"><title>bucket 15: 51 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="250" y="256" width="11" height="13" rx="1" data-tip="bucket 15: 98 events&#10;28–40 ms"><title>bucket 15: 98 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="250" y="242" width="11" height="13" rx="1" data-tip="bucket 15: 129 events&#10;40–57 ms"><title>bucket 15: 129 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="250" y="228" width="11" height="13" rx="1" data-tip="bucket 15: 82 events&#10;57–80 ms"><title>bucket 15: 82 events, 57–80 ms</title></rect>
+<rect class="hc-h6" x="250" y="214" width="11" height="13" rx="1" data-tip="bucket 15: 40 events&#10;80–113 ms"><title>bucket 15: 40 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="250" y="200" width="11" height="13" rx="1" data-tip="bucket 15: 8 events&#10;113–160 ms"><title>bucket 15: 8 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="250" y="186" width="11" height="13" rx="1" data-tip="bucket 15: 1 events&#10;160–226 ms"><title>bucket 15: 1 events, 160–226 ms</title></rect>
+<rect class="hc-h2" x="262" y="298" width="11" height="13" rx="1" data-tip="bucket 16: 3 events&#10;10–14 ms"><title>bucket 16: 3 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="262" y="284" width="11" height="13" rx="1" data-tip="bucket 16: 10 events&#10;14–20 ms"><title>bucket 16: 10 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="262" y="270" width="11" height="13" rx="1" data-tip="bucket 16: 50 events&#10;20–28 ms"><title>bucket 16: 50 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="262" y="256" width="11" height="13" rx="1" data-tip="bucket 16: 110 events&#10;28–40 ms"><title>bucket 16: 110 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="262" y="242" width="11" height="13" rx="1" data-tip="bucket 16: 124 events&#10;40–57 ms"><title>bucket 16: 124 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="262" y="228" width="11" height="13" rx="1" data-tip="bucket 16: 79 events&#10;57–80 ms"><title>bucket 16: 79 events, 57–80 ms</title></rect>
+<rect class="hc-h6" x="262" y="214" width="11" height="13" rx="1" data-tip="bucket 16: 35 events&#10;80–113 ms"><title>bucket 16: 35 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="262" y="200" width="11" height="13" rx="1" data-tip="bucket 16: 9 events&#10;113–160 ms"><title>bucket 16: 9 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="274" y="298" width="11" height="13" rx="1" data-tip="bucket 17: 2 events&#10;10–14 ms"><title>bucket 17: 2 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="274" y="284" width="11" height="13" rx="1" data-tip="bucket 17: 9 events&#10;14–20 ms"><title>bucket 17: 9 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="274" y="270" width="11" height="13" rx="1" data-tip="bucket 17: 52 events&#10;20–28 ms"><title>bucket 17: 52 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="274" y="256" width="11" height="13" rx="1" data-tip="bucket 17: 89 events&#10;28–40 ms"><title>bucket 17: 89 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="274" y="242" width="11" height="13" rx="1" data-tip="bucket 17: 139 events&#10;40–57 ms"><title>bucket 17: 139 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="274" y="228" width="11" height="13" rx="1" data-tip="bucket 17: 89 events&#10;57–80 ms"><title>bucket 17: 89 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="274" y="214" width="11" height="13" rx="1" data-tip="bucket 17: 33 events&#10;80–113 ms"><title>bucket 17: 33 events, 80–113 ms</title></rect>
+<rect class="hc-h3" x="274" y="200" width="11" height="13" rx="1" data-tip="bucket 17: 6 events&#10;113–160 ms"><title>bucket 17: 6 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="274" y="172" width="11" height="13" rx="1" data-tip="bucket 17: 1 events&#10;226–320 ms"><title>bucket 17: 1 events, 226–320 ms</title></rect>
+<rect class="hc-h1" x="286" y="298" width="11" height="13" rx="1" data-tip="bucket 18: 1 events&#10;10–14 ms"><title>bucket 18: 1 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="286" y="284" width="11" height="13" rx="1" data-tip="bucket 18: 12 events&#10;14–20 ms"><title>bucket 18: 12 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="286" y="270" width="11" height="13" rx="1" data-tip="bucket 18: 36 events&#10;20–28 ms"><title>bucket 18: 36 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="286" y="256" width="11" height="13" rx="1" data-tip="bucket 18: 132 events&#10;28–40 ms"><title>bucket 18: 132 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="286" y="242" width="11" height="13" rx="1" data-tip="bucket 18: 110 events&#10;40–57 ms"><title>bucket 18: 110 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="286" y="228" width="11" height="13" rx="1" data-tip="bucket 18: 86 events&#10;57–80 ms"><title>bucket 18: 86 events, 57–80 ms</title></rect>
+<rect class="hc-h6" x="286" y="214" width="11" height="13" rx="1" data-tip="bucket 18: 35 events&#10;80–113 ms"><title>bucket 18: 35 events, 80–113 ms</title></rect>
+<rect class="hc-h3" x="286" y="200" width="11" height="13" rx="1" data-tip="bucket 18: 7 events&#10;113–160 ms"><title>bucket 18: 7 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="286" y="186" width="11" height="13" rx="1" data-tip="bucket 18: 1 events&#10;160–226 ms"><title>bucket 18: 1 events, 160–226 ms</title></rect>
+<rect class="hc-h2" x="298" y="298" width="11" height="13" rx="1" data-tip="bucket 19: 2 events&#10;10–14 ms"><title>bucket 19: 2 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="298" y="284" width="11" height="13" rx="1" data-tip="bucket 19: 10 events&#10;14–20 ms"><title>bucket 19: 10 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="298" y="270" width="11" height="13" rx="1" data-tip="bucket 19: 45 events&#10;20–28 ms"><title>bucket 19: 45 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="298" y="256" width="11" height="13" rx="1" data-tip="bucket 19: 105 events&#10;28–40 ms"><title>bucket 19: 105 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="298" y="242" width="11" height="13" rx="1" data-tip="bucket 19: 123 events&#10;40–57 ms"><title>bucket 19: 123 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="298" y="228" width="11" height="13" rx="1" data-tip="bucket 19: 91 events&#10;57–80 ms"><title>bucket 19: 91 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="298" y="214" width="11" height="13" rx="1" data-tip="bucket 19: 33 events&#10;80–113 ms"><title>bucket 19: 33 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="298" y="200" width="11" height="13" rx="1" data-tip="bucket 19: 11 events&#10;113–160 ms"><title>bucket 19: 11 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="310" y="298" width="11" height="13" rx="1" data-tip="bucket 20: 1 events&#10;10–14 ms"><title>bucket 20: 1 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="310" y="284" width="11" height="13" rx="1" data-tip="bucket 20: 9 events&#10;14–20 ms"><title>bucket 20: 9 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="310" y="270" width="11" height="13" rx="1" data-tip="bucket 20: 56 events&#10;20–28 ms"><title>bucket 20: 56 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="310" y="256" width="11" height="13" rx="1" data-tip="bucket 20: 86 events&#10;28–40 ms"><title>bucket 20: 86 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="310" y="242" width="11" height="13" rx="1" data-tip="bucket 20: 126 events&#10;40–57 ms"><title>bucket 20: 126 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="310" y="228" width="11" height="13" rx="1" data-tip="bucket 20: 96 events&#10;57–80 ms"><title>bucket 20: 96 events, 57–80 ms</title></rect>
+<rect class="hc-h6" x="310" y="214" width="11" height="13" rx="1" data-tip="bucket 20: 36 events&#10;80–113 ms"><title>bucket 20: 36 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="310" y="200" width="11" height="13" rx="1" data-tip="bucket 20: 10 events&#10;113–160 ms"><title>bucket 20: 10 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="322" y="298" width="11" height="13" rx="1" data-tip="bucket 21: 3 events&#10;10–14 ms"><title>bucket 21: 3 events, 10–14 ms</title></rect>
+<rect class="hc-h5" x="322" y="284" width="11" height="13" rx="1" data-tip="bucket 21: 18 events&#10;14–20 ms"><title>bucket 21: 18 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="322" y="270" width="11" height="13" rx="1" data-tip="bucket 21: 56 events&#10;20–28 ms"><title>bucket 21: 56 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="322" y="256" width="11" height="13" rx="1" data-tip="bucket 21: 105 events&#10;28–40 ms"><title>bucket 21: 105 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="322" y="242" width="11" height="13" rx="1" data-tip="bucket 21: 112 events&#10;40–57 ms"><title>bucket 21: 112 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="322" y="228" width="11" height="13" rx="1" data-tip="bucket 21: 87 events&#10;57–80 ms"><title>bucket 21: 87 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="322" y="214" width="11" height="13" rx="1" data-tip="bucket 21: 29 events&#10;80–113 ms"><title>bucket 21: 29 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="322" y="200" width="11" height="13" rx="1" data-tip="bucket 21: 8 events&#10;113–160 ms"><title>bucket 21: 8 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="322" y="186" width="11" height="13" rx="1" data-tip="bucket 21: 2 events&#10;160–226 ms"><title>bucket 21: 2 events, 160–226 ms</title></rect>
+<rect class="hc-h2" x="334" y="298" width="11" height="13" rx="1" data-tip="bucket 22: 3 events&#10;10–14 ms"><title>bucket 22: 3 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="334" y="284" width="11" height="13" rx="1" data-tip="bucket 22: 15 events&#10;14–20 ms"><title>bucket 22: 15 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="334" y="270" width="11" height="13" rx="1" data-tip="bucket 22: 53 events&#10;20–28 ms"><title>bucket 22: 53 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="334" y="256" width="11" height="13" rx="1" data-tip="bucket 22: 97 events&#10;28–40 ms"><title>bucket 22: 97 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="334" y="242" width="11" height="13" rx="1" data-tip="bucket 22: 123 events&#10;40–57 ms"><title>bucket 22: 123 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="334" y="228" width="11" height="13" rx="1" data-tip="bucket 22: 90 events&#10;57–80 ms"><title>bucket 22: 90 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="334" y="214" width="11" height="13" rx="1" data-tip="bucket 22: 31 events&#10;80–113 ms"><title>bucket 22: 31 events, 80–113 ms</title></rect>
+<rect class="hc-h3" x="334" y="200" width="11" height="13" rx="1" data-tip="bucket 22: 7 events&#10;113–160 ms"><title>bucket 22: 7 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="334" y="186" width="11" height="13" rx="1" data-tip="bucket 22: 1 events&#10;160–226 ms"><title>bucket 22: 1 events, 160–226 ms</title></rect>
+<rect class="hc-h2" x="346" y="298" width="11" height="13" rx="1" data-tip="bucket 23: 2 events&#10;10–14 ms"><title>bucket 23: 2 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="346" y="284" width="11" height="13" rx="1" data-tip="bucket 23: 10 events&#10;14–20 ms"><title>bucket 23: 10 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="346" y="270" width="11" height="13" rx="1" data-tip="bucket 23: 48 events&#10;20–28 ms"><title>bucket 23: 48 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="346" y="256" width="11" height="13" rx="1" data-tip="bucket 23: 119 events&#10;28–40 ms"><title>bucket 23: 119 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="346" y="242" width="11" height="13" rx="1" data-tip="bucket 23: 110 events&#10;40–57 ms"><title>bucket 23: 110 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="346" y="228" width="11" height="13" rx="1" data-tip="bucket 23: 95 events&#10;57–80 ms"><title>bucket 23: 95 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="346" y="214" width="11" height="13" rx="1" data-tip="bucket 23: 31 events&#10;80–113 ms"><title>bucket 23: 31 events, 80–113 ms</title></rect>
+<rect class="hc-h3" x="346" y="200" width="11" height="13" rx="1" data-tip="bucket 23: 4 events&#10;113–160 ms"><title>bucket 23: 4 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="346" y="186" width="11" height="13" rx="1" data-tip="bucket 23: 1 events&#10;160–226 ms"><title>bucket 23: 1 events, 160–226 ms</title></rect>
+<rect class="hc-h2" x="358" y="298" width="11" height="13" rx="1" data-tip="bucket 24: 2 events&#10;10–14 ms"><title>bucket 24: 2 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="358" y="284" width="11" height="13" rx="1" data-tip="bucket 24: 14 events&#10;14–20 ms"><title>bucket 24: 14 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="358" y="270" width="11" height="13" rx="1" data-tip="bucket 24: 44 events&#10;20–28 ms"><title>bucket 24: 44 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="358" y="256" width="11" height="13" rx="1" data-tip="bucket 24: 105 events&#10;28–40 ms"><title>bucket 24: 105 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="358" y="242" width="11" height="13" rx="1" data-tip="bucket 24: 133 events&#10;40–57 ms"><title>bucket 24: 133 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="358" y="228" width="11" height="13" rx="1" data-tip="bucket 24: 81 events&#10;57–80 ms"><title>bucket 24: 81 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="358" y="214" width="11" height="13" rx="1" data-tip="bucket 24: 28 events&#10;80–113 ms"><title>bucket 24: 28 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="358" y="200" width="11" height="13" rx="1" data-tip="bucket 24: 13 events&#10;113–160 ms"><title>bucket 24: 13 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="370" y="298" width="11" height="13" rx="1" data-tip="bucket 25: 3 events&#10;10–14 ms"><title>bucket 25: 3 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="370" y="284" width="11" height="13" rx="1" data-tip="bucket 25: 11 events&#10;14–20 ms"><title>bucket 25: 11 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="370" y="270" width="11" height="13" rx="1" data-tip="bucket 25: 48 events&#10;20–28 ms"><title>bucket 25: 48 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="370" y="256" width="11" height="13" rx="1" data-tip="bucket 25: 106 events&#10;28–40 ms"><title>bucket 25: 106 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="370" y="242" width="11" height="13" rx="1" data-tip="bucket 25: 114 events&#10;40–57 ms"><title>bucket 25: 114 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="370" y="228" width="11" height="13" rx="1" data-tip="bucket 25: 99 events&#10;57–80 ms"><title>bucket 25: 99 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="370" y="214" width="11" height="13" rx="1" data-tip="bucket 25: 31 events&#10;80–113 ms"><title>bucket 25: 31 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="370" y="200" width="11" height="13" rx="1" data-tip="bucket 25: 8 events&#10;113–160 ms"><title>bucket 25: 8 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="382" y="298" width="11" height="13" rx="1" data-tip="bucket 26: 1 events&#10;10–14 ms"><title>bucket 26: 1 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="382" y="284" width="11" height="13" rx="1" data-tip="bucket 26: 16 events&#10;14–20 ms"><title>bucket 26: 16 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="382" y="270" width="11" height="13" rx="1" data-tip="bucket 26: 43 events&#10;20–28 ms"><title>bucket 26: 43 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="382" y="256" width="11" height="13" rx="1" data-tip="bucket 26: 105 events&#10;28–40 ms"><title>bucket 26: 105 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="382" y="242" width="11" height="13" rx="1" data-tip="bucket 26: 132 events&#10;40–57 ms"><title>bucket 26: 132 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="382" y="228" width="11" height="13" rx="1" data-tip="bucket 26: 82 events&#10;57–80 ms"><title>bucket 26: 82 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="382" y="214" width="11" height="13" rx="1" data-tip="bucket 26: 34 events&#10;80–113 ms"><title>bucket 26: 34 events, 80–113 ms</title></rect>
+<rect class="hc-h3" x="382" y="200" width="11" height="13" rx="1" data-tip="bucket 26: 5 events&#10;113–160 ms"><title>bucket 26: 5 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="382" y="186" width="11" height="13" rx="1" data-tip="bucket 26: 2 events&#10;160–226 ms"><title>bucket 26: 2 events, 160–226 ms</title></rect>
+<rect class="hc-h2" x="394" y="298" width="11" height="13" rx="1" data-tip="bucket 27: 2 events&#10;10–14 ms"><title>bucket 27: 2 events, 10–14 ms</title></rect>
+<rect class="hc-h5" x="394" y="284" width="11" height="13" rx="1" data-tip="bucket 27: 22 events&#10;14–20 ms"><title>bucket 27: 22 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="394" y="270" width="11" height="13" rx="1" data-tip="bucket 27: 41 events&#10;20–28 ms"><title>bucket 27: 41 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="394" y="256" width="11" height="13" rx="1" data-tip="bucket 27: 101 events&#10;28–40 ms"><title>bucket 27: 101 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="394" y="242" width="11" height="13" rx="1" data-tip="bucket 27: 128 events&#10;40–57 ms"><title>bucket 27: 128 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="394" y="228" width="11" height="13" rx="1" data-tip="bucket 27: 87 events&#10;57–80 ms"><title>bucket 27: 87 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="394" y="214" width="11" height="13" rx="1" data-tip="bucket 27: 28 events&#10;80–113 ms"><title>bucket 27: 28 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="394" y="200" width="11" height="13" rx="1" data-tip="bucket 27: 9 events&#10;113–160 ms"><title>bucket 27: 9 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="394" y="186" width="11" height="13" rx="1" data-tip="bucket 27: 2 events&#10;160–226 ms"><title>bucket 27: 2 events, 160–226 ms</title></rect>
+<rect class="hc-h1" x="406" y="298" width="11" height="13" rx="1" data-tip="bucket 28: 1 events&#10;10–14 ms"><title>bucket 28: 1 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="406" y="284" width="11" height="13" rx="1" data-tip="bucket 28: 8 events&#10;14–20 ms"><title>bucket 28: 8 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="406" y="270" width="11" height="13" rx="1" data-tip="bucket 28: 48 events&#10;20–28 ms"><title>bucket 28: 48 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="406" y="256" width="11" height="13" rx="1" data-tip="bucket 28: 114 events&#10;28–40 ms"><title>bucket 28: 114 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="406" y="242" width="11" height="13" rx="1" data-tip="bucket 28: 126 events&#10;40–57 ms"><title>bucket 28: 126 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="406" y="228" width="11" height="13" rx="1" data-tip="bucket 28: 89 events&#10;57–80 ms"><title>bucket 28: 89 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="406" y="214" width="11" height="13" rx="1" data-tip="bucket 28: 29 events&#10;80–113 ms"><title>bucket 28: 29 events, 80–113 ms</title></rect>
+<rect class="hc-h2" x="406" y="200" width="11" height="13" rx="1" data-tip="bucket 28: 3 events&#10;113–160 ms"><title>bucket 28: 3 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="406" y="186" width="11" height="13" rx="1" data-tip="bucket 28: 2 events&#10;160–226 ms"><title>bucket 28: 2 events, 160–226 ms</title></rect>
+<rect class="hc-h2" x="418" y="298" width="11" height="13" rx="1" data-tip="bucket 29: 3 events&#10;10–14 ms"><title>bucket 29: 3 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="418" y="284" width="11" height="13" rx="1" data-tip="bucket 29: 13 events&#10;14–20 ms"><title>bucket 29: 13 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="418" y="270" width="11" height="13" rx="1" data-tip="bucket 29: 55 events&#10;20–28 ms"><title>bucket 29: 55 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="418" y="256" width="11" height="13" rx="1" data-tip="bucket 29: 96 events&#10;28–40 ms"><title>bucket 29: 96 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="418" y="242" width="11" height="13" rx="1" data-tip="bucket 29: 127 events&#10;40–57 ms"><title>bucket 29: 127 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="418" y="228" width="11" height="13" rx="1" data-tip="bucket 29: 77 events&#10;57–80 ms"><title>bucket 29: 77 events, 57–80 ms</title></rect>
+<rect class="hc-h6" x="418" y="214" width="11" height="13" rx="1" data-tip="bucket 29: 38 events&#10;80–113 ms"><title>bucket 29: 38 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="418" y="200" width="11" height="13" rx="1" data-tip="bucket 29: 8 events&#10;113–160 ms"><title>bucket 29: 8 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="418" y="186" width="11" height="13" rx="1" data-tip="bucket 29: 3 events&#10;160–226 ms"><title>bucket 29: 3 events, 160–226 ms</title></rect>
+<rect class="hc-h3" x="430" y="298" width="11" height="13" rx="1" data-tip="bucket 30: 4 events&#10;10–14 ms"><title>bucket 30: 4 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="430" y="284" width="11" height="13" rx="1" data-tip="bucket 30: 12 events&#10;14–20 ms"><title>bucket 30: 12 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="430" y="270" width="11" height="13" rx="1" data-tip="bucket 30: 46 events&#10;20–28 ms"><title>bucket 30: 46 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="430" y="256" width="11" height="13" rx="1" data-tip="bucket 30: 115 events&#10;28–40 ms"><title>bucket 30: 115 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="430" y="242" width="11" height="13" rx="1" data-tip="bucket 30: 122 events&#10;40–57 ms"><title>bucket 30: 122 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="430" y="228" width="11" height="13" rx="1" data-tip="bucket 30: 88 events&#10;57–80 ms"><title>bucket 30: 88 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="430" y="214" width="11" height="13" rx="1" data-tip="bucket 30: 29 events&#10;80–113 ms"><title>bucket 30: 29 events, 80–113 ms</title></rect>
+<rect class="hc-h2" x="430" y="200" width="11" height="13" rx="1" data-tip="bucket 30: 2 events&#10;113–160 ms"><title>bucket 30: 2 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="430" y="186" width="11" height="13" rx="1" data-tip="bucket 30: 2 events&#10;160–226 ms"><title>bucket 30: 2 events, 160–226 ms</title></rect>
+<rect class="hc-h4" x="430" y="116" width="11" height="13" rx="1" data-tip="bucket 30: 12 events&#10;905–1280 ms"><title>bucket 30: 12 events, 905–1280 ms</title></rect>
+<rect class="hc-h5" x="430" y="102" width="11" height="13" rx="1" data-tip="bucket 30: 34 events&#10;1280–1810 ms"><title>bucket 30: 34 events, 1280–1810 ms</title></rect>
+<rect class="hc-h4" x="430" y="88" width="11" height="13" rx="1" data-tip="bucket 30: 9 events&#10;1810–2560 ms"><title>bucket 30: 9 events, 1810–2560 ms</title></rect>
+<rect class="hc-h2" x="442" y="298" width="11" height="13" rx="1" data-tip="bucket 31: 3 events&#10;10–14 ms"><title>bucket 31: 3 events, 10–14 ms</title></rect>
+<rect class="hc-h3" x="442" y="284" width="11" height="13" rx="1" data-tip="bucket 31: 7 events&#10;14–20 ms"><title>bucket 31: 7 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="442" y="270" width="11" height="13" rx="1" data-tip="bucket 31: 41 events&#10;20–28 ms"><title>bucket 31: 41 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="442" y="256" width="11" height="13" rx="1" data-tip="bucket 31: 105 events&#10;28–40 ms"><title>bucket 31: 105 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="442" y="242" width="11" height="13" rx="1" data-tip="bucket 31: 127 events&#10;40–57 ms"><title>bucket 31: 127 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="442" y="228" width="11" height="13" rx="1" data-tip="bucket 31: 87 events&#10;57–80 ms"><title>bucket 31: 87 events, 57–80 ms</title></rect>
+<rect class="hc-h6" x="442" y="214" width="11" height="13" rx="1" data-tip="bucket 31: 41 events&#10;80–113 ms"><title>bucket 31: 41 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="442" y="200" width="11" height="13" rx="1" data-tip="bucket 31: 9 events&#10;113–160 ms"><title>bucket 31: 9 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="442" y="130" width="11" height="13" rx="1" data-tip="bucket 31: 2 events&#10;640–905 ms"><title>bucket 31: 2 events, 640–905 ms</title></rect>
+<rect class="hc-h5" x="442" y="116" width="11" height="13" rx="1" data-tip="bucket 31: 19 events&#10;905–1280 ms"><title>bucket 31: 19 events, 905–1280 ms</title></rect>
+<rect class="hc-h5" x="442" y="102" width="11" height="13" rx="1" data-tip="bucket 31: 25 events&#10;1280–1810 ms"><title>bucket 31: 25 events, 1280–1810 ms</title></rect>
+<rect class="hc-h4" x="442" y="88" width="11" height="13" rx="1" data-tip="bucket 31: 9 events&#10;1810–2560 ms"><title>bucket 31: 9 events, 1810–2560 ms</title></rect>
+<rect class="hc-h1" x="454" y="298" width="11" height="13" rx="1" data-tip="bucket 32: 1 events&#10;10–14 ms"><title>bucket 32: 1 events, 10–14 ms</title></rect>
+<rect class="hc-h5" x="454" y="284" width="11" height="13" rx="1" data-tip="bucket 32: 18 events&#10;14–20 ms"><title>bucket 32: 18 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="454" y="270" width="11" height="13" rx="1" data-tip="bucket 32: 43 events&#10;20–28 ms"><title>bucket 32: 43 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="454" y="256" width="11" height="13" rx="1" data-tip="bucket 32: 91 events&#10;28–40 ms"><title>bucket 32: 91 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="454" y="242" width="11" height="13" rx="1" data-tip="bucket 32: 130 events&#10;40–57 ms"><title>bucket 32: 130 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="454" y="228" width="11" height="13" rx="1" data-tip="bucket 32: 106 events&#10;57–80 ms"><title>bucket 32: 106 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="454" y="214" width="11" height="13" rx="1" data-tip="bucket 32: 26 events&#10;80–113 ms"><title>bucket 32: 26 events, 80–113 ms</title></rect>
+<rect class="hc-h3" x="454" y="200" width="11" height="13" rx="1" data-tip="bucket 32: 5 events&#10;113–160 ms"><title>bucket 32: 5 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="454" y="130" width="11" height="13" rx="1" data-tip="bucket 32: 2 events&#10;640–905 ms"><title>bucket 32: 2 events, 640–905 ms</title></rect>
+<rect class="hc-h4" x="454" y="116" width="11" height="13" rx="1" data-tip="bucket 32: 16 events&#10;905–1280 ms"><title>bucket 32: 16 events, 905–1280 ms</title></rect>
+<rect class="hc-h5" x="454" y="102" width="11" height="13" rx="1" data-tip="bucket 32: 27 events&#10;1280–1810 ms"><title>bucket 32: 27 events, 1280–1810 ms</title></rect>
+<rect class="hc-h4" x="454" y="88" width="11" height="13" rx="1" data-tip="bucket 32: 10 events&#10;1810–2560 ms"><title>bucket 32: 10 events, 1810–2560 ms</title></rect>
+<rect class="hc-h1" x="466" y="298" width="11" height="13" rx="1" data-tip="bucket 33: 1 events&#10;10–14 ms"><title>bucket 33: 1 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="466" y="284" width="11" height="13" rx="1" data-tip="bucket 33: 14 events&#10;14–20 ms"><title>bucket 33: 14 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="466" y="270" width="11" height="13" rx="1" data-tip="bucket 33: 48 events&#10;20–28 ms"><title>bucket 33: 48 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="466" y="256" width="11" height="13" rx="1" data-tip="bucket 33: 95 events&#10;28–40 ms"><title>bucket 33: 95 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="466" y="242" width="11" height="13" rx="1" data-tip="bucket 33: 140 events&#10;40–57 ms"><title>bucket 33: 140 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="466" y="228" width="11" height="13" rx="1" data-tip="bucket 33: 82 events&#10;57–80 ms"><title>bucket 33: 82 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="466" y="214" width="11" height="13" rx="1" data-tip="bucket 33: 33 events&#10;80–113 ms"><title>bucket 33: 33 events, 80–113 ms</title></rect>
+<rect class="hc-h3" x="466" y="200" width="11" height="13" rx="1" data-tip="bucket 33: 5 events&#10;113–160 ms"><title>bucket 33: 5 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="466" y="186" width="11" height="13" rx="1" data-tip="bucket 33: 1 events&#10;160–226 ms"><title>bucket 33: 1 events, 160–226 ms</title></rect>
+<rect class="hc-h1" x="466" y="172" width="11" height="13" rx="1" data-tip="bucket 33: 1 events&#10;226–320 ms"><title>bucket 33: 1 events, 226–320 ms</title></rect>
+<rect class="hc-h1" x="466" y="130" width="11" height="13" rx="1" data-tip="bucket 33: 1 events&#10;640–905 ms"><title>bucket 33: 1 events, 640–905 ms</title></rect>
+<rect class="hc-h5" x="466" y="116" width="11" height="13" rx="1" data-tip="bucket 33: 17 events&#10;905–1280 ms"><title>bucket 33: 17 events, 905–1280 ms</title></rect>
+<rect class="hc-h5" x="466" y="102" width="11" height="13" rx="1" data-tip="bucket 33: 30 events&#10;1280–1810 ms"><title>bucket 33: 30 events, 1280–1810 ms</title></rect>
+<rect class="hc-h3" x="466" y="88" width="11" height="13" rx="1" data-tip="bucket 33: 5 events&#10;1810–2560 ms"><title>bucket 33: 5 events, 1810–2560 ms</title></rect>
+<rect class="hc-h2" x="466" y="74" width="11" height="13" rx="1" data-tip="bucket 33: 2 events&#10;2560–3620 ms"><title>bucket 33: 2 events, 2560–3620 ms</title></rect>
+<rect class="hc-h1" x="478" y="298" width="11" height="13" rx="1" data-tip="bucket 34: 1 events&#10;10–14 ms"><title>bucket 34: 1 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="478" y="284" width="11" height="13" rx="1" data-tip="bucket 34: 12 events&#10;14–20 ms"><title>bucket 34: 12 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="478" y="270" width="11" height="13" rx="1" data-tip="bucket 34: 52 events&#10;20–28 ms"><title>bucket 34: 52 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="478" y="256" width="11" height="13" rx="1" data-tip="bucket 34: 99 events&#10;28–40 ms"><title>bucket 34: 99 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="478" y="242" width="11" height="13" rx="1" data-tip="bucket 34: 129 events&#10;40–57 ms"><title>bucket 34: 129 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="478" y="228" width="11" height="13" rx="1" data-tip="bucket 34: 84 events&#10;57–80 ms"><title>bucket 34: 84 events, 57–80 ms</title></rect>
+<rect class="hc-h6" x="478" y="214" width="11" height="13" rx="1" data-tip="bucket 34: 35 events&#10;80–113 ms"><title>bucket 34: 35 events, 80–113 ms</title></rect>
+<rect class="hc-h3" x="478" y="200" width="11" height="13" rx="1" data-tip="bucket 34: 7 events&#10;113–160 ms"><title>bucket 34: 7 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="478" y="186" width="11" height="13" rx="1" data-tip="bucket 34: 1 events&#10;160–226 ms"><title>bucket 34: 1 events, 160–226 ms</title></rect>
+<rect class="hc-h1" x="478" y="130" width="11" height="13" rx="1" data-tip="bucket 34: 1 events&#10;640–905 ms"><title>bucket 34: 1 events, 640–905 ms</title></rect>
+<rect class="hc-h5" x="478" y="116" width="11" height="13" rx="1" data-tip="bucket 34: 25 events&#10;905–1280 ms"><title>bucket 34: 25 events, 905–1280 ms</title></rect>
+<rect class="hc-h5" x="478" y="102" width="11" height="13" rx="1" data-tip="bucket 34: 21 events&#10;1280–1810 ms"><title>bucket 34: 21 events, 1280–1810 ms</title></rect>
+<rect class="hc-h4" x="478" y="88" width="11" height="13" rx="1" data-tip="bucket 34: 8 events&#10;1810–2560 ms"><title>bucket 34: 8 events, 1810–2560 ms</title></rect>
+<rect class="hc-h2" x="490" y="298" width="11" height="13" rx="1" data-tip="bucket 35: 3 events&#10;10–14 ms"><title>bucket 35: 3 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="490" y="284" width="11" height="13" rx="1" data-tip="bucket 35: 12 events&#10;14–20 ms"><title>bucket 35: 12 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="490" y="270" width="11" height="13" rx="1" data-tip="bucket 35: 46 events&#10;20–28 ms"><title>bucket 35: 46 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="490" y="256" width="11" height="13" rx="1" data-tip="bucket 35: 102 events&#10;28–40 ms"><title>bucket 35: 102 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="490" y="242" width="11" height="13" rx="1" data-tip="bucket 35: 144 events&#10;40–57 ms"><title>bucket 35: 144 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="490" y="228" width="11" height="13" rx="1" data-tip="bucket 35: 72 events&#10;57–80 ms"><title>bucket 35: 72 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="490" y="214" width="11" height="13" rx="1" data-tip="bucket 35: 30 events&#10;80–113 ms"><title>bucket 35: 30 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="490" y="200" width="11" height="13" rx="1" data-tip="bucket 35: 11 events&#10;113–160 ms"><title>bucket 35: 11 events, 113–160 ms</title></rect>
+<rect class="hc-h3" x="490" y="130" width="11" height="13" rx="1" data-tip="bucket 35: 4 events&#10;640–905 ms"><title>bucket 35: 4 events, 640–905 ms</title></rect>
+<rect class="hc-h5" x="490" y="116" width="11" height="13" rx="1" data-tip="bucket 35: 19 events&#10;905–1280 ms"><title>bucket 35: 19 events, 905–1280 ms</title></rect>
+<rect class="hc-h5" x="490" y="102" width="11" height="13" rx="1" data-tip="bucket 35: 23 events&#10;1280–1810 ms"><title>bucket 35: 23 events, 1280–1810 ms</title></rect>
+<rect class="hc-h4" x="490" y="88" width="11" height="13" rx="1" data-tip="bucket 35: 8 events&#10;1810–2560 ms"><title>bucket 35: 8 events, 1810–2560 ms</title></rect>
+<rect class="hc-h1" x="490" y="74" width="11" height="13" rx="1" data-tip="bucket 35: 1 events&#10;2560–3620 ms"><title>bucket 35: 1 events, 2560–3620 ms</title></rect>
+<rect class="hc-h2" x="502" y="298" width="11" height="13" rx="1" data-tip="bucket 36: 2 events&#10;10–14 ms"><title>bucket 36: 2 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="502" y="284" width="11" height="13" rx="1" data-tip="bucket 36: 8 events&#10;14–20 ms"><title>bucket 36: 8 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="502" y="270" width="11" height="13" rx="1" data-tip="bucket 36: 51 events&#10;20–28 ms"><title>bucket 36: 51 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="502" y="256" width="11" height="13" rx="1" data-tip="bucket 36: 85 events&#10;28–40 ms"><title>bucket 36: 85 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="502" y="242" width="11" height="13" rx="1" data-tip="bucket 36: 135 events&#10;40–57 ms"><title>bucket 36: 135 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="502" y="228" width="11" height="13" rx="1" data-tip="bucket 36: 87 events&#10;57–80 ms"><title>bucket 36: 87 events, 57–80 ms</title></rect>
+<rect class="hc-h6" x="502" y="214" width="11" height="13" rx="1" data-tip="bucket 36: 42 events&#10;80–113 ms"><title>bucket 36: 42 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="502" y="200" width="11" height="13" rx="1" data-tip="bucket 36: 10 events&#10;113–160 ms"><title>bucket 36: 10 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="502" y="144" width="11" height="13" rx="1" data-tip="bucket 36: 1 events&#10;453–640 ms"><title>bucket 36: 1 events, 453–640 ms</title></rect>
+<rect class="hc-h3" x="502" y="130" width="11" height="13" rx="1" data-tip="bucket 36: 4 events&#10;640–905 ms"><title>bucket 36: 4 events, 640–905 ms</title></rect>
+<rect class="hc-h5" x="502" y="116" width="11" height="13" rx="1" data-tip="bucket 36: 19 events&#10;905–1280 ms"><title>bucket 36: 19 events, 905–1280 ms</title></rect>
+<rect class="hc-h5" x="502" y="102" width="11" height="13" rx="1" data-tip="bucket 36: 22 events&#10;1280–1810 ms"><title>bucket 36: 22 events, 1280–1810 ms</title></rect>
+<rect class="hc-h4" x="502" y="88" width="11" height="13" rx="1" data-tip="bucket 36: 9 events&#10;1810–2560 ms"><title>bucket 36: 9 events, 1810–2560 ms</title></rect>
+<rect class="hc-h2" x="514" y="298" width="11" height="13" rx="1" data-tip="bucket 37: 2 events&#10;10–14 ms"><title>bucket 37: 2 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="514" y="284" width="11" height="13" rx="1" data-tip="bucket 37: 11 events&#10;14–20 ms"><title>bucket 37: 11 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="514" y="270" width="11" height="13" rx="1" data-tip="bucket 37: 50 events&#10;20–28 ms"><title>bucket 37: 50 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="514" y="256" width="11" height="13" rx="1" data-tip="bucket 37: 107 events&#10;28–40 ms"><title>bucket 37: 107 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="514" y="242" width="11" height="13" rx="1" data-tip="bucket 37: 119 events&#10;40–57 ms"><title>bucket 37: 119 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="514" y="228" width="11" height="13" rx="1" data-tip="bucket 37: 90 events&#10;57–80 ms"><title>bucket 37: 90 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="514" y="214" width="11" height="13" rx="1" data-tip="bucket 37: 31 events&#10;80–113 ms"><title>bucket 37: 31 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="514" y="200" width="11" height="13" rx="1" data-tip="bucket 37: 9 events&#10;113–160 ms"><title>bucket 37: 9 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="514" y="186" width="11" height="13" rx="1" data-tip="bucket 37: 1 events&#10;160–226 ms"><title>bucket 37: 1 events, 160–226 ms</title></rect>
+<rect class="hc-h2" x="514" y="130" width="11" height="13" rx="1" data-tip="bucket 37: 2 events&#10;640–905 ms"><title>bucket 37: 2 events, 640–905 ms</title></rect>
+<rect class="hc-h5" x="514" y="116" width="11" height="13" rx="1" data-tip="bucket 37: 17 events&#10;905–1280 ms"><title>bucket 37: 17 events, 905–1280 ms</title></rect>
+<rect class="hc-h5" x="514" y="102" width="11" height="13" rx="1" data-tip="bucket 37: 31 events&#10;1280–1810 ms"><title>bucket 37: 31 events, 1280–1810 ms</title></rect>
+<rect class="hc-h3" x="514" y="88" width="11" height="13" rx="1" data-tip="bucket 37: 4 events&#10;1810–2560 ms"><title>bucket 37: 4 events, 1810–2560 ms</title></rect>
+<rect class="hc-h1" x="514" y="74" width="11" height="13" rx="1" data-tip="bucket 37: 1 events&#10;2560–3620 ms"><title>bucket 37: 1 events, 2560–3620 ms</title></rect>
+<rect class="hc-h1" x="526" y="298" width="11" height="13" rx="1" data-tip="bucket 38: 1 events&#10;10–14 ms"><title>bucket 38: 1 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="526" y="284" width="11" height="13" rx="1" data-tip="bucket 38: 14 events&#10;14–20 ms"><title>bucket 38: 14 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="526" y="270" width="11" height="13" rx="1" data-tip="bucket 38: 42 events&#10;20–28 ms"><title>bucket 38: 42 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="526" y="256" width="11" height="13" rx="1" data-tip="bucket 38: 97 events&#10;28–40 ms"><title>bucket 38: 97 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="526" y="242" width="11" height="13" rx="1" data-tip="bucket 38: 130 events&#10;40–57 ms"><title>bucket 38: 130 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="526" y="228" width="11" height="13" rx="1" data-tip="bucket 38: 91 events&#10;57–80 ms"><title>bucket 38: 91 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="526" y="214" width="11" height="13" rx="1" data-tip="bucket 38: 34 events&#10;80–113 ms"><title>bucket 38: 34 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="526" y="200" width="11" height="13" rx="1" data-tip="bucket 38: 11 events&#10;113–160 ms"><title>bucket 38: 11 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="526" y="130" width="11" height="13" rx="1" data-tip="bucket 38: 3 events&#10;640–905 ms"><title>bucket 38: 3 events, 640–905 ms</title></rect>
+<rect class="hc-h5" x="526" y="116" width="11" height="13" rx="1" data-tip="bucket 38: 17 events&#10;905–1280 ms"><title>bucket 38: 17 events, 905–1280 ms</title></rect>
+<rect class="hc-h5" x="526" y="102" width="11" height="13" rx="1" data-tip="bucket 38: 31 events&#10;1280–1810 ms"><title>bucket 38: 31 events, 1280–1810 ms</title></rect>
+<rect class="hc-h3" x="526" y="88" width="11" height="13" rx="1" data-tip="bucket 38: 4 events&#10;1810–2560 ms"><title>bucket 38: 4 events, 1810–2560 ms</title></rect>
+<rect class="hc-h3" x="538" y="298" width="11" height="13" rx="1" data-tip="bucket 39: 5 events&#10;10–14 ms"><title>bucket 39: 5 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="538" y="284" width="11" height="13" rx="1" data-tip="bucket 39: 10 events&#10;14–20 ms"><title>bucket 39: 10 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="538" y="270" width="11" height="13" rx="1" data-tip="bucket 39: 48 events&#10;20–28 ms"><title>bucket 39: 48 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="538" y="256" width="11" height="13" rx="1" data-tip="bucket 39: 103 events&#10;28–40 ms"><title>bucket 39: 103 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="538" y="242" width="11" height="13" rx="1" data-tip="bucket 39: 120 events&#10;40–57 ms"><title>bucket 39: 120 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="538" y="228" width="11" height="13" rx="1" data-tip="bucket 39: 79 events&#10;57–80 ms"><title>bucket 39: 79 events, 57–80 ms</title></rect>
+<rect class="hc-h6" x="538" y="214" width="11" height="13" rx="1" data-tip="bucket 39: 43 events&#10;80–113 ms"><title>bucket 39: 43 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="538" y="200" width="11" height="13" rx="1" data-tip="bucket 39: 10 events&#10;113–160 ms"><title>bucket 39: 10 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="538" y="186" width="11" height="13" rx="1" data-tip="bucket 39: 2 events&#10;160–226 ms"><title>bucket 39: 2 events, 160–226 ms</title></rect>
+<rect class="hc-h1" x="550" y="298" width="11" height="13" rx="1" data-tip="bucket 40: 1 events&#10;10–14 ms"><title>bucket 40: 1 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="550" y="284" width="11" height="13" rx="1" data-tip="bucket 40: 16 events&#10;14–20 ms"><title>bucket 40: 16 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="550" y="270" width="11" height="13" rx="1" data-tip="bucket 40: 43 events&#10;20–28 ms"><title>bucket 40: 43 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="550" y="256" width="11" height="13" rx="1" data-tip="bucket 40: 128 events&#10;28–40 ms"><title>bucket 40: 128 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="550" y="242" width="11" height="13" rx="1" data-tip="bucket 40: 105 events&#10;40–57 ms"><title>bucket 40: 105 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="550" y="228" width="11" height="13" rx="1" data-tip="bucket 40: 88 events&#10;57–80 ms"><title>bucket 40: 88 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="550" y="214" width="11" height="13" rx="1" data-tip="bucket 40: 32 events&#10;80–113 ms"><title>bucket 40: 32 events, 80–113 ms</title></rect>
+<rect class="hc-h3" x="550" y="200" width="11" height="13" rx="1" data-tip="bucket 40: 6 events&#10;113–160 ms"><title>bucket 40: 6 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="550" y="186" width="11" height="13" rx="1" data-tip="bucket 40: 1 events&#10;160–226 ms"><title>bucket 40: 1 events, 160–226 ms</title></rect>
+<rect class="hc-h2" x="562" y="298" width="11" height="13" rx="1" data-tip="bucket 41: 3 events&#10;10–14 ms"><title>bucket 41: 3 events, 10–14 ms</title></rect>
+<rect class="hc-h5" x="562" y="284" width="11" height="13" rx="1" data-tip="bucket 41: 19 events&#10;14–20 ms"><title>bucket 41: 19 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="562" y="270" width="11" height="13" rx="1" data-tip="bucket 41: 50 events&#10;20–28 ms"><title>bucket 41: 50 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="562" y="256" width="11" height="13" rx="1" data-tip="bucket 41: 105 events&#10;28–40 ms"><title>bucket 41: 105 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="562" y="242" width="11" height="13" rx="1" data-tip="bucket 41: 135 events&#10;40–57 ms"><title>bucket 41: 135 events, 40–57 ms</title></rect>
+<rect class="hc-h6" x="562" y="228" width="11" height="13" rx="1" data-tip="bucket 41: 69 events&#10;57–80 ms"><title>bucket 41: 69 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="562" y="214" width="11" height="13" rx="1" data-tip="bucket 41: 32 events&#10;80–113 ms"><title>bucket 41: 32 events, 80–113 ms</title></rect>
+<rect class="hc-h3" x="562" y="200" width="11" height="13" rx="1" data-tip="bucket 41: 6 events&#10;113–160 ms"><title>bucket 41: 6 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="562" y="186" width="11" height="13" rx="1" data-tip="bucket 41: 1 events&#10;160–226 ms"><title>bucket 41: 1 events, 160–226 ms</title></rect>
+<rect class="hc-h2" x="574" y="298" width="11" height="13" rx="1" data-tip="bucket 42: 2 events&#10;10–14 ms"><title>bucket 42: 2 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="574" y="284" width="11" height="13" rx="1" data-tip="bucket 42: 10 events&#10;14–20 ms"><title>bucket 42: 10 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="574" y="270" width="11" height="13" rx="1" data-tip="bucket 42: 45 events&#10;20–28 ms"><title>bucket 42: 45 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="574" y="256" width="11" height="13" rx="1" data-tip="bucket 42: 111 events&#10;28–40 ms"><title>bucket 42: 111 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="574" y="242" width="11" height="13" rx="1" data-tip="bucket 42: 126 events&#10;40–57 ms"><title>bucket 42: 126 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="574" y="228" width="11" height="13" rx="1" data-tip="bucket 42: 86 events&#10;57–80 ms"><title>bucket 42: 86 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="574" y="214" width="11" height="13" rx="1" data-tip="bucket 42: 27 events&#10;80–113 ms"><title>bucket 42: 27 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="574" y="200" width="11" height="13" rx="1" data-tip="bucket 42: 12 events&#10;113–160 ms"><title>bucket 42: 12 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="574" y="186" width="11" height="13" rx="1" data-tip="bucket 42: 1 events&#10;160–226 ms"><title>bucket 42: 1 events, 160–226 ms</title></rect>
+<rect class="hc-h1" x="586" y="298" width="11" height="13" rx="1" data-tip="bucket 43: 1 events&#10;10–14 ms"><title>bucket 43: 1 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="586" y="284" width="11" height="13" rx="1" data-tip="bucket 43: 14 events&#10;14–20 ms"><title>bucket 43: 14 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="586" y="270" width="11" height="13" rx="1" data-tip="bucket 43: 50 events&#10;20–28 ms"><title>bucket 43: 50 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="586" y="256" width="11" height="13" rx="1" data-tip="bucket 43: 97 events&#10;28–40 ms"><title>bucket 43: 97 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="586" y="242" width="11" height="13" rx="1" data-tip="bucket 43: 135 events&#10;40–57 ms"><title>bucket 43: 135 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="586" y="228" width="11" height="13" rx="1" data-tip="bucket 43: 81 events&#10;57–80 ms"><title>bucket 43: 81 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="586" y="214" width="11" height="13" rx="1" data-tip="bucket 43: 28 events&#10;80–113 ms"><title>bucket 43: 28 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="586" y="200" width="11" height="13" rx="1" data-tip="bucket 43: 13 events&#10;113–160 ms"><title>bucket 43: 13 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="586" y="186" width="11" height="13" rx="1" data-tip="bucket 43: 1 events&#10;160–226 ms"><title>bucket 43: 1 events, 160–226 ms</title></rect>
+<rect class="hc-h2" x="598" y="298" width="11" height="13" rx="1" data-tip="bucket 44: 3 events&#10;10–14 ms"><title>bucket 44: 3 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="598" y="284" width="11" height="13" rx="1" data-tip="bucket 44: 15 events&#10;14–20 ms"><title>bucket 44: 15 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="598" y="270" width="11" height="13" rx="1" data-tip="bucket 44: 53 events&#10;20–28 ms"><title>bucket 44: 53 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="598" y="256" width="11" height="13" rx="1" data-tip="bucket 44: 87 events&#10;28–40 ms"><title>bucket 44: 87 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="598" y="242" width="11" height="13" rx="1" data-tip="bucket 44: 133 events&#10;40–57 ms"><title>bucket 44: 133 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="598" y="228" width="11" height="13" rx="1" data-tip="bucket 44: 89 events&#10;57–80 ms"><title>bucket 44: 89 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="598" y="214" width="11" height="13" rx="1" data-tip="bucket 44: 29 events&#10;80–113 ms"><title>bucket 44: 29 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="598" y="200" width="11" height="13" rx="1" data-tip="bucket 44: 10 events&#10;113–160 ms"><title>bucket 44: 10 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="598" y="186" width="11" height="13" rx="1" data-tip="bucket 44: 1 events&#10;160–226 ms"><title>bucket 44: 1 events, 160–226 ms</title></rect>
+<rect class="hc-h1" x="610" y="298" width="11" height="13" rx="1" data-tip="bucket 45: 1 events&#10;10–14 ms"><title>bucket 45: 1 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="610" y="284" width="11" height="13" rx="1" data-tip="bucket 45: 8 events&#10;14–20 ms"><title>bucket 45: 8 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="610" y="270" width="11" height="13" rx="1" data-tip="bucket 45: 48 events&#10;20–28 ms"><title>bucket 45: 48 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="610" y="256" width="11" height="13" rx="1" data-tip="bucket 45: 110 events&#10;28–40 ms"><title>bucket 45: 110 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="610" y="242" width="11" height="13" rx="1" data-tip="bucket 45: 126 events&#10;40–57 ms"><title>bucket 45: 126 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="610" y="228" width="11" height="13" rx="1" data-tip="bucket 45: 79 events&#10;57–80 ms"><title>bucket 45: 79 events, 57–80 ms</title></rect>
+<rect class="hc-h6" x="610" y="214" width="11" height="13" rx="1" data-tip="bucket 45: 41 events&#10;80–113 ms"><title>bucket 45: 41 events, 80–113 ms</title></rect>
+<rect class="hc-h3" x="610" y="200" width="11" height="13" rx="1" data-tip="bucket 45: 5 events&#10;113–160 ms"><title>bucket 45: 5 events, 113–160 ms</title></rect>
+<rect class="hc-h2" x="610" y="186" width="11" height="13" rx="1" data-tip="bucket 45: 2 events&#10;160–226 ms"><title>bucket 45: 2 events, 160–226 ms</title></rect>
+<rect class="hc-h4" x="622" y="284" width="11" height="13" rx="1" data-tip="bucket 46: 14 events&#10;14–20 ms"><title>bucket 46: 14 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="622" y="270" width="11" height="13" rx="1" data-tip="bucket 46: 47 events&#10;20–28 ms"><title>bucket 46: 47 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="622" y="256" width="11" height="13" rx="1" data-tip="bucket 46: 101 events&#10;28–40 ms"><title>bucket 46: 101 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="622" y="242" width="11" height="13" rx="1" data-tip="bucket 46: 131 events&#10;40–57 ms"><title>bucket 46: 131 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="622" y="228" width="11" height="13" rx="1" data-tip="bucket 46: 87 events&#10;57–80 ms"><title>bucket 46: 87 events, 57–80 ms</title></rect>
+<rect class="hc-h6" x="622" y="214" width="11" height="13" rx="1" data-tip="bucket 46: 35 events&#10;80–113 ms"><title>bucket 46: 35 events, 80–113 ms</title></rect>
+<rect class="hc-h3" x="622" y="200" width="11" height="13" rx="1" data-tip="bucket 46: 5 events&#10;113–160 ms"><title>bucket 46: 5 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="634" y="298" width="11" height="13" rx="1" data-tip="bucket 47: 1 events&#10;10–14 ms"><title>bucket 47: 1 events, 10–14 ms</title></rect>
+<rect class="hc-h4" x="634" y="284" width="11" height="13" rx="1" data-tip="bucket 47: 12 events&#10;14–20 ms"><title>bucket 47: 12 events, 14–20 ms</title></rect>
+<rect class="hc-h6" x="634" y="270" width="11" height="13" rx="1" data-tip="bucket 47: 50 events&#10;20–28 ms"><title>bucket 47: 50 events, 20–28 ms</title></rect>
+<rect class="hc-h7" x="634" y="256" width="11" height="13" rx="1" data-tip="bucket 47: 105 events&#10;28–40 ms"><title>bucket 47: 105 events, 28–40 ms</title></rect>
+<rect class="hc-h7" x="634" y="242" width="11" height="13" rx="1" data-tip="bucket 47: 127 events&#10;40–57 ms"><title>bucket 47: 127 events, 40–57 ms</title></rect>
+<rect class="hc-h7" x="634" y="228" width="11" height="13" rx="1" data-tip="bucket 47: 84 events&#10;57–80 ms"><title>bucket 47: 84 events, 57–80 ms</title></rect>
+<rect class="hc-h5" x="634" y="214" width="11" height="13" rx="1" data-tip="bucket 47: 32 events&#10;80–113 ms"><title>bucket 47: 32 events, 80–113 ms</title></rect>
+<rect class="hc-h4" x="634" y="200" width="11" height="13" rx="1" data-tip="bucket 47: 8 events&#10;113–160 ms"><title>bucket 47: 8 events, 113–160 ms</title></rect>
+<rect class="hc-h1" x="634" y="186" width="11" height="13" rx="1" data-tip="bucket 47: 1 events&#10;160–226 ms"><title>bucket 47: 1 events, 160–226 ms</title></rect>
+<text class="hc-tick hc-tick-end" x="64" y="316.0">10 ms</text>
+<line class="hc-grid" x1="70" y1="312.0" x2="646" y2="312.0"/>
+<text class="hc-tick hc-tick-end" x="64" y="223.0">100 ms</text>
+<line class="hc-grid" x1="70" y1="219.0" x2="646" y2="219.0"/>
+<text class="hc-tick hc-tick-end" x="64" y="130.0">1 s</text>
+<line class="hc-grid" x1="70" y1="126.0" x2="646" y2="126.0"/>
+<line class="hc-axis" x1="70" y1="312" x2="646" y2="312"/>
+<text class="hc-tick hc-tick-mid" x="76.0" y="328">−118 min</text>
+<text class="hc-tick hc-tick-mid" x="220.0" y="328">−88 min</text>
+<text class="hc-tick hc-tick-mid" x="364.0" y="328">−58 min</text>
+<text class="hc-tick hc-tick-mid" x="508.0" y="328">−28 min</text>
+<text class="hc-tick hc-tick-mid" x="640.0" y="328">now</text>
+<rect class="hc-selection" x="428" y="72" width="111" height="73" rx="3"><title>Selection: the slow band, buckets 30 to 38, about 0.7 to 3 s</title></rect>
+<text class="hc-annot" x="546" y="86">selection</text>
+<text class="hc-annot-muted" x="546" y="102">BubbleUp compares</text>
+<text class="hc-annot-muted" x="546" y="116">it with the rest</text>
+</svg>
+</div>
+<ul class="hc-legend"><li><span class="hc-key hc-key-ramp"></span>Events per cell, few to many</li><li><span class="hc-key hc-key-2"></span>Selection</li></ul>
+<figcaption>"Heatmaps show the statistical distribution of the values in a dataset field over time. ... Each of the vertical columns in that graph is a histogram for that time bucket" <a class="src" href="sources.html#s-docs-visualize">docs-visualize</a>. On a tracing dataset, clicking a cell opens a matching trace <a class="src" href="sources.html#s-docs-visualize">docs-visualize</a>. Synthetic data; hover a cell for its count.</figcaption>
+</figure>
+<p>A heatmap shows what a percentile line hides: here the median barely moves, but a second population of requests near a second and a half appears for twenty minutes. Drawing a box around it starts BubbleUp: "BubbleUp computes the values of all dimensions both inside the box (the anomaly you care about and want to explain) and outside the box (the baseline), and then compares the two and sorts the resulting view by percent of differences" <span class="prov prov-doc">documented</span> <a class="src" href="sources.html#s-docs-core-loop">docs-core-loop</a>.</p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="chart hc-chart-dense" viewBox="0 0 900 300" role="img" aria-labelledby="bu-title bu-desc">
+<title id="bu-title">BubbleUp: selection against baseline for three fields</title>
+<desc id="bu-desc">Synthetic BubbleUp result. cloud.region: 92 percent of selected events are eu-west-1 against 31 percent of the baseline. app.build_id: 88 percent of the selection is build a91f3c against 12 percent. http.route: the selection and baseline are almost identical. Fields are ranked by how much they differ, so region and build come first.</desc>
+<text class="hc-chart-title" x="20" y="24">BubbleUp, synthetic: what is different about the selection?</text>
+<text class="hc-chart-sub" x="20" y="42">Share of events with each value, selection against baseline; fields sorted by difference</text>
+<text class="hc-annot" x="20" y="72"><tspan font-weight="700">cloud.region</tspan> · ranked 1st</text>
+<text class="hc-annot-muted" x="20" y="100">eu-west-1</text>
+<path class="hc-fill-2" d="M20,106 h199.4 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-199.4 z" data-tip="cloud.region = eu-west-1&#10;selection 92%"><title>cloud.region = eu-west-1: selection 92%</title></path>
+<path class="hc-fill-1" d="M20,120 h65.2 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-65.2 z" data-tip="cloud.region = eu-west-1&#10;baseline 31%"><title>cloud.region = eu-west-1: baseline 31%</title></path>
+<text class="hc-annot" x="228.4" y="115">92%</text>
+<text class="hc-annot-muted" x="94.2" y="129">31%</text>
+<text class="hc-annot-muted" x="20" y="162">us-east-1</text>
+<path class="hc-fill-2" d="M20,168 h10.2 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-10.2 z" data-tip="cloud.region = us-east-1&#10;selection 6%"><title>cloud.region = us-east-1: selection 6%</title></path>
+<path class="hc-fill-1" d="M20,182 h102.6 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-102.6 z" data-tip="cloud.region = us-east-1&#10;baseline 48%"><title>cloud.region = us-east-1: baseline 48%</title></path>
+<text class="hc-annot" x="39.2" y="177">6%</text>
+<text class="hc-annot-muted" x="131.6" y="191">48%</text>
+<text class="hc-annot-muted" x="20" y="224">ap-south-1</text>
+<path class="hc-fill-2" d="M20,230 h1.4 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-1.4 z" data-tip="cloud.region = ap-south-1&#10;selection 2%"><title>cloud.region = ap-south-1: selection 2%</title></path>
+<path class="hc-fill-1" d="M20,244 h43.2 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-43.2 z" data-tip="cloud.region = ap-south-1&#10;baseline 21%"><title>cloud.region = ap-south-1: baseline 21%</title></path>
+<text class="hc-annot" x="30.4" y="239">2%</text>
+<text class="hc-annot-muted" x="72.2" y="253">21%</text>
+<text class="hc-annot" x="315" y="72"><tspan font-weight="700">app.build_id</tspan> · ranked 2nd</text>
+<text class="hc-annot-muted" x="315" y="100">…a91f3c</text>
+<path class="hc-fill-2" d="M315,106 h190.6 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-190.6 z" data-tip="app.build_id = …a91f3c&#10;selection 88%"><title>app.build_id = …a91f3c: selection 88%</title></path>
+<path class="hc-fill-1" d="M315,120 h23.4 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-23.4 z" data-tip="app.build_id = …a91f3c&#10;baseline 12%"><title>app.build_id = …a91f3c: baseline 12%</title></path>
+<text class="hc-annot" x="514.6" y="115">88%</text>
+<text class="hc-annot-muted" x="347.4" y="129">12%</text>
+<text class="hc-annot-muted" x="315" y="162">…77d0b2</text>
+<path class="hc-fill-2" d="M315,168 h19.0 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-19.0 z" data-tip="app.build_id = …77d0b2&#10;selection 10%"><title>app.build_id = …77d0b2: selection 10%</title></path>
+<path class="hc-fill-1" d="M315,182 h151.0 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-151.0 z" data-tip="app.build_id = …77d0b2&#10;baseline 70%"><title>app.build_id = …77d0b2: baseline 70%</title></path>
+<text class="hc-annot" x="343.0" y="177">10%</text>
+<text class="hc-annot-muted" x="475.0" y="191">70%</text>
+<text class="hc-annot-muted" x="315" y="224">…5e19aa</text>
+<path class="hc-fill-2" d="M315,230 h1.4 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-1.4 z" data-tip="app.build_id = …5e19aa&#10;selection 2%"><title>app.build_id = …5e19aa: selection 2%</title></path>
+<path class="hc-fill-1" d="M315,244 h36.6 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-36.6 z" data-tip="app.build_id = …5e19aa&#10;baseline 18%"><title>app.build_id = …5e19aa: baseline 18%</title></path>
+<text class="hc-annot" x="325.4" y="239">2%</text>
+<text class="hc-annot-muted" x="360.6" y="253">18%</text>
+<text class="hc-annot" x="610" y="72"><tspan font-weight="700">http.route</tspan> · ranked 3rd</text>
+<text class="hc-annot-muted" x="610" y="100">/cart/checkout</text>
+<path class="hc-fill-2" d="M610,106 h100.4 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-100.4 z" data-tip="http.route = /cart/checkout&#10;selection 47%"><title>http.route = /cart/checkout: selection 47%</title></path>
+<path class="hc-fill-1" d="M610,120 h93.8 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-93.8 z" data-tip="http.route = /cart/checkout&#10;baseline 44%"><title>http.route = /cart/checkout: baseline 44%</title></path>
+<text class="hc-annot" x="719.4" y="115">47%</text>
+<text class="hc-annot-muted" x="712.8" y="129">44%</text>
+<text class="hc-annot-muted" x="610" y="162">/cart</text>
+<path class="hc-fill-2" d="M610,168 h69.6 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-69.6 z" data-tip="http.route = /cart&#10;selection 33%"><title>http.route = /cart: selection 33%</title></path>
+<path class="hc-fill-1" d="M610,182 h74.0 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-74.0 z" data-tip="http.route = /cart&#10;baseline 35%"><title>http.route = /cart: baseline 35%</title></path>
+<text class="hc-annot" x="688.6" y="177">33%</text>
+<text class="hc-annot-muted" x="693.0" y="191">35%</text>
+<text class="hc-annot-muted" x="610" y="224">/home</text>
+<path class="hc-fill-2" d="M610,230 h41.0 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-41.0 z" data-tip="http.route = /home&#10;selection 20%"><title>http.route = /home: selection 20%</title></path>
+<path class="hc-fill-1" d="M610,244 h43.2 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-43.2 z" data-tip="http.route = /home&#10;baseline 21%"><title>http.route = /home: baseline 21%</title></path>
+<text class="hc-annot" x="660.0" y="239">20%</text>
+<text class="hc-annot-muted" x="662.2" y="253">21%</text>
+</svg>
+</div>
+<ul class="hc-legend"><li><span class="hc-key hc-key-2"></span>Selection</li><li><span class="hc-key hc-key-1"></span>Baseline</li></ul>
+<figcaption>Synthetic result for the selection above: the slow requests are almost all in one region and one build, while the route looks like the baseline. In Honeycomb the selection is drawn in yellow and the baseline in blue; each field gets its own chart of at most 75 values <a class="src" href="sources.html#s-docs-bubbleup">docs-bubbleup</a>.</figcaption>
+<details class="hc-data"><summary>Table view</summary>
+<div class="table-wrap"><table>
+<thead><tr><th>Field</th><th>Value</th><th class="num">Selection</th><th class="num">Baseline</th></tr></thead>
+<tbody>
+<tr><td>cloud.region</td><td>eu-west-1</td><td class="num">92%</td><td class="num">31%</td></tr>
+<tr><td>cloud.region</td><td>us-east-1</td><td class="num">6%</td><td class="num">48%</td></tr>
+<tr><td>cloud.region</td><td>ap-south-1</td><td class="num">2%</td><td class="num">21%</td></tr>
+<tr><td>app.build_id</td><td>…a91f3c</td><td class="num">88%</td><td class="num">12%</td></tr>
+<tr><td>app.build_id</td><td>…77d0b2</td><td class="num">10%</td><td class="num">70%</td></tr>
+<tr><td>app.build_id</td><td>…5e19aa</td><td class="num">2%</td><td class="num">18%</td></tr>
+<tr><td>http.route</td><td>/cart/checkout</td><td class="num">47%</td><td class="num">44%</td></tr>
+<tr><td>http.route</td><td>/cart</td><td class="num">33%</td><td class="num">35%</td></tr>
+<tr><td>http.route</td><td>/home</td><td class="num">20%</td><td class="num">21%</td></tr>
+</tbody></table></div>
+</details>
+</figure>
+<ul>
+<li>BubbleUp came out of beta in early 2019 <a class="src" href="sources.html#s-blog-bubbleup-2019">blog-bubbleup-2019</a>; since October 2022 it starts from any query, a line on a grouped chart or a results row, not only a heatmap <a class="src" href="sources.html#s-blog-bubbleup-2022">blog-bubbleup-2022</a>.</li>
+<li>The scoring formula is not published: "sorts ... by percent of differences" is all the docs say <a class="src" href="sources.html#s-docs-core-loop">docs-core-loop</a>. Its designer described "five distinct code paths" for drawing different kinds of fields <a class="src" href="sources.html#s-fisher-bar-charts">fisher-bar-charts</a>.</li>
+<li>Its blind spot is high-cardinality fields: "dimensions with very high cardinality, like user ID, may not have a meaningful 'baseline' to establish difference from, so they may not be ranked highly". AI-written insights, added in 2026 for teams with Honeycomb Intelligence, summarise the strongest differences <span class="prov prov-stated">talk/blog</span> <a class="src" href="sources.html#s-blog-ai-bubbleup">blog-ai-bubbleup</a>.</li>
+<li>Agents can run it too, through the MCP server's <code>run_bubbleup</code> tool <a class="src" href="sources.html#s-blog-mcp-ga">blog-mcp-ga</a> <a class="src" href="sources.html#s-docs-mcp-tools">docs-mcp-tools</a>.</li>
+</ul>
+
+<h2 id="traces">Traces</h2>
+<p>The trace view shows a summary of up to six levels of span dependency, the waterfall, and a sidebar of each span's fields, span events and links; rows are coloured by <code>service.name</code> when a trace crosses services <span class="prov prov-doc">documented</span> <a class="src" href="sources.html#s-docs-explore-traces">docs-explore-traces</a>. A span with <code>gen_ai.operation.name</code> gets a Gen AI tab <a class="src" href="sources.html#s-docs-explore-traces">docs-explore-traces</a>. Relational fields such as <code>root.http.route</code> make queries trace-aware <a class="src" href="sources.html#s-docs-query-build">docs-query-build</a>. The <a href="data-model.html#trace">data model</a> page draws one trace as events.</p>
+
+<h2 id="service-map">Service Map</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1000 300" role="img" aria-labelledby="smap-title smap-desc">
+<title id="smap-title">How the Service Map is derived from spans</title>
+<desc id="smap-desc">Left: a trace whose frontend span calls a checkout span, which has a child checkout span and a payments span. Right: the edges drawn, frontend to checkout and checkout to payments; the checkout to checkout pair makes no edge.</desc>
+<defs><marker id="smap-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="32">Service Map: edges from parent and child spans</text>
+<g class="c4-container">
+<rect x="30" y="70" width="170" height="56" rx="8"/>
+<text class="c4-label" x="115.0" y="95.5">frontend span</text>
+<text class="c4-desc" x="115.0" y="111.5">GET /checkout</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="184" y="74" width="13" height="13" rx="3"/><text x="190.5" y="84">D</text></g>
+<g class="c4-container">
+<rect x="80" y="150" width="170" height="56" rx="8"/>
+<text class="c4-label" x="165.0" y="175.5">checkout span</text>
+<text class="c4-desc" x="165.0" y="191.5">POST /cart/checkout</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="234" y="154" width="13" height="13" rx="3"/><text x="240.5" y="164">D</text></g>
+<g class="c4-container">
+<rect x="130" y="230" width="150" height="50" rx="8"/>
+<text class="c4-label" x="205.0" y="252.5">checkout span</text>
+<text class="c4-desc" x="205.0" y="268.5">SELECT cart_items</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="264" y="234" width="13" height="13" rx="3"/><text x="270.5" y="244">D</text></g>
+<g class="c4-container">
+<rect x="300" y="230" width="150" height="50" rx="8"/>
+<text class="c4-label" x="375.0" y="252.5">payments span</text>
+<text class="c4-desc" x="375.0" y="268.5">charge card</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="434" y="234" width="13" height="13" rx="3"/><text x="440.5" y="244">D</text></g>
+<g class="c4-rel">
+<path d="M115,126 L140,150" marker-end="url(#smap-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M180,206 L200,230" marker-end="url(#smap-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M220,206 L360,230" marker-end="url(#smap-arrow)"/>
+</g>
+<text class="hc-note-strong" x="470" y="180">parent.service.name ≠ child.service.name</text>
+<text class="hc-note" x="470" y="196">→ draw an edge; same service → none</text>
+<g class="c4-system">
+<rect x="600" y="70" width="160" height="60" rx="8"/>
+<text class="c4-label" x="680.0" y="97.5">frontend</text>
+<text class="c4-desc" x="680.0" y="113.5">service</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="744" y="74" width="13" height="13" rx="3"/><text x="750.5" y="84">D</text></g>
+<g class="c4-system">
+<rect x="800" y="150" width="160" height="60" rx="8"/>
+<text class="c4-label" x="880.0" y="177.5">checkout</text>
+<text class="c4-desc" x="880.0" y="193.5">service</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="944" y="154" width="13" height="13" rx="3"/><text x="950.5" y="164">D</text></g>
+<g class="c4-system">
+<rect x="600" y="225" width="160" height="60" rx="8"/>
+<text class="c4-label" x="680.0" y="252.5">payments</text>
+<text class="c4-desc" x="680.0" y="268.5">service</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="744" y="229" width="13" height="13" rx="3"/><text x="750.5" y="239">D</text></g>
+<g class="c4-rel">
+<path d="M760,100 L820,150" marker-end="url(#smap-arrow)"/>
+<text class="c4-rel-label" x="805" y="118">edge</text>
+</g>
+<g class="c4-rel">
+<path d="M820,210 L760,240" marker-end="url(#smap-arrow)"/>
+<text class="c4-rel-label" x="805" y="238">edge</text>
+</g>
+</svg>
+</div>
+<figcaption>"If span A has <code>service.name = frontend</code> and a child span has <code>service.name = checkout</code>, Service Map draws an edge frontend → checkout." Same-service pairs, orphans, span events and links make no edge, and traces are sampled to build it <span class="prov prov-doc">documented</span> <a class="src" href="sources.html#s-docs-service-map-how">docs-service-map-how</a>.</figcaption>
+</figure>
+<p>It launched in October 2022 and became Enterprise-only after that year <a class="src" href="sources.html#s-blog-service-map">blog-service-map</a>. Internally a separate service consumes the ingest stream and records the edges <span class="prov prov-stated">talk/blog</span> <a class="src" href="sources.html#s-blog-service-map-iter">blog-service-map-iter</a>. Honeycomb's advice is to keep <code>service.name</code> deliberately coarse, "the identity you want on the map", and put pods and components in other attributes <a class="src" href="sources.html#s-docs-service-map-how">docs-service-map-how</a>.</p>
+
+<h2 id="slos">SLOs and burn alerts</h2>
+<p>An SLI is a calculated field that, "for each event in the Dataset, ... returns true (success), false (failure), or null (not applicable)", usually written <code>IF(qualifier, criterion)</code>; the SLO is a target proportion over a rolling window of days, and the error budget is counted in events <span class="prov prov-doc">documented</span> <a class="src" href="sources.html#s-docs-sli">docs-sli</a> <a class="src" href="sources.html#s-docs-slos">docs-slos</a>. Burn alerts come in two kinds: <strong>exhaustion time</strong>, "at risk of burning through its error budget within a specified number of hours", and <strong>budget rate</strong>, a drop of at least some percentage within a window <a class="src" href="sources.html#s-docs-slo-monitor">docs-slo-monitor</a>.</p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="chart hc-chart-dense" viewBox="0 0 960 360" role="img" aria-labelledby="slo-title slo-desc">
+<title id="slo-title">An SLO error budget burning, and a 4-hour exhaustion alert</title>
+<desc id="slo-desc">Synthetic. Over 72 hours an SLO budget falls slowly from 64 to 58 percent, then an incident from hour 48 burns 7 points an hour. At hour 53, extrapolating the last hour forward, the budget would be exhausted within 4 hours, so a 4-hour exhaustion-time burn alert fires.</desc>
+<text class="hc-chart-title" x="20" y="24">Error budget remaining, with a 4-hour exhaustion alert (synthetic)</text>
+<text class="hc-chart-sub" x="20" y="42">The alert extrapolates from a lookback one quarter of its horizon: a 4-hour alert looks at the last hour</text>
+<line class="hc-grid" x1="70" y1="290.0" x2="850" y2="290.0"/>
+<text class="hc-tick hc-tick-end" x="62" y="294.0">0%</text>
+<line class="hc-grid" x1="70" y1="232.5" x2="850" y2="232.5"/>
+<text class="hc-tick hc-tick-end" x="62" y="236.5">25%</text>
+<line class="hc-grid" x1="70" y1="175.0" x2="850" y2="175.0"/>
+<text class="hc-tick hc-tick-end" x="62" y="179.0">50%</text>
+<line class="hc-grid" x1="70" y1="117.5" x2="850" y2="117.5"/>
+<text class="hc-tick hc-tick-end" x="62" y="121.5">75%</text>
+<line class="hc-grid" x1="70" y1="60.0" x2="850" y2="60.0"/>
+<text class="hc-tick hc-tick-end" x="62" y="64.0">100%</text>
+<text class="hc-tick hc-tick-mid" x="70.0" y="308">0 h</text>
+<text class="hc-tick hc-tick-mid" x="200.0" y="308">12 h</text>
+<text class="hc-tick hc-tick-mid" x="330.0" y="308">24 h</text>
+<text class="hc-tick hc-tick-mid" x="460.0" y="308">36 h</text>
+<text class="hc-tick hc-tick-mid" x="590.0" y="308">48 h</text>
+<text class="hc-tick hc-tick-mid" x="720.0" y="308">60 h</text>
+<text class="hc-tick hc-tick-mid" x="850.0" y="308">72 h</text>
+<line class="hc-axis" x1="70" y1="290" x2="850" y2="290"/>
+<rect class="hc-band" x="633.3" y="60" width="10.8" height="230"><title>Lookback: the last hour</title></rect>
+<text class="hc-annot-muted hc-annot-end" x="629.3" y="74">last hour</text>
+<path class="hc-area-1" d="M70.0,290 L70.0,143.1 L80.8,143.4 L91.7,143.6 L102.5,143.9 L113.3,144.2 L124.2,144.5 L135.0,144.7 L145.8,145.0 L156.7,145.3 L167.5,145.6 L178.3,145.8 L189.2,146.1 L200.0,146.4 L210.8,146.7 L221.7,146.9 L232.5,147.2 L243.3,147.5 L254.2,147.8 L265.0,148.0 L275.8,148.3 L286.7,148.6 L297.5,148.9 L308.3,149.1 L319.2,149.4 L330.0,149.7 L340.8,150.0 L351.7,150.3 L362.5,150.5 L373.3,150.8 L384.2,151.1 L395.0,151.4 L405.8,151.6 L416.7,151.9 L427.5,152.2 L438.3,152.5 L449.2,152.7 L460.0,153.0 L470.8,153.3 L481.7,153.6 L492.5,153.8 L503.3,154.1 L514.2,154.4 L525.0,154.7 L535.8,154.9 L546.7,155.2 L557.5,155.5 L568.3,155.8 L579.2,156.0 L590.0,156.3 L600.8,172.4 L611.7,188.5 L622.5,204.6 L633.3,220.7 L644.2,236.8 L655.0,238.0 L665.8,239.1 L676.7,240.3 L687.5,241.4 L698.3,242.6 L709.2,243.7 L720.0,244.9 L730.8,246.0 L741.7,247.2 L752.5,248.3 L763.3,249.5 L774.2,250.6 L785.0,251.8 L795.8,252.9 L806.7,254.1 L817.5,255.2 L828.3,256.4 L839.2,257.5 L850.0,258.7 L850.0,290 Z"/>
+<path class="hc-line-1" d="M70.0,143.1 L80.8,143.4 L91.7,143.6 L102.5,143.9 L113.3,144.2 L124.2,144.5 L135.0,144.7 L145.8,145.0 L156.7,145.3 L167.5,145.6 L178.3,145.8 L189.2,146.1 L200.0,146.4 L210.8,146.7 L221.7,146.9 L232.5,147.2 L243.3,147.5 L254.2,147.8 L265.0,148.0 L275.8,148.3 L286.7,148.6 L297.5,148.9 L308.3,149.1 L319.2,149.4 L330.0,149.7 L340.8,150.0 L351.7,150.3 L362.5,150.5 L373.3,150.8 L384.2,151.1 L395.0,151.4 L405.8,151.6 L416.7,151.9 L427.5,152.2 L438.3,152.5 L449.2,152.7 L460.0,153.0 L470.8,153.3 L481.7,153.6 L492.5,153.8 L503.3,154.1 L514.2,154.4 L525.0,154.7 L535.8,154.9 L546.7,155.2 L557.5,155.5 L568.3,155.8 L579.2,156.0 L590.0,156.3 L600.8,172.4 L611.7,188.5 L622.5,204.6 L633.3,220.7 L644.2,236.8 L655.0,238.0 L665.8,239.1 L676.7,240.3 L687.5,241.4 L698.3,242.6 L709.2,243.7 L720.0,244.9 L730.8,246.0 L741.7,247.2 L752.5,248.3 L763.3,249.5 L774.2,250.6 L785.0,251.8 L795.8,252.9 L806.7,254.1 L817.5,255.2 L828.3,256.4 L839.2,257.5 L850.0,258.7"/>
+<path class="hc-line-critical" d="M644.2,236.8 L679.9,290.0"/>
+<circle class="hc-fill-critical hc-dot" cx="644.2" cy="236.8" r="6" data-tip="Hour 53: 23.1% left, burning 7.0 points an hour&#10;projected empty at hour 56.3, inside 4 hours: alert fires"><title>Hour 53: alert fires</title></circle>
+<text class="hc-annot" x="654.2" y="226.8">alert fires: empty in 3.3 h</text>
+<text class="hc-annot-muted" x="685.9" y="284.0">projected zero</text>
+<circle class="hc-fill-1 hc-dot" cx="330.0" cy="149.7" r="5" data-tip="Hour 24: 61.0% left&#10;slow burn, no alert"><title>Hour 24: slow burn</title></circle>
+</svg>
+</div>
+<ul class="hc-legend"><li><span class="hc-key hc-key-1 hc-key-line"></span>Budget remaining</li><li><span class="hc-key hc-key-critical hc-key-line"></span>Projection from the last hour</li></ul>
+<figcaption>Synthetic. "Honeycomb determines the extrapolation window by dividing the alert's Exhaustion Time by 4", and "aims to evaluate SLO Burn Alerts every minute" <a class="src" href="sources.html#s-docs-slo-monitor">docs-slo-monitor</a>. The 1:4 ratio comes from the 2020 design work: "a one-hour baseline would be used to predict four hours from now" <a class="src" href="sources.html#s-blog-slo-challenges">blog-slo-challenges</a>.</figcaption>
+</figure>
+<ul>
+<li><strong>Event-based, not window-based.</strong> "A bad minute where 50% of the events fail but only four events were seen won't alert you" <span class="prov prov-stated">talk/blog</span> <a class="src" href="sources.html#s-blog-budget-rate">blog-budget-rate</a>; the flip side is volume: "an SLO of 99.9% needs a minimum level of traffic of a few tens of thousands of events a day to be meaningful" <a class="src" href="sources.html#s-blog-slo-challenges">blog-slo-challenges</a>.</li>
+<li><strong>Built the expensive way first.</strong> The first alert loop re-queried at one-minute resolution every minute "and promptly arranged a $10,000 day of AWS spend on data retrieval"; the fix was a cache that never stores approximate results <a class="src" href="sources.html#s-blog-slo-challenges">blog-slo-challenges</a>. In 2021 the computation moved to Beagle, a stream processor <a class="src" href="sources.html#s-blog-beagle">blog-beagle</a>.</li>
+<li><strong>Budget-rate alerts</strong> arrived in November 2023 because exhaustion alerts went silent "once an organization's budget hit 0%" <a class="src" href="sources.html#s-blog-budget-rate">blog-budget-rate</a>.</li>
+<li><strong>Limits.</strong> Events more than 25 hours late are ignored <a class="src" href="sources.html#s-docs-slo-create">docs-slo-create</a>; one SLO per SLI; up to 10 services share one budget <a class="src" href="sources.html#s-docs-slo-practice">docs-slo-practice</a>; time-series metrics cannot back an SLO <a class="src" href="sources.html#s-docs-metrics-faq">docs-metrics-faq</a>. SLOs were Enterprise-only in 2020; Pro now includes two <a class="src" href="sources.html#s-wb-pricing-2020">wb-pricing-2020</a> <a class="src" href="sources.html#s-pricing">pricing</a>.</li>
+</ul>
+
+<h2 id="triggers">Triggers</h2>
+<p>A trigger is a scheduled query with a threshold: "a trigger with a duration of 5 minutes and a frequency of 2 minutes will check the last 5 minutes of data every 2 minutes" <span class="prov prov-doc">documented</span> <a class="src" href="sources.html#s-docs-triggers">docs-triggers</a>.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Setting</th><th>Rule</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>Frequency</td><td>whole minutes, 1 to 1,440</td><td><a class="src" href="sources.html#s-docs-triggers-create">docs-triggers-create</a></td></tr>
+<tr><td>Duration</td><td>at most 1 day and at most four times the frequency</td><td><a class="src" href="sources.html#s-docs-triggers-create">docs-triggers-create</a></td></tr>
+<tr><td>Query</td><td>one calculation, or a formula over several; no HEATMAP, CONCURRENCY or rate calculations</td><td><a class="src" href="sources.html#s-docs-triggers-create">docs-triggers-create</a></td></tr>
+<tr><td>Thresholds</td><td>static, or a dynamic baseline against 1 hour, 24 hours, 7 or 28 days earlier; 1 to 5 consecutive breaches</td><td><a class="src" href="sources.html#s-docs-triggers-create">docs-triggers-create</a></td></tr>
+<tr><td>Groups</td><td>"a maximum of 1,000 groups per query execution"; per-group resolution and routing since 2026-09-24</td><td><a class="src" href="sources.html#s-docs-triggers-create">docs-triggers-create</a> <a class="src" href="sources.html#s-changelog-group-alerts">changelog-group-alerts</a></td></tr>
+<tr><td>Recipients</td><td>PagerDuty, email, webhook, Microsoft Teams and Slack, team-wide</td><td><a class="src" href="sources.html#s-docs-recipients">docs-recipients</a></td></tr>
+</tbody></table></div>
+
+<h2 id="ai">AI features, 2023 to 2026</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Feature</th><th>What it does</th><th>Since</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>Query Assistant</td><td>Natural language to an editable query, on OpenAI's gpt-3.5-turbo; schemas of "over 5000 unique fields" made choosing context the hard part. Gone from the docs since; Canvas took its place <span class="prov prov-inferred">inferred</span>.</td><td>2023-05</td><td><a class="src" href="sources.html#s-pr-query-assistant">pr-query-assistant</a> <a class="src" href="sources.html#s-blog-llm-hard">blog-llm-hard</a></td></tr>
+<tr><td>Hosted MCP server</td><td>Tools for agents: workspace discovery, queries with "parity with the UI", BubbleUp, traces, the Service Map and anomalies, boards, triggers, SLOs and Canvas investigations; managing burn alerts since 2026-09.</td><td>beta 2025-07, GA 2025-09</td><td><a class="src" href="sources.html#s-blog-mcp-beta">blog-mcp-beta</a> <a class="src" href="sources.html#s-blog-mcp-ga">blog-mcp-ga</a> <a class="src" href="sources.html#s-docs-mcp-tools">docs-mcp-tools</a> <a class="src" href="sources.html#s-changelog-mcp-burn">changelog-mcp-burn</a></td></tr>
+<tr><td>Canvas</td><td>"Conversational AI, Honeycomb's query engine, and a multiplayer infinite canvas"; since 2026 a Canvas Agent with reusable skills, investigations that start themselves "when an alert fires, an SLO burns, or an anomaly surfaces", and connectors to other tools.</td><td>2025-09</td><td><a class="src" href="sources.html#s-docs-canvas">docs-canvas</a> <a class="src" href="sources.html#s-pr-agent-obs">pr-agent-obs</a> <a class="src" href="sources.html#s-pr-ai-ecosystem">pr-ai-ecosystem</a></td></tr>
+<tr><td>Anomaly Detection</td><td>A per-service statistical baseline of error rate and presence, with no thresholds to set; "statistical machine learning models rather than LLMs"; no seasonality yet.</td><td>open beta 2026-08</td><td><a class="src" href="sources.html#s-docs-anomaly">docs-anomaly</a> <a class="src" href="sources.html#s-changelog-anomaly">changelog-anomaly</a> <a class="src" href="sources.html#s-docs-hi">docs-hi</a></td></tr>
+<tr><td>Agent observability</td><td>GenAI semantic conventions as first-class fields; Agent Timeline, generally available 2026-06-15, groups conversations by <code>gen_ai.conversation.id</code> and agents by <code>gen_ai.agent.name</code>; renamed Agent Conversations inside "AI Ecosystem".</td><td>2026-05</td><td><a class="src" href="sources.html#s-pr-agent-obs">pr-agent-obs</a> <a class="src" href="sources.html#s-docs-agents">docs-agents</a> <a class="src" href="sources.html#s-changelog-agent-timeline">changelog-agent-timeline</a> <a class="src" href="sources.html#s-pr-ai-ecosystem">pr-ai-ecosystem</a></td></tr>
+<tr><td>Agent Skills and Slack</td><td>Skills for Claude Code, Cursor and other coding agents; Canvas inside Slack.</td><td>2026-03</td><td><a class="src" href="sources.html#s-pr-2026-03">pr-2026-03</a></td></tr>
+</tbody></table></div>
+<p>All of it can be switched off by a team owner, and Honeycomb says it "does not use any AI model providers that train foundation models based on input" <a class="src" href="sources.html#s-docs-hi">docs-hi</a> <a class="src" href="sources.html#s-docs-ai-policies">docs-ai-policies</a>. The agent docs recommend keeping prompts and completions in span events, "where your OTel Collector can filter them before they reach Honeycomb" <a class="src" href="sources.html#s-docs-agents">docs-agents</a>.</p>
+</article>
+</main>
+</div>
+<script src="assets/nav-data.js"></script>
+<script src="assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Honeycomb C4 research</title>
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">Start here</p>
+<h1>Honeycomb, as a C4 model</h1>
+<p class="lede">A study of Honeycomb, the hosted observability service at honeycomb.io: what it does, how it is built as far as public evidence shows, what the value in it is, and what Guildmaster's tracing design can borrow from it.</p>
+<p class="meta-line">Researched on 2026-10-02 from public sources only: Honeycomb's docs, blog, talks and open-source repositories, plus press and podcasts. No account was created and nothing was sent anywhere. Every claim links to its entry on the <a href="sources.html">Sources</a> page, which dates it.</p>
+<p class="hc-provkey"><span>Each architectural statement carries its provenance:</span> <span class="prov prov-doc">documented</span> <span>Honeycomb docs or public code</span> <span class="prov prov-stated">talk/blog</span> <span>a Honeycomb post, talk or interview</span> <span class="prov prov-inferred">inferred</span> <span>this site's reading, saying from what</span></p>
+
+<ul class="hc-stats">
+<li><span class="hc-stat-label">Founded</span><span class="hc-stat-value">2016</span><span class="hc-stat-note">by Charity Majors and Christine Yen</span></li>
+<li><span class="hc-stat-label">Capital raised</span><span class="hc-stat-value">≈ $150M</span><span class="hc-stat-note">last round April 2023</span></li>
+<li><span class="hc-stat-label">Customers</span><span class="hc-stat-value">600+</span><span class="hc-stat-note">last published count, October 2023</span></li>
+<li><span class="hc-stat-label">Free plan</span><span class="hc-stat-value">20M</span><span class="hc-stat-note">events a month</span></li>
+<li><span class="hc-stat-label">Event retention</span><span class="hc-stat-value">60 days</span><span class="hc-stat-note">fixed, on every plan</span></li>
+<li><span class="hc-stat-label">Pro, from July 2026</span><span class="hc-stat-value">$150</span><span class="hc-stat-note">a month for 50M events</span></li>
+</ul>
+<p class="evidence">Sources: <a class="src" href="sources.html#s-manifesto-2026">manifesto-2026</a> <a class="src" href="sources.html#s-pr-series-d">pr-series-d</a> <a class="src" href="sources.html#s-pr-best-quarter">pr-best-quarter</a> <a class="src" href="sources.html#s-pricing">pricing</a> <a class="src" href="sources.html#s-docs-usage">docs-usage</a> <a class="src" href="sources.html#s-docs-pro-2026">docs-pro-2026</a>.</p>
+
+<h2 id="what">What Honeycomb is</h2>
+<p>Honeycomb is a hosted service that stores telemetry as structured events and lets engineers query them interactively. A query can group or filter on any attribute, "no matter how high its cardinality", and a dataset can have thousands of columns <a class="src" href="sources.html#s-docs-high-card">docs-high-card</a>. The docs promise results "on terabytes of raw event data at sub-second to low-second query times" from a "purpose-built columnar store" <a class="src" href="sources.html#s-docs-intro">docs-intro</a>. Traces, logs and events all land in that store as events <a class="src" href="sources.html#s-docs-logs">docs-logs</a>. Time-series metrics have their own metrics dataset since 2026 <a class="src" href="sources.html#s-docs-metrics">docs-metrics</a>.</p>
+<p>The company is Hound Technology, Inc. <a class="src" href="sources.html#s-pricing">pricing</a>. Christine Yen, a developer, and Charity Majors, an operations engineer, founded it in 2016 <a class="src" href="sources.html#s-manifesto-2026">manifesto-2026</a>. The two met at Parse, which Facebook acquired <a class="src" href="sources.html#s-founderstalk-86">founderstalk-86</a>. Inside Facebook, an internal tool called Scuba let Parse "slice and dice on any dimensions in basically real time", which got Parse's backend under control <a class="src" href="sources.html#s-corecursive-19">corecursive-19</a>. Majors calls Scuba "famously the inspiration for Honeycomb" <a class="src" href="sources.html#s-charity-one-difference">charity-one-difference</a>. Majors was chief executive for the first three years, and then the two swapped: Yen is CEO, Majors CTO <a class="src" href="sources.html#s-founderstalk-86">founderstalk-86</a> <a class="src" href="sources.html#s-team-page">team-page</a>.</p>
+<p>It is software as a service. Since November 2025 there is also <strong>Honeycomb Private Cloud</strong>, which "uses the same architecture and codebase as Honeycomb SaaS" but runs in the customer's own AWS account <a class="src" href="sources.html#s-docs-private-cloud">docs-private-cloud</a> <a class="src" href="sources.html#s-pr-private-cloud">pr-private-cloud</a>. There is no edition that runs on a laptop; <a href="lessons.html#local">Lessons for Guildmaster</a> covers what does.</p>
+
+<h2 id="problem">The problem it solves</h2>
+<p>The docs give two terms. "High cardinality" means "many possible values for a single attribute", such as a user id. "High dimensionality" means "many different attributes attached to events" <a class="src" href="sources.html#s-docs-high-card">docs-high-card</a>. Metrics systems handle both badly: every new value of a tag is a new time series, so teams leave out the very attributes, such as a customer id or a build id, that would explain an incident. Honeycomb's own words are that per-time-series pricing "penalizes high-cardinality data and forces teams to leave out vital context like customer IDs" <a class="src" href="sources.html#s-pr-2026-03">pr-2026-03</a>.</p>
+<p>Honeycomb's answer is to keep one record per unit of work, with as many attributes as the code can attach, and derive every view from it. Majors named this split in 2024. In her account, "observability 1.0" is the "three pillars" generation of metrics, logs and traces, with "many sources of truth". "Observability 2.0" has "one source of truth, wide structured log events, from which you can derive all the other data types" <a class="src" href="sources.html#s-charity-version">charity-version</a> <a class="src" href="sources.html#s-charity-one-difference">charity-one-difference</a>. Yen put the same idea as a question: "what is a metric, if not logs that have been aggregated along a single dimension? What is a trace, if not structured logs tied together into a useful hierarchy?" <a class="src" href="sources.html#s-blog-features-2022">blog-features-2022</a>.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 760 330" role="img" aria-labelledby="pv-title pv-desc">
+<title id="pv-title">Three pillars against one source of truth</title>
+<desc id="pv-desc">On the left, a service writes metrics, logs and traces to three separate stores, and an engineer correlates them by hand. On the right, the service writes one wide event per unit of work to one column store, and metrics, traces and logs are queries over it.</desc>
+<defs><marker id="pv-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="28">Three pillars against one source of truth</text>
+<g class="c4-boundary"><rect x="16" y="44" width="350" height="270" rx="10"/><text x="28" y="64">"Observability 1.0": many sources of truth</text></g>
+<g class="c4-external"><rect x="126" y="78" width="130" height="44" rx="8"/><text class="c4-label" x="191" y="105">Service</text></g>
+<g class="c4-datastore"><path d="M36,196 a40,8 0 0,0 80,0 a40,8 0 0,0 -80,0 v44 a40,8 0 0,0 80,0 v-44"/><text class="c4-label" x="76" y="226">Metrics</text></g>
+<g class="c4-datastore"><path d="M151,196 a40,8 0 0,0 80,0 a40,8 0 0,0 -80,0 v44 a40,8 0 0,0 80,0 v-44"/><text class="c4-label" x="191" y="226">Logs</text></g>
+<g class="c4-datastore"><path d="M266,196 a40,8 0 0,0 80,0 a40,8 0 0,0 -80,0 v44 a40,8 0 0,0 80,0 v-44"/><text class="c4-label" x="306" y="226">Traces</text></g>
+<g class="c4-rel"><path d="M160,122 L86,186" marker-end="url(#pv-arrow)"/></g>
+<g class="c4-rel"><path d="M191,122 L191,186" marker-end="url(#pv-arrow)"/></g>
+<g class="c4-rel"><path d="M222,122 L296,186" marker-end="url(#pv-arrow)"/></g>
+<text class="hc-note" x="40" y="272">Each store pre-decides what can be asked.</text>
+<text class="hc-note" x="40" y="288">Answers are correlated across tools by hand,</text>
+<text class="hc-note" x="40" y="304">and the same data is paid for once per pillar.</text>
+<g class="c4-boundary"><rect x="394" y="44" width="350" height="270" rx="10"/><text x="406" y="64">"Observability 2.0": one source of truth</text></g>
+<g class="c4-external"><rect x="504" y="78" width="130" height="44" rx="8"/><text class="c4-label" x="569" y="105">Service</text></g>
+<g class="c4-rel"><path d="M569,122 L569,172" marker-end="url(#pv-arrow)"/><text class="c4-rel-label" x="569" y="152">one wide event per unit of work</text></g>
+<g class="c4-datastore"><path d="M494,182 a75,10 0 0,0 150,0 a75,10 0 0,0 -150,0 v46 a75,10 0 0,0 150,0 v-46"/><text class="c4-label" x="569" y="212">Column store</text><text class="c4-desc" x="569" y="228">raw events, any attribute</text></g>
+<text class="hc-note" x="418" y="272">Metrics are aggregates over the events;</text>
+<text class="hc-note" x="418" y="288">traces are events joined by trace id;</text>
+<text class="hc-note" x="418" y="304">logs are events. Stored once.</text>
+</svg>
+</div>
+<figcaption>The framing is Charity Majors's (2024) <a class="src" href="sources.html#s-charity-version">charity-version</a> <a class="src" href="sources.html#s-charity-one-difference">charity-one-difference</a>; the cost argument, "you pay to store it again and again", is hers too. By 2025 she "mildly" regretted the "o11y 2.0" label and called it two architectures instead: "multiple pillars" against "unified storage" <a class="src" href="sources.html#s-charity-3-0">charity-3-0</a> <a class="src" href="sources.html#s-charity-pillar">charity-pillar</a>.</figcaption>
+</figure>
+
+<h2 id="does">What it does</h2>
+<p>The <a href="product.html">Product tour</a> walks through these with drawings. In brief:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Feature</th><th>What it does</th><th>Plans, since</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><strong>Query Builder</strong></td><td>Up to six clauses: SELECT (historically VISUALIZE), WHERE, GROUP BY, ORDER BY, LIMIT, HAVING. Prefixes such as <code>root.</code> match whole traces by conditions on particular spans.</td><td>All</td><td><a class="src" href="sources.html#s-docs-query-build">docs-query-build</a></td></tr>
+<tr><td><strong>Heatmaps</strong></td><td>The distribution of a field over time; "each of the vertical columns in that graph is a histogram for that time bucket".</td><td>All</td><td><a class="src" href="sources.html#s-docs-visualize">docs-visualize</a></td></tr>
+<tr><td><strong>BubbleUp</strong></td><td>Select odd points on a graph; Honeycomb compares every dimension inside the selection with the baseline outside it and sorts by difference. AI-written summaries since 2026.</td><td>All, out of beta early 2019</td><td><a class="src" href="sources.html#s-docs-core-loop">docs-core-loop</a> <a class="src" href="sources.html#s-blog-bubbleup-2019">blog-bubbleup-2019</a> <a class="src" href="sources.html#s-blog-ai-bubbleup">blog-ai-bubbleup</a></td></tr>
+<tr><td><strong>Traces</strong></td><td>A waterfall of spans across services, and a trace summary of up to six levels that highlights slow and failed spans.</td><td>All</td><td><a class="src" href="sources.html#s-docs-waterfall">docs-waterfall</a></td></tr>
+<tr><td><strong>Service Map</strong></td><td>Traffic and dependencies between services, drawn from sampled traces.</td><td>Enterprise, 2022</td><td><a class="src" href="sources.html#s-docs-service-map">docs-service-map</a> <a class="src" href="sources.html#s-pr-gartner-2023">pr-gartner-2023</a></td></tr>
+<tr><td><strong>SLOs and burn alerts</strong></td><td>A reliability target with an error budget; burn alerts fire on time-to-exhaustion or on budget rate.</td><td>Pro (2) and Enterprise; Enterprise-only in 2020</td><td><a class="src" href="sources.html#s-docs-slos">docs-slos</a> <a class="src" href="sources.html#s-wb-pricing-2020">wb-pricing-2020</a></td></tr>
+<tr><td><strong>Triggers</strong></td><td>A query checked against a threshold, notifying PagerDuty, Slack, Microsoft Teams, webhooks or email.</td><td>2 on Free, 100 on Pro, 300+ Enterprise</td><td><a class="src" href="sources.html#s-docs-triggers">docs-triggers</a> <a class="src" href="sources.html#s-pricing">pricing</a></td></tr>
+<tr><td><strong>Boards</strong>, <strong>calculated fields</strong>, <strong>markers</strong></td><td>Saved views; formula fields (formerly "derived columns") usable in queries, boards and alerts; vertical lines on graphs for deploys and incidents.</td><td>All</td><td><a class="src" href="sources.html#s-docs-boards">docs-boards</a> <a class="src" href="sources.html#s-docs-calc-fields">docs-calc-fields</a> <a class="src" href="sources.html#s-docs-markers">docs-markers</a></td></tr>
+<tr><td><strong>Query Assistant</strong></td><td>Plain English to a query, on OpenAI's gpt-3.5-turbo. Since gone from the docs; its old URL redirects to "Build a query".</td><td>All, May 2023</td><td><a class="src" href="sources.html#s-pr-query-assistant">pr-query-assistant</a> <a class="src" href="sources.html#s-blog-llm-hard">blog-llm-hard</a></td></tr>
+<tr><td><strong>Honeycomb Intelligence</strong></td><td>Canvas (an AI investigation workspace, later a "Canvas Agent" with auto-investigations), the hosted MCP server, and Anomaly Detection, which uses "statistical machine learning models rather than LLMs".</td><td>All, September 2025</td><td><a class="src" href="sources.html#s-pr-hi">pr-hi</a> <a class="src" href="sources.html#s-docs-hi">docs-hi</a> <a class="src" href="sources.html#s-pr-agent-obs">pr-agent-obs</a></td></tr>
+<tr><td><strong>Hosted MCP server</strong></td><td>Tools for AI agents to query, run BubbleUp, read traces, and manage boards, triggers and SLOs, at <code>mcp.honeycomb.io</code>. The earlier self-hosted server is deprecated and archived.</td><td>Beta July 2025, GA September 2025</td><td><a class="src" href="sources.html#s-blog-mcp-beta">blog-mcp-beta</a> <a class="src" href="sources.html#s-blog-mcp-ga">blog-mcp-ga</a> <a class="src" href="sources.html#s-docs-mcp-tools">docs-mcp-tools</a> <a class="src" href="sources.html#s-repo-honeycomb-mcp">repo-honeycomb-mcp</a></td></tr>
+<tr><td><strong>Agent observability</strong></td><td>OpenTelemetry GenAI conventions as first-class attributes; Agent Timeline, renamed Agent Conversations inside "AI Ecosystem" (early access).</td><td>All, May 2026</td><td><a class="src" href="sources.html#s-pr-agent-obs">pr-agent-obs</a> <a class="src" href="sources.html#s-docs-agent-timeline">docs-agent-timeline</a> <a class="src" href="sources.html#s-pr-ai-ecosystem">pr-ai-ecosystem</a></td></tr>
+<tr><td><strong>Metrics</strong></td><td>OpenTelemetry gauges, sums and histograms in a dedicated metrics dataset; billed per data point, not per series.</td><td>GA March 2026</td><td><a class="src" href="sources.html#s-docs-metrics">docs-metrics</a> <a class="src" href="sources.html#s-pr-2026-03">pr-2026-03</a> <a class="src" href="sources.html#s-docs-usage">docs-usage</a></td></tr>
+<tr><td><strong>Telemetry Pipeline</strong>, <strong>Frontend Observability</strong></td><td>An OpenTelemetry pipeline add-on priced per GB, with "Enhance" to pull dropped data back from the customer's S3; browser, iOS and Android SDKs.</td><td>Enterprise add-ons, 2024</td><td><a class="src" href="sources.html#s-docs-pipeline">docs-pipeline</a> <a class="src" href="sources.html#s-pr-pipeline-2025">pr-pipeline-2025</a> <a class="src" href="sources.html#s-pr-frontend">pr-frontend</a></td></tr>
+<tr><td><strong>Refinery</strong></td><td>An open-source, customer-run proxy that samples whole traces after they finish. Events it drops are not billed.</td><td>Open source; Enterprise support</td><td><a class="src" href="sources.html#s-docs-usage">docs-usage</a> · <a href="c4/refinery.html">Level 3: Refinery</a></td></tr>
+</tbody></table></div>
+
+<h2 id="who">Who uses it</h2>
+<p>Named customers over the years, from Honeycomb's own releases and case studies: Fender, Axios, Intercom and Travis CI in 2018 <a class="src" href="sources.html#s-finsmes-2018">finsmes-2018</a>; Optimizely, Shipt and Meetup in 2019 <a class="src" href="sources.html#s-pr-funding-2019">pr-funding-2019</a>; Vanguard, Slack, Vercel, Robinhood, Moov, Frasers Group and Equinix in 2023 <a class="src" href="sources.html#s-pr-series-d">pr-series-d</a>; HelloFresh, Stripe and LaunchDarkly in its press boilerplate <a class="src" href="sources.html#s-pr-gartner-2023">pr-gartner-2023</a>; Booking.com, Duolingo, Depot, Scribe, Nubank and Notion more recently <a class="src" href="sources.html#s-cs-booking">cs-booking</a> <a class="src" href="sources.html#s-cs-duolingo">cs-duolingo</a> <a class="src" href="sources.html#s-cs-depot">cs-depot</a> <a class="src" href="sources.html#s-cs-scribe">cs-scribe</a> <a class="src" href="sources.html#s-pr-aws-sca">pr-aws-sca</a> <a class="src" href="sources.html#s-pr-2026-03">pr-2026-03</a>. It markets to AI startups, financial services, retail and software companies <a class="src" href="sources.html#s-pricing">pricing</a>.</p>
+<p>It reported more than 300 customers for 2020 and 600+ in 2023, with net revenue retention falling from over 160% in 2022 to 138% through September 2023 <a class="src" href="sources.html#s-pr-series-b">pr-series-b</a> <a class="src" href="sources.html#s-pr-series-d">pr-series-d</a> <a class="src" href="sources.html#s-pr-best-quarter">pr-best-quarter</a>. Since then it says "thousands of teams" and publishes no count <a class="src" href="sources.html#s-blog-gartner-2025">blog-gartner-2025</a>. Gartner placed it as a Leader in the 2022 and 2023 Magic Quadrant for APM and Observability, then as a Visionary in the Observability Platforms quadrant in 2024, 2025 and 2026 <a class="src" href="sources.html#s-pr-gartner-2022">pr-gartner-2022</a> <a class="src" href="sources.html#s-pr-gartner-2023">pr-gartner-2023</a> <a class="src" href="sources.html#s-blog-gartner-2026">blog-gartner-2026</a>. Gartner's reasoning is behind its paywall.</p>
+<p>Funding: an $11.5M Series A (February 2018), $11.4M (September 2019), a $20M Series B (February 2021), a $50M Series C (October 2021) and a $50M Series D (April 2023), "nearly $150 million" in all <a class="src" href="sources.html#s-finsmes-2018">finsmes-2018</a> <a class="src" href="sources.html#s-pr-funding-2019">pr-funding-2019</a> <a class="src" href="sources.html#s-pr-series-b">pr-series-b</a> <a class="src" href="sources.html#s-blog-series-c">blog-series-c</a> <a class="src" href="sources.html#s-pr-series-d">pr-series-d</a>. It bought Grit, an open-source code-query agent, in April 2025 to automate instrumentation <a class="src" href="sources.html#s-pr-grit">pr-grit</a>, and signed a three-year agreement with AWS in December 2025 <a class="src" href="sources.html#s-pr-aws-sca">pr-aws-sca</a>. No later round appears in its press releases <a class="src" href="sources.html#s-press-releases">press-releases</a>.</p>
+
+<h2 id="pricing">Pricing model</h2>
+<p>Honeycomb charges by <strong>events</strong>, not by hosts, seats, gigabytes or cardinality. Every plan has unlimited seats and unlimited querying <a class="src" href="sources.html#s-pricing">pricing</a>. "Honeycomb counts a trace that contains 150 spans as 150 events", and each OpenTelemetry span event and link counts as one too <a class="src" href="sources.html#s-docs-usage">docs-usage</a> <a class="src" href="sources.html#s-pricing">pricing</a>. An event may be up to 1 MB with at most 2,000 columns <a class="src" href="sources.html#s-pricing">pricing</a>. Events that Refinery or an SDK samples away before sending are not counted <a class="src" href="sources.html#s-docs-usage">docs-usage</a>. Events and logs are kept 60 days; time-series metrics 13 months by default, though the pricing FAQ says 60 days <a class="src" href="sources.html#s-docs-usage">docs-usage</a> <a class="src" href="sources.html#s-pricing">pricing</a>.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Plan</th><th>Volume</th><th>Price</th><th>Notable inclusions</th></tr></thead>
+<tbody>
+<tr><td>Free</td><td>20M events and 100M metric data points a month</td><td>$0</td><td>2 triggers; Canvas, hosted MCP and Agent Timeline</td></tr>
+<tr><td>Pro</td><td>50M to 750M events a month</td><td>From $150 a month ($3.00 per million events)</td><td>100 triggers, 2 SLOs, SSO; Canvas and MCP counted in the price since July 2026</td></tr>
+<tr><td>Enterprise</td><td>From 10 billion events a year</td><td>Custom, annual</td><td>300+ triggers, 100+ SLOs, Service Map, Query Data API, PrivateLink, Refinery support, Private Cloud</td></tr>
+</tbody></table></div>
+<p class="evidence">Sources: <a class="src" href="sources.html#s-pricing">pricing</a> <a class="src" href="sources.html#s-docs-pro-2026">docs-pro-2026</a>. Over-limit Free and Pro teams are throttled, after two months and a warning, to accepting one event in ten; Enterprise is exempt <a class="src" href="sources.html#s-docs-usage">docs-usage</a>.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="chart hc-chart-dense" viewBox="0 0 680 300" role="img" aria-labelledby="pr-title pr-desc">
+<title id="pr-title">Pro list price per million events, 2020 to 2026</title>
+<desc id="pr-desc">A step chart. From May 2020 Pro cost $1.00 per million events ($100 for 100M). Sometime between January and June 2022 it rose to $1.30 ($130 for 100M). From July 2026 it is $3.00 ($150 for 50M).</desc>
+<text class="hc-chart-title" x="20" y="26">Pro list price per million events</text>
+<text class="hc-chart-sub" x="20" y="45">US dollars, entry tier, from Honeycomb's pricing pages and docs</text>
+<line class="hc-grid" x1="70" y1="200" x2="650" y2="200"/>
+<line class="hc-grid" x1="70" y1="150" x2="650" y2="150"/>
+<line class="hc-grid" x1="70" y1="100" x2="650" y2="100"/>
+<text class="hc-tick hc-tick-end" x="62" y="254">$0</text>
+<text class="hc-tick hc-tick-end" x="62" y="204">$1</text>
+<text class="hc-tick hc-tick-end" x="62" y="154">$2</text>
+<text class="hc-tick hc-tick-end" x="62" y="104">$3</text>
+<line class="hc-axis" x1="70" y1="250" x2="650" y2="250"/>
+<text class="hc-tick hc-tick-mid" x="70" y="270">2020</text>
+<text class="hc-tick hc-tick-mid" x="153" y="270">2021</text>
+<text class="hc-tick hc-tick-mid" x="236" y="270">2022</text>
+<text class="hc-tick hc-tick-mid" x="319" y="270">2023</text>
+<text class="hc-tick hc-tick-mid" x="401" y="270">2024</text>
+<text class="hc-tick hc-tick-mid" x="484" y="270">2025</text>
+<text class="hc-tick hc-tick-mid" x="567" y="270">2026</text>
+<text class="hc-tick hc-tick-mid" x="650" y="270">2027</text>
+<rect class="hc-band" x="242" y="120" width="35" height="130"><title>The $1.30 price first appears between archived snapshots of 2022-01-27 and 2022-06-26</title></rect>
+<path class="hc-area-1" d="M101,250 L101,200 L261,200 L261,185 L609,185 L609,100 L629,100 L629,250 Z"/>
+<path class="hc-line-1" d="M101,200 L261,200 L261,185 L609,185 L609,100 L629,100"/>
+<circle class="hc-fill-1 hc-dot" cx="101" cy="200" r="5" data-tip="May 2020: $1.00 per million events&#10;Pro from $100 a month for 100M"><title>May 2020: $1.00 per million events (Pro from $100 a month for 100M)</title></circle>
+<circle class="hc-fill-1 hc-dot" cx="261" cy="185" r="5" data-tip="2022: $1.30 per million events&#10;Pro from $130 a month for 100M"><title>2022: $1.30 per million events (Pro from $130 a month for 100M)</title></circle>
+<circle class="hc-fill-1 hc-dot" cx="609" cy="100" r="5" data-tip="July 2026: $3.00 per million events&#10;Pro from $150 a month for 50M (2.3 times the legacy rate)"><title>July 2026: $3.00 per million events (Pro from $150 a month for 50M)</title></circle>
+<text class="hc-annot" x="109" y="192">$1.00 · $100 for 100M</text>
+<text class="hc-annot" x="269" y="177">$1.30 · $130 for 100M</text>
+<text class="hc-annot hc-annot-end" x="598" y="92">$3.00 · $150 for 50M</text>
+<text class="hc-annot-muted" x="236" y="112">rise dated only to Jan–Jun 2022</text>
+</svg>
+</div>
+<figcaption>A single series, so no legend. Before May 2020 pricing was by storage, so there is no comparable rate <a class="src" href="sources.html#s-wb-pricing-2018">wb-pricing-2018</a>. Legacy Pro customers may keep $1.30 for one more annual term at a 20% increase if they commit by 2026-12-31 <a class="src" href="sources.html#s-docs-pro-2026">docs-pro-2026</a>.</figcaption>
+<details class="hc-data"><summary>Table view</summary>
+<div class="table-wrap"><table>
+<thead><tr><th>From</th><th class="num">Pro entry price</th><th class="num">Events included</th><th class="num">Per million</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>2018 (storage pricing)</td><td class="num">$70 a month</td><td class="num">by storage</td><td class="num">n/a</td><td><a class="src" href="sources.html#s-wb-pricing-2018">wb-pricing-2018</a></td></tr>
+<tr><td>2020-05-18</td><td class="num">$100</td><td class="num">100M</td><td class="num">$1.00</td><td><a class="src" href="sources.html#s-pr-pricing-2020">pr-pricing-2020</a> <a class="src" href="sources.html#s-wb-pricing-2020">wb-pricing-2020</a></td></tr>
+<tr><td>Between 2022-01-27 and 2022-06-26</td><td class="num">$130</td><td class="num">100M</td><td class="num">$1.30</td><td><a class="src" href="sources.html#s-wb-pricing-2022a">wb-pricing-2022a</a> <a class="src" href="sources.html#s-wb-pricing-2022b">wb-pricing-2022b</a> <a class="src" href="sources.html#s-wb-pricing-2024">wb-pricing-2024</a></td></tr>
+<tr><td>2026-07-01</td><td class="num">$150</td><td class="num">50M</td><td class="num">$3.00</td><td><a class="src" href="sources.html#s-docs-pro-2026">docs-pro-2026</a></td></tr>
+</tbody></table></div>
+</details>
+</figure>
+<p>From 2026-07-01 the rate is $3.00 per million events against $1.30 on legacy plans, and the self-serve ceiling fell from 1.5 billion to 750 million events a month <a class="src" href="sources.html#s-docs-pro-2026">docs-pro-2026</a> <a class="src" href="sources.html#s-wb-pricing-2026">wb-pricing-2026</a>. Honeycomb justifies the rise by moving time-series metrics, Canvas and MCP into Pro <a class="src" href="sources.html#s-docs-pro-2026">docs-pro-2026</a>, although in July 2025 it had called hosted MCP free "for all Honeycomb plans (including our free plan!)" <a class="src" href="sources.html#s-blog-mcp-beta">blog-mcp-beta</a>. Honeycomb's pitch against other models is that it charges "by event volume rather than by host or ingested GB" <a class="src" href="sources.html#s-pricing">pricing</a>; its own Pro bill still rises with every span sent.</p>
+
+<h2 id="value">The value in it</h2>
+<h3>What Honeycomb and its customers claim</h3>
+<p>These are vendor numbers, not independent measurements. A Forrester study that Honeycomb commissioned reported a three-year return of 296% for a composite organisation <a class="src" href="sources.html#s-blog-forrester">blog-forrester</a>. An IDC study it promotes reports users "79% faster to respond to and remediate performance issues" and with "45% fewer unplanned outages" <a class="src" href="sources.html#s-idc">idc</a>. Case studies report root-cause time falling from about an hour to five minutes at Scribe, three tools retired at Duolingo, and a 60% cut in median time to first token for Intercom's Fin agent <a class="src" href="sources.html#s-cs-scribe">cs-scribe</a> <a class="src" href="sources.html#s-cs-duolingo">cs-duolingo</a> <a class="src" href="sources.html#s-cs-intercom">cs-intercom</a>. Its company values put the design stance plainly: "Be like our storage engine: 99% right in milliseconds is better than 100% right in an hour" <a class="src" href="sources.html#s-about-page">about-page</a>.</p>
+<h3>This site's reading <span class="prov prov-inferred">inferred</span></h3>
+<p>From the documented mechanisms on the following pages, the value comes from five things working together:</p>
+<ol>
+<li><strong>Questions do not have to be known in advance.</strong> Raw events stay queryable by any attribute, so a new question needs no new metric, index or deploy. That is what "unknown unknowns" tooling means in practice.</li>
+<li><strong>Attributes are free; events are the cost.</strong> Pricing by event count, not cardinality or column count, rewards putting more context on each event, which is exactly what makes the first point work.</li>
+<li><strong>BubbleUp turns "why are these slow?" into a ranked list.</strong> Comparing a selection against its baseline on every dimension replaces guessing which attribute to group by.</li>
+<li><strong>Alerts and dashboards read the same events as debugging.</strong> SLOs, triggers and boards are queries over the same store, so the alert that fires and the investigation that follows see identical data.</li>
+<li><strong>One store means one bill and no correlation step.</strong> A trace is spans with a shared id, not a separate product joined to logs and metrics afterwards.</li>
+</ol>
+<p>The costs are just as structural. It is a hosted service: data leaves the customer's network unless they run Private Cloud in their own AWS account. Every span is billed, so cost grows with traffic, and large users sample, which loses exact counts. The per-event rate more than doubled in 2026. Retention is 60 days. <a href="lessons.html">Lessons for Guildmaster</a> weighs which of these matter at one patron's scale.</p>
+
+<h2 id="index">Section index</h2>
+<ul class="cards">
+<li><a href="product.html"><strong>Product tour</strong><span>Query builder, heatmaps, BubbleUp, traces, SLOs, triggers, AI features</span></a></li>
+<li><a href="c4/context.html"><strong>System context</strong><span>Level 1: users, instrumented services, OpenTelemetry, Refinery, integrations, AWS</span></a></li>
+<li><a href="c4/containers.html"><strong>Containers</strong><span>Level 2: ingest, Kafka, Retriever, S3, Lambda, UI, triggers and SLOs</span></a></li>
+<li><a href="c4/retriever.html"><strong>Retriever</strong><span>Level 3: segments, column files, fan-out queries</span></a></li>
+<li><a href="c4/refinery.html"><strong>Refinery</strong><span>Level 3: how the open-source tail sampler decides</span></a></li>
+<li><a href="data-model.html"><strong>Events, spans and traces</strong><span>Datasets, environments, columns, wide events against metrics and logs</span></a></li>
+<li><a href="sampling.html"><strong>Sampling and its maths</strong><span>Sample rates, reweighting, error, head against tail</span></a></li>
+<li><a href="engineering.html"><strong>Engineering decisions</strong><span>Why a custom store, Lambda, Graviton, Go, Kafka, sampling</span></a></li>
+<li><a href="timeline.html"><strong>Timeline</strong><span>How the architecture and product evolved, 2016 to 2026</span></a></li>
+<li><a href="lessons.html"><strong>Lessons for Guildmaster</strong><span>What to borrow for tracing, what not to copy, what runs locally</span></a></li>
+<li><a href="sources.html"><strong>Sources</strong><span>Every source, dated, with its kind</span></a></li>
+</ul>
+
+<h2 id="reading">How to read these pages</h2>
+<ul>
+<li>A key such as <a class="src" href="sources.html#s-docs-usage">docs-usage</a> links to that source's entry on the <a href="sources.html">Sources</a> page, with its title, publisher, kind, date and address.</li>
+<li>Honeycomb's internals are proprietary. Architectural statements carry a provenance pill, and diagrams mark each box with a D, S or I badge for documented, stated in a talk or blog, or inferred; inferred boxes also have a dashed amber outline. Nothing is named on a diagram unless a public source names it.</li>
+<li>Charts drawn from synthetic data say so. Every chart has a table view and hover or focus tooltips.</li>
+<li>These pages use Honeycomb's words. <a href="lessons.html">Lessons for Guildmaster</a> switches to Guildmaster's, from the repository's <code>TERMINOLOGY.md</code>.</li>
+<li>Authors adding pages follow <a href="AUTHORING.md">AUTHORING.md</a>, which defers to the Firstmate site's authoring contract.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="assets/nav-data.js"></script>
+<script src="assets/site.js"></script>
+</body>
+</html>

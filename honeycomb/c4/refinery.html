@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Refinery · Honeycomb C4</title>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">C4 model › Level 3</p>
+<h1>Refinery</h1>
+<p class="lede">Honeycomb's open-source tail-sampling proxy: the customer runs it in front of Honeycomb, it holds each trace until the trace is complete, and it then keeps or drops the whole trace. Unlike Retriever, its code is public, so this page is traced through the source at tag <code>v3.4.0</code>.</p>
+<p class="meta-line">Read on 2026-10-02 at <code>v3.4.0</code> (commit <code>47a9c75</code>, released 2026-09-08) <a class="src" href="../sources.html#s-repo-refinery">repo-refinery</a>. Code citations link to that tag. Up: <a href="containers.html">Containers</a>, where Refinery is one of the senders.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1260 820" role="img" aria-labelledby="fcmp-title fcmp-desc">
+<title id="fcmp-title">Refinery components (C4 level 3)</title>
+<desc id="fcmp-desc">Inside one Refinery node: the router receives Events API and OTLP traffic, the sharder decides which node owns each trace, and spans owned elsewhere are forwarded to peers. Owned spans go to one of several collector workers, which hold traces in a cache until a deadline passes, ask a sampler for a rate and a keep decision, record the decision in a decision cache, and send kept spans upstream as Events API batches. Peer management uses a static file or Redis; stress relief takes over decisions under load.</desc>
+<defs><marker id="fcmp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="32">Refinery — Components (Level 3), at v3.4.0</text>
+<g class="c4-boundary"><rect x="200" y="100" width="840" height="690" rx="10"/><text x="212" y="780">Refinery · one node of a cluster (Go, Apache-2.0)</text></g>
+<g class="c4-external">
+<rect x="20" y="120" width="160" height="100" rx="8"/>
+<text class="c4-label" x="100.0" y="153.0">Senders</text>
+<text class="c4-tech" x="100.0" y="169.0">[SDKs · Collector]</text>
+<text class="c4-desc" x="100.0" y="185.0">Events API, OTLP</text>
+<text class="c4-desc" x="100.0" y="199.0">HTTP or gRPC</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="164" y="124" width="13" height="13" rx="3"/><text x="170.5" y="134">D</text></g>
+<g class="c4-component">
+<rect x="230" y="120" width="230" height="110" rx="8"/>
+<text class="c4-label" x="345.0" y="151.0">Router</text>
+<text class="c4-tech" x="345.0" y="167.0">[route/]</text>
+<text class="c4-desc" x="345.0" y="183.0">:8080 Events API and OTLP/HTTP,</text>
+<text class="c4-desc" x="345.0" y="197.0">optional gRPC; :8081 for peers;</text>
+<text class="c4-desc" x="345.0" y="211.0">spans without a trace ID pass</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="444" y="124" width="13" height="13" rx="3"/><text x="450.5" y="134">D</text></g>
+<g class="c4-component">
+<rect x="520" y="120" width="220" height="110" rx="8"/>
+<text class="c4-label" x="630.0" y="151.0">Sharder</text>
+<text class="c4-tech" x="630.0" y="167.0">[sharder/]</text>
+<text class="c4-desc" x="630.0" y="183.0">Which node owns a trace ID:</text>
+<text class="c4-desc" x="630.0" y="197.0">~50 partitions, highest</text>
+<text class="c4-desc" x="630.0" y="211.0">hash wins</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="724" y="124" width="13" height="13" rx="3"/><text x="730.5" y="134">D</text></g>
+<g class="c4-component">
+<rect x="800" y="120" width="210" height="110" rx="8"/>
+<text class="c4-label" x="905.0" y="151.0">Peer management</text>
+<text class="c4-tech" x="905.0" y="167.0">[internal/peer/]</text>
+<text class="c4-desc" x="905.0" y="183.0">Static file list, or Redis</text>
+<text class="c4-desc" x="905.0" y="197.0">pubsub: refresh every ~3 s,</text>
+<text class="c4-desc" x="905.0" y="211.0">expire after 10 s</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="994" y="124" width="13" height="13" rx="3"/><text x="1000.5" y="134">D</text></g>
+<g class="c4-component">
+<rect x="230" y="300" width="230" height="120" rx="8"/>
+<text class="c4-label" x="345.0" y="329.0">Collector workers</text>
+<text class="c4-tech" x="345.0" y="345.0">[collect/ · one per CPU]</text>
+<text class="c4-desc" x="345.0" y="361.0">Trace cache keyed by trace ID;</text>
+<text class="c4-desc" x="345.0" y="375.0">each trace has a SendBy deadline;</text>
+<text class="c4-desc" x="345.0" y="389.0">a 100 ms ticker takes the</text>
+<text class="c4-desc" x="345.0" y="403.0">expired ones</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="444" y="304" width="13" height="13" rx="3"/><text x="450.5" y="314">D</text></g>
+<g class="c4-component">
+<rect x="520" y="300" width="220" height="120" rx="8"/>
+<text class="c4-label" x="630.0" y="336.0">Samplers</text>
+<text class="c4-tech" x="630.0" y="352.0">[sample/ · dynsampler-go]</text>
+<text class="c4-desc" x="630.0" y="368.0">Chosen by environment or</text>
+<text class="c4-desc" x="630.0" y="382.0">dataset: deterministic, dynamic,</text>
+<text class="c4-desc" x="630.0" y="396.0">EMA, rules, throughput</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="724" y="304" width="13" height="13" rx="3"/><text x="730.5" y="314">D</text></g>
+<g class="c4-component">
+<rect x="800" y="300" width="210" height="120" rx="8"/>
+<text class="c4-label" x="905.0" y="336.0">Decision cache</text>
+<text class="c4-tech" x="905.0" y="352.0">[collect/cache/]</text>
+<text class="c4-desc" x="905.0" y="368.0">Kept: LRU of 10,000 per node</text>
+<text class="c4-desc" x="905.0" y="382.0">Dropped: cuckoo filters,</text>
+<text class="c4-desc" x="905.0" y="396.0">1,000,000</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="994" y="304" width="13" height="13" rx="3"/><text x="1000.5" y="314">D</text></g>
+<g class="c4-component">
+<rect x="230" y="490" width="230" height="110" rx="8"/>
+<text class="c4-label" x="345.0" y="521.0">Stress relief</text>
+<text class="c4-tech" x="345.0" y="537.0">[collect/stressRelief.go]</text>
+<text class="c4-desc" x="345.0" y="553.0">Under load, decide each span</text>
+<text class="c4-desc" x="345.0" y="567.0">at once by trace-ID hash,</text>
+<text class="c4-desc" x="345.0" y="581.0">default 1 in 100</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="444" y="494" width="13" height="13" rx="3"/><text x="450.5" y="504">D</text></g>
+<g class="c4-component">
+<rect x="520" y="490" width="220" height="110" rx="8"/>
+<text class="c4-label" x="630.0" y="521.0">Upstream transmission</text>
+<text class="c4-tech" x="630.0" y="537.0">[transmit/]</text>
+<text class="c4-desc" x="630.0" y="553.0">msgpack POST to</text>
+<text class="c4-desc" x="630.0" y="567.0">{HoneycombAPI}/1/batch/{dataset}</text>
+<text class="c4-desc" x="630.0" y="581.0">with X-Honeycomb-Team</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="724" y="494" width="13" height="13" rx="3"/><text x="730.5" y="504">D</text></g>
+<g class="c4-datastore">
+<path d="M520,660 a110.0,10 0 0,0 220,0 a110.0,10 0 0,0 -220,0 v80 a110.0,10 0 0,0 220,0 v-80"/>
+<text class="c4-label" x="630.0" y="691.0">config.yaml, rules.yaml</text>
+<text class="c4-tech" x="630.0" y="707.0">[file or URL]</text>
+<text class="c4-desc" x="630.0" y="723.0">Strictly validated since</text>
+<text class="c4-desc" x="630.0" y="737.0">2.0; reloaded on change</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="724" y="662" width="13" height="13" rx="3"/><text x="730.5" y="672">D</text></g>
+<g class="c4-component">
+<rect x="230" y="650" width="230" height="100" rx="8"/>
+<text class="c4-label" x="345.0" y="683.0">Own telemetry</text>
+<text class="c4-tech" x="345.0" y="699.0">[metrics · logs · traces]</text>
+<text class="c4-desc" x="345.0" y="715.0">Prometheus on :2112 or OTLP;</text>
+<text class="c4-desc" x="345.0" y="729.0">stress_level, trace_send_*</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="444" y="654" width="13" height="13" rx="3"/><text x="450.5" y="664">D</text></g>
+<g class="c4-datastore">
+<path d="M1070,130 a85.0,10 0 0,0 170,0 a85.0,10 0 0,0 -170,0 v80 a85.0,10 0 0,0 170,0 v-80"/>
+<text class="c4-label" x="1155.0" y="161.0">Redis</text>
+<text class="c4-tech" x="1155.0" y="177.0">[optional]</text>
+<text class="c4-desc" x="1155.0" y="193.0">Peer list and</text>
+<text class="c4-desc" x="1155.0" y="207.0">pubsub only</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="1224" y="132" width="13" height="13" rx="3"/><text x="1230.5" y="142">D</text></g>
+<g class="c4-container">
+<rect x="1070" y="300" width="170" height="100" rx="8"/>
+<text class="c4-label" x="1155.0" y="340.0">Peer nodes</text>
+<text class="c4-tech" x="1155.0" y="356.0">[other Refinerys]</text>
+<text class="c4-desc" x="1155.0" y="372.0">Same components</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="1224" y="304" width="13" height="13" rx="3"/><text x="1230.5" y="314">D</text></g>
+<g class="c4-external">
+<rect x="1070" y="490" width="170" height="110" rx="8"/>
+<text class="c4-label" x="1155.0" y="528.0">Honeycomb</text>
+<text class="c4-tech" x="1155.0" y="544.0">[or any /1/batch API]</text>
+<text class="c4-desc" x="1155.0" y="560.0">Receives kept spans</text>
+<text class="c4-desc" x="1155.0" y="574.0">with SampleRate</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="1224" y="494" width="13" height="13" rx="3"/><text x="1230.5" y="504">D</text></g>
+<g class="c4-rel">
+<path d="M180,170 L230,170" marker-end="url(#fcmp-arrow)"/>
+<text class="c4-rel-label" x="205" y="160">spans</text>
+</g>
+<g class="c4-rel">
+<path d="M460,170 L520,170" marker-end="url(#fcmp-arrow)"/>
+<text class="c4-rel-label" x="490" y="160">WhichShard</text>
+</g>
+<g class="c4-rel">
+<path d="M740,175 L800,175" marker-end="url(#fcmp-arrow)"/>
+<text class="c4-rel-label" x="770" y="165">peer list</text>
+</g>
+<g class="c4-rel">
+<path d="M1010,170 L1070,170" marker-end="url(#fcmp-arrow)"/>
+<text class="c4-rel-label" x="1040" y="150">publish,</text>
+<text class="c4-rel-label" x="1040" y="163">subscribe</text>
+</g>
+<g class="c4-rel">
+<path d="M345,230 L345,300" marker-end="url(#fcmp-arrow)"/>
+<text class="c4-rel-label" x="390" y="268">owned spans</text>
+</g>
+<g class="c4-rel">
+<path d="M460,200 C760,250 950,250 1070,330" marker-end="url(#fcmp-arrow)" marker-start="url(#fcmp-arrow)"/>
+<text class="c4-rel-label" x="860" y="250">spans to and from owners (:8081)</text>
+</g>
+<g class="c4-rel">
+<path d="M460,350 L520,350" marker-end="url(#fcmp-arrow)"/>
+<text class="c4-rel-label" x="490" y="340">GetSampleRate</text>
+</g>
+<g class="c4-rel">
+<path d="M460,405 C560,455 700,455 800,405" marker-end="url(#fcmp-arrow)"/>
+<text class="c4-rel-label" x="630" y="452">CheckSpan, Record</text>
+</g>
+<g class="c4-rel">
+<path d="M400,420 L560,490" marker-end="url(#fcmp-arrow)"/>
+<text class="c4-rel-label" x="470" y="465">kept traces</text>
+</g>
+<g class="c4-rel">
+<path d="M740,545 L1070,545" marker-end="url(#fcmp-arrow)"/>
+<text class="c4-rel-label" x="900" y="535">batches</text>
+</g>
+<g class="c4-rel">
+<path d="M345,490 L345,420" marker-end="url(#fcmp-arrow)"/>
+<text class="c4-rel-label" x="380" y="460">overrides</text>
+</g>
+<text class="hc-note-strong" x="800" y="680">Configuration feeds every component;</text>
+<text class="hc-note" x="800" y="696">drawn without arrows to keep this readable.</text>
+<g class="c4-legend">
+<rect class="c4-legend-frame" x="20" y="300" width="170" height="222" rx="6"/>
+<text class="c4-legend-heading" x="32" y="320">Legend</text>
+<g class="c4-component"><rect x="32" y="332" width="32" height="16" rx="3"/></g>
+<text x="74" y="344">Component</text>
+<g class="c4-container"><rect x="32" y="356" width="32" height="16" rx="3"/></g>
+<text x="74" y="368">Container</text>
+<g class="c4-datastore"><path d="M32,383 a16,3 0 0,0 32,0 a16,3 0 0,0 -32,0 v10 a16,3 0 0,0 32,0 v-10"/></g>
+<text x="74" y="392">Store</text>
+<g class="c4-external"><rect x="32" y="404" width="32" height="16" rx="3"/></g>
+<text x="74" y="416">External</text>
+<g class="c4-rel"><path d="M32,436 L64,436"/></g>
+<text x="74" y="440">Call or data flow</text>
+<g class="hc-badge hc-badge-doc"><rect x="41" y="453" width="13" height="13" rx="3"/><text x="47.5" y="463">D</text></g>
+<text x="74" y="464">Documented</text>
+<g class="hc-badge hc-badge-stated"><rect x="41" y="475" width="13" height="13" rx="3"/><text x="47.5" y="485">S</text></g>
+<text x="74" y="486">Stated in a talk or blog</text>
+<g class="hc-badge hc-badge-inferred"><rect x="41" y="497" width="13" height="13" rx="3"/><text x="47.5" y="507">I</text></g>
+<text x="74" y="508">Inferred by this site</text>
+</g>
+</svg>
+</div>
+<figcaption>Level 3. Every component is a directory or file in the repository, so every badge is D. Redis is optional; the default peer list is a static file <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/config/file_config.go#L301"><code class="cite">config/file_config.go:301</code></a>.</figcaption>
+</figure>
+
+<h2 id="what">What it is, and how it got here</h2>
+<p>"Refinery is a trace-aware tail-based sampling proxy. It examines whole traces and intelligently applies sampling decisions (whether to keep or discard) to each trace" <span class="prov prov-doc">documented</span> <a class="src" href="../sources.html#s-refinery-readme">refinery-readme</a>. Head sampling decides when a trace starts; tail sampling "considers all or most of the spans within the trace", so it can keep every trace with an error or a slow root while dropping most of the healthy ones <a class="src" href="../sources.html#s-docs-sampling">docs-sampling</a>. Events it drops never reach Honeycomb and are not billed <a class="src" href="../sources.html#s-docs-usage">docs-usage</a>.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>When</th><th>What changed</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>2018-10</td><td>Repository created, as <code>samproxy</code></td><td><a class="src" href="../sources.html#s-refinery-v020">refinery-v020</a></td></tr>
+<tr><td>2019-06-05</td><td>First versioned release, v0.2.0, still "samproxy"</td><td><a class="src" href="../sources.html#s-refinery-v020">refinery-v020</a></td></tr>
+<tr><td>2020-10-05</td><td>v0.12.0 renames samproxy to Refinery, "includes metrics names, environment variables etc."</td><td><a class="src" href="../sources.html#s-refinery-v0120">refinery-v0120</a></td></tr>
+<tr><td>2021-03-01</td><td>1.0, the first GA release; announced as running "within a customer's infrastructure, giving them full control over what they choose to send"</td><td><a class="src" href="../sources.html#s-refinery-changelog">refinery-changelog</a> <a class="src" href="../sources.html#s-pr-refinery">pr-refinery</a></td></tr>
+<tr><td>2023-07-06</td><td>2.0: YAML configuration, strict validation, a required <code>__default__</code> sampler, two throughput samplers; dynamic samplers fixed to count spans, not traces</td><td><a class="src" href="../sources.html#s-refinery-notes">refinery-notes</a> <a class="src" href="../sources.html#s-blog-refinery-2">blog-refinery-2</a></td></tr>
+<tr><td>2024-07 to 2024-12</td><td>2.7 makes Redis a pubsub bus instead of a peer store; 2.8 adds <code>SpanLimit</code> and Redis Cluster; 2.9 tries an experimental distributed trace locality</td><td><a class="src" href="../sources.html#s-refinery-notes">refinery-notes</a></td></tr>
+<tr><td>2025-10-02</td><td>3.0: a performance release that drops trace redistribution and the locality mode; Honeycomb's own cluster used 70% less CPU and 60% less memory</td><td><a class="src" href="../sources.html#s-refinery-notes">refinery-notes</a> <a class="src" href="../sources.html#s-blog-refinery-3">blog-refinery-3</a></td></tr>
+<tr><td>2026-02-05</td><td>3.1: several collect workers per node instead of one loop; default <code>SpanLimit</code> 32,000</td><td><a class="src" href="../sources.html#s-refinery-notes">refinery-notes</a></td></tr>
+<tr><td>2026-09</td><td>3.4.0 released; Honeycomb starts selling Refinery as a Service; it donates an adaptive tail-sampling processor, the same algorithm family, to the OpenTelemetry Collector</td><td><a class="src" href="../sources.html#s-repo-refinery">repo-refinery</a> <a class="src" href="../sources.html#s-raas">raas</a> <a class="src" href="../sources.html#s-blog-adaptive-tail">blog-adaptive-tail</a></td></tr>
+</tbody></table></div>
+
+<h2 id="cluster">Receiving, and finding a trace's owner</h2>
+<p>The router accepts the Events API (<code>/1/events/</code> and <code>/1/batch/</code>) and OTLP over HTTP (<code>/v1/traces</code>, <code>/v1/logs</code>) on <code>0.0.0.0:8080</code>, OTLP over gRPC when an address is configured, and peer traffic on <code>8081</code> <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/route/route.go#L262-L272"><code class="cite">route/route.go:262-272</code></a> <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/route/route.go#L1256-L1267"><code class="cite">route/route.go:1256-1267</code></a> <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/config/file_config.go#L86-L91"><code class="cite">config/file_config.go:86-91</code></a>. A span with no trace ID is "not part of a trace" and goes straight upstream <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/route/route.go#L732-L740"><code class="cite">route/route.go:732-740</code></a>. A span is a root when none of the parent-ID fields (<code>trace.parent_id</code>, <code>parentId</code>) has a value <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/types/payload.go#L270-L273"><code class="cite">types/payload.go:270-273</code></a>.</p>
+<p>All spans of a trace must meet on one node. The sharder gives each peer about <code>50 / N + 1</code> pseudo-random partition hashes and, for each trace, picks the peer whose partition scores the highest <code>wyhash(traceID, partitionHash)</code> <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/sharder/deterministic.go#L184-L195"><code class="cite">sharder/deterministic.go:184-195</code></a> <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/sharder/deterministic.go#L216-L239"><code class="cite">sharder/deterministic.go:216-239</code></a>. That is rendezvous-style hashing <span class="prov prov-inferred">inferred</span>, so a change in membership moves only part of the traces; it still "can temporarily cause inconsistent sampling decisions or dropped traces", which is why Honeycomb says Refinery "is not optimized for dynamic auto-scaling" and its Helm chart ships autoscaling off <a class="src" href="../sources.html#s-docs-refinery-scale">docs-refinery-scale</a> <a class="src" href="../sources.html#s-helm-refinery">helm-refinery</a>. Spans owned elsewhere are forwarded to that peer <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/route/route.go#L782-L812"><code class="cite">route/route.go:782-812</code></a>. Peers find each other from a static list or through Redis, where each node republishes itself about every three seconds and expires after ten <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/internal/peer/pubsub_redis.go#L19-L30"><code class="cite">internal/peer/pubsub_redis.go:19-30</code></a>; "the load on the Redis server is quite light" <a class="src" href="../sources.html#s-refinery-readme">refinery-readme</a>.</p>
+<p>Inside a node, a trace goes to one of several collect workers by <code>wyhash(traceID, seed) % workers</code> <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/collect/collect.go#L394-L407"><code class="cite">collect/collect.go:394-407</code></a>, and each worker drains peer traffic first, so that the cluster never "deadlocks because peers are waiting to get their events handed off to each other" <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/collect/collector_worker.go#L162-L174"><code class="cite">collect/collector_worker.go:162-174</code></a>.</p>
+
+<h2 id="decision">The decision, step by step</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1180 1120" role="img" aria-labelledby="fflow-title fflow-desc">
+<title id="fflow-title">Refinery decision flow for one span</title>
+<desc id="fflow-desc">A span without a trace ID is sent upstream. A span whose trace another node owns is forwarded there. On the owning node, a worker chosen by hash checks the decision cache; a late span follows the earlier decision. Otherwise the span joins its trace in the cache; a new trace gets a deadline of now plus TraceTimeout, a root span pulls the deadline in to now plus SendDelay, and exceeding SpanLimit makes it now. A ticker every 100 ms takes expired traces to makeDecision, which asks the sampler for a rate and a keep decision and records it. Kept traces are sent with their sample rate multiplied in; dropped traces are counted. Memory pressure and stress relief can force earlier decisions.</desc>
+<defs><marker id="fflow-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="32">Refinery — what happens to one span (v3.4.0)</text>
+<g class="c4-external"><rect x="180" y="60" width="300" height="56" rx="8"/><text class="c4-label" x="330.0" y="85.5">A span arrives</text><text class="c4-desc" x="330.0" y="102.5">Events API or OTLP, at any node</text></g>
+<g class="hc-decision"><path d="M330,132.0 L450.0,170 L330,208.0 L210.0,170 Z"/><text x="330" y="174.0">Has a trace ID?</text></g>
+<g class="c4-component"><rect x="700" y="142" width="300" height="56" rx="8"/><text class="c4-label" x="850.0" y="167.5">Send upstream as it is</text><text class="c4-desc" x="850.0" y="184.5">Not part of a trace: no sampling</text></g>
+<g class="hc-decision"><path d="M330,240.0 L460.0,280 L330,320.0 L200.0,280 Z"/><text x="330" y="277.0">Does this node</text><text x="330" y="291.0">own the trace?</text></g>
+<g class="c4-component"><rect x="700" y="252" width="300" height="56" rx="8"/><text class="c4-label" x="850.0" y="277.5">Forward to the owning peer</text><text class="c4-desc" x="850.0" y="294.5">It runs this flow from here on</text></g>
+<g class="c4-component"><rect x="180" y="350" width="300" height="56" rx="8"/><text class="c4-label" x="330.0" y="375.5">Pick a worker</text><text class="c4-desc" x="330.0" y="392.5">hash(trace ID) mod workers</text></g>
+<g class="hc-decision"><path d="M330,428.0 L460.0,470 L330,512.0 L200.0,470 Z"/><text x="330" y="467.0">Already decided?</text><text x="330" y="481.0">(decision cache)</text></g>
+<g class="c4-component"><rect x="700" y="420" width="300" height="64" rx="8"/><text class="c4-label" x="850.0" y="442.5">Follow the old decision</text><text class="c4-desc" x="850.0" y="459.5">Kept: send now at the recorded rate</text><text class="c4-desc" x="850.0" y="473.5">Dropped: discard</text></g>
+<g class="c4-component"><rect x="160" y="552" width="340" height="64" rx="8"/><text class="c4-label" x="330.0" y="574.5">Add to the trace cache</text><text class="c4-desc" x="330.0" y="591.5">New trace: SendBy = now + TraceTimeout</text><text class="c4-desc" x="330.0" y="605.5">(default 60 s)</text></g>
+<g class="hc-decision"><path d="M330,645.0 L440.0,680 L330,715.0 L220.0,680 Z"/><text x="330" y="684.0">Root span?</text></g>
+<g class="c4-component"><rect x="700" y="650" width="300" height="60" rx="8"/><text class="c4-label" x="850.0" y="670.5">Pull the deadline in</text><text class="c4-desc" x="850.0" y="687.5">SendBy = min(SendBy, now + SendDelay)</text><text class="c4-desc" x="850.0" y="701.5">(default 2 s)</text></g>
+<g class="hc-decision"><path d="M330,750.0 L460.0,790 L330,830.0 L200.0,790 Z"/><text x="330" y="787.0">More than SpanLimit</text><text x="330" y="801.0">spans? (32,000)</text></g>
+<g class="c4-component"><rect x="700" y="762" width="300" height="56" rx="8"/><text class="c4-label" x="850.0" y="787.5">Decide now</text><text class="c4-desc" x="850.0" y="804.5">SendBy = now</text></g>
+<g class="c4-component"><rect x="160" y="870" width="340" height="64" rx="8"/><text class="c4-label" x="330.0" y="892.5">Every SendTicker (100 ms)</text><text class="c4-desc" x="330.0" y="909.5">take up to 3,000 traces whose</text><text class="c4-desc" x="330.0" y="923.5">SendBy has passed</text></g>
+<g class="c4-component"><rect x="160" y="970" width="340" height="80" rx="8"/><text class="c4-label" x="330.0" y="993.5">makeDecision</text><text class="c4-desc" x="330.0" y="1010.5">sampler for the environment or dataset</text><text class="c4-desc" x="330.0" y="1024.5">→ rate and keep; record it in</text><text class="c4-desc" x="330.0" y="1038.5">the decision cache</text></g>
+<g class="hc-decision"><path d="M760,975.0 L850.0,1010 L760,1045.0 L670.0,1010 Z"/><text x="760" y="1014.0">Keep?</text></g>
+<g class="c4-component"><rect x="900" y="920" width="260" height="70" rx="8"/><text class="c4-label" x="1030.0" y="945.5">Send every span</text><text class="c4-desc" x="1030.0" y="962.5">SampleRate = incoming rate</text><text class="c4-desc" x="1030.0" y="976.5">× the trace's rate</text></g>
+<g class="c4-component"><rect x="900" y="1030" width="260" height="56" rx="8"/><text class="c4-label" x="1030.0" y="1055.5">Drop and count</text><text class="c4-desc" x="1030.0" y="1072.5">trace_send_dropped</text></g>
+<g class="c4-rel"><path d="M330,116 L330,132" marker-end="url(#fflow-arrow)"/></g>
+<g class="c4-rel"><path d="M450,170 L700,170" marker-end="url(#fflow-arrow)"/><text class="c4-rel-label" x="585" y="162">no</text></g>
+<g class="c4-rel"><path d="M330,208 L330,240" marker-end="url(#fflow-arrow)"/><text class="c4-rel-label" x="348" y="228">yes</text></g>
+<g class="c4-rel"><path d="M460,280 L700,280" marker-end="url(#fflow-arrow)"/><text class="c4-rel-label" x="585" y="272">no</text></g>
+<g class="c4-rel"><path d="M330,320 L330,350" marker-end="url(#fflow-arrow)"/><text class="c4-rel-label" x="348" y="340">yes</text></g>
+<g class="c4-rel"><path d="M330,406 L330,428" marker-end="url(#fflow-arrow)"/></g>
+<g class="c4-rel"><path d="M460,470 L700,452" marker-end="url(#fflow-arrow)"/><text class="c4-rel-label" x="585" y="452">yes</text></g>
+<g class="c4-rel"><path d="M330,512 L330,552" marker-end="url(#fflow-arrow)"/><text class="c4-rel-label" x="346" y="536">no</text></g>
+<g class="c4-rel"><path d="M330,616 L330,645" marker-end="url(#fflow-arrow)"/></g>
+<g class="c4-rel"><path d="M440,680 L700,680" marker-end="url(#fflow-arrow)"/><text class="c4-rel-label" x="585" y="672">yes</text></g>
+<g class="c4-rel"><path d="M330,715 L330,750" marker-end="url(#fflow-arrow)"/><text class="c4-rel-label" x="346" y="736">no</text></g>
+<g class="c4-rel"><path d="M460,790 L700,790" marker-end="url(#fflow-arrow)"/><text class="c4-rel-label" x="585" y="782">yes</text></g>
+<g class="c4-rel"><path d="M330,830 L330,870" marker-end="url(#fflow-arrow)"/><text class="c4-rel-label" x="360" y="854">no: wait</text></g>
+<g class="c4-rel c4-rel-async"><path d="M1000,690 C1045,740 1045,880 500,893" marker-end="url(#fflow-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M1000,800 C1025,830 1015,905 500,910" marker-end="url(#fflow-arrow)"/></g>
+<g class="c4-rel"><path d="M330,934 L330,970" marker-end="url(#fflow-arrow)"/></g>
+<g class="c4-rel"><path d="M500,1010 L670,1010" marker-end="url(#fflow-arrow)"/></g>
+<g class="c4-rel"><path d="M850,1010 C880,1010 880,955 900,955" marker-end="url(#fflow-arrow)"/><text class="c4-rel-label" x="872" y="975">yes</text></g>
+<g class="c4-rel"><path d="M850,1010 C880,1010 880,1058 900,1058" marker-end="url(#fflow-arrow)"/><text class="c4-rel-label" x="872" y="1048">no</text></g>
+<g class="c4-component"><rect x="20" y="560" width="120" height="150" rx="8"/><text class="c4-label" x="80.0" y="611.5">Memory over</text><text class="c4-desc" x="80.0" y="628.5">budget: decide</text><text class="c4-desc" x="80.0" y="642.5">the heaviest</text><text class="c4-desc" x="80.0" y="656.5">traces first</text><text class="c4-desc" x="80.0" y="670.5">(every 100 ms)</text></g>
+<g class="c4-component"><rect x="20" y="380" width="120" height="130" rx="8"/><text class="c4-label" x="80.0" y="421.5">Stress relief</text><text class="c4-desc" x="80.0" y="438.5">on: decide each</text><text class="c4-desc" x="80.0" y="452.5">span now by</text><text class="c4-desc" x="80.0" y="466.5">trace-ID hash,</text><text class="c4-desc" x="80.0" y="480.5">1 in 100</text></g>
+<g class="c4-rel c4-rel-async"><path d="M140,640 C170,700 150,960 160,990" marker-end="url(#fflow-arrow)"/></g>
+<g class="c4-rel c4-rel-async"><path d="M140,445 C175,445 175,470 200,470" marker-end="url(#fflow-arrow)"/></g>
+<text class="hc-note" x="20" y="1098">Defaults are Refinery 3.4.0's. Spans waiting in the trace cache are invisible to Honeycomb until the decision.</text>
+</svg>
+</div>
+<figcaption>Traced through <code>route/route.go</code>, <code>collect/collector_worker.go</code> and <code>collect/collect.go</code> at <code>v3.4.0</code>. Dashed arrows are deadlines firing on the next tick.</figcaption>
+</figure>
+<ol>
+<li><strong>Late spans first.</strong> A worker checks the decision cache before anything else; a span for an already-decided trace follows that decision <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/collect/collector_worker.go#L232-L267"><code class="cite">collect/collector_worker.go:232-267</code></a>.</li>
+<li><strong>A new trace gets a deadline</strong> of now plus <code>TraceTimeout</code>, 60 seconds by default <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/config/file_config.go#L210-L216"><code class="cite">config/file_config.go:210-216</code></a>.</li>
+<li><strong>A root span pulls it in</strong> to now plus <code>SendDelay</code>, 2 seconds, so stragglers can still arrive; more than <code>SpanLimit</code> spans makes it now. The deadline only ever moves earlier <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/collect/collector_worker.go#L286-L312"><code class="cite">collect/collector_worker.go:286-312</code></a>. The 32,000 default matches "the limit for trace view in Honeycomb" <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/config/file_config.go#L215"><code class="cite">config/file_config.go:215</code></a>.</li>
+<li><strong>A ticker decides.</strong> Every <code>SendTicker</code> (100 ms) each worker takes up to 3,000 expired traces and labels them by why: got its root, hit the span limit, or expired <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/collect/collector_worker.go#L316-L369"><code class="cite">collect/collector_worker.go:316-369</code></a>.</li>
+<li><strong><code>makeDecision</code></strong> picks the sampler for the trace's environment (or dataset, for Classic keys), calls <code>GetSampleRate</code>, and records the result in the decision cache before sending <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/collect/collector_worker.go#L420-L498"><code class="cite">collect/collector_worker.go:420-498</code></a>.</li>
+<li><strong>Kept spans carry their weight.</strong> Each span's <code>SampleRate</code> becomes its incoming rate times the trace's rate, and the original and final rates are written as <code>meta.refinery.*</code> fields <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/collect/collect.go#L563-L590"><code class="cite">collect/collect.go:563-590</code></a>. Dropped traces are counted in <code>trace_send_dropped</code> <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/collect/collect.go#L613-L620"><code class="cite">collect/collect.go:613-620</code></a>.</li>
+</ol>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="chart hc-chart-dense" viewBox="0 0 1140 290" role="img" aria-labelledby="rft-title rft-desc">
+<title id="rft-title">When Refinery decides: two traces, Refinery 3.4.0 defaults</title>
+<desc id="rft-desc">Left: a trace whose child spans arrive from 0 to 2.9 seconds and whose root arrives at 3.5 seconds is decided at 5.5 seconds, two seconds of SendDelay later; a child span arriving at 8 seconds follows the cached decision and is sent at once. Right: a trace whose root never arrives is held until the 60-second TraceTimeout and decided then.</desc>
+<text class="hc-chart-title" x="20" y="28">When Refinery decides (synthetic timings, default settings)</text>
+<text class="hc-chart-title" x="20" y="70">Trace with a root span</text>
+<text class="hc-chart-sub" x="20" y="88">decided SendDelay after the root arrives</text>
+<rect class="hc-area-1" x="40.0" y="116" width="264.0" height="68"><title>held, invisible to Honeycomb</title></rect>
+<text class="hc-annot-muted" x="44.0" y="110">held, invisible to Honeycomb</text>
+<line class="hc-axis" x1="40.0" y1="200" x2="520.0" y2="200"/>
+<line class="hc-grid" x1="40.0" y1="116" x2="40.0" y2="200"/>
+<text class="hc-tick hc-tick-mid" x="40.0" y="216">0 s</text>
+<line class="hc-grid" x1="136.0" y1="116" x2="136.0" y2="200"/>
+<text class="hc-tick hc-tick-mid" x="136.0" y="216">2 s</text>
+<line class="hc-grid" x1="232.0" y1="116" x2="232.0" y2="200"/>
+<text class="hc-tick hc-tick-mid" x="232.0" y="216">4 s</text>
+<line class="hc-grid" x1="328.0" y1="116" x2="328.0" y2="200"/>
+<text class="hc-tick hc-tick-mid" x="328.0" y="216">6 s</text>
+<line class="hc-grid" x1="424.0" y1="116" x2="424.0" y2="200"/>
+<text class="hc-tick hc-tick-mid" x="424.0" y="216">8 s</text>
+<line class="hc-grid" x1="520.0" y1="116" x2="520.0" y2="200"/>
+<text class="hc-tick hc-tick-mid" x="520.0" y="216">10 s</text>
+<line class="hc-line-critical" x1="304.0" y1="106" x2="304.0" y2="200"/>
+<text class="hc-annot hc-annot-mid" x="304.0" y="236">decided at 5.5 s</text>
+<circle class="hc-fill-1 hc-dot" cx="40.0" cy="150" r="6" data-tip="Child span 1, arrives at 0.0 s&#10;held in the trace cache"><title>Child span 1, arrives at 0.0 s</title></circle>
+<circle class="hc-fill-1 hc-dot" cx="59.2" cy="150" r="6" data-tip="Child span 2, arrives at 0.4 s&#10;held in the trace cache"><title>Child span 2, arrives at 0.4 s</title></circle>
+<circle class="hc-fill-1 hc-dot" cx="92.8" cy="150" r="6" data-tip="Child span 3, arrives at 1.1 s&#10;held in the trace cache"><title>Child span 3, arrives at 1.1 s</title></circle>
+<circle class="hc-fill-1 hc-dot" cx="179.2" cy="150" r="6" data-tip="Child span 4, arrives at 2.9 s&#10;held in the trace cache"><title>Child span 4, arrives at 2.9 s</title></circle>
+<circle class="hc-fill-2 hc-dot" cx="208.0" cy="150" r="7" data-tip="Root span, arrives at 3.5 s&#10;deadline pulled in to 3.5 + SendDelay (2 s)"><title>Root span, arrives at 3.5 s</title></circle>
+<text class="hc-annot hc-annot-mid" x="208.0" y="136">root</text>
+<circle class="hc-fill-3 hc-dot" cx="424.0" cy="150" r="6" data-tip="Late child span, arrives at 8.0 s&#10;decision cache says kept: sent at once"><title>Late child span, arrives at 8.0 s, after the decision</title></circle>
+<text class="hc-annot hc-annot-mid" x="424.0" y="174">late</text>
+<text class="hc-chart-title" x="600" y="70">Trace whose root never arrives</text>
+<text class="hc-chart-sub" x="600" y="88">decided when TraceTimeout runs out</text>
+<rect class="hc-area-1" x="620.0" y="116" width="443.1" height="68"><title>held for the full TraceTimeout</title></rect>
+<text class="hc-annot-muted" x="624.0" y="110">held for the full TraceTimeout</text>
+<line class="hc-axis" x1="620.0" y1="200" x2="1100.0" y2="200"/>
+<line class="hc-grid" x1="620.0" y1="116" x2="620.0" y2="200"/>
+<text class="hc-tick hc-tick-mid" x="620.0" y="216">0 s</text>
+<line class="hc-grid" x1="730.8" y1="116" x2="730.8" y2="200"/>
+<text class="hc-tick hc-tick-mid" x="730.8" y="216">15 s</text>
+<line class="hc-grid" x1="841.5" y1="116" x2="841.5" y2="200"/>
+<text class="hc-tick hc-tick-mid" x="841.5" y="216">30 s</text>
+<line class="hc-grid" x1="952.3" y1="116" x2="952.3" y2="200"/>
+<text class="hc-tick hc-tick-mid" x="952.3" y="216">45 s</text>
+<line class="hc-grid" x1="1063.1" y1="116" x2="1063.1" y2="200"/>
+<text class="hc-tick hc-tick-mid" x="1063.1" y="216">60 s</text>
+<line class="hc-line-critical" x1="1063.1" y1="106" x2="1063.1" y2="200"/>
+<text class="hc-annot hc-annot-mid" x="1063.1" y="236">decided at 60 s</text>
+<circle class="hc-fill-1 hc-dot" cx="620.0" cy="150" r="6" data-tip="Child span 1, arrives at 0.0 s&#10;held in the trace cache"><title>Child span 1, arrives at 0.0 s</title></circle>
+<circle class="hc-fill-1 hc-dot" cx="625.9" cy="150" r="6" data-tip="Child span 2, arrives at 0.8 s&#10;held in the trace cache"><title>Child span 2, arrives at 0.8 s</title></circle>
+<circle class="hc-fill-1 hc-dot" cx="634.8" cy="150" r="6" data-tip="Child span 3, arrives at 2.0 s&#10;held in the trace cache"><title>Child span 3, arrives at 2.0 s</title></circle>
+</svg>
+</div>
+<ul class="hc-legend"><li><span class="hc-key hc-key-1"></span>Child span</li><li><span class="hc-key hc-key-2"></span>Root span</li><li><span class="hc-key hc-key-3"></span>Late span, after the decision</li><li><span class="hc-key hc-key-critical hc-key-line"></span>Decision</li></ul>
+<figcaption>Synthetic timings with Refinery's default <code>SendDelay</code> (2 s) and <code>TraceTimeout</code> (60 s). The shaded span is how long the trace waits in memory, invisible to Honeycomb. A trace whose root is lost costs a full minute of memory and latency.</figcaption>
+<details class="hc-data"><summary>Table view</summary>
+<div class="table-wrap"><table>
+<thead><tr><th>Trace</th><th>Event</th><th class="num">Time</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td>With root</td><td>child spans arrive</td><td class="num">0.0, 0.4, 1.1, 2.9 s</td><td>held; deadline 60 s after the first</td></tr>
+<tr><td>With root</td><td>root arrives</td><td class="num">3.5 s</td><td>deadline pulled in to 5.5 s</td></tr>
+<tr><td>With root</td><td>decision</td><td class="num">5.5 s</td><td>next 100 ms tick</td></tr>
+<tr><td>With root</td><td>late child arrives</td><td class="num">8.0 s</td><td>follows the cached decision</td></tr>
+<tr><td>Without root</td><td>child spans arrive</td><td class="num">0.0, 0.8, 2.0 s</td><td>held</td></tr>
+<tr><td>Without root</td><td>decision</td><td class="num">60 s</td><td>TraceTimeout expires</td></tr>
+</tbody></table></div>
+</details>
+</figure>
+
+<h2 id="samplers">The samplers</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Sampler</th><th>How it decides</th><th>Goal</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><code>DeterministicSampler</code></td><td>Keeps a trace when the first four bytes of SHA-1(trace ID + a fixed salt), read as an integer, are at most <code>MaxUint32 / SampleRate</code>. Every node, and every restart, reaches the same answer for the same trace.</td><td>Fixed 1 in N</td><td><a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/sample/deterministic.go#L14-L58"><code class="cite">sample/deterministic.go:14-58</code></a></td></tr>
+<tr><td><code>DynamicSampler</code></td><td>Per key built from chosen fields, it counts spans for a 30-second window and gives each key a rate from dynsampler-go's logarithmic allocator, so common keys are sampled hard and rare keys are kept.</td><td>Average rate goal</td><td><a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/sample/dynamic.go#L70-L91"><code class="cite">sample/dynamic.go:70-91</code></a> <a class="cite" href="https://github.com/honeycombio/dynsampler-go/blob/v0.6.4/avgsamplerate.go#L112-L182"><code class="cite">avgsamplerate.go:112-182</code></a></td></tr>
+<tr><td><code>EMADynamicSampler</code></td><td>The same allocator over an exponential moving average of counts (weight 0.5, adjusted every 15 s), with burst detection; the docs recommend it or EMAThroughput "for most Refinery use cases".</td><td>Average rate goal</td><td><a class="cite" href="https://github.com/honeycombio/dynsampler-go/blob/v0.6.4/emasamplerate.go#L289-L323"><code class="cite">emasamplerate.go:289-323</code></a> <a class="src" href="../sources.html#s-docs-refinery-samplers">docs-refinery-samplers</a></td></tr>
+<tr><td><code>EMAThroughputSampler</code></td><td>The EMA allocator with a target of <code>GoalThroughputPerSec × AdjustmentInterval</code> kept events instead of a rate.</td><td>Throughput goal</td><td><a class="cite" href="https://github.com/honeycombio/dynsampler-go/blob/v0.6.4/emathroughput.go#L226-L244"><code class="cite">emathroughput.go:226-244</code></a></td></tr>
+<tr><td><code>WindowedThroughputSampler</code></td><td>Splits a throughput budget equally across active keys, recomputed every second over a rolling window.</td><td>Throughput goal</td><td><a class="cite" href="https://github.com/honeycombio/dynsampler-go/blob/v0.6.4/windowedthroughput.go#L151-L180"><code class="cite">windowedthroughput.go:151-180</code></a></td></tr>
+<tr><td><code>TotalThroughputSampler</code></td><td>The same equal split over fixed windows; "deprecated and present mainly for compatibility".</td><td>Throughput goal</td><td><a class="src" href="../sources.html#s-docs-refinery-samplers">docs-refinery-samplers</a></td></tr>
+<tr><td><code>RulesBasedSampler</code></td><td>Ordered rules, first match wins: each matches field conditions over the whole trace or within one span, then drops, keeps 1 in N, or hands off to another sampler. No match keeps the trace at rate 1.</td><td>Your rules</td><td><a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/sample/rules.go#L71-L139"><code class="cite">sample/rules.go:71-139</code></a></td></tr>
+</tbody></table></div>
+<p>Only the deterministic sampler is a pure function of the trace ID. The dynamic and throughput samplers compute a rate and then keep the trace "randomly with probability 1/rate": <code>rand.Intn(int(rate)) == 0</code> <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/sample/dynamic.go#L81"><code class="cite">sample/dynamic.go:81</code></a>. Honeycomb's own staff warn that dynamic samplers "are not deterministic, meaning you won't know in advance what they'll do", and that they need "no more than a few dozen (certainly &lt;100) unique dynsampler keys" to hit their goal <span class="prov prov-stated">talk/blog</span> <a class="src" href="../sources.html#s-blog-tuning-dynamic">blog-tuning-dynamic</a>. The shipped default rule keeps everything: <code>DeterministicSampler</code> at <code>SampleRate: 1</code> <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/rules.yaml#L1-L6"><code class="cite">rules.yaml:1-6</code></a>. The maths of the allocator is on <a href="../sampling.html#dynamic">Sampling and its maths</a>.</p>
+
+<h2 id="cache">Remembering decisions</h2>
+<p>Late spans are why Refinery remembers. Kept traces go into an LRU with their rate and reason (10,000 by default); dropped traces go into "a pair of cuckoo filters" (1,000,000), behind a three-second set of just-dropped IDs <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/collect/cache/cuckooSentCache.go#L16-L21"><code class="cite">collect/cache/cuckooSentCache.go:16-21</code></a> <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/config/file_config.go#L402-L405"><code class="cite">config/file_config.go:402-405</code></a>. A cuckoo filter cannot be emptied, so Refinery keeps "two filters, current and future" and swaps them; going over capacity raises the false-positive rate <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/collect/cache/cuckoo.go#L21-L31"><code class="cite">collect/cache/cuckoo.go:21-31</code></a>. The docs size this at roughly 200 bytes per kept trace and 4 to 6 bytes per dropped one <a class="src" href="../sources.html#s-docs-refinery-configure">docs-refinery-configure</a>. Nothing is written to disk: "When you restart the process all in-flight traces will be flushed ... but you will lose the record of past trace decisions" <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/README.md#L286-L288"><code class="cite">README.md:286-288</code></a>.</p>
+
+<h2 id="pressure">Under pressure</h2>
+<ul>
+<li><strong>Memory.</strong> Every 100 ms the collector compares heap use with <code>MaxAlloc</code>, or 75% of <code>AvailableMemory</code>; over budget, each worker decides its heaviest traces first <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/collect/collect.go#L259-L310"><code class="cite">collect/collect.go:259-310</code></a>.</li>
+<li><strong>Stress relief.</strong> Each node's stress is the largest of its peer-queue, incoming-queue and heap scores; nodes share it over pubsub <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/collect/stressRelief.go#L413-L445"><code class="cite">collect/stressRelief.go:413-445</code></a>. With <code>Mode</code> set (default <code>never</code>), stress above 90 switches to deciding each span immediately by <code>wyhash(traceID) ≤ MaxUint64 / 100</code>, until it falls below 75 for at least 10 seconds <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/config/file_config.go#L420-L426"><code class="cite">config/file_config.go:420-426</code></a> <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/collect/stressRelief.go#L540-L548"><code class="cite">collect/stressRelief.go:540-548</code></a>.</li>
+</ul>
+
+<h2 id="running">Running it</h2>
+<p>Configuration is two files, <code>config.yaml</code> and <code>rules.yaml</code>, read from disk or "with an unauthenticated GET request from a URL" <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/README.md#L84-L95"><code class="cite">README.md:84-95</code></a>. Honeycomb's sizing advice: linux on amd64 or arm64, 2 GB and 2 cores per node at least, "in many cases, Refinery only needs one node", and prefer "vertical scaling ... over horizontal scaling" <a class="src" href="../sources.html#s-docs-refinery-setup">docs-refinery-setup</a> <a class="src" href="../sources.html#s-docs-refinery-scale">docs-refinery-scale</a>. The Helm chart defaults to Redis peers, three replicas and 2 CPU / 2 GiB <a class="src" href="../sources.html#s-helm-refinery">helm-refinery</a>. Refinery reports on itself through Prometheus on <code>localhost:2112</code> or OTLP metrics, with counters such as <code>stress_level</code> and <code>trace_send_kept</code> <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/config/file_config.go#L250-L298"><code class="cite">config/file_config.go:250-298</code></a>. Honeycomb runs it internally too: production's telemetry passes "through Refinery into dogfood's Shepherd", and one rule keeps every end-to-end test trace <span class="prov prov-stated">talk/blog</span> <a class="src" href="../sources.html#s-blog-graviton4">blog-graviton4</a> <a class="src" href="../sources.html#s-blog-teaching-ai-refinery">blog-teaching-ai-refinery</a>.</p>
+<p>Output always goes to the Honeycomb Events API: kept spans are posted as msgpack to <code>{HoneycombAPI}/1/batch/{dataset}</code> with an <code>X-Honeycomb-Team</code> header <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/transmit/direct_transmit.go#L749-L753"><code class="cite">transmit/direct_transmit.go:749-753</code></a> <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/transmit/direct_transmit.go#L497-L499"><code class="cite">transmit/direct_transmit.go:497-499</code></a>. There is no OTLP exporter, so Refinery is useful only in front of Honeycomb or something that speaks its batch API <span class="prov prov-inferred">inferred</span>. <a href="../lessons.html#local">Lessons for Guildmaster</a> covers what that means for running it locally.</p>
+
+<div class="callout unclear"><span class="callout-title">Where the docs and the code disagree</span>
+<ul>
+<li>The scale page says throughput "is limited by single-thread CPU performance"; since 3.1 a node runs one collect worker per CPU <a class="src" href="../sources.html#s-docs-refinery-scale">docs-refinery-scale</a> <a class="src" href="../sources.html#s-refinery-notes">refinery-notes</a>.</li>
+<li>The docs call the worker assignment "consistent hashing"; the code is a plain modulo of a hash <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/collect/collect.go#L394-L407"><code class="cite">collect/collect.go:394-407</code></a>.</li>
+<li>The cluster stress level is described as a "geometric mean" in a comment and "a weighted average" in the 2.7 notes; the code computes a root mean square <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/collect/stressRelief.go#L493-L530"><code class="cite">collect/stressRelief.go:493-530</code></a>.</li>
+<li>The set-up page still shows version 2.9.4 and says Redis Cluster is unsupported; 2.8 added it <a class="src" href="../sources.html#s-docs-refinery-setup">docs-refinery-setup</a> <a class="src" href="../sources.html#s-refinery-notes">refinery-notes</a>.</li>
+</ul>
+</div>
+</article>
+</main>
+</div>
+<script src="../assets/nav-data.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

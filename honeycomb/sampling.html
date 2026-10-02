@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sampling and its maths · Honeycomb C4</title>
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">Data model</p>
+<h1>Sampling and its maths</h1>
+<p class="lede">Honeycomb bills and stores every event, so at volume its customers keep a fraction and let each kept event stand for the ones dropped. This page covers what a sample rate means, how the query engine weights by it, how wrong the answer can be, and how Refinery picks rates.</p>
+<p class="meta-line">Read on 2026-10-02. The error chart is this site's derivation from elementary statistics, not a Honeycomb figure; everything else is cited.</p>
+
+<h2 id="rate">What a sample rate means</h2>
+<p>A sample rate of N means one event in N was kept and the kept one stands for N: "A 'sample rate' of 100 means that for every 100 requests, we capture a single event and indicate that it represents 100 similar requests" <span class="prov prov-doc">documented</span> <a class="src" href="sources.html#s-repo-dynsampler">repo-dynsampler</a>. Each span carries it: "each span in a trace is given a <code>SampleRate</code> attribute that represents <code>N</code> when you only sample <code>1/N</code> traces. This allows Honeycomb to weight counts to compensate" <a class="src" href="sources.html#s-docs-sampled-data">docs-sampled-data</a>. On the Events API it is the integer <code>samplerate</code>, defaulting to 1, "meaning 'not sampled'" <a class="src" href="sources.html#s-docs-events-api">docs-events-api</a>. For OTLP, Honeycomb's translator reads a <code>sampleRate</code> (or <code>SampleRate</code>) span or resource attribute and removes it; failing that, it derives the rate from the W3C <code>tracestate</code> threshold <code>ot=th</code> <a class="src" href="sources.html#s-repo-husky">repo-husky</a>. When that threshold implies a fractional count such as 10.8, it returns 10 or 11 at random in the right proportions, "so the expected value matches" <a class="src" href="sources.html#s-repo-husky">repo-husky</a>.</p>
+
+<h2 id="weighting">How queries weight by it</h2>
+<p>The query engine multiplies at read time <span class="prov prov-doc">documented</span> <a class="src" href="sources.html#s-docs-sampled-data">docs-sampled-data</a>. With <em>k</em> kept events, each with rate N<sub>i</sub> and value x<sub>i</sub>:</p>
+<pre class="hc-formula">COUNT          ≈  Σ Nᵢ
+SUM(x)         ≈  Σ Nᵢ · xᵢ
+AVG(x)         ≈  Σ Nᵢ · xᵢ  /  Σ Nᵢ
+P99(x)         ≈  the value below which 99% of the weight Σ Nᵢ lies
+COUNT_DISTINCT    not corrected: a HyperLogLog estimate over the values present</pre>
+<p>The docs' own example: two traces sampled at 10, with durations 200 ms and 1,100 ms, give COUNT = 2 × 10 = 20 and AVG = (200 · 10 + 1100 · 10) / (10 + 10) = 650 ms; "sample rate correction applies to <code>SUM</code> and percentile aggregations as well", but "<code>COUNT_DISTINCT</code> operator does not compensate for sampling rate" <a class="src" href="sources.html#s-docs-sampled-data">docs-sampled-data</a>. <strong>Usage Mode</strong> turns weighting off and exposes the <code>Sample Rate</code> field, so a team can see what it actually stores and pays for <a class="src" href="sources.html#s-docs-sampled-data">docs-sampled-data</a> <a class="src" href="sources.html#s-docs-usage">docs-usage</a>. That heatmaps are weighted is not stated in the docs; a 2025 post says "every single datapoint will be automatically corrected for sampling", which this site reads as including them <span class="prov prov-inferred">inferred</span> <a class="src" href="sources.html#s-blog-living-future">blog-living-future</a>.</p>
+
+<h2 id="error">How wrong can it be?</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="chart hc-chart-dense" viewBox="0 0 960 390" role="img" aria-labelledby="err-title err-desc">
+<title id="err-title">How far a sampled COUNT can be off</title>
+<desc id="err-desc">Relative standard error of a reweighted count, the square root of (N minus 1) over n, against the true number of events n from 100 to 10 million, for sample rates N of 10, 100 and 1,000. Each line falls by a factor of about 3.2 per tenfold more events. At N equal to 100 the error is 31 percent for 1,000 events, 10 percent for 10,000 and 3 percent for 100,000.</desc>
+<text class="hc-chart-title" x="20" y="26">How far a sampled COUNT can be off (derived, not a Honeycomb figure)</text>
+<text class="hc-chart-sub" x="20" y="45">Relative standard error √((N−1)/n) of Σ SampleRate, for n true events kept independently at 1 in N</text>
+<line class="hc-grid" x1="80" y1="330.0" x2="840" y2="330.0"/>
+<text class="hc-tick hc-tick-end" x="72" y="334.0">0%</text>
+<line class="hc-grid" x1="80" y1="278.0" x2="840" y2="278.0"/>
+<text class="hc-tick hc-tick-end" x="72" y="282.0">10%</text>
+<line class="hc-grid" x1="80" y1="226.0" x2="840" y2="226.0"/>
+<text class="hc-tick hc-tick-end" x="72" y="230.0">20%</text>
+<line class="hc-grid" x1="80" y1="174.0" x2="840" y2="174.0"/>
+<text class="hc-tick hc-tick-end" x="72" y="178.0">30%</text>
+<line class="hc-grid" x1="80" y1="122.0" x2="840" y2="122.0"/>
+<text class="hc-tick hc-tick-end" x="72" y="126.0">40%</text>
+<line class="hc-grid" x1="80" y1="70.0" x2="840" y2="70.0"/>
+<text class="hc-tick hc-tick-end" x="72" y="74.0">50%</text>
+<line class="hc-grid" x1="80.0" y1="70" x2="80.0" y2="330"/>
+<text class="hc-tick hc-tick-mid" x="80.0" y="348">100</text>
+<line class="hc-grid" x1="232.0" y1="70" x2="232.0" y2="330"/>
+<text class="hc-tick hc-tick-mid" x="232.0" y="348">1k</text>
+<line class="hc-grid" x1="384.0" y1="70" x2="384.0" y2="330"/>
+<text class="hc-tick hc-tick-mid" x="384.0" y="348">10k</text>
+<line class="hc-grid" x1="536.0" y1="70" x2="536.0" y2="330"/>
+<text class="hc-tick hc-tick-mid" x="536.0" y="348">100k</text>
+<line class="hc-grid" x1="688.0" y1="70" x2="688.0" y2="330"/>
+<text class="hc-tick hc-tick-mid" x="688.0" y="348">1M</text>
+<line class="hc-grid" x1="840.0" y1="70" x2="840.0" y2="330"/>
+<text class="hc-tick hc-tick-mid" x="840.0" y="348">10M</text>
+<line class="hc-axis" x1="80" y1="330" x2="840" y2="330"/>
+<text class="hc-axis-title" x="460.0" y="370" text-anchor="middle">true events in the time bucket, n (log scale)</text>
+<path class="hc-line-1" d="M80.0,174.0 L87.6,182.7 L95.2,191.0 L102.8,198.7 L110.4,206.1 L118.0,213.0 L125.6,219.6 L133.2,225.7 L140.8,231.6 L148.4,237.1 L156.0,242.3 L163.6,247.2 L171.2,251.8 L178.8,256.2 L186.4,260.3 L194.0,264.2 L201.6,267.9 L209.2,271.4 L216.8,274.6 L224.4,277.7 L232.0,280.7 L239.6,283.4 L247.2,286.0 L254.8,288.5 L262.4,290.8 L270.0,293.0 L277.6,295.1 L285.2,297.0 L292.8,298.9 L300.4,300.6 L308.0,302.3 L315.6,303.8 L323.2,305.3 L330.8,306.7 L338.4,308.0 L346.0,309.2 L353.6,310.4 L361.2,311.5 L368.8,312.5 L376.4,313.5 L384.0,314.4 L391.6,315.3 L399.2,316.1 L406.8,316.9 L414.4,317.6 L422.0,318.3 L429.6,319.0 L437.2,319.6 L444.8,320.2 L452.4,320.7 L460.0,321.2 L467.6,321.7 L475.2,322.2 L482.8,322.6 L490.4,323.0 L498.0,323.4 L505.6,323.8 L513.2,324.1 L520.8,324.5 L528.4,324.8 L536.0,325.1 L543.6,325.3 L551.2,325.6 L558.8,325.8 L566.4,326.1 L574.0,326.3 L581.6,326.5 L589.2,326.7 L596.8,326.9 L604.4,327.1 L612.0,327.2 L619.6,327.4 L627.2,327.5 L634.8,327.7 L642.4,327.8 L650.0,327.9 L657.6,328.0 L665.2,328.1 L672.8,328.2 L680.4,328.3 L688.0,328.4 L695.6,328.5 L703.2,328.6 L710.8,328.7 L718.4,328.8 L726.0,328.8 L733.6,328.9 L741.2,329.0 L748.8,329.0 L756.4,329.1 L764.0,329.1 L771.6,329.2 L779.2,329.2 L786.8,329.3 L794.4,329.3 L802.0,329.3 L809.6,329.4 L817.2,329.4 L824.8,329.4 L832.4,329.5 L840.0,329.5"/>
+<circle class="hc-fill-1 hc-dot" cx="80.0" cy="174.0" r="5" data-tip="1 in 10, 100 events: ±30.0%&#10;about 10 kept"><title>1 in 10, 100 events: ±30.0%</title></circle>
+<circle class="hc-fill-1 hc-dot" cx="232.0" cy="280.7" r="5" data-tip="1 in 10, 1,000 events: ±9.5%&#10;about 100 kept"><title>1 in 10, 1,000 events: ±9.5%</title></circle>
+<circle class="hc-fill-1 hc-dot" cx="384.0" cy="314.4" r="5" data-tip="1 in 10, 10,000 events: ±3.0%&#10;about 1,000 kept"><title>1 in 10, 10,000 events: ±3.0%</title></circle>
+<circle class="hc-fill-1 hc-dot" cx="536.0" cy="325.1" r="5" data-tip="1 in 10, 100,000 events: ±0.9%&#10;about 10,000 kept"><title>1 in 10, 100,000 events: ±0.9%</title></circle>
+<circle class="hc-fill-1 hc-dot" cx="688.0" cy="328.4" r="5" data-tip="1 in 10, 1,000,000 events: ±0.3%&#10;about 100,000 kept"><title>1 in 10, 1,000,000 events: ±0.3%</title></circle>
+<circle class="hc-fill-1 hc-dot" cx="840.0" cy="329.5" r="5" data-tip="1 in 10, 10,000,000 events: ±0.1%&#10;about 1,000,000 kept"><title>1 in 10, 10,000,000 events: ±0.1%</title></circle>
+<text class="hc-annot" x="90.0" y="166.0">1 in 10</text>
+<path class="hc-line-2" d="M171.2,70.7 L178.8,85.2 L186.4,98.9 L194.0,111.8 L201.6,124.0 L209.2,135.5 L216.8,146.4 L224.4,156.7 L232.0,166.4 L239.6,175.5 L247.2,184.2 L254.8,192.3 L262.4,200.0 L270.0,207.3 L277.6,214.2 L285.2,220.6 L292.8,226.8 L300.4,232.5 L308.0,238.0 L315.6,243.1 L323.2,248.0 L330.8,252.6 L338.4,256.9 L346.0,261.0 L353.6,264.9 L361.2,268.5 L368.8,271.9 L376.4,275.2 L384.0,278.3 L391.6,281.2 L399.2,283.9 L406.8,286.5 L414.4,288.9 L422.0,291.2 L429.6,293.4 L437.2,295.4 L444.8,297.4 L452.4,299.2 L460.0,300.9 L467.6,302.5 L475.2,304.1 L482.8,305.5 L490.4,306.9 L498.0,308.2 L505.6,309.4 L513.2,310.6 L520.8,311.6 L528.4,312.7 L536.0,313.6 L543.6,314.6 L551.2,315.4 L558.8,316.2 L566.4,317.0 L574.0,317.7 L581.6,318.4 L589.2,319.1 L596.8,319.7 L604.4,320.3 L612.0,320.8 L619.6,321.3 L627.2,321.8 L634.8,322.3 L642.4,322.7 L650.0,323.1 L657.6,323.5 L665.2,323.9 L672.8,324.2 L680.4,324.5 L688.0,324.8 L695.6,325.1 L703.2,325.4 L710.8,325.6 L718.4,325.9 L726.0,326.1 L733.6,326.3 L741.2,326.5 L748.8,326.7 L756.4,326.9 L764.0,327.1 L771.6,327.3 L779.2,327.4 L786.8,327.6 L794.4,327.7 L802.0,327.8 L809.6,327.9 L817.2,328.1 L824.8,328.2 L832.4,328.3 L840.0,328.4"/>
+<circle class="hc-fill-2 hc-dot" cx="232.0" cy="166.4" r="5" data-tip="1 in 100, 1,000 events: ±31.5%&#10;about 10 kept"><title>1 in 100, 1,000 events: ±31.5%</title></circle>
+<circle class="hc-fill-2 hc-dot" cx="384.0" cy="278.3" r="5" data-tip="1 in 100, 10,000 events: ±9.9%&#10;about 100 kept"><title>1 in 100, 10,000 events: ±9.9%</title></circle>
+<circle class="hc-fill-2 hc-dot" cx="536.0" cy="313.6" r="5" data-tip="1 in 100, 100,000 events: ±3.1%&#10;about 1,000 kept"><title>1 in 100, 100,000 events: ±3.1%</title></circle>
+<circle class="hc-fill-2 hc-dot" cx="688.0" cy="324.8" r="5" data-tip="1 in 100, 1,000,000 events: ±1.0%&#10;about 10,000 kept"><title>1 in 100, 1,000,000 events: ±1.0%</title></circle>
+<circle class="hc-fill-2 hc-dot" cx="840.0" cy="328.4" r="5" data-tip="1 in 100, 10,000,000 events: ±0.3%&#10;about 100,000 kept"><title>1 in 100, 10,000,000 events: ±0.3%</title></circle>
+<text class="hc-annot" x="242.0" y="158.4">1 in 100</text>
+<path class="hc-line-3" d="M330.8,84.1 L338.4,97.8 L346.0,110.8 L353.6,123.1 L361.2,134.7 L368.8,145.6 L376.4,155.9 L384.0,165.6 L391.6,174.8 L399.2,183.5 L406.8,191.7 L414.4,199.4 L422.0,206.8 L429.6,213.6 L437.2,220.2 L444.8,226.3 L452.4,232.1 L460.0,237.6 L467.6,242.7 L475.2,247.6 L482.8,252.2 L490.4,256.6 L498.0,260.7 L505.6,264.6 L513.2,268.2 L520.8,271.7 L528.4,274.9 L536.0,278.0 L543.6,280.9 L551.2,283.7 L558.8,286.3 L566.4,288.7 L574.0,291.0 L581.6,293.2 L589.2,295.3 L596.8,297.2 L604.4,299.0 L612.0,300.8 L619.6,302.4 L627.2,304.0 L634.8,305.4 L642.4,306.8 L650.0,308.1 L657.6,309.3 L665.2,310.5 L672.8,311.6 L680.4,312.6 L688.0,313.6 L695.6,314.5 L703.2,315.4 L710.8,316.2 L718.4,316.9 L726.0,317.7 L733.6,318.4 L741.2,319.0 L748.8,319.6 L756.4,320.2 L764.0,320.8 L771.6,321.3 L779.2,321.8 L786.8,322.2 L794.4,322.7 L802.0,323.1 L809.6,323.5 L817.2,323.8 L824.8,324.2 L832.4,324.5 L840.0,324.8"/>
+<circle class="hc-fill-3 hc-dot" cx="384.0" cy="165.6" r="5" data-tip="1 in 1000, 10,000 events: ±31.6%&#10;about 10 kept"><title>1 in 1000, 10,000 events: ±31.6%</title></circle>
+<circle class="hc-fill-3 hc-dot" cx="536.0" cy="278.0" r="5" data-tip="1 in 1000, 100,000 events: ±10.0%&#10;about 100 kept"><title>1 in 1000, 100,000 events: ±10.0%</title></circle>
+<circle class="hc-fill-3 hc-dot" cx="688.0" cy="313.6" r="5" data-tip="1 in 1000, 1,000,000 events: ±3.2%&#10;about 1,000 kept"><title>1 in 1000, 1,000,000 events: ±3.2%</title></circle>
+<circle class="hc-fill-3 hc-dot" cx="840.0" cy="324.8" r="5" data-tip="1 in 1000, 10,000,000 events: ±1.0%&#10;about 10,000 kept"><title>1 in 1000, 10,000,000 events: ±1.0%</title></circle>
+<text class="hc-annot" x="394.0" y="157.6">1 in 1,000</text>
+<text class="hc-annot-muted" x="80" y="388">For large N the error is about 1/√(kept events): 100 kept is ±10%, 10,000 kept is ±1%, whatever the rate.</text>
+</svg>
+</div>
+<ul class="hc-legend"><li><span class="hc-key hc-key-1 hc-key-line"></span>1 in 10</li><li><span class="hc-key hc-key-2 hc-key-line"></span>1 in 100</li><li><span class="hc-key hc-key-3 hc-key-line"></span>1 in 1,000</li></ul>
+<figcaption><span class="prov prov-inferred">inferred</span> If each of n events is kept independently with probability 1/N and weighted by N, the count estimate is unbiased with variance n(N − 1), so its relative standard error is √((N − 1)/n). Lines are cut at 50%.</figcaption>
+<details class="hc-data"><summary>Table view</summary>
+<div class="table-wrap"><table>
+<thead><tr><th class="num">True events n</th><th class="num">1 in 10</th><th class="num">1 in 100</th><th class="num">1 in 1,000</th></tr></thead>
+<tbody>
+<tr><td class="num">1,000</td><td class="num">±9.5%</td><td class="num">±31%</td><td class="num">±100%</td></tr>
+<tr><td class="num">10,000</td><td class="num">±3.0%</td><td class="num">±9.9%</td><td class="num">±32%</td></tr>
+<tr><td class="num">100,000</td><td class="num">±0.9%</td><td class="num">±3.1%</td><td class="num">±10%</td></tr>
+<tr><td class="num">1,000,000</td><td class="num">±0.3%</td><td class="num">±1.0%</td><td class="num">±3.2%</td></tr>
+</tbody></table></div>
+</details>
+</figure>
+<p>The rule of thumb that falls out, about 1/√(kept events), is Honeycomb's own advice in other words: "don't be afraid of high sample rates. Instead, what's important is to have enough values remaining in order for the sampling to be accurate" <span class="prov prov-stated">talk/blog</span> <a class="src" href="sources.html#s-blog-refining-sampling">blog-refining-sampling</a>. Rare things are where it bites. Honeycomb points SLO users to an external sampling-error calculator, warning that it "gives us an estimation" <a class="src" href="sources.html#s-blog-sampling-slos">blog-sampling-slos</a>, and its staff recommend: "Never sample traces that contain errors or exceed our threshold for duration, because we don't want our Honeycomb triggers and SLOs unduly impacted by sample rate amplification" <a class="src" href="sources.html#s-blog-tuning-dynamic">blog-tuning-dynamic</a>. The docs suggest considering sampling once "your services generate 1000 or more traces per second" <span class="prov prov-doc">documented</span> <a class="src" href="sources.html#s-docs-sampling-guidelines">docs-sampling-guidelines</a>, and the agent-observability guide says not to sample GenAI telemetry at all <a class="src" href="sources.html#s-docs-agents">docs-agents</a>.</p>
+
+<h2 id="head-tail">Head against tail</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1100 330" role="img" aria-labelledby="ht-title ht-desc">
+<title id="ht-title">Head sampling against tail sampling</title>
+<desc id="ht-desc">Head sampling decides at the first span from the trace ID and passes the decision downstream, before anyone knows whether the trace will fail. Tail sampling, as in Refinery, buffers every span of the trace and decides when it is complete, so it can keep all errors and slow traces.</desc>
+<defs><marker id="ht-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="32">Where the decision is made</text>
+<g class="c4-external">
+<rect x="20" y="70" width="200" height="70" rx="8"/>
+<text class="c4-label" x="120.0" y="102.5">Root span starts</text>
+<text class="c4-desc" x="120.0" y="118.5">trace ID is chosen</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="204" y="74" width="13" height="13" rx="3"/><text x="210.5" y="84">D</text></g>
+<g class="c4-component">
+<rect x="270" y="70" width="230" height="70" rx="8"/>
+<text class="c4-label" x="385.0" y="95.0">Head sampler in the SDK</text>
+<text class="c4-tech" x="385.0" y="111.0">[e.g. TraceIDRatioBased]</text>
+<text class="c4-desc" x="385.0" y="127.0">keep if trace-ID bits &lt; 1/N</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="484" y="74" width="13" height="13" rx="3"/><text x="490.5" y="84">D</text></g>
+<g class="c4-external">
+<rect x="550" y="70" width="240" height="70" rx="8"/>
+<text class="c4-label" x="670.0" y="102.5">Downstream services</text>
+<text class="c4-desc" x="670.0" y="118.5">follow the propagated flag</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="774" y="74" width="13" height="13" rx="3"/><text x="780.5" y="84">D</text></g>
+<g class="c4-external">
+<rect x="840" y="70" width="240" height="70" rx="8"/>
+<text class="c4-label" x="960.0" y="102.5">Honeycomb</text>
+<text class="c4-desc" x="960.0" y="118.5">kept spans, SampleRate = N</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="1064" y="74" width="13" height="13" rx="3"/><text x="1070.5" y="84">D</text></g>
+<g class="c4-rel">
+<path d="M220,105 L270,105" marker-end="url(#ht-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M500,105 L550,105" marker-end="url(#ht-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M790,105 L840,105" marker-end="url(#ht-arrow)"/>
+</g>
+<text class="hc-note" x="270" y="166">Cheap and stateless, but blind: "Head sampling is a blunt instrument."</text>
+<g class="c4-external">
+<rect x="20" y="210" width="200" height="70" rx="8"/>
+<text class="c4-label" x="120.0" y="242.5">Every span of the trace</text>
+<text class="c4-desc" x="120.0" y="258.5">from every service</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="204" y="214" width="13" height="13" rx="3"/><text x="210.5" y="224">D</text></g>
+<g class="c4-component">
+<rect x="270" y="200" width="280" height="90" rx="8"/>
+<text class="c4-label" x="410.0" y="228.0">Refinery or a Collector tail sampler</text>
+<text class="c4-tech" x="410.0" y="244.0">[buffers the whole trace]</text>
+<text class="c4-desc" x="410.0" y="260.0">decides after the root, or after</text>
+<text class="c4-desc" x="410.0" y="274.0">TraceTimeout, on every span's fields</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="534" y="204" width="13" height="13" rx="3"/><text x="540.5" y="214">D</text></g>
+<g class="c4-external">
+<rect x="600" y="210" width="190" height="70" rx="8"/>
+<text class="c4-label" x="695.0" y="242.5">Decision cache</text>
+<text class="c4-desc" x="695.0" y="258.5">late spans follow it</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="774" y="214" width="13" height="13" rx="3"/><text x="780.5" y="224">D</text></g>
+<g class="c4-external">
+<rect x="840" y="210" width="240" height="70" rx="8"/>
+<text class="c4-label" x="960.0" y="242.5">Honeycomb</text>
+<text class="c4-desc" x="960.0" y="258.5">kept spans, rate multiplied in</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="1064" y="214" width="13" height="13" rx="3"/><text x="1070.5" y="224">D</text></g>
+<g class="c4-rel">
+<path d="M220,245 L270,245" marker-end="url(#ht-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M550,245 L600,245" marker-end="url(#ht-arrow)"/>
+</g>
+<g class="c4-rel">
+<path d="M790,245 L840,245" marker-end="url(#ht-arrow)"/>
+</g>
+<text class="hc-note" x="20" y="318">Head and tail combine: Refinery multiplies a head-sampled span's incoming rate by its own, so the weights stay right.</text>
+</svg>
+</div>
+<figcaption>"Head sampling is when you sample traces without looking at the entire trace"; "tail sampling is where the sampling decision considers all or most of the spans within the trace" <a class="src" href="sources.html#s-docs-sampling">docs-sampling</a>. Using the trace ID "as a random number ... allows disparate samplers to make consistent decisions for all of the spans in a trace" <a class="src" href="sources.html#s-docs-sampling">docs-sampling</a>.</figcaption>
+</figure>
+<p>Honeycomb calls head sampling "a blunt instrument" and suggests combining both at extreme volume <a class="src" href="sources.html#s-docs-sampling-guidelines">docs-sampling-guidelines</a>. When both run, Refinery multiplies the incoming rate into its own, so "if you use both, Refinery takes that into account" <a class="src" href="sources.html#s-refinery-readme">refinery-readme</a> <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/collect/collect.go#L563-L590"><code class="cite">collect/collect.go:563-590</code></a>. One subtlety the docs do not raise: the hashes differ, so a head sampler's keep decision and Refinery's deterministic decision are independent rather than nested <span class="prov prov-inferred">inferred</span>.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Who decides</th><th>How</th><th>Property</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>Refinery DeterministicSampler</td><td>SHA-1(trace ID + fixed salt), first 4 bytes ≤ MaxUint32 / N</td><td>Same answer on every node and restart</td><td><a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/sample/deterministic.go#L14-L58"><code class="cite">sample/deterministic.go:14-58</code></a></td></tr>
+<tr><td>Refinery dynamic, throughput and rules samplers</td><td>Rate from the key's traffic, then <code>rand.Intn(rate) == 0</code></td><td>Random; not reproducible</td><td><a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/sample/dynamic.go#L81"><code class="cite">sample/dynamic.go:81</code></a> <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/sample/rules.go#L115"><code class="cite">sample/rules.go:115</code></a></td></tr>
+<tr><td>Refinery stress relief</td><td>wyhash(trace ID) ≤ MaxUint64 / N</td><td>Deterministic per trace</td><td><a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/collect/stressRelief.go#L540-L548"><code class="cite">collect/stressRelief.go:540-548</code></a></td></tr>
+<tr><td>Beeline deterministic sampler (end of life)</td><td>SHA-1(trace ID), no salt, first 4 bytes ≤ MaxUint32 / N</td><td>Deterministic, but a different hash from Refinery's</td><td><a class="src" href="sources.html#s-repo-beeline-go">repo-beeline-go</a></td></tr>
+<tr><td>Honeycomb OpenTelemetry distributions (archived)</td><td>OpenTelemetry's <code>TraceIDRatioBased(1/N)</code>, plus a <code>SampleRate=N</code> attribute</td><td>Deterministic on the trace ID's last 8 bytes</td><td><a class="src" href="sources.html#s-repo-hny-otel-go">repo-hny-otel-go</a> <a class="src" href="sources.html#s-otel-go-sampling">otel-go-sampling</a></td></tr>
+<tr><td>OpenTelemetry consistent probability sampling</td><td>56 bits of randomness from <code>ot=rv</code> or the trace ID, compared with a threshold carried as <code>ot=th</code></td><td>Deterministic; any spec-aware backend can reweight</td><td><a class="src" href="sources.html#s-blog-adaptive-tail">blog-adaptive-tail</a> <a class="src" href="sources.html#s-repo-husky">repo-husky</a></td></tr>
+<tr><td>libhoney client-side sampling</td><td><code>rand.Intn(N) != 0</code> drops the event</td><td>Random, not trace-aware</td><td><a class="src" href="sources.html#s-repo-libhoney-go">repo-libhoney-go</a></td></tr>
+</tbody></table></div>
+
+<h2 id="dynamic">Dynamic sampling, worked through</h2>
+<p>Refinery's dynamic samplers come from <code>dynsampler-go</code>. Every window (30 s by default for <code>DynamicSampler</code>) it counts spans per key, a key being the values of chosen fields such as status code and route, then <span class="prov prov-doc">documented</span> <a class="cite" href="https://github.com/honeycombio/dynsampler-go/blob/v0.6.4/avgsamplerate.go#L112-L182"><code class="cite">avgsamplerate.go:112-182</code></a> <a class="cite" href="https://github.com/honeycombio/dynsampler-go/blob/v0.6.4/keyCalculation.go#L9-L56"><code class="cite">keyCalculation.go:9-56</code></a>:</p>
+<pre class="hc-formula">goalCount  = Σ count(key) / GoalSampleRate          events to keep this window
+goalRatio  = goalCount / Σ log10(count(key))
+goal(key)  = max(1, log10(count(key)) × goalRatio)  + unused share passed on from earlier keys
+rate(key)  = 1                          if count(key) ≤ goal(key)
+           = ⌈ count(key) / goal(key) ⌉  otherwise</pre>
+<p>Because each key's share grows with the <em>logarithm</em> of its traffic, a key with ten thousand times more traffic gets only a few times more kept events. Rare keys, typically errors, keep everything.</p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="chart hc-chart-dense" viewBox="0 0 960 380" role="img" aria-labelledby="dyn-title dyn-desc">
+<title id="dyn-title">Dynamic sampling at a goal rate of 100: spans in and kept per key</title>
+<desc id="dyn-desc">Five keys over one 30-second window, on a logarithmic axis. 900,000 spans of 200 GET /home are kept at 1 in 299, 90,000 of 200 GET /cart at 1 in 36, 9,000 of 404 GET /missing at 1 in 5, and every one of the 900 500 POST /checkout and 90 503 GET /cart spans is kept.</desc>
+<text class="hc-chart-title" x="20" y="26">Dynamic sampling, goal rate 100 (synthetic traffic, real algorithm)</text>
+<text class="hc-chart-sub" x="20" y="45">Spans per key in one 30-second window, log scale; computed with dynsampler-go v0.6.4's allocator</text>
+<line class="hc-grid" x1="190.0" y1="64" x2="190.0" y2="330"/>
+<text class="hc-tick hc-tick-mid" x="190.0" y="348">1</text>
+<line class="hc-grid" x1="293.3" y1="64" x2="293.3" y2="330"/>
+<text class="hc-tick hc-tick-mid" x="293.3" y="348">10</text>
+<line class="hc-grid" x1="396.7" y1="64" x2="396.7" y2="330"/>
+<text class="hc-tick hc-tick-mid" x="396.7" y="348">100</text>
+<line class="hc-grid" x1="500.0" y1="64" x2="500.0" y2="330"/>
+<text class="hc-tick hc-tick-mid" x="500.0" y="348">1k</text>
+<line class="hc-grid" x1="603.3" y1="64" x2="603.3" y2="330"/>
+<text class="hc-tick hc-tick-mid" x="603.3" y="348">10k</text>
+<line class="hc-grid" x1="706.7" y1="64" x2="706.7" y2="330"/>
+<text class="hc-tick hc-tick-mid" x="706.7" y="348">100k</text>
+<line class="hc-grid" x1="810.0" y1="64" x2="810.0" y2="330"/>
+<text class="hc-tick hc-tick-mid" x="810.0" y="348">1M</text>
+<line class="hc-axis" x1="190" y1="64" x2="190" y2="330"/>
+<text class="hc-tick hc-tick-end" x="180" y="96">200 GET /home</text>
+<path class="hc-fill-1" d="M190,76 h611.3 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-611.3 z" data-tip="200 GET /home: 900,000 spans received"><title>200 GET /home: 900,000 spans received</title></path>
+<path class="hc-fill-2" d="M190,96 h355.5 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-355.5 z" data-tip="200 GET /home: about 3,010 kept at 1 in 299&#10;each kept span counts as 299"><title>200 GET /home: about 3,010 kept at 1 in 299</title></path>
+<text class="hc-annot" x="813.3" y="88">900,000</text>
+<text class="hc-annot" x="557.5" y="108">3,010 kept · 1 in 299</text>
+<text class="hc-tick hc-tick-end" x="180" y="148">200 GET /cart</text>
+<path class="hc-fill-1" d="M190,128 h507.9 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-507.9 z" data-tip="200 GET /cart: 90,000 spans received"><title>200 GET /cart: 90,000 spans received</title></path>
+<path class="hc-fill-2" d="M190,148 h347.1 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-347.1 z" data-tip="200 GET /cart: about 2,500 kept at 1 in 36&#10;each kept span counts as 36"><title>200 GET /cart: about 2,500 kept at 1 in 36</title></path>
+<text class="hc-annot" x="709.9" y="140">90,000</text>
+<text class="hc-annot" x="549.1" y="160">2,500 kept · 1 in 36</text>
+<text class="hc-tick hc-tick-end" x="180" y="200">404 GET /missing</text>
+<path class="hc-fill-1" d="M190,180 h404.6 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-404.6 z" data-tip="404 GET /missing: 9,000 spans received"><title>404 GET /missing: 9,000 spans received</title></path>
+<path class="hc-fill-2" d="M190,200 h332.4 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-332.4 z" data-tip="404 GET /missing: about 1,800 kept at 1 in 5&#10;each kept span counts as 5"><title>404 GET /missing: about 1,800 kept at 1 in 5</title></path>
+<text class="hc-annot" x="606.6" y="192">9,000</text>
+<text class="hc-annot" x="534.4" y="212">1,800 kept · 1 in 5</text>
+<text class="hc-tick hc-tick-end" x="180" y="252">500 POST /checkout</text>
+<path class="hc-fill-1" d="M190,232 h301.3 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-301.3 z" data-tip="500 POST /checkout: 900 spans received"><title>500 POST /checkout: 900 spans received</title></path>
+<path class="hc-fill-2" d="M190,252 h301.3 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-301.3 z" data-tip="500 POST /checkout: about 900 kept at 1 in 1&#10;each kept span counts as 1"><title>500 POST /checkout: about 900 kept at 1 in 1</title></path>
+<text class="hc-annot" x="503.3" y="244">900</text>
+<text class="hc-annot" x="503.3" y="264">900 kept · all kept</text>
+<text class="hc-tick hc-tick-end" x="180" y="304">503 GET /cart</text>
+<path class="hc-fill-1" d="M190,284 h197.9 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-197.9 z" data-tip="503 GET /cart: 90 spans received"><title>503 GET /cart: 90 spans received</title></path>
+<path class="hc-fill-2" d="M190,304 h197.9 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-197.9 z" data-tip="503 GET /cart: about 90 kept at 1 in 1&#10;each kept span counts as 1"><title>503 GET /cart: about 90 kept at 1 in 1</title></path>
+<text class="hc-annot" x="399.9" y="296">90</text>
+<text class="hc-annot" x="399.9" y="316">90 kept · all kept</text>
+<text class="hc-annot-muted" x="20" y="372">Total 999,990 spans in; about 8,300 kept (an average of 1 in 120: rates round up). Weighted back by their rates, every key's count is exact in expectation.</text>
+</svg>
+</div>
+<ul class="hc-legend"><li><span class="hc-key hc-key-1"></span>Spans received</li><li><span class="hc-key hc-key-2"></span>Spans kept</li></ul>
+<figcaption>The traffic is invented; the rates are what the allocator above, ported line for line from <code>dynsampler-go</code> v0.6.4, returns for it with <code>GoalSampleRate</code> 100.</figcaption>
+<details class="hc-data"><summary>Table view</summary>
+<div class="table-wrap"><table>
+<thead><tr><th>Key</th><th class="num">Spans in</th><th class="num">Rate</th><th class="num">Kept, about</th><th class="num">Count after weighting</th></tr></thead>
+<tbody>
+<tr><td>200 GET /home</td><td class="num">900,000</td><td class="num">1 in 299</td><td class="num">3,010</td><td class="num">900,000</td></tr>
+<tr><td>200 GET /cart</td><td class="num">90,000</td><td class="num">1 in 36</td><td class="num">2,500</td><td class="num">90,000</td></tr>
+<tr><td>404 GET /missing</td><td class="num">9,000</td><td class="num">1 in 5</td><td class="num">1,800</td><td class="num">9,000</td></tr>
+<tr><td>500 POST /checkout</td><td class="num">900</td><td class="num">1 in 1</td><td class="num">900</td><td class="num">900</td></tr>
+<tr><td>503 GET /cart</td><td class="num">90</td><td class="num">1 in 1</td><td class="num">90</td><td class="num">90</td></tr>
+</tbody></table></div>
+</details>
+</figure>
+<p>Two limits are visible in the code and the posts. A sampler "can't set the sample rate below 1, and it will always keep at least one of every key it sees", so many small keys make the goal hard to reach <span class="prov prov-stated">talk/blog</span> <a class="src" href="sources.html#s-blog-refinery-ema">blog-refinery-ema</a>; and once more than <code>MaxKeys</code> keys (500 in Refinery) appear in a window, new keys fall back to rate 1 <a class="cite" href="https://github.com/honeycombio/dynsampler-go/blob/v0.6.4/avgsamplerate.go#L166-L174"><code class="cite">avgsamplerate.go:166-174</code></a> <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/sample/dynamic.go#L16-L33"><code class="cite">sample/dynamic.go:16-33</code></a>. The EMA variants smooth counts with an exponential moving average and recompute early on a burst <a class="cite" href="https://github.com/honeycombio/dynsampler-go/blob/v0.6.4/emasamplerate.go#L179-L233"><code class="cite">emasamplerate.go:179-233</code></a>.</p>
+
+<h2 id="billing">Sampling and the bill</h2>
+<ul>
+<li>"Events your application samples before sending to Honeycomb, such as via Refinery, Beelines, or other sampling methods" are not counted <span class="prov prov-doc">documented</span> <a class="src" href="sources.html#s-docs-usage">docs-usage</a>.</li>
+<li>A Free or Pro team over its limit for two months is throttled: "The Honeycomb Event API randomly accepts one of every ten events" <a class="src" href="sources.html#s-docs-usage">docs-usage</a>. Those survivors carry no adjusted rate, so counts drop tenfold <span class="prov prov-inferred">inferred</span>.</li>
+<li>Data sampled away can be pulled back from the customer's own S3 archive with the Telemetry Pipeline's Enhance and "Query with Archive" <a class="src" href="sources.html#s-docs-archive">docs-archive</a> <a class="src" href="sources.html#s-pr-pipeline-2025">pr-pipeline-2025</a>.</li>
+<li>In September 2026 Honeycomb moved the same algorithms into an OpenTelemetry Collector processor that writes portable <code>ot=th</code> thresholds, criticising the stock tail-sampling processor because its "decisions are plain keep/drop with no sampling probability attached, so kept data generally can't be reweighted downstream" <span class="prov prov-stated">talk/blog</span> <a class="src" href="sources.html#s-blog-adaptive-tail">blog-adaptive-tail</a> <a class="src" href="sources.html#s-blog-adaptive-collector">blog-adaptive-collector</a>.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="assets/nav-data.js"></script>
+<script src="assets/site.js"></script>
+</body>
+</html>
