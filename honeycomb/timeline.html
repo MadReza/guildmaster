@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timeline, 2016 to 2026 · Honeycomb C4</title>
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">How it is done</p>
+<h1>Timeline, 2016 to 2026</h1>
+<p class="lede">How the architecture, the product and the company changed, in one sequence. The architecture lane is the story of the <a href="engineering.html">engineering decisions</a>: a disk-based column store, then S3 and Lambda, then ARM, then a stream processor for SLOs, then Kubernetes, Private Cloud and open-source Kafka.</p>
+<p class="meta-line">Read on 2026-10-02. Dates are each source's own; a month means the source dates the event no closer.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="chart hc-chart-dense" viewBox="0 0 1000 1790" role="img" aria-labelledby="tl-title tl-desc">
+<title id="tl-title">Honeycomb timeline, 2013 to 2026</title>
+<desc id="tl-desc">53 dated events in three lanes, architecture, product, and company and pricing, from Charity Majors meeting Scuba at Facebook in 2013 to the Refinery and AI releases of September 2026. The table below the figure lists the same events with sources.</desc>
+<text class="hc-chart-title" x="20" y="28">Honeycomb, 2013 to 2026</text>
+<text class="hc-chart-sub" x="20" y="48">One row per dated event; colour gives the lane. Hover or focus a dot for detail.</text>
+<line class="hc-axis" x1="330" y1="80" x2="330" y2="1770"/>
+<text class="hc-chart-title" x="310" y="106" text-anchor="end">2013</text>
+<line class="hc-grid" x1="316" y1="114" x2="980" y2="114"/>
+<circle class="hc-fill-3 hc-dot" cx="330" cy="124" r="6" data-tip="2013 · Company and pricing&#10;Majors meets Scuba at Facebook, after it buys Parse"><title>2013, Company and pricing: Majors meets Scuba at Facebook, after it buys Parse</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="128">2013</text>
+<text class="hc-annot" x="346" y="128">Majors meets Scuba at Facebook, after it buys Parse</text>
+<text class="hc-chart-title" x="310" y="164" text-anchor="end">2016</text>
+<line class="hc-grid" x1="316" y1="172" x2="980" y2="172"/>
+<circle class="hc-fill-3 hc-dot" cx="330" cy="182" r="6" data-tip="2016 · Company and pricing&#10;Honeycomb founded by Charity Majors and Christine Yen"><title>2016, Company and pricing: Honeycomb founded by Charity Majors and Christine Yen</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="186">2016</text>
+<text class="hc-annot" x="346" y="186">Honeycomb founded by Charity Majors and Christine Yen</text>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="206" r="6" data-tip="2016 · Architecture&#10;Launch on Intel EC2; datasets spread over Kafka partitions"><title>2016, Architecture: Launch on Intel EC2; datasets spread over Kafka partitions</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="210">2016</text>
+<text class="hc-annot" x="346" y="210">Launch on Intel EC2; datasets spread over Kafka partitions</text>
+<text class="hc-chart-title" x="310" y="246" text-anchor="end">2017</text>
+<line class="hc-grid" x1="316" y1="254" x2="980" y2="254"/>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="264" r="6" data-tip="2017-04 · Architecture&#10;Retriever: no write-path indexes, no compression"><title>2017-04, Architecture: Retriever: no write-path indexes, no compression</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="268">2017-04</text>
+<text class="hc-annot" x="346" y="268">Retriever: no write-path indexes, no compression</text>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="288" r="6" data-tip="2017-09 · Architecture&#10;Strange Loop talk: "Why we built our own distributed column store""><title>2017-09, Architecture: Strange Loop talk: "Why we built our own distributed column store"</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="292">2017-09</text>
+<text class="hc-annot" x="346" y="292">Strange Loop talk: "Why we built our own distributed column store"</text>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="312" r="6" data-tip="2017-10 · Architecture&#10;Shepherd, Retriever, Poodle, Doodle and Basset named in public"><title>2017-10, Architecture: Shepherd, Retriever, Poodle, Doodle and Basset named in public</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="316">2017-10</text>
+<text class="hc-annot" x="346" y="316">Shepherd, Retriever, Poodle, Doodle and Basset named in public</text>
+<circle class="hc-fill-2 hc-dot" cx="330" cy="336" r="6" data-tip="2017-11 · Product&#10;"Best practices for observability": one wide event per hop"><title>2017-11, Product: "Best practices for observability": one wide event per hop</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="340">2017-11</text>
+<text class="hc-annot" x="346" y="340">"Best practices for observability": one wide event per hop</text>
+<text class="hc-chart-title" x="310" y="376" text-anchor="end">2018</text>
+<line class="hc-grid" x1="316" y1="384" x2="980" y2="384"/>
+<circle class="hc-fill-3 hc-dot" cx="330" cy="394" r="6" data-tip="2018-02 · Company and pricing&#10;$11.5M Series A"><title>2018-02, Company and pricing: $11.5M Series A</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="398">2018-02</text>
+<text class="hc-annot" x="346" y="398">$11.5M Series A</text>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="418" r="6" data-tip="2018-03 · Architecture&#10;Secondary Storage: gzip segments to S3, Fast Query Window"><title>2018-03, Architecture: Secondary Storage: gzip segments to S3, Fast Query Window</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="422">2018-03</text>
+<text class="hc-annot" x="346" y="422">Secondary Storage: gzip segments to S3, Fast Query Window</text>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="442" r="6" data-tip="2018-11 · Architecture&#10;Fully distributed merge; median query 250 ms"><title>2018-11, Architecture: Fully distributed merge; median query 250 ms</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="446">2018-11</text>
+<text class="hc-annot" x="346" y="446">Fully distributed merge; median query 250 ms</text>
+<text class="hc-chart-title" x="310" y="482" text-anchor="end">2019</text>
+<line class="hc-grid" x1="316" y1="490" x2="980" y2="490"/>
+<circle class="hc-fill-2 hc-dot" cx="330" cy="500" r="6" data-tip="2019 · Product&#10;BubbleUp out of beta"><title>2019, Product: BubbleUp out of beta</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="504">2019</text>
+<text class="hc-annot" x="346" y="504">BubbleUp out of beta</text>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="524" r="6" data-tip="2019-06 · Architecture&#10;samproxy v0.2.0, the first versioned release of what becomes Refinery"><title>2019-06, Architecture: samproxy v0.2.0, the first versioned release of what becomes Refinery</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="528">2019-06</text>
+<text class="hc-annot" x="346" y="528">samproxy v0.2.0, the first versioned release of what becomes Refinery</text>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="548" r="6" data-tip="2019-07 · Architecture&#10;Kafka 0.10 → Confluent Community 5.3"><title>2019-07, Architecture: Kafka 0.10 → Confluent Community 5.3</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="552">2019-07</text>
+<text class="hc-annot" x="346" y="552">Kafka 0.10 → Confluent Community 5.3</text>
+<circle class="hc-fill-3 hc-dot" cx="330" cy="572" r="6" data-tip="2019-09 · Company and pricing&#10;$11.4M round; Yen is CEO, Majors CTO"><title>2019-09, Company and pricing: $11.4M round; Yen is CEO, Majors CTO</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="576">2019-09</text>
+<text class="hc-annot" x="346" y="576">$11.4M round; Yen is CEO, Majors CTO</text>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="596" r="6" data-tip="2019-12 · Architecture&#10;Lambda fans queries over S3; LZ4; Fast Query Window removed"><title>2019-12, Architecture: Lambda fans queries over S3; LZ4; Fast Query Window removed</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="600">2019-12</text>
+<text class="hc-annot" x="346" y="600">Lambda fans queries over S3; LZ4; Fast Query Window removed</text>
+<text class="hc-chart-title" x="310" y="636" text-anchor="end">2020</text>
+<line class="hc-grid" x1="316" y1="644" x2="980" y2="644"/>
+<circle class="hc-fill-2 hc-dot" cx="330" cy="654" r="6" data-tip="2020-01 · Product&#10;SLOs generally available"><title>2020-01, Product: SLOs generally available</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="658">2020-01</text>
+<text class="hc-annot" x="346" y="658">SLOs generally available</text>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="678" r="6" data-tip="2020-03 · Architecture&#10;First Graviton2 trial, on dogfood ingest"><title>2020-03, Architecture: First Graviton2 trial, on dogfood ingest</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="682">2020-03</text>
+<text class="hc-annot" x="346" y="682">First Graviton2 trial, on dogfood ingest</text>
+<circle class="hc-fill-3 hc-dot" cx="330" cy="702" r="6" data-tip="2020-05 · Company and pricing&#10;Pricing by events: Free 20M, Pro from $100 for 100M"><title>2020-05, Company and pricing: Pricing by events: Free 20M, Pro from $100 for 100M</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="706">2020-05</text>
+<text class="hc-annot" x="346" y="706">Pricing by events: Free 20M, Pro from $100 for 100M</text>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="726" r="6" data-tip="2020-10 · Architecture&#10;samproxy renamed Refinery"><title>2020-10, Architecture: samproxy renamed Refinery</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="730">2020-10</text>
+<text class="hc-annot" x="346" y="730">samproxy renamed Refinery</text>
+<text class="hc-chart-title" x="310" y="766" text-anchor="end">2021</text>
+<line class="hc-grid" x1="316" y1="774" x2="980" y2="774"/>
+<circle class="hc-fill-3 hc-dot" cx="330" cy="784" r="6" data-tip="2021-02 · Company and pricing&#10;$20M Series B; 300+ customers"><title>2021-02, Company and pricing: $20M Series B; 300+ customers</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="788">2021-02</text>
+<text class="hc-annot" x="346" y="788">$20M Series B; 300+ customers</text>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="808" r="6" data-tip="2021-02 · Architecture&#10;Kafka tiered storage rollout, unstable on Graviton2 + EBS"><title>2021-02, Architecture: Kafka tiered storage rollout, unstable on Graviton2 + EBS</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="812">2021-02</text>
+<text class="hc-annot" x="346" y="812">Kafka tiered storage rollout, unstable on Graviton2 + EBS</text>
+<circle class="hc-fill-2 hc-dot" cx="330" cy="832" r="6" data-tip="2021-03 · Product&#10;Refinery 1.0"><title>2021-03, Product: Refinery 1.0</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="836">2021-03</text>
+<text class="hc-annot" x="346" y="836">Refinery 1.0</text>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="856" r="6" data-tip="2021-04 · Architecture&#10;92% of vCPUs on arm64"><title>2021-04, Architecture: 92% of vCPUs on arm64</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="860">2021-04</text>
+<text class="hc-annot" x="346" y="860">92% of vCPUs on arm64</text>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="880" r="6" data-tip="2021-07 · Architecture&#10;Beagle streams SLOs instead of querying every minute"><title>2021-07, Architecture: Beagle streams SLOs instead of querying every minute</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="884">2021-07</text>
+<text class="hc-annot" x="346" y="884">Beagle streams SLOs instead of querying every minute</text>
+<circle class="hc-fill-3 hc-dot" cx="330" cy="904" r="6" data-tip="2021-10 · Company and pricing&#10;$50M Series C"><title>2021-10, Company and pricing: $50M Series C</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="908">2021-10</text>
+<text class="hc-annot" x="346" y="908">$50M Series C</text>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="928" r="6" data-tip="2021-11 · Architecture&#10;Kafka on im4gn; 1.5M spans/s; 700 TB of columns"><title>2021-11, Architecture: Kafka on im4gn; 1.5M spans/s; 700 TB of columns</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="932">2021-11</text>
+<text class="hc-annot" x="346" y="932">Kafka on im4gn; 1.5M spans/s; 700 TB of columns</text>
+<text class="hc-chart-title" x="310" y="968" text-anchor="end">2022</text>
+<line class="hc-grid" x1="316" y1="976" x2="980" y2="976"/>
+<circle class="hc-fill-2 hc-dot" cx="330" cy="986" r="6" data-tip="2022-03 · Product&#10;Environments and Services; older teams become Classic"><title>2022-03, Product: Environments and Services; older teams become Classic</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="990">2022-03</text>
+<text class="hc-annot" x="346" y="990">Environments and Services; older teams become Classic</text>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="1010" r="6" data-tip="2022-04 · Architecture&#10;Not one x86 EC2 instance left in production"><title>2022-04, Architecture: Not one x86 EC2 instance left in production</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1014">2022-04</text>
+<text class="hc-annot" x="346" y="1014">Not one x86 EC2 instance left in production</text>
+<circle class="hc-fill-2 hc-dot" cx="330" cy="1034" r="6" data-tip="2022-05 · Product&#10;Observability Engineering, first edition"><title>2022-05, Product: Observability Engineering, first edition</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1038">2022-05</text>
+<text class="hc-annot" x="346" y="1038">Observability Engineering, first edition</text>
+<circle class="hc-fill-3 hc-dot" cx="330" cy="1058" r="6" data-tip="2022-06 · Company and pricing&#10;Gartner Leader (and again in 2023)"><title>2022-06, Company and pricing: Gartner Leader (and again in 2023)</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1062">2022-06</text>
+<text class="hc-annot" x="346" y="1062">Gartner Leader (and again in 2023)</text>
+<circle class="hc-fill-2 hc-dot" cx="330" cy="1082" r="6" data-tip="2022-10 · Product&#10;Service Map; BubbleUp from any query"><title>2022-10, Product: Service Map; BubbleUp from any query</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1086">2022-10</text>
+<text class="hc-annot" x="346" y="1086">Service Map; BubbleUp from any query</text>
+<text class="hc-chart-title" x="310" y="1122" text-anchor="end">2023</text>
+<line class="hc-grid" x1="316" y1="1130" x2="980" y2="1130"/>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="1140" r="6" data-tip="2023-03 · Architecture&#10;Move to EKS complete, except Kafka"><title>2023-03, Architecture: Move to EKS complete, except Kafka</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1144">2023-03</text>
+<text class="hc-annot" x="346" y="1144">Move to EKS complete, except Kafka</text>
+<circle class="hc-fill-3 hc-dot" cx="330" cy="1164" r="6" data-tip="2023-04 · Company and pricing&#10;$50M Series D, nearly $150M in all; 600+ customers"><title>2023-04, Company and pricing: $50M Series D, nearly $150M in all; 600+ customers</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1168">2023-04</text>
+<text class="hc-annot" x="346" y="1168">$50M Series D, nearly $150M in all; 600+ customers</text>
+<circle class="hc-fill-2 hc-dot" cx="330" cy="1188" r="6" data-tip="2023-05 · Product&#10;Query Assistant, on gpt-3.5-turbo"><title>2023-05, Product: Query Assistant, on gpt-3.5-turbo</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1192">2023-05</text>
+<text class="hc-annot" x="346" y="1192">Query Assistant, on gpt-3.5-turbo</text>
+<circle class="hc-fill-2 hc-dot" cx="330" cy="1212" r="6" data-tip="2023-07 · Product&#10;Refinery 2.0: YAML, strict config"><title>2023-07, Product: Refinery 2.0: YAML, strict config</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1216">2023-07</text>
+<text class="hc-annot" x="346" y="1216">Refinery 2.0: YAML, strict config</text>
+<circle class="hc-fill-2 hc-dot" cx="330" cy="1236" r="6" data-tip="2023-11 · Product&#10;Budget-rate burn alerts"><title>2023-11, Product: Budget-rate burn alerts</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1240">2023-11</text>
+<text class="hc-annot" x="346" y="1240">Budget-rate burn alerts</text>
+<text class="hc-chart-title" x="310" y="1276" text-anchor="end">2024</text>
+<line class="hc-grid" x1="316" y1="1284" x2="980" y2="1284"/>
+<circle class="hc-fill-3 hc-dot" cx="330" cy="1294" r="6" data-tip="2024-01 · Company and pricing&#10;EU region"><title>2024-01, Company and pricing: EU region</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1298">2024-01</text>
+<text class="hc-annot" x="346" y="1298">EU region</text>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="1318" r="6" data-tip="2024-05 · Architecture&#10;Virtual datasets: 20 s → 0.2 s median in large environments"><title>2024-05, Architecture: Virtual datasets: 20 s → 0.2 s median in large environments</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1322">2024-05</text>
+<text class="hc-annot" x="346" y="1322">Virtual datasets: 20 s → 0.2 s median in large environments</text>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="1342" r="6" data-tip="2024-07 · Architecture&#10;Graviton4; one third of production destroyed on purpose"><title>2024-07, Architecture: Graviton4; one third of production destroyed on purpose</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1346">2024-07</text>
+<text class="hc-annot" x="346" y="1346">Graviton4; one third of production destroyed on purpose</text>
+<circle class="hc-fill-2 hc-dot" cx="330" cy="1366" r="6" data-tip="2024-10 · Product&#10;Telemetry Pipeline and Log Analytics"><title>2024-10, Product: Telemetry Pipeline and Log Analytics</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1370">2024-10</text>
+<text class="hc-annot" x="346" y="1370">Telemetry Pipeline and Log Analytics</text>
+<text class="hc-chart-title" x="310" y="1406" text-anchor="end">2025</text>
+<line class="hc-grid" x1="316" y1="1414" x2="980" y2="1414"/>
+<circle class="hc-fill-3 hc-dot" cx="330" cy="1424" r="6" data-tip="2025-04 · Company and pricing&#10;Acquires Grit, a code-query agent"><title>2025-04, Company and pricing: Acquires Grit, a code-query agent</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1428">2025-04</text>
+<text class="hc-annot" x="346" y="1428">Acquires Grit, a code-query agent</text>
+<circle class="hc-fill-2 hc-dot" cx="330" cy="1448" r="6" data-tip="2025-08 · Product&#10;Beelines end of life; self-hosted MCP deprecated"><title>2025-08, Product: Beelines end of life; self-hosted MCP deprecated</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1452">2025-08</text>
+<text class="hc-annot" x="346" y="1452">Beelines end of life; self-hosted MCP deprecated</text>
+<circle class="hc-fill-2 hc-dot" cx="330" cy="1472" r="6" data-tip="2025-09 · Product&#10;Honeycomb Intelligence: Canvas, hosted MCP (GA), Anomaly Detection"><title>2025-09, Product: Honeycomb Intelligence: Canvas, hosted MCP (GA), Anomaly Detection</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1476">2025-09</text>
+<text class="hc-annot" x="346" y="1476">Honeycomb Intelligence: Canvas, hosted MCP (GA), Anomaly Detection</text>
+<circle class="hc-fill-2 hc-dot" cx="330" cy="1496" r="6" data-tip="2025-10 · Product&#10;Refinery 3.0: 70% less CPU on Honeycomb's own cluster"><title>2025-10, Product: Refinery 3.0: 70% less CPU on Honeycomb's own cluster</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1500">2025-10</text>
+<text class="hc-annot" x="346" y="1500">Refinery 3.0: 70% less CPU on Honeycomb's own cluster</text>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="1520" r="6" data-tip="2025-11 · Architecture&#10;Private Cloud: the same codebase in the customer's AWS"><title>2025-11, Architecture: Private Cloud: the same codebase in the customer's AWS</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1524">2025-11</text>
+<text class="hc-annot" x="346" y="1524">Private Cloud: the same codebase in the customer's AWS</text>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="1544" r="6" data-tip="2025-12 · Architecture&#10;Kafka partition loss after a zone exercise; evacuation in five days"><title>2025-12, Architecture: Kafka partition loss after a zone exercise; evacuation in five days</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1548">2025-12</text>
+<text class="hc-annot" x="346" y="1548">Kafka partition loss after a zone exercise; evacuation in five days</text>
+<text class="hc-chart-title" x="310" y="1584" text-anchor="end">2026</text>
+<line class="hc-grid" x1="316" y1="1592" x2="980" y2="1592"/>
+<circle class="hc-fill-2 hc-dot" cx="330" cy="1602" r="6" data-tip="2026-03 · Product&#10;Time-series Metrics generally available"><title>2026-03, Product: Time-series Metrics generally available</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1606">2026-03</text>
+<text class="hc-annot" x="346" y="1606">Time-series Metrics generally available</text>
+<circle class="hc-fill-1 hc-dot" cx="330" cy="1626" r="6" data-tip="2026-05 · Architecture&#10;Kafka → Apache Kafka 4.1.1, KRaft, on EKS with Strimzi"><title>2026-05, Architecture: Kafka → Apache Kafka 4.1.1, KRaft, on EKS with Strimzi</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1630">2026-05</text>
+<text class="hc-annot" x="346" y="1630">Kafka → Apache Kafka 4.1.1, KRaft, on EKS with Strimzi</text>
+<circle class="hc-fill-2 hc-dot" cx="330" cy="1650" r="6" data-tip="2026-05 · Product&#10;Agent observability: GenAI conventions, Agent Timeline, Canvas Agent"><title>2026-05, Product: Agent observability: GenAI conventions, Agent Timeline, Canvas Agent</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1654">2026-05</text>
+<text class="hc-annot" x="346" y="1654">Agent observability: GenAI conventions, Agent Timeline, Canvas Agent</text>
+<circle class="hc-fill-2 hc-dot" cx="330" cy="1674" r="6" data-tip="2026-06 · Product&#10;Observability Engineering, second edition"><title>2026-06, Product: Observability Engineering, second edition</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1678">2026-06</text>
+<text class="hc-annot" x="346" y="1678">Observability Engineering, second edition</text>
+<circle class="hc-fill-3 hc-dot" cx="330" cy="1698" r="6" data-tip="2026-07 · Company and pricing&#10;Pro moves to $3.00 per million events"><title>2026-07, Company and pricing: Pro moves to $3.00 per million events</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1702">2026-07</text>
+<text class="hc-annot" x="346" y="1702">Pro moves to $3.00 per million events</text>
+<circle class="hc-fill-2 hc-dot" cx="330" cy="1722" r="6" data-tip="2026-08 · Product&#10;Anomaly Detection open beta; AI BubbleUp"><title>2026-08, Product: Anomaly Detection open beta; AI BubbleUp</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1726">2026-08</text>
+<text class="hc-annot" x="346" y="1726">Anomaly Detection open beta; AI BubbleUp</text>
+<circle class="hc-fill-2 hc-dot" cx="330" cy="1746" r="6" data-tip="2026-09 · Product&#10;Refinery 3.4.0; Refinery as a Service; adaptive tail sampling in the Collector; AI Ecosystem"><title>2026-09, Product: Refinery 3.4.0; Refinery as a Service; adaptive tail sampling in the Collector; AI Ecosystem</title></circle>
+<text class="hc-annot-muted hc-annot-end" x="314" y="1750">2026-09</text>
+<text class="hc-annot" x="346" y="1750">Refinery 3.4.0; Refinery as a Service; adaptive tail sampling in the Collector; AI Ecosystem</text>
+</svg>
+</div>
+<ul class="hc-legend"><li><span class="hc-key hc-key-1"></span>Architecture</li><li><span class="hc-key hc-key-2"></span>Product</li><li><span class="hc-key hc-key-3"></span>Company and pricing</li></ul>
+<figcaption>Rows are evenly spaced, not to scale in time.</figcaption>
+<details class="hc-data"><summary>Table view, with sources</summary>
+<div class="table-wrap"><table>
+<thead><tr><th class="num">Date</th><th>Lane</th><th>Event</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td class="num">2013</td><td>Company and pricing</td><td>Majors meets Scuba at Facebook, after it buys Parse</td><td><a class="src" href="sources.html#s-book-oe-1e">book-oe-1e</a></td></tr>
+<tr><td class="num">2016</td><td>Company and pricing</td><td>Honeycomb founded by Charity Majors and Christine Yen</td><td><a class="src" href="sources.html#s-manifesto-2026">manifesto-2026</a></td></tr>
+<tr><td class="num">2016</td><td>Architecture</td><td>Launch on Intel EC2; datasets spread over Kafka partitions</td><td><a class="src" href="sources.html#s-blog-arm-future">blog-arm-future</a> <a class="src" href="sources.html#s-blog-hnyhny-1">blog-hnyhny-1</a></td></tr>
+<tr><td class="num">2017-04</td><td>Architecture</td><td>Retriever: no write-path indexes, no compression</td><td><a class="src" href="sources.html#s-yen-under-the-hood">yen-under-the-hood</a></td></tr>
+<tr><td class="num">2017-09</td><td>Architecture</td><td>Strange Loop talk: "Why we built our own distributed column store"</td><td><a class="src" href="sources.html#s-strangeloop-2017">strangeloop-2017</a></td></tr>
+<tr><td class="num">2017-10</td><td>Architecture</td><td>Shepherd, Retriever, Poodle, Doodle and Basset named in public</td><td><a class="src" href="sources.html#s-devops-2017">devops-2017</a></td></tr>
+<tr><td class="num">2017-11</td><td>Product</td><td>"Best practices for observability": one wide event per hop</td><td><a class="src" href="sources.html#s-wb-best-practices">wb-best-practices</a></td></tr>
+<tr><td class="num">2018-02</td><td>Company and pricing</td><td>$11.5M Series A</td><td><a class="src" href="sources.html#s-finsmes-2018">finsmes-2018</a></td></tr>
+<tr><td class="num">2018-03</td><td>Architecture</td><td>Secondary Storage: gzip segments to S3, Fast Query Window</td><td><a class="src" href="sources.html#s-blog-secondary-2018">blog-secondary-2018</a></td></tr>
+<tr><td class="num">2018-11</td><td>Architecture</td><td>Fully distributed merge; median query 250 ms</td><td><a class="src" href="sources.html#s-blog-speeding-2018">blog-speeding-2018</a></td></tr>
+<tr><td class="num">2019</td><td>Product</td><td>BubbleUp out of beta</td><td><a class="src" href="sources.html#s-blog-bubbleup-2019">blog-bubbleup-2019</a></td></tr>
+<tr><td class="num">2019-06</td><td>Architecture</td><td>samproxy v0.2.0, the first versioned release of what becomes Refinery</td><td><a class="src" href="sources.html#s-refinery-v020">refinery-v020</a></td></tr>
+<tr><td class="num">2019-07</td><td>Architecture</td><td>Kafka 0.10 → Confluent Community 5.3</td><td><a class="src" href="sources.html#s-blog-scaling-kafka">blog-scaling-kafka</a></td></tr>
+<tr><td class="num">2019-09</td><td>Company and pricing</td><td>$11.4M round; Yen is CEO, Majors CTO</td><td><a class="src" href="sources.html#s-pr-funding-2019">pr-funding-2019</a></td></tr>
+<tr><td class="num">2019-12</td><td>Architecture</td><td>Lambda fans queries over S3; LZ4; Fast Query Window removed</td><td><a class="src" href="sources.html#s-blog-secondary-storage">blog-secondary-storage</a></td></tr>
+<tr><td class="num">2020-01</td><td>Product</td><td>SLOs generally available</td><td><a class="src" href="sources.html#s-wb-slo-ga">wb-slo-ga</a></td></tr>
+<tr><td class="num">2020-03</td><td>Architecture</td><td>First Graviton2 trial, on dogfood ingest</td><td><a class="src" href="sources.html#s-blog-m6g">blog-m6g</a></td></tr>
+<tr><td class="num">2020-05</td><td>Company and pricing</td><td>Pricing by events: Free 20M, Pro from $100 for 100M</td><td><a class="src" href="sources.html#s-pr-pricing-2020">pr-pricing-2020</a></td></tr>
+<tr><td class="num">2020-10</td><td>Architecture</td><td>samproxy renamed Refinery</td><td><a class="src" href="sources.html#s-refinery-v0120">refinery-v0120</a></td></tr>
+<tr><td class="num">2021-02</td><td>Company and pricing</td><td>$20M Series B; 300+ customers</td><td><a class="src" href="sources.html#s-pr-series-b">pr-series-b</a></td></tr>
+<tr><td class="num">2021-02</td><td>Architecture</td><td>Kafka tiered storage rollout, unstable on Graviton2 + EBS</td><td><a class="src" href="sources.html#s-blog-scaling-kafka">blog-scaling-kafka</a></td></tr>
+<tr><td class="num">2021-03</td><td>Product</td><td>Refinery 1.0</td><td><a class="src" href="sources.html#s-refinery-changelog">refinery-changelog</a></td></tr>
+<tr><td class="num">2021-04</td><td>Architecture</td><td>92% of vCPUs on arm64</td><td><a class="src" href="sources.html#s-blog-graviton-1yr">blog-graviton-1yr</a></td></tr>
+<tr><td class="num">2021-07</td><td>Architecture</td><td>Beagle streams SLOs instead of querying every minute</td><td><a class="src" href="sources.html#s-blog-beagle">blog-beagle</a></td></tr>
+<tr><td class="num">2021-10</td><td>Company and pricing</td><td>$50M Series C</td><td><a class="src" href="sources.html#s-blog-series-c">blog-series-c</a></td></tr>
+<tr><td class="num">2021-11</td><td>Architecture</td><td>Kafka on im4gn; 1.5M spans/s; 700 TB of columns</td><td><a class="src" href="sources.html#s-blog-scaling-kafka">blog-scaling-kafka</a> <a class="src" href="sources.html#s-book-oe-1e">book-oe-1e</a></td></tr>
+<tr><td class="num">2022-03</td><td>Product</td><td>Environments and Services; older teams become Classic</td><td><a class="src" href="sources.html#s-changelog-es">changelog-es</a></td></tr>
+<tr><td class="num">2022-04</td><td>Architecture</td><td>Not one x86 EC2 instance left in production</td><td><a class="src" href="sources.html#s-blog-arm-future">blog-arm-future</a></td></tr>
+<tr><td class="num">2022-05</td><td>Product</td><td>Observability Engineering, first edition</td><td><a class="src" href="sources.html#s-book-oe-1e">book-oe-1e</a></td></tr>
+<tr><td class="num">2022-06</td><td>Company and pricing</td><td>Gartner Leader (and again in 2023)</td><td><a class="src" href="sources.html#s-pr-gartner-2022">pr-gartner-2022</a></td></tr>
+<tr><td class="num">2022-10</td><td>Product</td><td>Service Map; BubbleUp from any query</td><td><a class="src" href="sources.html#s-blog-service-map">blog-service-map</a> <a class="src" href="sources.html#s-blog-bubbleup-2022">blog-bubbleup-2022</a></td></tr>
+<tr><td class="num">2023-03</td><td>Architecture</td><td>Move to EKS complete, except Kafka</td><td><a class="src" href="sources.html#s-blog-k8s-migration">blog-k8s-migration</a></td></tr>
+<tr><td class="num">2023-04</td><td>Company and pricing</td><td>$50M Series D, nearly $150M in all; 600+ customers</td><td><a class="src" href="sources.html#s-pr-series-d">pr-series-d</a></td></tr>
+<tr><td class="num">2023-05</td><td>Product</td><td>Query Assistant, on gpt-3.5-turbo</td><td><a class="src" href="sources.html#s-pr-query-assistant">pr-query-assistant</a></td></tr>
+<tr><td class="num">2023-07</td><td>Product</td><td>Refinery 2.0: YAML, strict config</td><td><a class="src" href="sources.html#s-refinery-notes">refinery-notes</a></td></tr>
+<tr><td class="num">2023-11</td><td>Product</td><td>Budget-rate burn alerts</td><td><a class="src" href="sources.html#s-blog-budget-rate">blog-budget-rate</a></td></tr>
+<tr><td class="num">2024-01</td><td>Company and pricing</td><td>EU region</td><td><a class="src" href="sources.html#s-pr-eu">pr-eu</a></td></tr>
+<tr><td class="num">2024-05</td><td>Architecture</td><td>Virtual datasets: 20 s → 0.2 s median in large environments</td><td><a class="src" href="sources.html#s-blog-virtual-datasets">blog-virtual-datasets</a></td></tr>
+<tr><td class="num">2024-07</td><td>Architecture</td><td>Graviton4; one third of production destroyed on purpose</td><td><a class="src" href="sources.html#s-blog-graviton4">blog-graviton4</a> <a class="src" href="sources.html#s-blog-chaos-1">blog-chaos-1</a></td></tr>
+<tr><td class="num">2024-10</td><td>Product</td><td>Telemetry Pipeline and Log Analytics</td><td><a class="src" href="sources.html#s-pr-pipeline">pr-pipeline</a></td></tr>
+<tr><td class="num">2025-04</td><td>Company and pricing</td><td>Acquires Grit, a code-query agent</td><td><a class="src" href="sources.html#s-pr-grit">pr-grit</a></td></tr>
+<tr><td class="num">2025-08</td><td>Product</td><td>Beelines end of life; self-hosted MCP deprecated</td><td><a class="src" href="sources.html#s-docs-migrate-beelines">docs-migrate-beelines</a> <a class="src" href="sources.html#s-repo-honeycomb-mcp">repo-honeycomb-mcp</a></td></tr>
+<tr><td class="num">2025-09</td><td>Product</td><td>Honeycomb Intelligence: Canvas, hosted MCP (GA), Anomaly Detection</td><td><a class="src" href="sources.html#s-pr-hi">pr-hi</a> <a class="src" href="sources.html#s-blog-mcp-ga">blog-mcp-ga</a></td></tr>
+<tr><td class="num">2025-10</td><td>Product</td><td>Refinery 3.0: 70% less CPU on Honeycomb's own cluster</td><td><a class="src" href="sources.html#s-blog-refinery-3">blog-refinery-3</a></td></tr>
+<tr><td class="num">2025-11</td><td>Architecture</td><td>Private Cloud: the same codebase in the customer's AWS</td><td><a class="src" href="sources.html#s-docs-private-cloud">docs-private-cloud</a> <a class="src" href="sources.html#s-pr-private-cloud">pr-private-cloud</a></td></tr>
+<tr><td class="num">2025-12</td><td>Architecture</td><td>Kafka partition loss after a zone exercise; evacuation in five days</td><td><a class="src" href="sources.html#s-blog-dec-2025">blog-dec-2025</a></td></tr>
+<tr><td class="num">2026-03</td><td>Product</td><td>Time-series Metrics generally available</td><td><a class="src" href="sources.html#s-blog-metrics-ga">blog-metrics-ga</a></td></tr>
+<tr><td class="num">2026-05</td><td>Architecture</td><td>Kafka → Apache Kafka 4.1.1, KRaft, on EKS with Strimzi</td><td><a class="src" href="sources.html#s-blog-kafka-2026">blog-kafka-2026</a></td></tr>
+<tr><td class="num">2026-05</td><td>Product</td><td>Agent observability: GenAI conventions, Agent Timeline, Canvas Agent</td><td><a class="src" href="sources.html#s-pr-agent-obs">pr-agent-obs</a></td></tr>
+<tr><td class="num">2026-06</td><td>Product</td><td>Observability Engineering, second edition</td><td><a class="src" href="sources.html#s-pr-book-2e">pr-book-2e</a></td></tr>
+<tr><td class="num">2026-07</td><td>Company and pricing</td><td>Pro moves to $3.00 per million events</td><td><a class="src" href="sources.html#s-docs-pro-2026">docs-pro-2026</a></td></tr>
+<tr><td class="num">2026-08</td><td>Product</td><td>Anomaly Detection open beta; AI BubbleUp</td><td><a class="src" href="sources.html#s-changelog-anomaly">changelog-anomaly</a> <a class="src" href="sources.html#s-blog-ai-bubbleup">blog-ai-bubbleup</a></td></tr>
+<tr><td class="num">2026-09</td><td>Product</td><td>Refinery 3.4.0; Refinery as a Service; adaptive tail sampling in the Collector; AI Ecosystem</td><td><a class="src" href="sources.html#s-repo-refinery">repo-refinery</a> <a class="src" href="sources.html#s-raas">raas</a> <a class="src" href="sources.html#s-blog-adaptive-tail">blog-adaptive-tail</a> <a class="src" href="sources.html#s-pr-ai-ecosystem">pr-ai-ecosystem</a></td></tr>
+</tbody></table></div>
+</details>
+</figure>
+
+<h2 id="eras">Four eras</h2>
+<dl class="defs">
+<dt>2016–2018: a Scuba for everyone else</dt>
+<dd>Retriever on local disk, Kafka in front, Go everywhere; "no indices to maintain on the write path" <a class="src" href="sources.html#s-yen-under-the-hood">yen-under-the-hood</a>. Older data moved to S3 in 2018, but slowly: secondary queries took minutes <a class="src" href="sources.html#s-blog-secondary-storage">blog-secondary-storage</a>.</dd>
+<dt>2019–2021: make it cheap enough to keep</dt>
+<dd>Lambda over S3 segments made old data fast <a class="src" href="sources.html#s-blog-secondary-storage">blog-secondary-storage</a>; event-based pricing replaced storage-based pricing <a class="src" href="sources.html#s-pr-pricing-2020">pr-pricing-2020</a>; Graviton and tiered Kafka cut costs by large fractions <a class="src" href="sources.html#s-blog-graviton-1yr">blog-graviton-1yr</a> <a class="src" href="sources.html#s-blog-scaling-kafka">blog-scaling-kafka</a>; Beagle moved SLOs off repeated queries <a class="src" href="sources.html#s-blog-beagle">blog-beagle</a>.</dd>
+<dt>2022–2024: an enterprise platform</dt>
+<dd>Environments, the Service Map, Kubernetes, the EU region and virtual datasets for very large environments <a class="src" href="sources.html#s-changelog-es">changelog-es</a> <a class="src" href="sources.html#s-blog-service-map">blog-service-map</a> <a class="src" href="sources.html#s-blog-k8s-migration">blog-k8s-migration</a> <a class="src" href="sources.html#s-pr-eu">pr-eu</a> <a class="src" href="sources.html#s-blog-virtual-datasets">blog-virtual-datasets</a>; Gartner moved Honeycomb from Leader (2022, 2023) to Visionary (2024 onward) <a class="src" href="sources.html#s-pr-gartner-2022">pr-gartner-2022</a> <a class="src" href="sources.html#s-blog-gartner-2026">blog-gartner-2026</a>.</dd>
+<dt>2025–2026: agents on both sides</dt>
+<dd>AI agents as users, through MCP and Canvas, and as the thing observed, through GenAI conventions and Agent Timeline <a class="src" href="sources.html#s-pr-hi">pr-hi</a> <a class="src" href="sources.html#s-pr-agent-obs">pr-agent-obs</a>; Private Cloud and open-source Kafka underneath <a class="src" href="sources.html#s-docs-private-cloud">docs-private-cloud</a> <a class="src" href="sources.html#s-blog-kafka-2026">blog-kafka-2026</a>; and a Pro price that more than doubled per event <a class="src" href="sources.html#s-docs-pro-2026">docs-pro-2026</a>.</dd>
+</dl>
+</article>
+</main>
+</div>
+<script src="assets/nav-data.js"></script>
+<script src="assets/site.js"></script>
+</body>
+</html>

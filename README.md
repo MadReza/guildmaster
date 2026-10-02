@@ -10,6 +10,7 @@ This repository is at its beginning. The vocabulary comes first, because every l
 
 - [TERMINOLOGY.md](TERMINOLOGY.md) is the single owner of the project's vocabulary. Read it before writing anything else here.
 - `firstmate/` holds the research into the prior system this one succeeds, kept separate from Guildmaster's own design.
+- `honeycomb/` is a research site on Honeycomb, the hosted observability service: its C4 model, data model, sampling, engineering decisions, and lessons for Guildmaster's tracing. Open `honeycomb/index.html` from disk.
 - `vision/` holds Guildmaster's own design material: the patron's notes, the requirements drawn from them, a Firstmate-informed consultation, the [step 1 design](vision/step-1-design.md), and the [tracing design](vision/tracing-design.md) with its [research](vision/tracing-research.md).
 - [vision/roadmap.md](vision/roadmap.md) is the tracked build plan: each step's goal, scope, done-when criteria, status and links.
 - `bin/gm` is the `gm` command; `templates/` holds the first charter, ticket playbook and repository rules it copies into the Guildhall; `tests/` holds its test suite and an end-to-end demonstration.

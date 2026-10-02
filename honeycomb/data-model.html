@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Events, spans and traces · Honeycomb C4</title>
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">Data model</p>
+<h1>Events, spans and traces</h1>
+<p class="lede">Honeycomb has one record type, the event, and builds everything else from it: a span is an event with trace fields, a trace is the events that share a trace ID, a log is an event with a body. This page sets out the containers they live in, the fields that matter, the limits, and the query semantics on top.</p>
+<p class="meta-line">Read on 2026-10-02 from Honeycomb's docs, whose pages carry a modification date rather than an authored one.</p>
+
+<h2 id="event">The event</h2>
+<p>"An event is a structured record of a single unit of work." <span class="prov prov-doc">documented</span> <a class="src" href="sources.html#s-docs-resource-structure">docs-resource-structure</a> "Every field in an event is labeled and indexed automatically, which means Honeycomb can filter, group, and aggregate on any field without knowing about it in advance" <a class="src" href="sources.html#s-docs-resource-structure">docs-resource-structure</a>; a dataset's schema is simply "the set of fields Honeycomb has seen across all events sent to that dataset" <a class="src" href="sources.html#s-docs-resource-structure">docs-resource-structure</a>. Types are inferred and can be changed; a value that cannot be coerced "will be set to 0 instead of being dropped" <a class="src" href="sources.html#s-docs-dataset-structure">docs-dataset-structure</a>.</p>
+<p>Honeycomb's instrumentation advice is to make events <strong>wide</strong>: "events should be wide because they can contain many different fields. ... One of the most common Honeycomb use cases is to send one event for each HTTP or RPC request" <a class="src" href="sources.html#s-docs-instrumentation">docs-instrumentation</a>. In 2017 Majors put it more sharply: "Any aggregation that is performed at write time is actively harmful", and "each event should be as wide as possible, with as many high-cardinality dimensions as possible" <span class="prov prov-stated">talk/blog</span> <a class="src" href="sources.html#s-wb-best-practices">wb-best-practices</a>. The pattern Honeycomb uses itself: "When a request enters a service, Honeycomb initializes a map and pre-populates it with everything known or inferred about the request. When the request is ready to exit or error, Honeycomb ships it off in one arbitrarily wide structured event" <a class="src" href="sources.html#s-blog-structured-events">blog-structured-events</a>. In 2026 "a typical environment has well over a hundred dimensions on its core spans" <a class="src" href="sources.html#s-blog-ai-bubbleup">blog-ai-bubbleup</a>.</p>
+<p>What one such span looks like, as a flattened event (invented values; field names follow the docs' advice to put custom fields under <code>app.</code> and to send identifiers that look like numbers as strings <a class="src" href="sources.html#s-docs-organizing-data">docs-organizing-data</a>):</p>
+<pre><code>{
+  "timestamp": "2026-10-02T14:03:11.204Z",
+  "trace.trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+  "trace.span_id": "00f067aa0ba902b7",
+  "trace.parent_id": "53995c3f42cd8ad8",
+  "service.name": "checkout",
+  "name": "POST /cart/checkout",
+  "duration_ms": 350.2,
+  "http.route": "/cart/checkout",
+  "http.request.method": "POST",
+  "response.status_code": 502,
+  "error": true,
+  "exception.type": "PaymentGatewayTimeout",
+  "user.id": "8817341",
+  "app.tenant": "acme-eu",
+  "app.cart.items": 14,
+  "app.cart.subtotal": 312.40,
+  "app.payment.provider": "stripe",
+  "app.payment.attempts": 2,
+  "app.feature_flags.new_tax_engine": true,
+  "app.build_id": "2026.10.02-1438-a91f3c",
+  "cloud.region": "eu-west-1",
+  "k8s.pod.name": "checkout-7c9d5f-xk2lp",
+  "db.query_count": 6,
+  "db.total_ms": 41.7,
+  "SampleRate": 1
+}</code></pre>
+<p>Every field there can be grouped and filtered on. <code>user.id</code> and <code>app.build_id</code> are the high-cardinality ones a metrics system would refuse, and they are the ones that answer "which users and which build?" during an incident. Repeated sub-occurrences, such as each retry in a loop, belong in span events rather than overwriting a field <a class="src" href="sources.html#s-docs-add-context">docs-add-context</a>.</p>
+
+<h2 id="containers">Teams, environments, datasets</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1100 470" role="img" aria-labelledby="res-title res-desc">
+<title id="res-title">Honeycomb resource hierarchy</title>
+<desc id="res-desc">A team holds environments; each environment holds datasets; each dataset holds events, or metric data points in a metrics dataset. Management keys act on the team, configuration keys and ingest keys on one environment. A query runs inside one environment.</desc>
+<defs><marker id="res-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="32">Team › environment › dataset › event</text>
+<g class="c4-boundary"><rect x="700" y="90" width="360" height="340" rx="10"/><text x="712" y="110">Environment: staging</text></g>
+<g class="c4-boundary"><rect x="40" y="90" width="640" height="340" rx="10"/><text x="52" y="110">Environment: production (Ingest and Configuration keys; queries stay inside)</text></g>
+<g class="c4-boundary"><rect x="20" y="50" width="1060" height="400" rx="10"/><text x="32" y="70">Team (the account; Management keys act here)</text></g>
+<g class="c4-container">
+<rect x="60" y="150" width="190" height="100" rx="8"/>
+<text class="c4-label" x="155.0" y="183.0">checkout</text>
+<text class="c4-tech" x="155.0" y="199.0">[service dataset]</text>
+<text class="c4-desc" x="155.0" y="215.0">spans with</text>
+<text class="c4-desc" x="155.0" y="229.0">service.name = checkout</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="234" y="154" width="13" height="13" rx="3"/><text x="240.5" y="164">D</text></g>
+<g class="c4-container">
+<rect x="270" y="150" width="190" height="100" rx="8"/>
+<text class="c4-label" x="365.0" y="183.0">frontend</text>
+<text class="c4-tech" x="365.0" y="199.0">[service dataset]</text>
+<text class="c4-desc" x="365.0" y="215.0">spans with</text>
+<text class="c4-desc" x="365.0" y="229.0">service.name = frontend</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="444" y="154" width="13" height="13" rx="3"/><text x="450.5" y="164">D</text></g>
+<g class="c4-container">
+<rect x="480" y="150" width="180" height="100" rx="8"/>
+<text class="c4-label" x="570.0" y="190.0">deploys, logs</text>
+<text class="c4-tech" x="570.0" y="206.0">[general datasets]</text>
+<text class="c4-desc" x="570.0" y="222.0">non-trace events</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="644" y="154" width="13" height="13" rx="3"/><text x="650.5" y="164">D</text></g>
+<g class="c4-datastore">
+<path d="M60,300 a150.0,10 0 0,0 300,0 a150.0,10 0 0,0 -300,0 v90 a150.0,10 0 0,0 300,0 v-90"/>
+<text class="c4-label" x="210.0" y="336.0">metrics dataset</text>
+<text class="c4-tech" x="210.0" y="352.0">[time-series, since 2026]</text>
+<text class="c4-desc" x="210.0" y="368.0">gauges, sums, histograms;</text>
+<text class="c4-desc" x="210.0" y="382.0">13-month retention</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="344" y="302" width="13" height="13" rx="3"/><text x="350.5" y="312">D</text></g>
+<g class="c4-external">
+<rect x="390" y="300" width="270" height="90" rx="8"/>
+<text class="c4-label" x="525.0" y="328.5">A trace</text>
+<text class="c4-desc" x="525.0" y="344.5">spans from many service datasets</text>
+<text class="c4-desc" x="525.0" y="358.5">of one environment, joined by</text>
+<text class="c4-desc" x="525.0" y="372.5">trace.trace_id</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="644" y="304" width="13" height="13" rx="3"/><text x="650.5" y="314">D</text></g>
+<g class="c4-container">
+<rect x="720" y="150" width="150" height="100" rx="8"/>
+<text class="c4-label" x="795.0" y="183.0">checkout</text>
+<text class="c4-tech" x="795.0" y="199.0">[service dataset]</text>
+<text class="c4-desc" x="795.0" y="215.0">same names,</text>
+<text class="c4-desc" x="795.0" y="229.0">separate data</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="854" y="154" width="13" height="13" rx="3"/><text x="860.5" y="164">D</text></g>
+<g class="c4-container">
+<rect x="890" y="150" width="150" height="100" rx="8"/>
+<text class="c4-label" x="965.0" y="190.0">frontend</text>
+<text class="c4-tech" x="965.0" y="206.0">[service dataset]</text>
+<text class="c4-desc" x="965.0" y="222.0">separate keys</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="1024" y="154" width="13" height="13" rx="3"/><text x="1030.5" y="164">D</text></g>
+<text class="hc-note-strong" x="720" y="300">Up to 100 datasets per environment</text>
+<text class="hc-note" x="720" y="316">(300 on Enterprise). Dataset names are</text>
+<text class="hc-note" x="720" y="332">permanent and case-insensitive; sending</text>
+<text class="hc-note" x="720" y="348">data creates them.</text>
+<text class="hc-note-strong" x="720" y="380">Classic (before 2022): datasets only,</text>
+<text class="hc-note" x="720" y="396">named by header, no environments.</text>
+</svg>
+</div>
+<figcaption>"Honeycomb queries run within a single environment by design. That boundary keeps production data separate from staging data and prevents accidental cross-environment analysis" <a class="src" href="sources.html#s-docs-resource-structure">docs-resource-structure</a>. Dataset limits from <a class="src" href="sources.html#s-docs-organizing-data">docs-organizing-data</a>; naming rules from <a class="src" href="sources.html#s-docs-datasets-manage">docs-datasets-manage</a> <a class="src" href="sources.html#s-docs-events-api">docs-events-api</a>.</figcaption>
+</figure>
+<ul>
+<li><strong>Datasets are created by sending.</strong> Honeycomb uses "the service name in your instrumentation as the Dataset's name. Once created, Dataset names are permanent" <a class="src" href="sources.html#s-docs-datasets-manage">docs-datasets-manage</a>. A span with no service name lands in <code>unknown_service</code> <a class="src" href="sources.html#s-docs-sending-issues">docs-sending-issues</a>.</li>
+<li><strong>Service datasets and general datasets.</strong> "The events in a Service Dataset represent distributed tracing spans"; other events such as deploys or logs go in general datasets <a class="src" href="sources.html#s-docs-organizing-data">docs-organizing-data</a>. Instance detail belongs in fields, "rather than the name of the service itself" <a class="src" href="sources.html#s-docs-organizing-data">docs-organizing-data</a>.</li>
+<li><strong>A trace spans datasets but not environments.</strong> "All the events in a trace must be within the same environment in order to render correctly" <a class="src" href="sources.html#s-docs-organizing-data">docs-organizing-data</a>.</li>
+<li><strong>Keys follow the hierarchy.</strong> Ingest keys send to one environment and cannot be changed after creation; configuration keys manage its boards, triggers and SLOs; management keys act on the team <a class="src" href="sources.html#s-docs-resource-structure">docs-resource-structure</a> <a class="src" href="sources.html#s-docs-api-keys">docs-api-keys</a>.</li>
+<li><strong>History.</strong> Environments and Services arrived on 2022-03-29 for new teams, and existing teams became "Honeycomb Classic", datasets only <span class="prov prov-stated">talk/blog</span> <a class="src" href="sources.html#s-changelog-es">changelog-es</a>. An in-place migration now converts Classic without re-instrumenting, and newer features, Honeycomb Intelligence and the Service Map among them, need environments <a class="src" href="sources.html#s-docs-es-in-place">docs-es-in-place</a>.</li>
+</ul>
+
+<h2 id="trace">A trace is events joined by an id</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="chart hc-chart-dense" viewBox="0 0 960 360" role="img" aria-labelledby="trc-title trc-desc">
+<title id="trc-title">One trace, six events</title>
+<desc id="trc-desc">A synthetic trace: a frontend root span of 420 ms, a checkout span, a database span and a payments span, a span event on the payments span and a span link from the checkout span. Every row is a separate event sharing one trace.trace_id; Honeycomb counts all six toward the bill.</desc>
+<text class="hc-chart-title" x="20" y="26">One trace is six events (synthetic)</text>
+<text class="hc-chart-sub" x="20" y="45">Every row shares trace.trace_id = 4bf92f35…; trace.parent_id draws the tree; span events and links are events too</text>
+<line class="hc-grid" x1="300.0" y1="60" x2="300.0" y2="310"/>
+<text class="hc-tick hc-tick-mid" x="300.0" y="326">0 ms</text>
+<line class="hc-grid" x1="442.9" y1="60" x2="442.9" y2="310"/>
+<text class="hc-tick hc-tick-mid" x="442.9" y="326">100 ms</text>
+<line class="hc-grid" x1="585.7" y1="60" x2="585.7" y2="310"/>
+<text class="hc-tick hc-tick-mid" x="585.7" y="326">200 ms</text>
+<line class="hc-grid" x1="728.6" y1="60" x2="728.6" y2="310"/>
+<text class="hc-tick hc-tick-mid" x="728.6" y="326">300 ms</text>
+<line class="hc-grid" x1="871.4" y1="60" x2="871.4" y2="310"/>
+<text class="hc-tick hc-tick-mid" x="871.4" y="326">400 ms</text>
+<text class="hc-tick hc-tick-end" x="290" y="85">GET /checkout</text>
+<text class="hc-annot-muted" x="20" y="85">frontend</text>
+<rect class="hc-fill-1" x="300.0" y="72" width="600.0" height="18" rx="4" data-tip="GET /checkout · service.name = frontend&#10;duration_ms = 420 · root: no trace.parent_id"><title>GET /checkout, frontend, 420 ms</title></rect>
+<text class="hc-annot" x="906.0" y="86">420 ms</text>
+<text class="hc-tick hc-tick-end" x="290" y="125">  POST /cart/checkout</text>
+<text class="hc-annot-muted" x="20" y="125">checkout</text>
+<rect class="hc-fill-2" x="350.0" y="112" width="500.0" height="18" rx="4" data-tip="POST /cart/checkout · service.name = checkout&#10;duration_ms = 350 · parent = frontend span"><title>POST /cart/checkout, checkout, 350 ms</title></rect>
+<text class="hc-annot" x="856.0" y="126">350 ms</text>
+<text class="hc-tick hc-tick-end" x="290" y="165">    SELECT cart_items</text>
+<text class="hc-annot-muted" x="20" y="165">checkout</text>
+<rect class="hc-fill-2" x="371.4" y="152" width="85.7" height="18" rx="4" data-tip="SELECT cart_items · service.name = checkout&#10;duration_ms = 60 · parent = checkout span"><title>SELECT cart_items, checkout, 60 ms</title></rect>
+<text class="hc-annot" x="463.1" y="166">60 ms</text>
+<text class="hc-tick hc-tick-end" x="290" y="205">    charge card</text>
+<text class="hc-annot-muted" x="20" y="205">payments</text>
+<rect class="hc-fill-3" x="478.6" y="192" width="335.7" height="18" rx="4" data-tip="charge card · service.name = payments&#10;duration_ms = 235 · parent = checkout span"><title>charge card, payments, 235 ms</title></rect>
+<text class="hc-annot" x="820.3" y="206">235 ms</text>
+<text class="hc-tick hc-tick-end" x="290" y="245">      retry (span event)</text>
+<text class="hc-annot-muted" x="20" y="245">payments</text>
+<circle class="hc-fill-3 hc-dot" cx="628.6" cy="241" r="6" data-tip="retry (span event)&#10;meta.annotation_type = span_event; no duration"><title>retry (span event): meta.annotation_type = span_event</title></circle>
+<text class="hc-annot" x="640.6" y="246">meta.annotation_type = span_event</text>
+<text class="hc-tick hc-tick-end" x="290" y="285">    link → fraud-check trace</text>
+<text class="hc-annot-muted" x="20" y="285">checkout</text>
+<circle class="hc-fill-2 hc-dot" cx="842.9" cy="281" r="6" data-tip="link → fraud-check trace&#10;meta.annotation_type = link; no duration"><title>link → fraud-check trace: meta.annotation_type = link</title></circle>
+<text class="hc-annot" x="854.9" y="286">meta.annotation_type = link</text>
+<text class="hc-annot-muted" x="20" y="350">Billing: "Honeycomb counts each span in a trace (SpanEvent or Link in OpenTelemetry and OpenCensus) as an event."</text>
+</svg>
+</div>
+<ul class="hc-legend"><li><span class="hc-key hc-key-1"></span>frontend</li><li><span class="hc-key hc-key-2"></span>checkout</li><li><span class="hc-key hc-key-3"></span>payments</li></ul>
+<figcaption>"Each span is one event to Honeycomb. ... A trace is a group of spans that all share the same traceID" <a class="src" href="sources.html#s-docs-distributed-tracing">docs-distributed-tracing</a>. Span events "are timestamped, structured events without a duration" and "are not counted towards the total span count"; links are events with <code>meta.annotation_type</code> set to <code>link</code> <a class="src" href="sources.html#s-docs-add-context">docs-add-context</a>. Each counts as an event for billing <a class="src" href="sources.html#s-docs-usage">docs-usage</a>.</figcaption>
+<details class="hc-data"><summary>Table view</summary>
+<div class="table-wrap"><table>
+<thead><tr><th>Event</th><th>service.name</th><th class="num">Start</th><th class="num">duration_ms</th><th>Kind</th></tr></thead>
+<tbody>
+<tr><td>GET /checkout</td><td>frontend</td><td class="num">0</td><td class="num">420</td><td>root span</td></tr>
+<tr><td>POST /cart/checkout</td><td>checkout</td><td class="num">35</td><td class="num">350</td><td>span</td></tr>
+<tr><td>SELECT cart_items</td><td>checkout</td><td class="num">50</td><td class="num">60</td><td>span</td></tr>
+<tr><td>charge card</td><td>payments</td><td class="num">125</td><td class="num">235</td><td>span</td></tr>
+<tr><td>retry</td><td>payments</td><td class="num">230</td><td class="num">none</td><td>span event</td></tr>
+<tr><td>link to fraud-check trace</td><td>checkout</td><td class="num">380</td><td class="num">none</td><td>link</td></tr>
+</tbody></table></div>
+</details>
+</figure>
+<div class="table-wrap"><table>
+<thead><tr><th>Field</th><th>Meaning</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>trace.trace_id</code></td><td>The trace every span belongs to</td><td>with <code>trace.span_id</code> and <code>duration_ms</code>, marks a dataset as a trace dataset</td></tr>
+<tr><td><code>trace.span_id</code></td><td>This span</td><td></td></tr>
+<tr><td><code>trace.parent_id</code></td><td>The parent span; absent on the root</td><td>the waterfall is drawn from it and <code>trace.span_id</code></td></tr>
+<tr><td><code>name</code>, <code>service.name</code></td><td>Operation and service</td><td><code>service.name</code> picks the dataset and colours the waterfall</td></tr>
+<tr><td><code>duration_ms</code></td><td>Length in milliseconds</td><td>computed from start and end for OTLP spans</td></tr>
+<tr><td><code>meta.annotation_type</code></td><td><code>span_event</code> or <code>link</code></td><td>turns an event into a span event or a link</td></tr>
+<tr><td><code>trace.link.trace_id</code>, <code>trace.link.span_id</code></td><td>A link's target</td><td></td></tr>
+<tr><td><code>error</code>, <code>http.route</code>, <code>response.status_code</code>, <code>user.id</code></td><td>Common standard fields</td><td>mapped in Dataset Definitions for Home and other views</td></tr>
+<tr><td><code>SampleRate</code></td><td>This event stands for N</td><td>see <a href="sampling.html">Sampling</a></td></tr>
+</tbody></table></div>
+<p class="evidence">Fields from <a class="src" href="sources.html#s-docs-map-data">docs-map-data</a> <a class="src" href="sources.html#s-docs-tml">docs-tml</a> <a class="src" href="sources.html#s-docs-add-context">docs-add-context</a>. The docs disagree on what marks a trace dataset: one page lists <code>trace.trace_id</code>, <code>trace.span_id</code> and <code>duration_ms</code> <a class="src" href="sources.html#s-docs-map-data">docs-map-data</a>, a troubleshooting page says "the existence of the column <code>trace.parent_id</code>" <a class="src" href="sources.html#s-docs-data-issues">docs-data-issues</a>. Traces display at most 32,000 spans <a class="src" href="sources.html#s-docs-data-issues">docs-data-issues</a>.</p>
+
+<h2 id="pillars">Wide events against metrics and logs</h2>
+<div class="table-wrap"><table>
+<thead><tr><th></th><th>Wide events (spans)</th><th>Logs</th><th>Time-series metrics</th></tr></thead>
+<tbody>
+<tr><td>Stored as</td><td>Events, one per unit of work</td><td>"Honeycomb stores logs as events, the same foundational unit as trace spans"</td><td>Since 2026, "time-series data points in dedicated metrics datasets rather than as events"</td></tr>
+<tr><td>Cardinality</td><td>Any field, any number of values</td><td>Any field</td><td>Billed per data point, "not the number of unique time series"</td></tr>
+<tr><td>Questions decided</td><td>At read time</td><td>At read time</td><td>At write time, by what is aggregated</td></tr>
+<tr><td>Joins</td><td>By <code>trace.trace_id</code>, and relational fields</td><td>Through trace context on OpenTelemetry logs</td><td>By shared attributes in a query</td></tr>
+<tr><td>Retention</td><td>60 days</td><td>60 days</td><td>13 months by default</td></tr>
+<tr><td>Not supported</td><td></td><td></td><td>SLOs, BubbleUp, bare COUNT, RATE and CONCURRENCY</td></tr>
+</tbody></table></div>
+<p class="evidence"><a class="src" href="sources.html#s-docs-logs">docs-logs</a> <a class="src" href="sources.html#s-docs-tml">docs-tml</a> <a class="src" href="sources.html#s-docs-metrics">docs-metrics</a> <a class="src" href="sources.html#s-docs-metrics-faq">docs-metrics-faq</a> <a class="src" href="sources.html#s-docs-query-spec">docs-query-spec</a> <a class="src" href="sources.html#s-docs-usage">docs-usage</a>. Before 2026 metrics were events too: data points sharing a request, a second and their attributes were merged into one event <a class="src" href="sources.html#s-docs-metrics-mapping">docs-metrics-mapping</a>. Free and Pro teams were switched to time-series metrics on 2026-06-10 <a class="src" href="sources.html#s-docs-metrics-faq">docs-metrics-faq</a>.</p>
+
+<h2 id="limits">Limits</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Limit</th><th>Value</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>Fields per event</td><td>2,000</td><td><a class="src" href="sources.html#s-docs-create-event">docs-create-event</a></td></tr>
+<tr><td>Event size</td><td>under 1 MB of uncompressed JSON; strings up to 64 KB; integers and floats 64-bit</td><td><a class="src" href="sources.html#s-docs-create-event">docs-create-event</a></td></tr>
+<tr><td>Fields per dataset</td><td>20,000 in one docs mention; the metrics FAQ implies 10,000 for metrics-as-events and 100,000 time-series metric columns per environment. Unresolved.</td><td><a class="src" href="sources.html#s-docs-migrations">docs-migrations</a> <a class="src" href="sources.html#s-docs-metrics-faq">docs-metrics-faq</a></td></tr>
+<tr><td>Column names</td><td>255 characters</td><td><a class="src" href="sources.html#s-docs-columns-api">docs-columns-api</a></td></tr>
+<tr><td>Datasets per environment</td><td>100, or 300 on Enterprise</td><td><a class="src" href="sources.html#s-docs-organizing-data">docs-organizing-data</a></td></tr>
+<tr><td>Retention</td><td>60 days for events and logs, from ingest time, not event time</td><td><a class="src" href="sources.html#s-docs-usage">docs-usage</a></td></tr>
+<tr><td>Earliest timestamp</td><td>1970-01-01</td><td><a class="src" href="sources.html#s-docs-data-issues">docs-data-issues</a></td></tr>
+<tr><td>Late events in SLOs</td><td>ignored if more than 25 hours late</td><td><a class="src" href="sources.html#s-docs-slo-create">docs-slo-create</a></td></tr>
+</tbody></table></div>
+<p>Generating field names, such as a timestamp sent as a key, leads to "runaway schemas" and Honeycomb "throttling the creation of new columns" <a class="src" href="sources.html#s-docs-organizing-data">docs-organizing-data</a>; the docs note that a dataset nearing its column limit "is often caused by a programming error" <a class="src" href="sources.html#s-docs-high-card">docs-high-card</a>.</p>
+
+<h2 id="query">Queries over events</h2>
+<p>A query is SELECT (once labelled VISUALIZE), WHERE, GROUP BY, ORDER BY, LIMIT and HAVING; leaving SELECT empty returns raw events <span class="prov prov-doc">documented</span> <a class="src" href="sources.html#s-docs-query-build">docs-query-build</a>. As JSON, which is also how a query is shared in a link <a class="src" href="sources.html#s-docs-share-query">docs-share-query</a>:</p>
+<pre><code>{
+  "time_range": 7200,
+  "calculations": [{"op": "HEATMAP", "column": "duration_ms"},
+                   {"op": "P99", "column": "duration_ms"}],
+  "filters": [{"column": "service.name", "op": "=", "value": "checkout"}],
+  "breakdowns": ["http.route"],
+  "orders": [{"op": "P99", "column": "duration_ms", "order": "descending"}],
+  "limit": 100
+}</code></pre>
+<ul>
+<li><strong>Calculations</strong>: COUNT, CONCURRENCY, SUM, AVG, COUNT_DISTINCT, MAX, MIN, percentiles from P001 to P999, HEATMAP, RATE_AVG, RATE_SUM and RATE_MAX; a query with none gets COUNT <a class="src" href="sources.html#s-docs-query-spec">docs-query-spec</a>. Percentiles are t-digest estimates and COUNT_DISTINCT a HyperLogLog estimate; "events that do not have a relevant attribute are ignored" <a class="src" href="sources.html#s-docs-query-build">docs-query-build</a>.</li>
+<li><strong>Shape</strong>: 100 rows by default and 1,000 at most in the UI; graphs draw the top 50 groups <a class="src" href="sources.html#s-docs-query-build">docs-query-build</a>. Granularity must lie between the range divided by 1,000 and by 10 <a class="src" href="sources.html#s-docs-query-spec">docs-query-spec</a>. HAVING filters on whole-range aggregates, not on time buckets <a class="src" href="sources.html#s-docs-query-build">docs-query-build</a>.</li>
+<li><strong>Calculated fields</strong>, formerly derived columns, are per-event formulas such as <code>IF($http.status_code = 200, 1, 0) * 100</code>, evaluated "at query-time, so you can run them on historical data" <a class="src" href="sources.html#s-docs-calc-examples">docs-calc-examples</a> <a class="src" href="sources.html#s-docs-calc-fields">docs-calc-fields</a>.</li>
+<li><strong>Relational fields</strong> make a query trace-aware: <code>root.</code>, <code>parent.</code>, <code>child.</code>, <code>any.</code> and <code>none.</code> prefixes in WHERE and GROUP BY <a class="src" href="sources.html#s-docs-query-build">docs-query-build</a>. They join within a buffer of "typically around 3-10 minutes" in high-volume environments, so longer traces can be missed <a class="src" href="sources.html#s-docs-relational">docs-relational</a>.</li>
+<li><strong>Query Math</strong> combines independent query steps with a formula such as <code>$A / $B</code> <a class="src" href="sources.html#s-docs-query-math">docs-query-math</a>.</li>
+<li>The <strong>Query Data API</strong> (Enterprise) is asynchronous, covers only the past 7 days, runs at most 10 seconds and 10 requests a minute <a class="src" href="sources.html#s-docs-query-data-api">docs-query-data-api</a>.</li>
+</ul>
+</article>
+</main>
+</div>
+<script src="assets/nav-data.js"></script>
+<script src="assets/site.js"></script>
+</body>
+</html>

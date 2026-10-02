@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>System context · Honeycomb C4</title>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article class="wide">
+<p class="breadcrumb">C4 model › Level 1</p>
+<h1>System context</h1>
+<p class="lede">Honeycomb as one box: who uses it, what sends it data, what it notifies, and what it runs on. The next level, <a href="containers.html">Containers</a>, opens the box.</p>
+<p class="meta-line">Read on 2026-10-02 from Honeycomb's docs and public repositories. Every node carries a provenance badge: D documented, S stated in a talk or blog, I inferred.</p>
+
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="c4 c4-dense" viewBox="0 0 1240 1000" role="img" aria-labelledby="ctx-title ctx-desc">
+<title id="ctx-title">Honeycomb system context (C4 level 1)</title>
+<desc id="ctx-desc">Engineers and AI agents use Honeycomb. Instrumented services send telemetry to it directly or through an OpenTelemetry Collector and Refinery, both run by the customer. AWS sources, CI and deploy tools also send data. Honeycomb notifies alert destinations, is managed through Terraform and its REST API, pulls context from Canvas connectors and the customer's S3 archive, runs on AWS and calls OpenAI and AWS Bedrock for its AI features.</desc>
+<defs><marker id="ctx-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="c4-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<text class="c4-diagram-title" x="20" y="32">Honeycomb — System Context (Level 1)</text>
+<g class="c4-person">
+<circle cx="500.0" cy="78" r="20"/>
+<rect x="400" y="92" width="200" height="82" rx="16"/>
+<text class="c4-label" x="500.0" y="123.5">Engineers</text>
+<text class="c4-desc" x="500.0" y="139.5">Query, BubbleUp, traces, boards;</text>
+<text class="c4-desc" x="500.0" y="153.5">get paged by triggers and SLOs</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="584" y="96" width="13" height="13" rx="3"/><text x="590.5" y="106">D</text></g>
+<g class="c4-external">
+<rect x="660" y="92" width="230" height="82" rx="8"/>
+<text class="c4-label" x="775.0" y="116.0">AI agents</text>
+<text class="c4-tech" x="775.0" y="132.0">[Claude Code, Cursor … via MCP]</text>
+<text class="c4-desc" x="775.0" y="148.0">Query, run BubbleUp, manage</text>
+<text class="c4-desc" x="775.0" y="162.0">boards, triggers and SLOs</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="874" y="96" width="13" height="13" rx="3"/><text x="880.5" y="106">D</text></g>
+<g class="c4-system">
+<rect x="470" y="400" width="300" height="150" rx="8"/>
+<text class="c4-label" x="620.0" y="444.0">Honeycomb</text>
+<text class="c4-tech" x="620.0" y="460.0">[hosted service · or Private Cloud on AWS]</text>
+<text class="c4-desc" x="620.0" y="476.0">Stores every span, log and event raw in</text>
+<text class="c4-desc" x="620.0" y="490.0">a custom column store; answers any</text>
+<text class="c4-desc" x="620.0" y="504.0">query on any attribute in seconds;</text>
+<text class="c4-desc" x="620.0" y="518.0">runs triggers, SLOs and AI features</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="754" y="404" width="13" height="13" rx="3"/><text x="760.5" y="414">D</text></g>
+<g class="c4-rel">
+<path d="M500,174 L560,400" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="470" y="285">queries in</text>
+<text class="c4-rel-label" x="470" y="298">ui.honeycomb.io</text>
+</g>
+<g class="c4-rel">
+<path d="M775,174 L690,400" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="742" y="292">MCP over HTTPS</text>
+<text class="c4-rel-label" x="742" y="305">mcp.honeycomb.io</text>
+</g>
+<g class="c4-external">
+<rect x="20" y="150" width="270" height="96" rx="8"/>
+<text class="c4-label" x="155.0" y="181.0">Instrumented services</text>
+<text class="c4-tech" x="155.0" y="197.0">[OpenTelemetry SDKs · libhoney]</text>
+<text class="c4-desc" x="155.0" y="213.0">Customer code; one span or wide</text>
+<text class="c4-desc" x="155.0" y="227.0">event per unit of work</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="274" y="154" width="13" height="13" rx="3"/><text x="280.5" y="164">D</text></g>
+<g class="c4-external">
+<rect x="20" y="290" width="270" height="96" rx="8"/>
+<text class="c4-label" x="155.0" y="321.0">OpenTelemetry Collector</text>
+<text class="c4-tech" x="155.0" y="337.0">[customer-run · Honeycomb Collector distro]</text>
+<text class="c4-desc" x="155.0" y="353.0">Batches, filters and forwards</text>
+<text class="c4-desc" x="155.0" y="367.0">OTLP; optional</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="274" y="294" width="13" height="13" rx="3"/><text x="280.5" y="304">D</text></g>
+<g class="c4-external">
+<rect x="20" y="430" width="270" height="96" rx="8"/>
+<text class="c4-label" x="155.0" y="461.0">Refinery</text>
+<text class="c4-tech" x="155.0" y="477.0">[open source, customer-run · or RaaS]</text>
+<text class="c4-desc" x="155.0" y="493.0">Tail sampler: keeps or drops</text>
+<text class="c4-desc" x="155.0" y="507.0">whole traces before ingest</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="274" y="434" width="13" height="13" rx="3"/><text x="280.5" y="444">D</text></g>
+<g class="c4-external">
+<rect x="20" y="570" width="270" height="96" rx="8"/>
+<text class="c4-label" x="155.0" y="601.0">AWS telemetry sources</text>
+<text class="c4-tech" x="155.0" y="617.0">[CloudWatch · Kinesis Firehose · Lambda]</text>
+<text class="c4-desc" x="155.0" y="633.0">Logs and metric streams; the</text>
+<text class="c4-desc" x="155.0" y="647.0">Lambda extension reads stdout</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="274" y="574" width="13" height="13" rx="3"/><text x="280.5" y="584">D</text></g>
+<g class="c4-external">
+<rect x="20" y="710" width="270" height="96" rx="8"/>
+<text class="c4-label" x="155.0" y="741.0">CI and deploy tooling</text>
+<text class="c4-tech" x="155.0" y="757.0">[buildevents · Markers API · honeymarker]</text>
+<text class="c4-desc" x="155.0" y="773.0">A build as one trace; deploys</text>
+<text class="c4-desc" x="155.0" y="787.0">as markers on every graph</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="274" y="714" width="13" height="13" rx="3"/><text x="280.5" y="724">D</text></g>
+<g class="c4-rel">
+<path d="M155,246 L155,290" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="182" y="272">OTLP</text>
+</g>
+<g class="c4-rel">
+<path d="M155,386 L155,430" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="182" y="412">OTLP</text>
+</g>
+<g class="c4-rel">
+<path d="M290,190 C380,200 430,330 470,410" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="352" y="236">OTLP gRPC or HTTP,</text>
+<text class="c4-rel-label" x="352" y="249">Events API</text>
+</g>
+<g class="c4-rel">
+<path d="M290,340 L470,440" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="385" y="378">OTLP</text>
+</g>
+<g class="c4-rel">
+<path d="M290,478 L470,478" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="380" y="466">Events API /1/batch,</text>
+<text class="c4-rel-label" x="380" y="479">sampled, with SampleRate</text>
+</g>
+<g class="c4-rel">
+<path d="M290,610 L470,520" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="380" y="556">Firehose to</text>
+<text class="c4-rel-label" x="380" y="569">/1/kinesis_events</text>
+</g>
+<g class="c4-rel">
+<path d="M290,750 C390,730 450,620 500,550" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="382" y="690">build spans,</text>
+<text class="c4-rel-label" x="382" y="703">markers</text>
+</g>
+<g class="c4-external">
+<rect x="950" y="150" width="270" height="96" rx="8"/>
+<text class="c4-label" x="1085.0" y="181.0">Alert destinations</text>
+<text class="c4-tech" x="1085.0" y="197.0">[PagerDuty · Slack · Teams · webhooks · email]</text>
+<text class="c4-desc" x="1085.0" y="213.0">Receive trigger and burn alerts;</text>
+<text class="c4-desc" x="1085.0" y="227.0">ServiceNow incidents too</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="1204" y="154" width="13" height="13" rx="3"/><text x="1210.5" y="164">D</text></g>
+<g class="c4-external">
+<rect x="950" y="290" width="270" height="96" rx="8"/>
+<text class="c4-label" x="1085.0" y="321.0">Terraform and API clients</text>
+<text class="c4-tech" x="1085.0" y="337.0">[honeycombio provider · REST /1/ and /2/]</text>
+<text class="c4-desc" x="1085.0" y="353.0">Manage boards, calculated fields,</text>
+<text class="c4-desc" x="1085.0" y="367.0">SLOs, triggers, keys</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="1204" y="294" width="13" height="13" rx="3"/><text x="1210.5" y="304">D</text></g>
+<g class="c4-external">
+<rect x="950" y="430" width="270" height="96" rx="8"/>
+<text class="c4-label" x="1085.0" y="461.0">Canvas connectors</text>
+<text class="c4-tech" x="1085.0" y="477.0">[GitHub · Linear · Sentry · incident.io …]</text>
+<text class="c4-desc" x="1085.0" y="493.0">Context the Canvas Agent pulls</text>
+<text class="c4-desc" x="1085.0" y="507.0">into an investigation</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="1204" y="434" width="13" height="13" rx="3"/><text x="1210.5" y="444">S</text></g>
+<g class="c4-external">
+<rect x="950" y="570" width="270" height="96" rx="8"/>
+<text class="c4-label" x="1085.0" y="601.0">Customer S3 archive</text>
+<text class="c4-tech" x="1085.0" y="617.0">[Telemetry Pipeline Enhance]</text>
+<text class="c4-desc" x="1085.0" y="633.0">Unsampled or expired data,</text>
+<text class="c4-desc" x="1085.0" y="647.0">rehydrated on demand</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="1204" y="574" width="13" height="13" rx="3"/><text x="1210.5" y="584">D</text></g>
+<g class="c4-rel">
+<path d="M770,420 L950,198" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="912" y="258">notifies</text>
+</g>
+<g class="c4-rel">
+<path d="M950,338 L770,450" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="862" y="386">manage via API</text>
+</g>
+<g class="c4-rel">
+<path d="M770,478 L950,478" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="860" y="466">pulls context</text>
+</g>
+<g class="c4-rel c4-rel-async">
+<path d="M770,520 L950,610" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="862" y="556">rehydrates from</text>
+</g>
+<g class="c4-external">
+<rect x="330" y="820" width="300" height="110" rx="8"/>
+<text class="c4-label" x="480.0" y="851.0">Amazon Web Services</text>
+<text class="c4-tech" x="480.0" y="867.0">[EKS · EC2 Graviton · S3 · Lambda · RDS]</text>
+<text class="c4-desc" x="480.0" y="883.0">Runs Honeycomb itself: compute,</text>
+<text class="c4-desc" x="480.0" y="897.0">segment storage, query fan-out,</text>
+<text class="c4-desc" x="480.0" y="911.0">metadata databases</text>
+</g><g class="hc-badge hc-badge-stated"><rect x="614" y="824" width="13" height="13" rx="3"/><text x="620.5" y="834">S</text></g>
+<g class="c4-external">
+<rect x="660" y="820" width="270" height="110" rx="8"/>
+<text class="c4-label" x="795.0" y="851.0">LLM providers</text>
+<text class="c4-tech" x="795.0" y="867.0">[OpenAI · AWS Bedrock]</text>
+<text class="c4-desc" x="795.0" y="883.0">Canvas, AI calculated fields and</text>
+<text class="c4-desc" x="795.0" y="897.0">BubbleUp insights; no training</text>
+<text class="c4-desc" x="795.0" y="911.0">on customer input</text>
+</g><g class="hc-badge hc-badge-doc"><rect x="914" y="824" width="13" height="13" rx="3"/><text x="920.5" y="834">D</text></g>
+<g class="c4-rel">
+<path d="M560,550 L500,820" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="505" y="700">runs on</text>
+</g>
+<g class="c4-rel">
+<path d="M700,550 L780,820" marker-end="url(#ctx-arrow)"/>
+<text class="c4-rel-label" x="765" y="690">calls for</text>
+<text class="c4-rel-label" x="765" y="703">AI features</text>
+</g>
+<g class="c4-legend">
+<rect class="c4-legend-frame" x="1000" y="720" width="210" height="222" rx="6"/>
+<text class="c4-legend-heading" x="1012" y="740">Legend</text>
+<g class="c4-person"><rect x="1012" y="752" width="32" height="16" rx="7"/></g>
+<text x="1054" y="764">Person</text>
+<g class="c4-system"><rect x="1012" y="776" width="32" height="16" rx="3"/></g>
+<text x="1054" y="788">System in scope</text>
+<g class="c4-external"><rect x="1012" y="800" width="32" height="16" rx="3"/></g>
+<text x="1054" y="812">External system</text>
+<g class="c4-rel"><path d="M1012,832 L1044,832"/></g>
+<text x="1054" y="836">Uses (synchronous)</text>
+<g class="c4-rel c4-rel-async"><path d="M1012,856 L1044,856"/></g>
+<text x="1054" y="860">On demand or event-driven</text>
+<g class="hc-badge hc-badge-doc"><rect x="1021" y="873" width="13" height="13" rx="3"/><text x="1027.5" y="883">D</text></g>
+<text x="1054" y="884">Documented</text>
+<g class="hc-badge hc-badge-stated"><rect x="1021" y="895" width="13" height="13" rx="3"/><text x="1027.5" y="905">S</text></g>
+<text x="1054" y="906">Stated in a talk or blog</text>
+<g class="hc-badge hc-badge-inferred"><rect x="1021" y="917" width="13" height="13" rx="3"/><text x="1027.5" y="927">I</text></g>
+<text x="1054" y="928">Inferred by this site</text>
+</g>
+<text class="hc-note-strong" x="20" y="860">Private Cloud (since 2025-11) runs the same</text>
+<text class="hc-note" x="20" y="878">codebase inside the customer's own AWS</text>
+<text class="hc-note" x="20" y="894">account, so the AWS box becomes theirs.</text>
+<text class="hc-note" x="20" y="920">No edition runs on a single machine.</text>
+</svg>
+</div>
+<figcaption>Level 1. Arrows point from the user of a relationship to the thing used, except telemetry, which flows toward Honeycomb. The dashed arrow is on demand. Everything left of Honeycomb is run by the customer; Refinery can also be bought as a managed service <a class="src" href="../sources.html#s-raas">raas</a>.</figcaption>
+</figure>
+
+<h2 id="system">The system in scope</h2>
+<p>Honeycomb is a hosted service with two public regions, reached at <code>api.honeycomb.io</code> in the US and <code>api.eu1.honeycomb.io</code> in the EU, each accepting OTLP over gRPC, HTTP/protobuf and HTTP/JSON with the API key in an <code>x-honeycomb-team</code> header <span class="prov prov-doc">documented</span> <a class="src" href="../sources.html#s-docs-otel">docs-otel</a>. The EU region opened in January 2024 for data residency <a class="src" href="../sources.html#s-pr-eu">pr-eu</a>. The web app is <code>ui.honeycomb.io</code> <span class="prov prov-stated">talk/blog</span> <a class="src" href="../sources.html#s-devops-2017">devops-2017</a>, and agents reach the hosted MCP server at <code>mcp.honeycomb.io/mcp</code> or <code>mcp.eu1.honeycomb.io/mcp</code> <a class="src" href="../sources.html#s-docs-mcp-config">docs-mcp-config</a>.</p>
+<p>A customer's account is a <strong>team</strong>, which holds <strong>environments</strong>, which hold <strong>datasets</strong> of events. "Honeycomb queries run within a single environment by design", and the ingest key decides which environment receives the data <a class="src" href="../sources.html#s-docs-resource-structure">docs-resource-structure</a>. The <a href="../data-model.html">data model</a> page covers this.</p>
+<p>Since 2025-11-19 the same system can also run as <strong>Honeycomb Private Cloud</strong>, which "runs Honeycomb in your cloud account instead of on Honeycomb's infrastructure" and "uses the same architecture and codebase as Honeycomb SaaS" <span class="prov prov-doc">documented</span> <a class="src" href="../sources.html#s-docs-private-cloud">docs-private-cloud</a>. It is self-managed or Honeycomb-managed, on AWS only, and its architecture page lists EC2, EKS, ECS, Lambda, S3, RDS, ElastiCache and Bedrock <a class="src" href="../sources.html#s-docs-pc-arch">docs-pc-arch</a>. That list is the only public inventory of the services Honeycomb itself runs on.</p>
+
+<h2 id="people">People and agents</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Who</th><th>Role toward Honeycomb</th><th>Provenance</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><strong>Engineers</strong></td><td>Build queries, read heatmaps and traces, run BubbleUp, keep boards, and receive trigger and SLO alerts. Every plan has unlimited seats, so the whole team can be a user.</td><td><span class="prov prov-doc">documented</span></td><td><a class="src" href="../sources.html#s-docs-query-build">docs-query-build</a> <a class="src" href="../sources.html#s-docs-bubbleup">docs-bubbleup</a> <a class="src" href="../sources.html#s-pricing">pricing</a></td></tr>
+<tr><td>Team owners</td><td>Create environments and API keys, and switch Honeycomb Intelligence on or off for the team.</td><td><span class="prov prov-doc">documented</span></td><td><a class="src" href="../sources.html#s-docs-api-keys">docs-api-keys</a> <a class="src" href="../sources.html#s-docs-hi">docs-hi</a></td></tr>
+<tr><td><strong>AI agents</strong></td><td>Coding and operations agents call the hosted MCP server's tools: discover the workspace, run queries and BubbleUp, read traces and the service map, and create boards, triggers and SLOs with write scope. Since 2026-03 Honeycomb also ships "Agent Skills" for Claude Code, Cursor "and dozens of other agents".</td><td><span class="prov prov-doc">documented</span></td><td><a class="src" href="../sources.html#s-docs-mcp-tools">docs-mcp-tools</a> <a class="src" href="../sources.html#s-docs-mcp-config">docs-mcp-config</a> <a class="src" href="../sources.html#s-pr-2026-03">pr-2026-03</a></td></tr>
+</tbody></table></div>
+
+<h2 id="external">External systems</h2>
+<h3 id="ext-in">What sends Honeycomb data</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>System</th><th>What it does with Honeycomb</th><th>Provenance</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><strong>Instrumented services</strong><br><span class="evidence">OpenTelemetry SDKs, libhoney</span></td><td>Customer code emits spans, logs and metrics. Honeycomb recommends the vendor-neutral OpenTelemetry SDKs; its own OpenTelemetry distributions have "reached End of Life and are now archived", except the browser SDK, and the Beelines reached end of life on 2025-08-12. libhoney, the low-level Events API client, is still maintained in six languages. In environments, the span's <code>service.name</code> picks the dataset.</td><td><span class="prov prov-doc">documented</span></td><td><a class="src" href="../sources.html#s-docs-migrate-distros">docs-migrate-distros</a> <a class="src" href="../sources.html#s-docs-migrate-beelines">docs-migrate-beelines</a> <a class="src" href="../sources.html#s-docs-supported-versions">docs-supported-versions</a> <a class="src" href="../sources.html#s-docs-sending-issues">docs-sending-issues</a></td></tr>
+<tr><td><strong>OpenTelemetry Collector</strong></td><td>An optional customer-run hop. Honeycomb says the stock Collector "and its standard OTLP exporter" are enough, "without any additional exporters or plugins". Since 2025 it also publishes its own Collector distribution, built with the Collector builder.</td><td><span class="prov prov-doc">documented</span></td><td><a class="src" href="../sources.html#s-docs-otel-collector">docs-otel-collector</a> <a class="src" href="../sources.html#s-repo-collector-distro">repo-collector-distro</a></td></tr>
+<tr><td><strong>Refinery</strong></td><td>Honeycomb's open-source tail-sampling proxy, run by the customer: it buffers each trace, decides to keep or drop it whole, and forwards kept spans to the Events API batch endpoint with their sample rate. Since September 2026 Honeycomb also runs it as a managed service. Events it drops are not billed. <a href="refinery.html">Level 3: Refinery</a>.</td><td><span class="prov prov-doc">documented</span></td><td><a class="src" href="../sources.html#s-refinery-readme">refinery-readme</a> <a class="src" href="../sources.html#s-raas">raas</a> <a class="src" href="../sources.html#s-docs-usage">docs-usage</a></td></tr>
+<tr><td>AWS telemetry sources</td><td>CloudWatch Logs subscription filters and CloudWatch Metric Streams feed Kinesis Data Firehose, which posts to Honeycomb's Kinesis endpoint; a Honeycomb Lambda extension reads a function's structured output through the Lambda Logs API.</td><td><span class="prov prov-doc">documented</span></td><td><a class="src" href="../sources.html#s-docs-aws">docs-aws</a> <a class="src" href="../sources.html#s-docs-cloudwatch-metrics">docs-cloudwatch-metrics</a> <a class="src" href="../sources.html#s-docs-lambda-ext">docs-lambda-ext</a></td></tr>
+<tr><td>CI and deploy tooling</td><td><code>buildevents</code> turns a CI build into one trace with a span per step; markers, created through <code>/1/markers</code> or the <code>honeymarker</code> CLI, draw deploys and incidents as vertical lines on graphs.</td><td><span class="prov prov-doc">documented</span></td><td><a class="src" href="../sources.html#s-docs-build-pipelines">docs-build-pipelines</a> <a class="src" href="../sources.html#s-repo-buildevents">repo-buildevents</a> <a class="src" href="../sources.html#s-docs-markers-api">docs-markers-api</a> <a class="src" href="../sources.html#s-repo-honeymarker">repo-honeymarker</a></td></tr>
+<tr><td>Log files</td><td><code>honeytail</code> tails log files and parses JSON, nginx, MySQL, PostgreSQL and other formats into events.</td><td><span class="prov prov-doc">documented</span></td><td><a class="src" href="../sources.html#s-repo-honeytail">repo-honeytail</a></td></tr>
+</tbody></table></div>
+
+<h3 id="ext-out">What Honeycomb reaches</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>System</th><th>What Honeycomb uses it for</th><th>Provenance</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><strong>Alert destinations</strong></td><td>Trigger and burn alerts go to "PagerDuty, Email, Webhook, Microsoft Teams, and Slack" recipients, which are team-wide. Webhooks get a 15-second timeout and up to three retries. Since 2022 ServiceNow events or incidents too.</td><td><span class="prov prov-doc">documented</span></td><td><a class="src" href="../sources.html#s-docs-recipients">docs-recipients</a> <a class="src" href="../sources.html#s-docs-webhooks">docs-webhooks</a> <a class="src" href="../sources.html#s-docs-slack">docs-slack</a> <a class="src" href="../sources.html#s-blog-servicenow">blog-servicenow</a></td></tr>
+<tr><td>Terraform and API clients</td><td>The <code>honeycombio</code> Terraform provider manages boards, calculated fields, SLOs, triggers, recipients and keys through the REST API: <code>/1/</code> for ingest and environment resources, <code>/2/</code> for team-level management.</td><td><span class="prov prov-doc">documented</span></td><td><a class="src" href="../sources.html#s-docs-terraform">docs-terraform</a> <a class="src" href="../sources.html#s-docs-api-intro">docs-api-intro</a></td></tr>
+<tr><td>Canvas connectors</td><td>Since 2026-09 the Canvas Agent can pull context from GitHub, Linear, Pylon, incident.io, Atlassian, Braintrust, Sentry, Amplitude and Checkly.</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-pr-ai-ecosystem">pr-ai-ecosystem</a></td></tr>
+<tr><td>Customer S3 archive</td><td>The Telemetry Pipeline's Enhance feature and "Query with Archive" rehydrate "unsampled OpenTelemetry trace and log data from your Amazon S3 archive when sampled or expired data is missing".</td><td><span class="prov prov-doc">documented</span></td><td><a class="src" href="../sources.html#s-docs-archive">docs-archive</a> <a class="src" href="../sources.html#s-pr-pipeline-2025">pr-pipeline-2025</a></td></tr>
+<tr><td><strong>Amazon Web Services</strong></td><td>Where Honeycomb runs: Graviton EC2 and EKS for its services, S3 for older segments and query results, Lambda for query fan-out, RDS MySQL for metadata. Honeycomb signed a three-year strategic agreement with AWS in December 2025.</td><td><span class="prov prov-stated">talk/blog</span></td><td><a class="src" href="../sources.html#s-blog-arm-future">blog-arm-future</a> <a class="src" href="../sources.html#s-blog-k8s-migration">blog-k8s-migration</a> <a class="src" href="../sources.html#s-blog-secondary-storage">blog-secondary-storage</a> <a class="src" href="../sources.html#s-blog-what-comes-up">blog-what-comes-up</a> <a class="src" href="../sources.html#s-pr-aws-sca">pr-aws-sca</a></td></tr>
+<tr><td>LLM providers</td><td>Canvas and AI-assisted calculated fields use OpenAI and AWS Bedrock; BubbleUp insights use Bedrock. "Honeycomb does not use any AI model providers that train foundation models based on input." The specific models are not named.</td><td><span class="prov prov-doc">documented</span></td><td><a class="src" href="../sources.html#s-docs-ai-policies">docs-ai-policies</a></td></tr>
+</tbody></table></div>
+
+<h2 id="retired">Retired or deliberately outside the box</h2>
+<ul>
+<li><strong>Beelines</strong>, Honeycomb's first tracing SDKs, reached end of life on 2025-08-12 <a class="src" href="../sources.html#s-docs-migrate-beelines">docs-migrate-beelines</a>. Its <strong>OpenTelemetry distributions</strong> for Java, .NET, Python, Node.js and Go are archived; only the web SDK remains <a class="src" href="../sources.html#s-docs-migrate-distros">docs-migrate-distros</a> <a class="src" href="../sources.html#s-repo-hny-otel-web">repo-hny-otel-web</a>.</li>
+<li>The <strong>self-hosted MCP server</strong> (<code>honeycombio/honeycomb-mcp</code>) was Enterprise-only, ran locally over stdio, and is deprecated and archived in favour of the hosted server <a class="src" href="../sources.html#s-repo-honeycomb-mcp">repo-honeycomb-mcp</a>.</li>
+<li><strong>Secure Tenancy</strong>, an on-premises proxy that held the customer's encryption keys so "Honeycomb never has access to the data", was patented in 2020; its Helm chart was marked deprecated and removed in May 2023 <a class="src" href="../sources.html#s-blog-secure-tenancy">blog-secure-tenancy</a> <a class="src" href="../sources.html#s-helm-secure-tenancy">helm-secure-tenancy</a>.</li>
+<li>The <strong>Honeycomb Kubernetes Agent</strong> is in maintenance and the <strong>Network Agent</strong> is archived; Kubernetes users are steered to OpenTelemetry <a class="src" href="../sources.html#s-docs-k8s-agent">docs-k8s-agent</a> <a class="src" href="../sources.html#s-repo-network-agent">repo-network-agent</a> <a class="src" href="../sources.html#s-docs-k8s">docs-k8s</a>.</li>
+<li><strong>Query Assistant</strong> (2023), the first natural-language query feature, is gone from the docs; Canvas took its place <span class="prov prov-inferred">inferred</span> from its old URL redirecting to "Build a query" <a class="src" href="../sources.html#s-pr-query-assistant">pr-query-assistant</a>.</li>
+</ul>
+
+<div class="callout unclear"><span class="callout-title">Not settled by public sources</span>
+<p>Which LLMs sit behind Canvas and the other AI features: only the providers are named <a class="src" href="../sources.html#s-docs-ai-policies">docs-ai-policies</a>. Which storage engine backs the time-series metrics that went generally available in 2026: the announcement says "native time series storage" and nothing more <a class="src" href="../sources.html#s-blog-metrics-ga">blog-metrics-ga</a>.</p>
+</div>
+</article>
+</main>
+</div>
+<script src="../assets/nav-data.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

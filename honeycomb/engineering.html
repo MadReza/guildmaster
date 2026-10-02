@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Engineering decisions · Honeycomb C4</title>
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">How it is done</p>
+<h1>Engineering decisions</h1>
+<p class="lede">How Honeycomb is built, decision by decision: what was chosen, the reason its engineers gave, and what it cost them. Each is told in their words where possible, because none of the code outside Refinery and the SDKs is public.</p>
+<p class="meta-line">Read on 2026-10-02. Every statement on this page is from a Honeycomb post, talk, podcast or book <span class="prov prov-stated">talk/blog</span> unless marked otherwise. The <a href="timeline.html">timeline</a> puts these in order.</p>
+
+<ul class="hc-stats">
+<li><span class="hc-stat-label">Kafka cost per MB, 2019–2021</span><span class="hc-stat-value">−87%</span><span class="hc-stat-note">while data grew ten times</span></li>
+<li><span class="hc-stat-label">arm64 share of vCPUs, April 2021</span><span class="hc-stat-value">92%</span><span class="hc-stat-note">no x86 EC2 left by April 2022</span></li>
+<li><span class="hc-stat-label">Peak Lambda concurrency, 2021</span><span class="hc-stat-value">30,000</span><span class="hc-stat-note">beside about 1,000 vCPU of Retriever</span></li>
+<li><span class="hc-stat-label">Columnar data, 2021</span><span class="hc-stat-value">700 TB</span><span class="hc-stat-note">in 500 million segment archives</span></li>
+</ul>
+<p class="evidence"><a class="src" href="sources.html#s-blog-scaling-kafka">blog-scaling-kafka</a> <a class="src" href="sources.html#s-blog-graviton-1yr">blog-graviton-1yr</a> <a class="src" href="sources.html#s-blog-arm-future">blog-arm-future</a> <a class="src" href="sources.html#s-book-oe-1e">book-oe-1e</a></p>
+
+<h2 id="column-store">1. Build a column store instead of buying a database</h2>
+<p><strong>Decision.</strong> Write Retriever, a distributed column store, "from scratch, in Go" <a class="src" href="sources.html#s-dataengconf-2017">dataengconf-2017</a>, rather than run an existing database.</p>
+<p><strong>Why.</strong> The product promise is that any field can be grouped or filtered at any cardinality, fast, without a schema. Facebook's Scuba proved the shape but "achieves fast queries by storing all data in memory", and Honeycomb had "additional constraints: multi-tenancy, cost to serve, and the limited resources of a startup" <a class="src" href="sources.html#s-strangeloop-2017">strangeloop-2017</a>. The book is blunter about Scuba: its RAM appetite made it "economically infeasible for mass adoption beyond the walls of Facebook" <a class="src" href="sources.html#s-book-oe-1e">book-oe-1e</a>. So Retriever "chooses disk over memory" <a class="src" href="sources.html#s-strangeloop-2017">strangeloop-2017</a>, keeps no indexes "so you don't need to decide which column is 'fast' before you start writing data" <a class="src" href="sources.html#s-blog-column-store">blog-column-store</a>, and uses time as the only index.</p>
+<p><strong>What it cost.</strong> Every operation happens at read time, so "we wind up being compute bound" <a class="src" href="sources.html#s-infoq-podcast-kerr">infoq-podcast-kerr</a>; and owning a storage engine means owning its bugs, such as an S3 prefix delete that silently destroyed live segments for more than two years <a class="src" href="sources.html#s-blog-murder-mystery">blog-murder-mystery</a>. Majors's own line on the scope: "we have not written a database, we've written a storage engine" <a class="src" href="sources.html#s-shipit-11">shipit-11</a>. Details: <a href="c4/retriever.html">Retriever</a>.</p>
+
+<h2 id="read-time">2. Keep raw events; compute everything at read time, approximately</h2>
+<p><strong>Decision.</strong> No pre-aggregation, no rollups, calculated fields at query time; percentiles by t-digest and distinct counts by HyperLogLog <a class="src" href="sources.html#s-infoq-podcast-kerr">infoq-podcast-kerr</a> <span class="prov prov-doc">documented</span> <a class="src" href="sources.html#s-docs-query-build">docs-query-build</a>.</p>
+<p><strong>Why.</strong> Pre-aggregation decides the questions in advance: "Any aggregation that is performed at write time is actively harmful to your ability to understand the health and experience of each request" <a class="src" href="sources.html#s-wb-best-practices">wb-best-practices</a>. Approximation is the price of speed and is written into the company values: "99% right in milliseconds is better than 100% right in an hour" <a class="src" href="sources.html#s-about-page">about-page</a>.</p>
+<p><strong>What it cost.</strong> Best effort collided with SLOs, which must not flap: "Honeycomb is designed as a best-effort querying system which is ok with occasional incorrect answers", so the SLO cache had to refuse approximations <a class="src" href="sources.html#s-blog-slo-challenges">blog-slo-challenges</a>.</p>
+
+<h2 id="kafka">3. Put Kafka between ingest and storage, and run it yourself</h2>
+<p><strong>Decision.</strong> Every event goes through one Kafka topic; ingest writes, Retriever and the stream processors read <a class="src" href="sources.html#s-confluent-podcast">confluent-podcast</a> <a class="src" href="sources.html#s-blog-kafka-may-2026">blog-kafka-may-2026</a>.</p>
+<p><strong>Why.</strong> "Using Kafka allows us to decouple the stateless 'shepherd' ingest workers from the stateful 'retriever' storage engine, allowing us to perform rolling restarts and updates without causing downtime", and a buffer of "24 to 48 hours of data" guards "against the risk of a bug in retriever corrupting customer data" <a class="src" href="sources.html#s-blog-scaling-kafka">blog-scaling-kafka</a>. It also lets several readers "be in agreement about the data they are receiving" <a class="src" href="sources.html#s-blog-scaling-kafka">blog-scaling-kafka</a>. It is deliberately narrow: "there is one Kafka topic at Honeycomb. There's one producer and two consumers" <a class="src" href="sources.html#s-confluent-podcast">confluent-podcast</a>.</p>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="chart hc-chart-dense" viewBox="0 0 760 300" role="img" aria-labelledby="kc-title kc-desc">
+<title id="kc-title">Kafka cost per megabyte of input, after each change, 2019 to 2021</title>
+<desc id="kc-desc">Indexed to 100 before the changes. Zstandard compression saved 25 percent, leaving 75; moving from c5 with gp2 disks to i3en reserved instances saved 20 percent, leaving 60; tiered storage to S3 saved 65 percent, leaving 21; moving from i3en to Graviton2 im4gn saved 43 percent, leaving 12. Honeycomb reports the cumulative saving as 87 percent.</desc>
+<text class="hc-chart-title" x="20" y="26">Kafka cost per MB of input, indexed to 100</text>
+<text class="hc-chart-sub" x="20" y="45">Each bar is the cost after that change; savings compound (Honeycomb's figures, November 2021)</text>
+<line class="hc-grid" x1="220.0" y1="58" x2="220.0" y2="262"/>
+<text class="hc-tick hc-tick-mid" x="220.0" y="280">0</text>
+<line class="hc-grid" x1="330.0" y1="58" x2="330.0" y2="262"/>
+<text class="hc-tick hc-tick-mid" x="330.0" y="280">25</text>
+<line class="hc-grid" x1="440.0" y1="58" x2="440.0" y2="262"/>
+<text class="hc-tick hc-tick-mid" x="440.0" y="280">50</text>
+<line class="hc-grid" x1="550.0" y1="58" x2="550.0" y2="262"/>
+<text class="hc-tick hc-tick-mid" x="550.0" y="280">75</text>
+<line class="hc-grid" x1="660.0" y1="58" x2="660.0" y2="262"/>
+<text class="hc-tick hc-tick-mid" x="660.0" y="280">100</text>
+<text class="hc-tick hc-tick-end" x="210" y="81">Starting point</text>
+<path class="hc-fill-1" d="M220,66 h436.0 a4,4 0 0 1 4,4 v14 a4,4 0 0 1 -4,4 h-436.0 z" data-tip="Starting point: 100"><title>Starting point: 100</title></path>
+<text class="hc-annot" x="668.0" y="82">100</text>
+<text class="hc-tick hc-tick-end" x="210" y="121">Zstandard compression</text>
+<path class="hc-fill-1" d="M220,106 h326.0 a4,4 0 0 1 4,4 v14 a4,4 0 0 1 -4,4 h-326.0 z" data-tip="Zstandard compression: 75 (−25% of 100)"><title>Zstandard compression: 75 (−25% of 100)</title></path>
+<rect class="hc-band" x="550.0" y="106" width="110.0" height="22" rx="2"><title>saved −25%</title></rect>
+<text class="hc-annot" x="668.0" y="122">75 · −25%</text>
+<text class="hc-tick hc-tick-end" x="210" y="161">c5 + gp2 → i3en reserved</text>
+<path class="hc-fill-1" d="M220,146 h260.0 a4,4 0 0 1 4,4 v14 a4,4 0 0 1 -4,4 h-260.0 z" data-tip="c5 + gp2 → i3en reserved: 60 (−20% of 75)"><title>c5 + gp2 → i3en reserved: 60 (−20% of 75)</title></path>
+<rect class="hc-band" x="484.0" y="146" width="66.0" height="22" rx="2"><title>saved −20%</title></rect>
+<text class="hc-annot" x="558.0" y="162">60 · −20%</text>
+<text class="hc-tick hc-tick-end" x="210" y="201">Tiered storage to S3</text>
+<path class="hc-fill-1" d="M220,186 h88.4 a4,4 0 0 1 4,4 v14 a4,4 0 0 1 -4,4 h-88.4 z" data-tip="Tiered storage to S3: 21 (−65% of 60)"><title>Tiered storage to S3: 21 (−65% of 60)</title></path>
+<rect class="hc-band" x="312.4" y="186" width="171.6" height="22" rx="2"><title>saved −65%</title></rect>
+<text class="hc-annot" x="492.0" y="202">21 · −65%</text>
+<text class="hc-tick hc-tick-end" x="210" y="241">i3en → im4gn (Graviton2)</text>
+<path class="hc-fill-3" d="M220,226 h48.7 a4,4 0 0 1 4,4 v14 a4,4 0 0 1 -4,4 h-48.7 z" data-tip="i3en → im4gn (Graviton2): 12 (−43% of 21)"><title>i3en → im4gn (Graviton2): 12 (−43% of 21)</title></path>
+<rect class="hc-band" x="272.7" y="226" width="39.7" height="22" rx="2"><title>saved −43%</title></rect>
+<text class="hc-annot" x="320.4" y="242">12 · −43%</text>
+</svg>
+</div>
+<figcaption>Single series, so no legend; amber marks what each step saved. "25% savings from Zstandard, 20% savings from c5+gp2 to i3en reserved instances, 65% savings from tiered storage, and 43% savings from i3en to im4gn" <a class="src" href="sources.html#s-blog-scaling-kafka">blog-scaling-kafka</a>. Compounded, these give 88%; Honeycomb reports 87%.</figcaption>
+<details class="hc-data"><summary>Table view</summary>
+<div class="table-wrap"><table>
+<thead><tr><th>After</th><th class="num">Saving</th><th class="num">Cost index</th></tr></thead>
+<tbody>
+<tr><td>Starting point</td><td class="num"></td><td class="num">100</td></tr>
+<tr><td>Zstandard compression</td><td class="num">25%</td><td class="num">75</td></tr>
+<tr><td>c5 + gp2 → i3en reserved instances</td><td class="num">20%</td><td class="num">60</td></tr>
+<tr><td>Tiered storage to S3</td><td class="num">65%</td><td class="num">21</td></tr>
+<tr><td>i3en → im4gn (Graviton2)</td><td class="num">43%</td><td class="num">12</td></tr>
+</tbody></table></div>
+</details>
+</figure>
+<p><strong>What it cost.</strong> Running Kafka was the hardest operational thread in Honeycomb's public record. An early tiered-storage rollout on Graviton2 with EBS was unstable and was reverted to i3en in 2021 <a class="src" href="sources.html#s-blog-scaling-kafka">blog-scaling-kafka</a> <a class="src" href="sources.html#s-blog-kafka-lessons">blog-kafka-lessons</a>; by 2026 replacing one broker under Confluent's closed tiered storage had grown "from 8 to 12 hours" to "48 to 72 hours" <a class="src" href="sources.html#s-blog-kafka-2026">blog-kafka-2026</a>; and in December 2025 the cleanup after a zone-failure exercise left partitions leaderless and lost one partition's data, "described as 'the worst incident of my career' by many" <a class="src" href="sources.html#s-blog-dec-2025">blog-dec-2025</a>. In May 2026 every cluster moved to "open-source Apache Kafka 4.1.1 running in KRaft mode and deployed to AWS EKS", partly because Private Cloud needed Kafka on Kubernetes <a class="src" href="sources.html#s-blog-kafka-2026">blog-kafka-2026</a>. Diskless Kafka was ruled out: "we can't trade higher latencies for more cost-effective data transfer and storage" <a class="src" href="sources.html#s-blog-kafka-2026">blog-kafka-2026</a>.</p>
+
+<h2 id="lambda">4. Tier old data to S3, and burst onto Lambda to read it</h2>
+<p><strong>Decision.</strong> Keep only the newest hours on local NVMe; move finished segments to S3; scan S3 segments with thousands of short Lambda invocations <a class="src" href="sources.html#s-shipit-11">shipit-11</a> <a class="src" href="sources.html#s-blog-secondary-storage">blog-secondary-storage</a> <a class="src" href="sources.html#s-qcon-2022">qcon-2022</a>.</p>
+<p><strong>Why.</strong> Disk limits were throwing data away: "we were throwing away data from like 10 minutes ago. That's not ok" <a class="src" href="sources.html#s-qcon-2022">qcon-2022</a>. The 2018 "Secondary Storage" put older data in S3 but with no extra compute, so those queries took minutes <a class="src" href="sources.html#s-blog-secondary-2018">blog-secondary-2018</a> <a class="src" href="sources.html#s-blog-secondary-storage">blog-secondary-storage</a>. Lambda made them fast without paying for idle servers: "They are 3 or 4 times more expensive, but we run them 100 times less, at least, than we would an EC2 instance" <a class="src" href="sources.html#s-qcon-2022">qcon-2022</a>. By December 2019, "20-minute queries are a thing of the past" and the Fast Query Window was gone from the UI <a class="src" href="sources.html#s-blog-secondary-storage">blog-secondary-storage</a>.</p>
+<p><strong>What it cost.</strong> Lambda is "a significant chunk" of the AWS bill <a class="src" href="sources.html#s-qcon-2022">qcon-2022</a>, AWS had to raise a 500-invocation burst limit <a class="src" href="sources.html#s-qcon-2022">qcon-2022</a>, one customer's queries read "billions of files (petabytes) in a short time" in 2021 <a class="src" href="sources.html#s-blog-sept-2021">blog-sept-2021</a>, and SLO alerting once ran "over $5,000 of AWS Lambda costs per day" for small datasets <a class="src" href="sources.html#s-book-oe-1e">book-oe-1e</a>. Honeycomb tags every Lambda span with dataset and query source so it can attribute that cost <a class="src" href="sources.html#s-blog-aws-costs">blog-aws-costs</a>.</p>
+
+<h2 id="go">5. Go for everything, without cgo</h2>
+<p><strong>Decision.</strong> "We're using Go for everything - the UI, all the way down to the guts" <a class="src" href="sources.html#s-gotime-35">gotime-35</a>; services build with <code>CGO_ENABLED=0</code> <a class="src" href="sources.html#s-reinvent-2022">reinvent-2022</a>. Exceptions: Kafka itself, a NodeJS chart renderer, and some Java <a class="src" href="sources.html#s-devops-2017">devops-2017</a> <a class="src" href="sources.html#s-newstack-2022">newstack-2022</a>.</p>
+<p><strong>Why.</strong> A single language for a small team, and it paid off later: Go "supports cross-compiling for aarch64 out of the box", which made the move to ARM cheap <a class="src" href="sources.html#s-blog-m6g">blog-m6g</a>.</p>
+<p><strong>What it cost.</strong> The garbage collector. "It wasn't uncommon for allocation and cleanup to eat the bulk of CPU time"; pooling allocations roughly doubled back-end query performance <a class="src" href="sources.html#s-blog-secondary-storage">blog-secondary-storage</a>. The Kafka client had to be pure Go, which delayed Zstandard <a class="src" href="sources.html#s-confluent-podcast">confluent-podcast</a>.</p>
+
+<h2 id="graviton">6. Move the fleet to ARM</h2>
+<p><strong>Decision.</strong> Run everything on AWS Graviton: dogfood ingest in March 2020, production ingest from mid-2020, 92% of vCPUs a year later, every EC2 instance by April 2022, Lambda at 99% arm64 <a class="src" href="sources.html#s-blog-m6g">blog-m6g</a> <a class="src" href="sources.html#s-blog-graviton-1yr">blog-graviton-1yr</a> <a class="src" href="sources.html#s-blog-arm-future">blog-arm-future</a> <a class="src" href="sources.html#s-qcon-2022">qcon-2022</a>.</p>
+<p><strong>Why.</strong> Price and performance. The first port took "about 15 hours of work" from one engineer and needed "30% fewer instances" than c5 <a class="src" href="sources.html#s-blog-m6g">blog-m6g</a>; ingest savings rose "to over 40% versus c5" <a class="src" href="sources.html#s-blog-graviton-1yr">blog-graviton-1yr</a>; Retriever doubled its threads "without needing to double the cost" <a class="src" href="sources.html#s-blog-graviton-1yr">blog-graviton-1yr</a>; Graviton3 let ingest run at 10% higher CPU targets with 30% fewer instances <a class="src" href="sources.html#s-blog-arm-future">blog-arm-future</a>; by Graviton4, "more than double the throughput per vCPU compared to when we started" <a class="src" href="sources.html#s-blog-graviton4">blog-graviton4</a>.</p>
+<p><strong>What it cost.</strong> Kafka was last and hardest: it needed "libc6-lse and the Corretto Java distribution to eliminate futex thrashing" <a class="src" href="sources.html#s-blog-scaling-kafka">blog-scaling-kafka</a>; ARM Lambda needed Go 1.18 and an arm64 port of LZ4's assembly <a class="src" href="sources.html#s-qcon-2022">qcon-2022</a>.</p>
+
+<h2 id="sampling">7. Sample rather than aggregate, and let the customer do it</h2>
+<p><strong>Decision.</strong> Price by event, weight sampled events by their rate at query time, and give customers an open-source tail sampler to run themselves <span class="prov prov-doc">documented</span> <a class="src" href="sources.html#s-docs-usage">docs-usage</a> <a class="src" href="sources.html#s-docs-sampled-data">docs-sampled-data</a> <a class="src" href="sources.html#s-refinery-readme">refinery-readme</a>.</p>
+<p><strong>Why.</strong> Sampling keeps whole events, so any question still works on what is kept; aggregation does not. Refinery "runs within a customer's infrastructure, giving them full control over what they choose to send" <a class="src" href="sources.html#s-pr-refinery">pr-refinery</a>, and what it drops is not billed <a class="src" href="sources.html#s-docs-usage">docs-usage</a>. Honeycomb's view of the stock alternative: plain keep-or-drop tail sampling makes "counts computed from sampled data no longer reflect real traffic" <a class="src" href="sources.html#s-blog-adaptive-tail">blog-adaptive-tail</a>.</p>
+<p><strong>What it cost.</strong> Sampling is now the customer's tuning problem: dynamic samplers "are not deterministic" and misbehave past "a few dozen" keys <a class="src" href="sources.html#s-blog-tuning-dynamic">blog-tuning-dynamic</a>, and Refinery is stateful and "not optimized for dynamic auto-scaling" <a class="src" href="sources.html#s-docs-refinery-scale">docs-refinery-scale</a>. Honeycomb answered with a managed Refinery and a Collector processor in 2026 <a class="src" href="sources.html#s-raas">raas</a> <a class="src" href="sources.html#s-blog-adaptive-collector">blog-adaptive-collector</a>. See <a href="sampling.html">Sampling and its maths</a>.</p>
+
+<h2 id="slos">8. SLOs: from repeated queries to a stream processor</h2>
+<p><strong>Decision.</strong> First compute SLOs by querying Retriever every minute; then, in 2021, by streaming every event through every SLI in Beagle <a class="src" href="sources.html#s-blog-beagle">blog-beagle</a>.</p>
+<p><strong>Why.</strong> The query approach reused the engine, but its first alert loop "promptly arranged a $10,000 day of AWS spend on data retrieval" <a class="src" href="sources.html#s-blog-slo-challenges">blog-slo-challenges</a>. Beagle "will automatically grow (and shrink) proportionally with the amount of incoming data" <a class="src" href="sources.html#s-blog-beagle">blog-beagle</a>.</p>
+<p><strong>What it cost.</strong> A new service that reads every message of every dataset, with its own scaling shape; in September 2021 partition skew in Beagle delayed SLOs <a class="src" href="sources.html#s-blog-sept-2021">blog-sept-2021</a>.</p>
+
+<h2 id="practice">9. Ship constantly, test in production, rehearse failure, publish incidents</h2>
+<p><strong>Decision.</strong> Deploy from cron "like every ten minutes", through kibble, then dogfood, then production <a class="src" href="sources.html#s-shipit-11">shipit-11</a>; stop the production deploy automatically "if our SLOs don't match" in dogfood <a class="src" href="sources.html#s-qcon-2022">qcon-2022</a>; flag everything through LaunchDarkly <a class="src" href="sources.html#s-blog-hnyhny-5">blog-hnyhny-5</a>; kill a Retriever node and a Kafka broker every week <a class="src" href="sources.html#s-blog-scaling-kafka">blog-scaling-kafka</a>; and write public incident reviews.</p>
+<p><strong>Why.</strong> "Honeycomb is all about test in production. Not that we only test in production, but that we also test in production and we notice when things break, and then we roll back quickly" <a class="src" href="sources.html#s-qcon-2022">qcon-2022</a>. Honeycomb observes itself with itself: dogfood watches production and kibble watches dogfood <a class="src" href="sources.html#s-blog-m6g">blog-m6g</a>.</p>
+<p><strong>What it cost.</strong> The practices fail too, and Honeycomb says so: in the 68-minute total outage of July 2023, "feature flags, frequent deploys, suspending deploys during incidents, and learning from prior near-misses all technically contributed to this incident" <a class="src" href="sources.html#s-blog-what-comes-up">blog-what-comes-up</a>. In 2024 it "abruptly destroyed one third of the infrastructure" to prove it could lose a zone <a class="src" href="sources.html#s-blog-chaos-1">blog-chaos-1</a>.</p>
+
+<h2 id="platform">10. Kubernetes, then one codebase for SaaS and Private Cloud</h2>
+<p><strong>Decision.</strong> Move from Packer images, Chef and Terraform on EC2 to EKS, finished in March 2023 except for Kafka <a class="src" href="sources.html#s-blog-m6g">blog-m6g</a> <a class="src" href="sources.html#s-blog-k8s-migration">blog-k8s-migration</a>; then ship the same system into customers' AWS accounts as Private Cloud, which "uses the same architecture and codebase as Honeycomb SaaS" <span class="prov prov-doc">documented</span> <a class="src" href="sources.html#s-docs-private-cloud">docs-private-cloud</a>.</p>
+<p><strong>Why.</strong> For Kubernetes, "we lived between two hard-to-manage systems", with dogfooding Kubernetes for customers as "a nice bonus win" <a class="src" href="sources.html#s-blog-k8s-migration">blog-k8s-migration</a>. For Private Cloud, enterprises' need for "control, residency, and security" and "stringent security, data residency, and regulatory requirements" <a class="src" href="sources.html#s-pr-private-cloud">pr-private-cloud</a>.</p>
+<p><strong>What it cost.</strong> Kafka had to follow onto EKS, which drove the 2026 migration <a class="src" href="sources.html#s-blog-kafka-2026">blog-kafka-2026</a>.</p>
+
+<h2 id="scale">The scale these decisions serve</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="chart hc-chart-dense" viewBox="0 0 760 330" role="img" aria-labelledby="sc-title sc-desc">
+<title id="sc-title">Reported ingest rate, 2019 to 2022</title>
+<desc id="sc-desc">About 200,000 spans a second in mid-2019, over 1.5 million in November 2021, 2.5 million in July 2022 and over 3 million events a second in December 2022. Later sources say only "millions".</desc>
+<text class="hc-chart-title" x="20" y="26">Reported ingest rate, millions per second</text>
+<text class="hc-chart-sub" x="20" y="45">From four Honeycomb statements; the last counts events rather than spans, and none is said to be a peak or an average</text>
+<line class="hc-grid" x1="70" y1="270.0" x2="670" y2="270.0"/>
+<text class="hc-tick hc-tick-end" x="62" y="274.0">0M</text>
+<line class="hc-grid" x1="70" y1="210.0" x2="670" y2="210.0"/>
+<text class="hc-tick hc-tick-end" x="62" y="214.0">1M</text>
+<line class="hc-grid" x1="70" y1="150.0" x2="670" y2="150.0"/>
+<text class="hc-tick hc-tick-end" x="62" y="154.0">2M</text>
+<line class="hc-grid" x1="70" y1="90.0" x2="670" y2="90.0"/>
+<text class="hc-tick hc-tick-end" x="62" y="94.0">3M</text>
+<text class="hc-tick hc-tick-mid" x="70.0" y="288">2019</text>
+<text class="hc-tick hc-tick-mid" x="220.0" y="288">2020</text>
+<text class="hc-tick hc-tick-mid" x="370.0" y="288">2021</text>
+<text class="hc-tick hc-tick-mid" x="520.0" y="288">2022</text>
+<text class="hc-tick hc-tick-mid" x="670.0" y="288">2023</text>
+<line class="hc-axis" x1="70" y1="270" x2="670" y2="270"/>
+<path class="hc-line-1" d="M145.0,258.0 L500.5,180.0 L601.0,120.0 L658.0,90.0"/>
+<circle class="hc-fill-1 hc-dot" cx="145.0" cy="258.0" r="5" data-tip="mid-2019: about 200,000 spans/s ("three years ago")"><title>mid-2019: about 200,000 spans/s ("three years ago")</title></circle>
+<circle class="hc-fill-1 hc-dot" cx="500.5" cy="180.0" r="5" data-tip="Nov 2021: over 1.5M spans/s"><title>Nov 2021: over 1.5M spans/s</title></circle>
+<circle class="hc-fill-1 hc-dot" cx="601.0" cy="120.0" r="5" data-tip="Jul 2022: 2.5M spans/s"><title>Jul 2022: 2.5M spans/s</title></circle>
+<circle class="hc-fill-1 hc-dot" cx="658.0" cy="90.0" r="5" data-tip="Dec 2022: over 3M events/s"><title>Dec 2022: over 3M events/s</title></circle>
+<text class="hc-annot" x="153.0" y="250.0">0.2M</text>
+<text class="hc-annot hc-annot-end" x="492.5" y="174.0">1.5M</text>
+<text class="hc-annot hc-annot-end" x="593.0" y="114.0">2.5M</text>
+<text class="hc-annot" x="666.0" y="84.0">3M events/s</text>
+<text class="hc-annot-muted" x="70" y="310">Later statements give no number: "hundreds of millions of high-cardinality event attributes per</text>
+<text class="hc-annot-muted" x="70" y="324">second" (2025); "millions of observability events per second" (2026).</text>
+</svg>
+</div>
+<figcaption><a class="src" href="sources.html#s-newstack-2022">newstack-2022</a> <a class="src" href="sources.html#s-book-oe-1e">book-oe-1e</a> <a class="src" href="sources.html#s-reinvent-2022">reinvent-2022</a> <a class="src" href="sources.html#s-blog-private-cloud">blog-private-cloud</a> <a class="src" href="sources.html#s-blog-kafka-2026">blog-kafka-2026</a>. The 2019 point is "200,00 [sic] just three years ago" in a July 2022 article; this site reads it as 200,000 <span class="prov prov-inferred">inferred</span>.</figcaption>
+<details class="hc-data"><summary>Table view</summary>
+<div class="table-wrap"><table>
+<thead><tr><th>When</th><th class="num">Rate</th><th>Unit</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>mid-2019</td><td class="num">≈ 0.2M</td><td>spans/s</td><td><a class="src" href="sources.html#s-newstack-2022">newstack-2022</a></td></tr>
+<tr><td>2021-11</td><td class="num">&gt; 1.5M</td><td>spans/s</td><td><a class="src" href="sources.html#s-book-oe-1e">book-oe-1e</a></td></tr>
+<tr><td>2022-07</td><td class="num">2.5M</td><td>spans/s</td><td><a class="src" href="sources.html#s-newstack-2022">newstack-2022</a></td></tr>
+<tr><td>2022-12</td><td class="num">&gt; 3M</td><td>events/s</td><td><a class="src" href="sources.html#s-reinvent-2022">reinvent-2022</a></td></tr>
+</tbody></table></div>
+</details>
+</figure>
+<p>For contrast, Honeycomb's own instrumented service graph is small: "&lt;10 connected services instrumented, whereas the median among Honeycomb teams is about 30 services" <a class="src" href="sources.html#s-blog-service-map-iter">blog-service-map-iter</a>. The engineering team was about 50 in 2022 <a class="src" href="sources.html#s-newstack-2022">newstack-2022</a>, and the company about 25 people in 2019 <a class="src" href="sources.html#s-confluent-podcast">confluent-podcast</a>.</p>
+</article>
+</main>
+</div>
+<script src="assets/nav-data.js"></script>
+<script src="assets/site.js"></script>
+</body>
+</html>

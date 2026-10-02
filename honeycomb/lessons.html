@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lessons for Guildmaster · Honeycomb C4</title>
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<nav id="site-nav" aria-label="Site"></nav>
+<main id="main">
+<article>
+<p class="breadcrumb">For Guildmaster</p>
+<h1>Lessons for Guildmaster</h1>
+<p class="lede">What Guildmaster's tracing should take from Honeycomb, what it should leave, and whether any of Honeycomb can run on the patron's machine. In short: borrow the data model and the questions, not the machinery.</p>
+<p class="meta-line">Written against <a href="../vision/tracing-design.md">vision/tracing-design.md</a> and <a href="../vision/tracing-research.md">vision/tracing-research.md</a> as merged on 2026-09-30. This page switches to Guildmaster's vocabulary from <code>TERMINOLOGY.md</code>: patron, Party Leader, Adventurer, posting, register. Everything said about Guildmaster here is this site's proposal <span class="prov prov-inferred">inferred</span>, for the patron to accept or not.</p>
+
+<div class="callout"><span class="callout-title">The short version</span>
+<p>Honeycomb's lasting idea is that one wide, raw record per unit of work, queried at read time, answers questions nobody thought to ask in advance. Guildmaster's design already has that shape: a posting is a trace, spans live in the register, derived measures are queries. What Honeycomb adds is three habits worth adopting, a column store's worth of machinery not worth building, and one local tool pattern for testing. None of it changes the design's ranking of storage and viewers.</p>
+</div>
+
+<h2 id="scale">First, the scale</h2>
+<figure class="diagram">
+<div class="diagram-scroll">
+<svg class="chart hc-chart-dense" viewBox="0 0 760 290" role="img" aria-labelledby="gs-title gs-desc">
+<title id="gs-title">Where Guildmaster sits: events per day, log scale</title>
+<desc id="gs-desc">On a logarithmic axis from 1 to a trillion events a day: Guildmaster, estimated at 600 to 6,000 spans a day; Honeycomb's Free plan, about 670,000 events a day; the point where Honeycomb's docs suggest considering sampling, 1,000 traces a second or about 86 million a day; and Honeycomb's own ingest of over 3 million events a second, about 260 billion a day.</desc>
+<text class="hc-chart-title" x="20" y="26">Where Guildmaster sits, in events per day</text>
+<text class="hc-chart-sub" x="20" y="45">Log scale; each gridline is a factor of 100. Guildmaster's range is this site's estimate.</text>
+<line class="hc-grid" x1="220.0" y1="60" x2="220.0" y2="242"/>
+<text class="hc-tick hc-tick-mid" x="220.0" y="260">1</text>
+<line class="hc-grid" x1="293.3" y1="60" x2="293.3" y2="242"/>
+<text class="hc-tick hc-tick-mid" x="293.3" y="260">100</text>
+<line class="hc-grid" x1="366.7" y1="60" x2="366.7" y2="242"/>
+<text class="hc-tick hc-tick-mid" x="366.7" y="260">10k</text>
+<line class="hc-grid" x1="440.0" y1="60" x2="440.0" y2="242"/>
+<text class="hc-tick hc-tick-mid" x="440.0" y="260">1M</text>
+<line class="hc-grid" x1="513.3" y1="60" x2="513.3" y2="242"/>
+<text class="hc-tick hc-tick-mid" x="513.3" y="260">100M</text>
+<line class="hc-grid" x1="586.7" y1="60" x2="586.7" y2="242"/>
+<text class="hc-tick hc-tick-mid" x="586.7" y="260">10B</text>
+<line class="hc-grid" x1="660.0" y1="60" x2="660.0" y2="242"/>
+<text class="hc-tick hc-tick-mid" x="660.0" y="260">1T</text>
+<text class="hc-tick hc-tick-end" x="210" y="85">Guildmaster, estimated</text>
+<path class="hc-fill-3" d="M321.9,70 h32.7 a4,4 0 0 1 4,4 v14 a4,4 0 0 1 -4,4 h-32.7 a4,4 0 0 1 -4,-4 v-14 a4,4 0 0 1 4,-4 z" data-tip="Guildmaster, estimated: 600 to 6,000 spans a day&#10;5 to 50 postings of about 120 spans (this site's inference)"><title>Guildmaster, estimated: 600 to 6,000 spans a day&#10;5 to 50 postings of about 120 spans (this site's inference)</title></path>
+<text class="hc-annot" x="366.5" y="85">600–6,000</text>
+<text class="hc-tick hc-tick-end" x="210" y="129">Honeycomb Free plan allowance</text>
+<path class="hc-fill-1" d="M220,114 h209.5 a4,4 0 0 1 4,4 v14 a4,4 0 0 1 -4,4 h-209.5 z" data-tip="Free plan: 20M events a month, about 670,000 a day"><title>Free plan: 20M events a month, about 670,000 a day</title></path>
+<text class="hc-annot" x="441.5" y="129">≈ 670k</text>
+<text class="hc-tick hc-tick-end" x="210" y="173">Sampling worth considering</text>
+<path class="hc-fill-1" d="M220,158 h287.0 a4,4 0 0 1 4,4 v14 a4,4 0 0 1 -4,4 h-287.0 z" data-tip="Honeycomb's docs: consider sampling at 1,000 traces a second, about 86 million a day"><title>Honeycomb's docs: consider sampling at 1,000 traces a second, about 86 million a day</title></path>
+<text class="hc-annot" x="519.0" y="173">≈ 86M traces</text>
+<text class="hc-tick hc-tick-end" x="210" y="217">Honeycomb's own ingest, Dec 2022</text>
+<path class="hc-fill-2" d="M220,202 h414.5 a4,4 0 0 1 4,4 v14 a4,4 0 0 1 -4,4 h-414.5 z" data-tip="Honeycomb's ingest: over 3M events a second, about 260 billion a day"><title>Honeycomb's ingest: over 3M events a second, about 260 billion a day</title></path>
+<text class="hc-annot" x="646.5" y="217">≈ 260B</text>
+<line class="hc-axis" x1="220" y1="60" x2="220" y2="242"/>
+<text class="hc-annot-muted" x="20" y="284">Seven to eight orders of magnitude separate Guildmaster from the system Honeycomb built.</text>
+</svg>
+</div>
+<figcaption><span class="prov prov-inferred">inferred</span> Guildmaster's range assumes 5 to 50 postings a day at about 120 spans each, the size of the design's own example posting (61 model calls, 48 tool calls, a subagent, 2 Adventurer runs) <a class="src" href="sources.html#s-pricing">pricing</a> <a class="src" href="sources.html#s-docs-sampling-guidelines">docs-sampling-guidelines</a> <a class="src" href="sources.html#s-reinvent-2022">reinvent-2022</a>. The design's estimate for the register is "megabytes a year" (<a href="../vision/tracing-design.md#retention-and-redaction">Retention and redaction</a>).</figcaption>
+<details class="hc-data"><summary>Table view</summary>
+<div class="table-wrap"><table>
+<thead><tr><th>What</th><th class="num">Events a day</th><th>Basis</th></tr></thead>
+<tbody>
+<tr><td>Guildmaster, estimated</td><td class="num">600–6,000</td><td>5–50 postings × ~120 spans <span class="prov prov-inferred">inferred</span></td></tr>
+<tr><td>Honeycomb Free plan</td><td class="num">≈ 670,000</td><td>20M a month</td></tr>
+<tr><td>Where Honeycomb suggests considering sampling</td><td class="num">≈ 86,000,000 traces</td><td>1,000 traces a second</td></tr>
+<tr><td>Honeycomb's ingest, December 2022</td><td class="num">≈ 260,000,000,000</td><td>over 3M events a second</td></tr>
+</tbody></table></div>
+</details>
+</figure>
+<p>Almost every machine on the <a href="c4/containers.html">containers</a> page exists to cope with the right-hand bars: Kafka to absorb bursts and allow replays, a custom store because no database met the cost, S3 and Lambda because local disk ran out, sampling because storing everything costs money. At the left-hand bar, a SQLite file does all of it.</p>
+
+<h2 id="borrow">What to borrow</h2>
+
+<h3 id="wide-rows">1. One wide row per span, written once, with an open attribute set</h3>
+<p><strong>Honeycomb.</strong> The canonical event is built up during the work and emitted once at the end: "initializes a map and pre-populates it with everything known ... When the request is ready to exit or error, Honeycomb ships it off in one arbitrarily wide structured event" <a class="src" href="sources.html#s-blog-structured-events">blog-structured-events</a>. The schema is never declared; it is "the set of fields Honeycomb has seen" <a class="src" href="sources.html#s-docs-resource-structure">docs-resource-structure</a>, and on disk a new field is just a new column file <a class="src" href="sources.html#s-blog-virtual-datasets">blog-virtual-datasets</a>.</p>
+<p><strong>For Guildmaster.</strong> The design lists a <code>span</code> table but not its columns (<a href="../vision/tracing-design.md#storage-and-viewer">Storage and viewer</a>). Give it a few fixed columns (trace id, span id, parent, name, start, end, status) and put every other attribute in one JSON column, read with <code>sqlite3</code>'s JSON functions, which <code>gm</code> already requires. Then a new attribute, a new Claude Code field, or a <code>guild.*</code> key added in build step 3, needs no schema migration, and old spans simply lack it. Write each span once, complete, when it ends, rather than as an opening row updated later.</p>
+
+<h3 id="cardinality">2. Put the high-cardinality ids on everything, and never pre-aggregate</h3>
+<p><strong>Honeycomb.</strong> "Any aggregation that is performed at write time is actively harmful" <a class="src" href="sources.html#s-wb-best-practices">wb-best-practices</a>; the ids metrics systems drop, user and build ids, are the ones that explain incidents <a class="src" href="sources.html#s-docs-service-map-how">docs-service-map-how</a> <a class="src" href="sources.html#s-docs-custom-instr">docs-custom-instr</a>.</p>
+<p><strong>For Guildmaster.</strong> The design already stamps <code>guild.posting</code> on every span "so a posting can be found even in a viewer that only searches attributes", and keeps <code>session.id</code>, <code>prompt.id</code>, <code>agent_id</code> and the tool-use id (<a href="../vision/tracing-design.md#guild-attributes">Guild attributes</a>). Add the camp's git commit at the span's end, and the writ's hash on every span of an Adventurer run, not only the dispatch span: those are the Guildmaster equivalents of a build id. Keep every measure in <a href="../vision/tracing-design.md#derived-measures">Derived measures</a> a query over spans, never a stored counter, which is the design's principle 3 in Honeycomb's terms.</p>
+
+<h3 id="bubbleup">3. A BubbleUp of its own: <code>gm stats --compare</code></h3>
+<p><strong>Honeycomb.</strong> BubbleUp "computes the values of all dimensions both inside the box ... and outside the box (the baseline), and then compares the two and sorts the resulting view by percent of differences" <a class="src" href="sources.html#s-docs-core-loop">docs-core-loop</a>. It is the feature customers credit most for speed, "from hours to seconds with BubbleUp triage" in one case study <a class="src" href="sources.html#s-cs-depot">cs-depot</a>.</p>
+<p><strong>For Guildmaster.</strong> The patron's questions are comparative: why did this posting need three exchanges when most need one; why are some model calls slow. With attributes in one JSON column, the comparison is one query. A minimal version, ranking by the difference in share:</p>
+<pre><code>-- BubbleUp in the register: which attribute values are over-represented among
+-- slow model calls (the selection) compared with all the others (the baseline)?
+WITH s AS (
+  SELECT (end_ms - start_ms) > 30000 AS sel, attrs
+  FROM span WHERE name LIKE 'chat %'
+),
+tot AS (SELECT SUM(sel) AS n_sel, SUM(1 - sel) AS n_base FROM s),
+kv  AS (SELECT s.sel, j.key, CAST(j.value AS TEXT) AS value
+        FROM s, json_each(s.attrs) AS j)
+SELECT key, value,
+       ROUND(100.0 * SUM(sel)     / tot.n_sel,  1) AS pct_selection,
+       ROUND(100.0 * SUM(1 - sel) / tot.n_base, 1) AS pct_baseline
+FROM kv, tot
+GROUP BY key, value
+ORDER BY ABS(1.0 * SUM(sel) / tot.n_sel - 1.0 * SUM(1 - sel) / tot.n_base) DESC
+LIMIT 10;</code></pre>
+<pre><code>$ gm stats --compare 'chat spans slower than 30 s'          (illustrative)
+key                              value        selection  baseline
+gen_ai.request.model             opus-5-5        81.0%     22.4%
+gen_ai.request.reasoning.level   high            77.9%     35.0%
+guild.focus                      appt-v2         74.2%     30.1%
+guild.role                       party-leader    69.0%     41.7%
+guild.attempt                    2               18.3%      1.2%</code></pre>
+<p>The selection can be anything the derived measures define: postings that were not right first time, exchanges whose reply took over two minutes, Adventurer runs whose check failed. Honeycomb's scoring formula is not published, so this is the simplest version, not a copy; and its own caveat applies, that very-high-cardinality fields "may not have a meaningful 'baseline'" <a class="src" href="sources.html#s-blog-ai-bubbleup">blog-ai-bubbleup</a>, so ids should be left out of the ranking.</p>
+
+<h3 id="slis">4. SLO thinking without SLO alerts</h3>
+<p><strong>Honeycomb.</strong> An SLI is a per-event function that "returns true (success), false (failure), or null (not applicable)" <a class="src" href="sources.html#s-docs-sli">docs-sli</a>, and SLOs count events rather than time windows, so "a bad minute where 50% of the events fail but only four events were seen won't alert you" <a class="src" href="sources.html#s-blog-budget-rate">blog-budget-rate</a>.</p>
+<p><strong>For Guildmaster.</strong> Define a few SLIs over register rows, as true, false or null: an exchange answered within a minute; a posting done right first time; an Adventurer run whose check passes. Report each as a ratio over the last 28 days in <code>gm stats</code>. Do not build burn alerts: Honeycomb's own sums say "an SLO of 99.9% needs a minimum level of traffic of a few tens of thousands of events a day to be meaningful" <a class="src" href="sources.html#s-blog-slo-challenges">blog-slo-challenges</a>, and the patron produces tens. A target like 80% over four weeks is meaningful at that volume; 99.9% is noise.</p>
+
+<h3 id="events">5. Span events for repeats, and the GenAI names Honeycomb reads</h3>
+<p>Honeycomb's advice is to record repeated sub-occurrences as span events rather than overwrite one field <a class="src" href="sources.html#s-docs-add-context">docs-add-context</a>, which is what the design already does for retries, compactions and Stop-guard give-ups. For agents, Honeycomb's Agent Timeline needs <code>gen_ai.conversation.id</code>, <code>gen_ai.agent.name</code> and <code>gen_ai.operation.name</code> on every span, and recommends keeping prompts and completions in span events "where your OTel Collector can filter them" and not sampling GenAI telemetry <a class="src" href="sources.html#s-docs-agents">docs-agents</a>. The design's <code>invoke_agent</code> spans already carry all three, but Honeycomb wants the conversation id on every span: "All spans in a conversation must have a <code>gen_ai.conversation.id</code>" <a class="src" href="sources.html#s-docs-agents">docs-agents</a>. Copying it onto every span of a turn on export, in build slice 4, lets any viewer that follows the conventions group a Party Leader's turns, Honeycomb's or not.</p>
+
+<h3 id="testing">6. Test the pipeline locally, the way Honeycomb tells agents to</h3>
+<p>Honeycomb's own skill for coding agents verifies instrumentation with "a local OTel Collector ... without needing a live Honeycomb account or sending data to a remote backend", using the Collector's <code>debug</code> exporter <a class="src" href="sources.html#s-agent-skill-local">agent-skill-local</a>. That is a ready-made smoke test for slice 2's loopback collector (<a href="../vision/tracing-design.md#build-plan">Build plan</a>): point Claude Code at <code>127.0.0.1</code>, run the debug exporter to a file, and assert the expected span names arrive.</p>
+
+<h3 id="dogfood">7. Watch yourself with yourself</h3>
+<p>Honeycomb runs a dogfood copy that watches production, and a kibble copy that watches dogfood <a class="src" href="sources.html#s-blog-m6g">blog-m6g</a>, and it tags every Lambda invocation with the query that caused it so cost is attributed to its cause <a class="src" href="sources.html#s-blog-aws-costs">blog-aws-costs</a>. The design's equivalents are <code>gm</code>'s own <code>guild.hook</code> and <code>guild.notice</code> spans and <code>guild.cost.usd</code> per posting and role; keep tracing <code>gm</code> itself in the same register, so a slow hook shows up in the same waterfall as a slow model call.</p>
+
+<h2 id="leave">What not to copy</h2>
+<div class="hc-split">
+<div>
+<h3>Machinery for a scale Guildmaster will not reach</h3>
+<ul>
+<li><strong>A custom column store, Kafka, S3 tiering, Lambda fan-out.</strong> Each answers a problem of the right-hand bars above; at a few million rows a year, one SQLite file on the patron's laptop is enough <span class="prov prov-inferred">inferred</span>.</li>
+<li><strong>Approximate aggregates.</strong> t-digest and HyperLogLog trade exactness for speed at billions of rows <a class="src" href="sources.html#s-docs-query-build">docs-query-build</a>; exact SQL is cheap at thousands.</li>
+<li><strong>Datasets and environments.</strong> Honeycomb splits data by <code>service.name</code> and walls environments apart <a class="src" href="sources.html#s-docs-resource-structure">docs-resource-structure</a>; one register, with <code>guild.focus</code> as an attribute, needs neither.</li>
+</ul>
+</div>
+<div>
+<h3>Choices that conflict with Guildmaster's principles</h3>
+<ul>
+<li><strong>Sampling and Refinery.</strong> Sampling exists to cut cost and storage; it makes counts estimates, and Honeycomb itself says not to sample GenAI telemetry <a class="src" href="sources.html#s-docs-agents">docs-agents</a>. Keep every span.</li>
+<li><strong>60-day retention.</strong> Honeycomb deletes events after 60 days <a class="src" href="sources.html#s-docs-usage">docs-usage</a>; the register keeps spans forever, as the design specifies.</li>
+<li><strong>A hosted backend.</strong> Even Private Cloud is a multi-service AWS deployment <a class="src" href="sources.html#s-docs-pc-arch">docs-pc-arch</a>; the design's principle 5, local by default, rules both out.</li>
+<li><strong>Paging alerts.</strong> Triggers and burn alerts serve on-call teams; one patron reading <code>gm stats</code> needs neither.</li>
+</ul>
+</div>
+</div>
+
+<h2 id="local">Could any part run locally?</h2>
+<p>Honeycomb itself, no. Its open-source pieces, yes, but none is useful on its own, because each either feeds Honeycomb or samples for it.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Piece</th><th>Runs on the patron's machine?</th><th>Sends data out?</th><th>Useful to Guildmaster?</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><strong>Honeycomb itself (SaaS)</strong></td><td>No</td><td>Yes: everything goes to api.honeycomb.io or api.eu1</td><td>No. Ruled out by the tracing design: prompts and code would leave the machine</td><td><a class="src" href="sources.html#s-docs-otel">docs-otel</a> <a class="src" href="sources.html#s-pricing">pricing</a></td></tr>
+<tr><td><strong>The Free plan</strong></td><td>No; it is the same SaaS</td><td>Yes</td><td>No, for the same reason; Guildmaster's volume would fit it a hundred times over</td><td><a class="src" href="sources.html#s-pricing">pricing</a></td></tr>
+<tr><td><strong>Honeycomb Private Cloud</strong></td><td>No: EC2, EKS, ECS, Lambda, S3, RDS, ElastiCache and Bedrock in an AWS account</td><td>Stays in the customer's AWS account</td><td>No: a cloud deployment, Enterprise-sold, not a laptop</td><td><a class="src" href="sources.html#s-docs-private-cloud">docs-private-cloud</a> <a class="src" href="sources.html#s-docs-pc-arch">docs-pc-arch</a></td></tr>
+<tr><td><strong>Refinery</strong></td><td>Yes: v3.4.0 ships darwin-arm64 and darwin-amd64 binaries</td><td>Only to a Honeycomb-style <code>/1/batch</code> endpoint, <code>api.honeycomb.io</code> by default; no OTLP output</td><td>No: it has no viewer, and Guildmaster has nothing to sample</td><td><a class="src" href="sources.html#s-repo-refinery">repo-refinery</a> <a class="cite" href="https://github.com/honeycombio/refinery/blob/v3.4.0/transmit/direct_transmit.go#L749-L753"><code class="cite">transmit/direct_transmit.go:749-753</code></a></td></tr>
+<tr><td><strong>Adaptive tail sampling processor</strong></td><td>Yes, inside any OpenTelemetry Collector build (beta in Honeycomb's distribution)</td><td>Exports OTLP anywhere</td><td>Not needed: no sampling at this scale</td><td><a class="src" href="sources.html#s-blog-adaptive-tail">blog-adaptive-tail</a> <a class="src" href="sources.html#s-repo-collector-distro">repo-collector-distro</a></td></tr>
+<tr><td><strong>libhoney, buildevents, honeymarker, honeytail</strong></td><td>Yes</td><td>Events API to a configurable host; no local sink exists for it</td><td>No</td><td><a class="src" href="sources.html#s-repo-libhoney-go">repo-libhoney-go</a> <a class="src" href="sources.html#s-repo-buildevents">repo-buildevents</a> <a class="src" href="sources.html#s-repo-honeymarker">repo-honeymarker</a> <a class="src" href="sources.html#s-repo-honeytail">repo-honeytail</a></td></tr>
+<tr><td><strong>Self-hosted MCP server</strong></td><td>Ran locally over stdio, but queried Honeycomb's API; Enterprise-only</td><td>Yes</td><td>No; deprecated and archived</td><td><a class="src" href="sources.html#s-repo-honeycomb-mcp">repo-honeycomb-mcp</a></td></tr>
+<tr><td><strong>Honeycomb's agent skill: local debug Collector</strong></td><td>Yes: a local OpenTelemetry Collector with the <code>debug</code> exporter, "without needing a live Honeycomb account"</td><td>No</td><td>Yes, as a pattern: the cheapest smoke test for slice 2</td><td><a class="src" href="sources.html#s-agent-skill-local">agent-skill-local</a></td></tr>
+<tr><td><strong>otel-desktop-viewer (not Honeycomb's)</strong></td><td>Yes: a Collector, DuckDB and a web UI on localhost</td><td>No</td><td>Perhaps: a local viewer to weigh beside Jaeger; no Honeycomb source recommends it</td><td><a class="src" href="sources.html#s-otel-desktop-viewer">otel-desktop-viewer</a></td></tr>
+</tbody></table></div>
+<p class="evidence">No Honeycomb docs page matches "local", "offline", "self-host" or "on-prem" in its page index <a class="src" href="sources.html#s-docs-llms">docs-llms</a>. Secure Tenancy, the one on-premises component Honeycomb once offered, held encryption keys locally while data still went to Honeycomb, and was retired by 2023 <a class="src" href="sources.html#s-blog-secure-tenancy">blog-secure-tenancy</a> <a class="src" href="sources.html#s-helm-secure-tenancy">helm-secure-tenancy</a>.</p>
+
+<h2 id="changes">What this suggests for the tracing design</h2>
+<p>Proposals for the patron, in the order the build plan would meet them; none changes the design's storage ranking, its local-only rule or its refusal to sample.</p>
+<ol>
+<li><strong>Slice 1:</strong> the <code>span</code> table keeps fixed columns for identity and time, and one JSON column for attributes; each span is written once, when it ends.</li>
+<li><strong>Slice 1:</strong> <code>gm stats</code> reports three SLIs as 28-day ratios, with no alerts.</li>
+<li><strong>Slice 1 or later:</strong> <code>gm stats --compare &lt;selection&gt;</code>, the BubbleUp query above.</li>
+<li><strong>Slice 2:</strong> a local Collector with the <code>debug</code> exporter is the first smoke test of Claude Code's telemetry.</li>
+<li><strong>Slice 3:</strong> the writ hash and the camp's commit go on every span of an Adventurer run.</li>
+<li><strong>Slice 4:</strong> the export puts <code>gen_ai.conversation.id</code> on every span of a turn, beside the <code>gen_ai.agent.name</code> and <code>gen_ai.operation.name</code> the design already has.</li>
+</ol>
+</article>
+</main>
+</div>
+<script src="assets/nav-data.js"></script>
+<script src="assets/site.js"></script>
+</body>
+</html>
