@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gm: the Guildmaster's single command. Step 1, one ticket that never forgets, and tracing slice 1.
+# gm: the Guildmaster's single command. Step 1, one ticket that never forgets, and tracing slices 1 and 2.
 set -euo pipefail
 
 gm_realpath() {
@@ -404,14 +404,20 @@ usage: gm <command> [arguments]
   where [focus]           the resume summary, built from the register
   statusline              the Claude Code status line (reads the session JSON on stdin)
   trace [posting|focus]   a posting's trace as a text waterfall (a focus: every posting and session)
-  stats [posting|focus]   measures computed from the spans: first reply, exchanges, steps, cost
+  trace import            fold Claude Code's telemetry from the local collector into the register
+                          (gm trace and gm stats run it first, quietly)
+  stats [posting|focus]   measures computed from the spans: first reply, exchanges, steps, tokens, cost
   stats --by-prompt <template> [focus]
                           outcomes per version of a prompt template (charter, playbook, rules, resume)
   stats --compare <selection> [--over DURATION] [focus]
                           what sets a selection apart from the rest; selections: slow-tools (30s),
-                          slow-hooks (1s), slow-replies (2m), not-right-first-time
+                          slow-hooks (1s), slow-replies (2m), slow-calls (30s), not-right-first-time
+  collector               run the local OpenTelemetry Collector (templates/otelcol.yaml) in the foreground
+  doctor                  check that telemetry goes only to 127.0.0.1 and that the collector answers
 
-Environment: GM_HALL (default ~/.guildmaster), GM_FOCUS (focus context override).
+Environment: GM_HALL (default ~/.guildmaster), GM_FOCUS (focus context override),
+  GM_OTEL_PORT (collector port, default 4318), GM_TELEMETRY=off (gm open starts sessions without telemetry),
+  GM_OTELCOL (the collector binary, default otelcol-contrib on PATH).
 EOF
 }
 
@@ -433,6 +439,7 @@ gm_cmd_open() {
   [[ $focus =~ $re_focus ]] || gm_die "open: a focus name is lowercase letters, digits and dashes, for example appt-v2"
   for t in $tickets; do [[ $t =~ $re_key ]] || gm_die "open: '$t' is not a ticket key like CRM-8965"; done
   [ "$kind" = ticket ] || gm_die "open: step 1 knows only the ticket kind"
+  gm_telemetry_refuse
   gm_db_ensure
 
   local fid camp
@@ -531,12 +538,22 @@ SQL
     [ -z "$phase0" ] || gm_set_phase "$focus" "$phase0" gm >/dev/null
   fi
   printf '%s is open: camp %s on branch %s\n' "$focus" "$camp" "$branch"
-  local claude=${GM_CLAUDE:-claude}
+  local claude=${GM_CLAUDE:-claude} envargs=() a shown=''
+  while IFS= read -r a; do
+    [ -z "$a" ] || envargs+=("$a")
+  done <<<"$(gm_telemetry_env "$focus")"
   if [ "$launch" = 1 ] && [ -t 0 ] && [ -t 1 ] && command -v "$claude" >/dev/null 2>&1; then
+    if [ "${#envargs[@]}" -gt 0 ] && [ "$(gm_otlp_status "$(gm_otel_endpoint)")" != 200 ]; then
+      printf 'gm: no collector answers at %s, so this session'\''s telemetry will be lost; start one with gm collector\n' "$(gm_otel_endpoint)" >&2
+    fi
     cd "$camp"
-    exec "$claude" --name "$focus"
+    exec env ${envargs[@]+"${envargs[@]}"} "$claude" --name "$focus"
   fi
-  printf 'Start its Party Leader with: cd %s && claude --name %s\n' "$(gm_shq "$camp")" "$focus"
+  for a in ${envargs[@]+"${envargs[@]}"}; do
+    case $a in *[!A-Za-z0-9_./:=,-]*) shown="$shown $(gm_shq "$a")" ;; *) shown="$shown $a" ;; esac
+  done
+  printf 'Start its Party Leader from a terminal with: gm open %s\n' "$focus"
+  printf 'or by hand: cd %s && %s%s --name %s\n' "$(gm_shq "$camp")" "${shown:+env$shown }" "$claude" "$focus"
 }
 
 gm_install_camp() {
@@ -1140,8 +1157,9 @@ gm_payload_field() {
 
 # Masks secrets in text on stdin before it is stored (tracing-design.md, Retention and redaction).
 # Best effort: tests/redaction-cases.tsv holds the known cases it must catch.
+# With "json", stdin is texts each ended by \036, and it prints them masked as a JSON array of strings.
 gm_redact() {
-  LC_ALL=C awk '
+  LC_ALL=C awk -v mode="${1:-}" '
 function rep(c, n,   s) { s = ""; while (n-- > 0) s = s c; return s }
 function red(re, pre, kind, keep,   out, rest, s0, l0, m, p, t) {
   out = ""
@@ -1159,8 +1177,25 @@ function red(re, pre, kind, keep,   out, rest, s0, l0, m, p, t) {
   }
   buf = out rest
 }
-{ buf = (NR == 1) ? $0 : buf "\n" $0 }
+function jstr(s,   i) {
+  gsub(/\\/, "\\\\", s)
+  gsub(/"/, "\\\"", s)
+  gsub(/\n/, "\\n", s)
+  gsub(/\r/, "\\r", s)
+  gsub(/\t/, "\\t", s)
+  for (i = 1; i < 32; i++) gsub(sprintf("%c", i), sprintf("\\u%04x", i), s)
+  return "\"" s "\""
+}
+{ all = (NR == 1) ? $0 : all "\n" $0 }
 END {
+  if (mode != "json") { printf "%s", redact(all); exit }
+  n = split(all, parts, /\036/)
+  printf "["
+  for (i = 1; i < n; i++) printf "%s%s", (i > 1 ? "," : ""), jstr(redact(parts[i]))
+  printf "]"
+}
+function redact(text) {
+  buf = text
   q = "\047"
   buf = " " buf
   v = "[^[:space:]\"" q "&;|`)<>\001\002]"
@@ -1186,7 +1221,7 @@ END {
   buf = substr(buf, 2)
   gsub(/\001/, "<REDACTED:", buf)
   gsub(/\002/, ">", buf)
-  printf "%s", buf
+  return buf
 }'
 }
 
@@ -1451,11 +1486,11 @@ gm_turn_end_sql() {
   # $1 session, $2 prompt, $3 end ms, $4 status SQL, $5 error type, $6 effort, $7 commit, $8 extra turn attrs SQL
   local s ex
   s=$(gm_q "$1")
-  ex="key=$(gm_q "exchange:$1:$2")"
+  ex="(key=$(gm_q "exchange:$1:$2") OR substr(key,1,length($(gm_q "exchange:$1:$2:")))=$(gm_q "exchange:$1:$2:"))"
   cat <<SQL
 INSERT OR IGNORE INTO span_link(trace_id, span_id, linked_trace_id, linked_span_id, attrs)
   SELECT e.trace_id, e.span_id, s.trace_id, s.span_id, json_object('guild.link','served by session')
-  FROM open_span e, open_span s WHERE e.$ex AND s.key=$(gm_q "session:$1");
+  FROM open_span e, open_span s WHERE e.key IN (SELECT key FROM open_span WHERE $ex) AND s.key=$(gm_q "session:$1");
 $(gm_close_sql "key=$(gm_q "turn:$1:$2")" "$3" "$4" "json_patch($(gm_turn_attrs_sql "$1" "$6" "$3" "$7"), json_patch($(gm_jobj error.type "$(gm_qn "$5")"), $8))")
 $(gm_close_sql "$ex" "$3" "$4" "$(gm_jobj error.type "$(gm_qn "$5")" guild.camp.commit "$(gm_qn "$7")")")
 $(gm_close_sql "session_id=$s AND (name='guild.exchange' OR name='invoke_agent party-leader') AND start_ms<$3" "$GM_LAST_SEEN" "'unset'" "$(gm_jobj guild.closed_by "'interrupted'")")
@@ -1504,8 +1539,11 @@ gm_trace_prompt() {
   local f=$1 mid=$2 t0=$3 camp sid pid rest commit
   IFS=$'\037' read -r camp sid pid rest <<<"$(gm_payload "$f" session_id prompt_id)"
   commit=$(gm_commit "$camp")
-  local ex turn
-  ex=$(gm_q "exchange:$sid:$pid")
+  local ex turn exkey=exchange:$sid:$pid
+  # A message typed during a running turn is captured when Claude Code takes it up, with that turn's
+  # prompt_id (tracing-design.md, As built in slice 2): it gets an exchange of its own, answered by that turn.
+  [ -z "$(gm_sql "SELECT 1 FROM open_span WHERE key=$(gm_q "$exkey");" 2>/dev/null || true)" ] || exkey=$exkey:$mid
+  ex=$(gm_q "$exkey")
   turn=$(gm_q "turn:$sid:$pid")
   gm_trace "guild.exchange" "$(gm_session_open_sql "$sid" "$t0")
 CREATE TEMP TABLE c AS
@@ -1526,7 +1564,10 @@ INSERT OR IGNORE INTO open_span(key, session_id, trace_id, span_id, parent_id, n
   FROM (SELECT trace_id, span_id, attrs, 1 AS pri FROM open_span WHERE key=$ex
         UNION ALL SELECT trace_id, span_id, attrs, 2 FROM open_span WHERE key=$(gm_q "session:$sid")
         ORDER BY pri LIMIT 1) par;
-$(gm_hook_span_sql UserPromptSubmit capture "exchange:$sid:$pid" "$sid" "$pid" "$t0" none \
+INSERT OR IGNORE INTO span_link(trace_id, span_id, linked_trace_id, linked_span_id, attrs)
+  SELECT e.trace_id, e.span_id, t.trace_id, t.span_id, json_object('guild.link','answered by turn')
+  FROM open_span e, open_span t WHERE e.key=$ex AND t.key=$turn AND t.parent_id<>e.span_id;
+$(gm_hook_span_sql UserPromptSubmit capture "$exkey" "$sid" "$pid" "$t0" none \
   "(SELECT $(gm_jobj guild.message.id c.mid guild.message.kind c.kind) FROM c)" "$commit")"
 }
 
@@ -1626,7 +1667,640 @@ UPDATE open_span SET attrs=$(gm_event_sql attrs "json_object('name','compaction'
 $(gm_hook_span_sql PreCompact snapshot "session:$sid" "$sid" "" "$t0" none "$(gm_jobj guild.compaction.trigger "$(gm_qn "$trigger")")" "$commit")"
 }
 
+# ---- Claude Code's telemetry through the local collector: build slice 2 of vision/tracing-design.md ----
+# gm open points the Party Leader's exporter at 127.0.0.1 only; the collector in templates/otelcol.yaml drops
+# identity, masks secrets and writes rotating files under the Guildhall; gm trace import folds those files
+# into the register under the GenAI names, keyed by session.id, prompt.id, tool_use_id and agent_id.
+
+# Attributes never stored, whatever sent them: who the patron is, and the raw text Claude Code captures,
+# which is stored only as gm's own masked copy (guild.prompt.text, guild.response.text, guild.tool.command).
+GM_OTEL_IDENTITY="'\$.\"user.email\"','\$.\"user.id\"','\$.\"user.account_uuid\"','\$.\"user.account_id\"','\$.\"organization.id\"'"
+GM_OTEL_CONTENT="'\$.\"user_prompt\"','\$.\"prompt\"','\$.\"prompt_text\"','\$.\"response\"','\$.\"tool_parameters\"','\$.\"tool_input\"','\$.\"full_command\"'"
+
+gm_otel_endpoint() {
+  local ep=${GM_OTEL_ENDPOINT:-http://127.0.0.1:${GM_OTEL_PORT:-4318}}
+  printf '%s' "${ep%/}"
+}
+
+# Only 127.0.0.1, localhost or ::1, with an optional port and path, and nothing that could name another host.
+gm_is_loopback() {
+  local re='^https?://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]{1,5})?(/[^@[:space:]]*)?$'
+  [[ $1 =~ $re ]]
+}
+
+# Each export destination a Claude Code settings file's env sets to somewhere other than loopback, as
+# "file: NAME=value". Settings env reaches the session whatever gm puts in its environment.
+gm_settings_offenders() {
+  local f k v
+  for f in "$HOME/.claude/settings.json" "/Library/Application Support/ClaudeCode/managed-settings.json" /etc/claude-code/managed-settings.json; do
+    [ -f "$f" ] || continue
+    while IFS=$'\t' read -r k v; do
+      [ -n "$k" ] || continue
+      gm_is_loopback "$v" || printf '%s: %s=%s\n' "$f" "$k" "$v"
+    done <<<"$(sqlite3 -batch -separator "$(printf '\t')" :memory: "SELECT key, value FROM json_each(json_extract(CAST(readfile($(gm_q "$f")) AS TEXT),'\$.env'))
+      WHERE key IN ('OTEL_EXPORTER_OTLP_ENDPOINT','OTEL_EXPORTER_OTLP_TRACES_ENDPOINT','OTEL_EXPORTER_OTLP_LOGS_ENDPOINT','OTEL_EXPORTER_OTLP_METRICS_ENDPOINT','BETA_TRACING_ENDPOINT');" 2>/dev/null || true)"
+  done
+}
+
+# Refuses, before anything is made or started, a session whose telemetry could leave the machine.
+gm_telemetry_refuse() {
+  [ "${GM_TELEMETRY:-on}" != off ] || return 0
+  local ep bad
+  ep=$(gm_otel_endpoint)
+  gm_is_loopback "$ep" || gm_die "open: telemetry goes only to 127.0.0.1, localhost or ::1, not $ep (GM_OTEL_ENDPOINT); GM_TELEMETRY=off starts the session without it"
+  bad=$(gm_settings_offenders)
+  [ -z "$bad" ] || gm_die "open: Claude Code's settings would send this session's telemetry off the machine:
+$bad
+Point them at 127.0.0.1 or remove them; gm starts no session whose telemetry goes elsewhere."
+}
+
+# The arguments for env(1) that gm open gives the Party Leader, one per line: the exporter pointed at the
+# loopback collector only, every inherited destination and header replaced or cleared, prompts, responses
+# and tool details captured, tool output and raw API bodies not (tracing-design.md, Retention and redaction).
+gm_telemetry_env() {
+  [ "${GM_TELEMETRY:-on}" != off ] || return 0
+  local focus=$1 ep s
+  ep=$(gm_otel_endpoint)
+  printf '%s\n' -u OTEL_EXPORTER_OTLP_HEADERS -u OTEL_LOG_TOOL_CONTENT -u OTEL_LOG_RAW_API_BODIES -u ENABLE_BETA_TRACING_DETAILED -u BETA_TRACING_ENDPOINT
+  for s in TRACES LOGS METRICS; do printf '%s\n' -u "OTEL_EXPORTER_OTLP_${s}_HEADERS"; done
+  printf '%s\n' CLAUDE_CODE_ENABLE_TELEMETRY=1 CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1 \
+    OTEL_TRACES_EXPORTER=otlp OTEL_LOGS_EXPORTER=otlp OTEL_METRICS_EXPORTER=otlp OTEL_EXPORTER_OTLP_PROTOCOL=http/json \
+    "OTEL_EXPORTER_OTLP_ENDPOINT=$ep"
+  for s in TRACES:traces LOGS:logs METRICS:metrics; do
+    printf '%s\n' "OTEL_EXPORTER_OTLP_${s%%:*}_PROTOCOL=http/json" "OTEL_EXPORTER_OTLP_${s%%:*}_ENDPOINT=$ep/v1/${s#*:}"
+  done
+  printf '%s\n' "OTEL_RESOURCE_ATTRIBUTES=guild.focus=$focus,guild.role=party-leader" \
+    OTEL_LOG_USER_PROMPTS=1 OTEL_LOG_ASSISTANT_RESPONSES=1 OTEL_LOG_TOOL_DETAILS=1
+}
+
+# The HTTP status an OTLP/HTTP receiver at a loopback endpoint gives an empty logs export, through bash's
+# own /dev/tcp; empty when nothing answers.
+gm_otlp_status() {
+  local ep=$1 host port body='{"resourceLogs":[]}'
+  local re='^http://(127\.0\.0\.1|localhost|\[::1\])(:([0-9]{1,5}))?'
+  [[ $ep =~ $re ]] || return 0
+  host=${BASH_REMATCH[1]}
+  port=${BASH_REMATCH[3]:-80}
+  [ "$host" != '[::1]' ] || host=::1
+  (
+    exec 3<>"/dev/tcp/$host/$port" || exit 0
+    printf 'POST /v1/logs HTTP/1.1\r\nHost: %s:%s\r\nContent-Type: application/json\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' \
+      "$host" "$port" "${#body}" "$body" >&3
+    IFS=' ' read -r -t 3 _ code _ <&3 || exit 0
+    printf '%s' "$code"
+  ) 2>/dev/null || true
+}
+
+gm_otelcol() {
+  if [ -n "${GM_OTELCOL:-}" ]; then
+    [ ! -x "$GM_OTELCOL" ] || printf '%s' "$GM_OTELCOL"
+  else
+    command -v otelcol-contrib 2>/dev/null || true
+  fi
+}
+
+gm_collector_config() { printf '%s' "${GM_COLLECTOR_CONFIG:-$GM_TEMPLATES/otelcol.yaml}"; }
+
+gm_cmd_collector() {
+  [ $# -eq 0 ] || gm_die "collector: gm collector takes no arguments (GM_OTEL_PORT sets the port)"
+  local bin port=${GM_OTEL_PORT:-4318}
+  gm_is_int "$port" || gm_die "collector: GM_OTEL_PORT must be a port number"
+  bin=$(gm_otelcol)
+  [ -n "$bin" ] || gm_die "collector: no OpenTelemetry Collector found; install otelcol-contrib (README.md) or set GM_OTELCOL"
+  mkdir -p "$GM_HALL/telemetry"
+  export GM_HALL GM_OTEL_PORT=$port
+  printf 'gm: the collector takes telemetry on 127.0.0.1:%s and writes it under %s/telemetry; Ctrl-C stops it\n' "$port" "$GM_HALL" >&2
+  exec "$bin" --config "$(gm_collector_config)"
+}
+
+# Static checks that a collector configuration can send nothing anywhere: every endpoint it listens on is
+# loopback, every exporter writes a file, and it serves no telemetry of its own. Prints one problem a line.
+gm_collector_config_problems() {
+  local cfg=$1
+  awk '
+    /^[^[:space:]#][^:]*:/ { top = $1; sub(/:.*/, "", top) }
+    /^[[:space:]]*endpoint:/ {
+      v = $0; sub(/^[[:space:]]*endpoint:[[:space:]]*/, "", v); gsub(/["\047]/, "", v)
+      if (v !~ /^(127\.0\.0\.1|localhost|\[::1\])(:|$)/) print "listens on " v ", not loopback"
+    }
+    top == "exporters" && /^  [^[:space:]#][^:]*:/ {
+      k = $1; sub(/:.*/, "", k)
+      if (k !~ /^file(\/|$)/) print "exporter " k " is not a file exporter"
+    }
+    top == "extensions" && /^  [^[:space:]#][^:]*:/ { k = $1; sub(/:.*/, "", k); print "extension " k " (extensions can listen or send)" }
+    /^[[:space:]]+level:[[:space:]]*/ && prev ~ /^[[:space:]]+metrics:/ { if ($2 != "none") print "the collector serves its own metrics (service.telemetry.metrics.level " $2 ")" }
+    { prev = $0 }
+  ' "$cfg"
+  grep -q '^[[:space:]]*level:[[:space:]]*none' "$cfg" || printf '%s\n' "service.telemetry.metrics.level is not none: the collector would serve its own metrics"
+}
+
+gm_cmd_doctor() {
+  [ $# -eq 0 ] || gm_die "doctor: gm doctor takes no arguments"
+  local fails=0 ep code bin cfg line pending=0 f n
+  gm_doc() {
+    printf '%-5s %s\n' "$1" "$2"
+    [ "$1" != FAIL ] || fails=$((fails + 1))
+  }
+  gm_doc ok "register schema $(gm_sql 'PRAGMA user_version;') at $GM_DB"
+  ep=$(gm_otel_endpoint)
+  if [ "${GM_TELEMETRY:-on}" = off ]; then
+    gm_doc warn "GM_TELEMETRY=off: gm open starts sessions without telemetry"
+  fi
+  if gm_is_loopback "$ep"; then gm_doc ok "telemetry endpoint $ep is loopback"; else gm_doc FAIL "telemetry endpoint $ep is not loopback (GM_OTEL_ENDPOINT); gm open refuses it"; fi
+  while IFS= read -r line; do
+    [ -z "$line" ] || gm_doc FAIL "Claude Code settings send telemetry elsewhere: $line"
+  done <<<"$(gm_settings_offenders)"
+  for n in OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_TRACES_ENDPOINT OTEL_EXPORTER_OTLP_LOGS_ENDPOINT OTEL_EXPORTER_OTLP_METRICS_ENDPOINT; do
+    eval "line=\${$n:-}"
+    [ -z "$line" ] || gm_is_loopback "$line" || gm_doc warn "this shell sets $n=$line; gm open replaces it for the sessions it starts, other Claude Code sessions still use it"
+  done
+  cfg=$(gm_collector_config)
+  if [ ! -f "$cfg" ]; then
+    gm_doc FAIL "no collector configuration at $cfg"
+  else
+    local problems
+    problems=$(gm_collector_config_problems "$cfg")
+    if [ -z "$problems" ]; then
+      gm_doc ok "collector configuration $cfg: listens on loopback only, exports to files only"
+    else
+      while IFS= read -r line; do gm_doc FAIL "collector configuration $cfg: $line"; done <<<"$problems"
+    fi
+  fi
+  bin=$(gm_otelcol)
+  if [ -z "$bin" ]; then
+    gm_doc FAIL "no OpenTelemetry Collector found: install otelcol-contrib (README.md) or set GM_OTELCOL"
+  else
+    gm_doc ok "collector $bin ($("$bin" --version 2>/dev/null | head -n 1))"
+    if [ -f "$cfg" ]; then
+      if line=$(GM_HALL=$GM_HALL "$bin" validate --config "$cfg" 2>&1); then gm_doc ok "the collector accepts its configuration"; else gm_doc FAIL "the collector rejects $cfg: $(printf '%s' "$line" | tail -n 1)"; fi
+    fi
+  fi
+  if gm_is_loopback "$ep"; then
+    code=$(gm_otlp_status "$ep")
+    if [ "$code" = 200 ]; then gm_doc ok "a collector answers at $ep"
+    else gm_doc FAIL "no collector answers at $ep${code:+ (HTTP $code)}: start it with gm collector"; fi
+  fi
+  if [ -d "$GM_HALL/telemetry" ]; then
+    for f in "$GM_HALL"/telemetry/*.jsonl; do
+      [ -f "$f" ] || continue
+      n=$(awk -F '\t' -v p="$f" '$3 == p { o = $2 } END { print o + 0 }' "$GM_HALL/telemetry/imported/offsets" 2>/dev/null || echo 0)
+      case $f in */metrics*) ;; *) pending=$((pending + $(wc -c <"$f") - n)) ;; esac
+    done
+    gm_doc ok "telemetry files under $GM_HALL/telemetry; $pending bytes not imported yet (gm trace import)"
+  else
+    gm_doc warn "no telemetry under $GM_HALL/telemetry yet"
+  fi
+  n=0
+  [ ! -f "$GM_HALL/spans-dropped.log" ] || n=$(grep -c . "$GM_HALL/spans-dropped.log" || true)
+  [ "$n" = 0 ] || gm_doc warn "$n spans could not be written (see $GM_HALL/spans-dropped.log)"
+  [ "$fails" = 0 ] || exit 1
+}
+
+# SQL: the JSON object of an OTLP attribute list (an array of {key, value}), as flat dotted keys.
+gm_otlp_attrs() {
+  printf "(SELECT json_group_object(a.value->>'key', CASE WHEN a.value->'value'->>'stringValue' IS NOT NULL THEN a.value->'value'->>'stringValue' WHEN a.value->'value'->>'intValue' IS NOT NULL THEN CAST(a.value->'value'->>'intValue' AS INTEGER) WHEN a.value->'value'->>'doubleValue' IS NOT NULL THEN a.value->'value'->>'doubleValue' WHEN a.value->'value'->'boolValue' IS NOT NULL THEN a.value->'value'->'boolValue' ELSE a.value->'value' END) FROM json_each(%s) a)" "$1"
+}
+
+# SQL: a model name without Anthropic's date suffix, so an event's claude-haiku-4-5-20251001 and a span's
+# claude-haiku-4-5 are one model.
+gm_model_sql() {
+  printf "CASE WHEN %s GLOB '*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]' THEN substr(%s,1,length(%s)-9) ELSE %s END" "$1" "$1" "$1" "$1"
+}
+
+# Appends the complete lines of telemetry file $1, from byte $2, to the JSON array being built in $3;
+# prints the offset after the last complete line. A line the collector is still writing waits for next time.
+gm_jsonl_take() {
+  local f=$1 off=$2 out=$3 size n complete
+  size=$(wc -c <"$f" | tr -d ' ')
+  if ! gm_is_int "$off" || [ "$off" -gt "$size" ]; then off=0; fi
+  if [ "$off" -ge "$size" ]; then
+    printf '%s' "$off"
+    return 0
+  fi
+  tail -c +"$((off + 1))" "$f" | head -c "$((size - off))" >"$out.chunk"
+  n=$(wc -c <"$out.chunk" | tr -d ' ')
+  complete=$n
+  if [ "$(tail -c 1 "$out.chunk" | od -An -c | tr -d ' ')" != '\n' ]; then
+    complete=$((n - $(tail -n 1 "$out.chunk" | wc -c)))
+  fi
+  head -c "$complete" "$out.chunk" | sed -e '/^[[:space:]]*$/d' -e 's/$/,/' >>"$out"
+  rm -f "$out.chunk"
+  printf '%s' "$((off + complete))"
+}
+
+# gm trace import: folds the telemetry files not yet read into the register. Each file is read from where
+# the last import stopped (by inode, so a rotated file is found again); a rotated file read to its end
+# moves to telemetry/imported/, and files there are deleted 14 days after import.
+gm_telemetry_import() {
+  local quiet=${1:-} dir=$GM_HALL/telemetry
+  if [ ! -d "$dir" ]; then
+    [ -n "$quiet" ] || printf 'No telemetry under %s yet: run gm collector, then start a session with gm open.\n' "$dir"
+    return 0
+  fi
+  mkdir -p "$dir/imported" "$GM_HALL/tmp"
+  local lock=$dir/imported/.lock rc=0
+  if ! mkdir "$lock" 2>/dev/null; then
+    # A lock older than ten minutes was left by an import that died.
+    if [ -n "$(find "$lock" -maxdepth 0 -mmin +10 2>/dev/null)" ] && rmdir "$lock" 2>/dev/null && mkdir "$lock" 2>/dev/null; then :; else
+      [ -n "$quiet" ] || printf 'Another gm trace import is running.\n'
+      return 0
+    fi
+  fi
+  local work
+  work=$(mktemp -d "$GM_HALL/tmp/import.XXXXXX") || { rmdir "$lock"; return 1; }
+  (gm_telemetry_import_locked "$quiet" "$work") || rc=$?
+  rm -rf -- "${work:?}"
+  rmdir "$lock" 2>/dev/null || true
+  return "$rc"
+}
+
+gm_telemetry_import_locked() {
+  local quiet=$1 work=$2 dir=$GM_HALL/telemetry sig f ino off new size moved='' out
+  local offsets=$dir/imported/offsets
+  : >"$work/offsets"
+  for sig in traces logs; do
+    printf '[' >"$work/$sig.json"
+    for f in "$dir/$sig"-*.jsonl "$dir/$sig.jsonl"; do
+      [ -f "$f" ] || continue
+      # shellcheck disable=SC2012 # ls -i is the portable way to read an inode; the name is quoted
+      ino=$(ls -i "$f" | awk '{print $1}')
+      off=$(awk -F '\t' -v i="$ino" '$1 == i { o = $2 } END { print o }' "$offsets" 2>/dev/null || true)
+      new=$(gm_jsonl_take "$f" "$off" "$work/$sig.json") || return 1
+      size=$(wc -c <"$f" | tr -d ' ')
+      if [ "$f" != "$dir/$sig.jsonl" ] && [ "$new" -ge "$size" ]; then
+        moved="$moved$f"$'\n'
+      else
+        printf '%s\t%s\t%s\n' "$ino" "$new" "$f" >>"$work/offsets"
+      fi
+    done
+    printf 'null]' >>"$work/$sig.json"
+  done
+  printf '[' >"$work/metrics.json"
+  for f in "$dir"/metrics-*.jsonl "$dir/metrics.jsonl"; do
+    [ ! -f "$f" ] || gm_jsonl_take "$f" 0 "$work/metrics.json" >/dev/null || return 1
+  done
+  printf 'null]' >>"$work/metrics.json"
+  if ! sqlite3 -bail -batch "$work/stage.db" >/dev/null 2>"$work/err" <<SQL
+$(gm_telemetry_stage_sql "$work")
+SQL
+  then
+    printf 'gm: trace import could not read the telemetry files: %s\n' "$(head -n 3 "$work/err")" >&2
+    return 1
+  fi
+  gm_redact json <"$work/texts.bin" >"$work/red.json" || return 1
+  if ! out=$(gm_sql 2>"$work/err" <<SQL
+$(gm_telemetry_fold_sql "$work")
+SQL
+  ); then
+    printf 'gm: trace import failed, and nothing was imported (the files are read again next time): %s\n' "$(head -n 3 "$work/err")" >&2
+    return 1
+  fi
+  mv "$work/offsets" "$offsets"
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    mv "$f" "$dir/imported/" && touch "$dir/imported/$(basename "$f")"
+  done <<<"$moved"
+  find "$dir/imported" -type f -name '*.jsonl' -mtime +14 -exec rm -f {} + 2>/dev/null || true
+  if [ -z "$quiet" ]; then
+    printf '%s\n' "$out"
+    gm_sql <<SQL || true
+$(gm_telemetry_reconcile_sql "$work")
+SQL
+  fi
+}
+
+# Stage SQL, run in a scratch database: the batch's spans (cs) and events (ce), flat, without identity,
+# and the texts to mask (texts.bin, each text ended by \036, in key order).
+gm_telemetry_stage_sql() {
+  local w=$1
+  cat <<SQL
+CREATE TABLE cs AS
+SELECT tid, sid, pid, name, start_ms, end_ms, code, events, json_remove(attrs, $GM_OTEL_IDENTITY) AS attrs, NULL AS prompt FROM (
+  SELECT sp.value->>'traceId' AS tid, sp.value->>'spanId' AS sid, NULLIF(sp.value->>'parentSpanId','') AS pid, sp.value->>'name' AS name,
+         CAST(sp.value->>'startTimeUnixNano' AS INTEGER)/1000000 AS start_ms, CAST(sp.value->>'endTimeUnixNano' AS INTEGER)/1000000 AS end_ms,
+         COALESCE(sp.value->'status'->>'code', 0) AS code, COALESCE(sp.value->'events', '[]') AS events,
+         json_patch($(gm_otlp_attrs "rs.value->'resource'->'attributes'"), $(gm_otlp_attrs "sp.value->'attributes'")) AS attrs
+  FROM json_each(CAST(readfile($(gm_q "$w/traces.json")) AS TEXT)) b, json_each(b.value->'resourceSpans') rs,
+       json_each(rs.value->'scopeSpans') ss, json_each(ss.value->'spans') sp
+  WHERE b.type='object');
+DELETE FROM cs WHERE rowid NOT IN (SELECT MIN(rowid) FROM cs GROUP BY tid, sid);
+CREATE TABLE ce AS
+SELECT ROW_NUMBER() OVER (ORDER BY t_ms, seq) AS n, * FROM (
+  SELECT t_ms, tid, sid, COALESCE($(gm_a event.name), replace(body,'claude_code.','')) AS name, $(gm_a event.sequence) AS seq, attrs FROM (
+    SELECT CAST(lr.value->>'timeUnixNano' AS INTEGER)/1000000 AS t_ms, NULLIF(lr.value->>'traceId','') AS tid, NULLIF(lr.value->>'spanId','') AS sid,
+           lr.value->'body'->>'stringValue' AS body,
+           json_remove(json_patch($(gm_otlp_attrs "rs.value->'resource'->'attributes'"), $(gm_otlp_attrs "lr.value->'attributes'")), $GM_OTEL_IDENTITY) AS attrs
+    FROM json_each(CAST(readfile($(gm_q "$w/logs.json")) AS TEXT)) b, json_each(b.value->'resourceLogs') rs,
+         json_each(rs.value->'scopeLogs') ss, json_each(ss.value->'logRecords') lr
+    WHERE b.type='object'))
+WHERE name IN ('user_prompt','assistant_response','api_request','api_error','api_retries_exhausted','api_refusal','compaction','subagent_completed','tool_result');
+DELETE FROM ce WHERE rowid NOT IN (SELECT MIN(rowid) FROM ce GROUP BY name, $(gm_a session.id), seq, t_ms);
+-- A span's prompt: its own, an event's that ran inside it, its model call's or tool call's event, or its parent's.
+UPDATE cs SET prompt=COALESCE($(gm_a prompt.id cs.attrs),
+  (SELECT $(gm_a prompt.id e.attrs) FROM ce e WHERE e.tid=cs.tid AND e.sid=cs.sid AND $(gm_a prompt.id e.attrs) IS NOT NULL ORDER BY e.n LIMIT 1),
+  (SELECT $(gm_a prompt.id e.attrs) FROM ce e WHERE e.name='api_request' AND $(gm_a request_id e.attrs)=$(gm_a request_id cs.attrs)),
+  (SELECT $(gm_a prompt.id e.attrs) FROM ce e WHERE e.name='tool_result' AND $(gm_a tool_use_id e.attrs)=$(gm_a tool_use_id cs.attrs)));
+UPDATE cs SET prompt=(SELECT p.prompt FROM cs p WHERE p.tid=cs.tid AND p.sid=cs.pid) WHERE prompt IS NULL;
+UPDATE cs SET prompt=(SELECT p.prompt FROM cs p WHERE p.tid=cs.tid AND p.sid=cs.pid) WHERE prompt IS NULL;
+UPDATE cs SET prompt=(SELECT c.prompt FROM cs c WHERE c.tid=cs.tid AND c.pid=cs.sid AND c.prompt IS NOT NULL LIMIT 1) WHERE prompt IS NULL;
+UPDATE cs SET prompt=(SELECT p.prompt FROM cs p WHERE p.tid=cs.tid AND p.sid=cs.pid) WHERE prompt IS NULL;
+CREATE TABLE texts(k INTEGER PRIMARY KEY, kind TEXT NOT NULL, ref TEXT NOT NULL, body TEXT NOT NULL);
+INSERT INTO texts(kind, ref, body)
+  SELECT 'command', tid||':'||sid, $(gm_a full_command) FROM cs WHERE name='claude_code.tool' AND $(gm_a full_command) IS NOT NULL
+  UNION ALL
+  SELECT 'prompt', n, COALESCE($(gm_a prompt), $(gm_a prompt_text)) FROM ce WHERE name='user_prompt' AND COALESCE($(gm_a prompt), $(gm_a prompt_text)) NOT IN ('', '<REDACTED>')
+  UNION ALL
+  SELECT 'response', n, $(gm_a response) FROM ce WHERE name='assistant_response' AND $(gm_a response) NOT IN ('', '<REDACTED>');
+SELECT writefile($(gm_q "$w/texts.bin"), COALESCE((SELECT group_concat(t, '') FROM (SELECT replace(body, char(30), ' ')||char(30) AS t FROM texts ORDER BY k)), ''));
+SQL
+}
+
+# SQL: the attributes a Claude Code span takes in the register, by the mapping in tracing-design.md:
+# its own keys without identity and raw text, plus the GenAI and guild names. Columns of "c": the cs row.
+gm_cc_span_attrs() {
+  local llm="c.name='claude_code.llm_request'" tool="c.name='claude_code.tool'" ia="c.name='claude_code.interaction'" m
+  m=$(gm_model_sql "COALESCE($(gm_a model c.attrs), $(gm_a gen_ai.request.model c.attrs))")
+  printf "json_patch(json_remove(c.attrs, %s), %s)" "$GM_OTEL_CONTENT" "$(gm_jobj \
+    gen_ai.operation.name "CASE WHEN $ia THEN 'invoke_agent' WHEN $llm THEN 'chat' WHEN $tool THEN 'execute_tool' END" \
+    gen_ai.provider.name "CASE WHEN $llm THEN 'anthropic' END" \
+    gen_ai.agent.name "CASE WHEN $ia THEN COALESCE($(gm_a guild.role c.attrs),'party-leader') END" \
+    gen_ai.conversation.id "CASE WHEN $ia THEN $(gm_a session.id c.attrs) END" \
+    gen_ai.request.model "CASE WHEN $llm THEN $m END" \
+    gen_ai.response.id "CASE WHEN $llm THEN $(gm_a request_id c.attrs) END" \
+    gen_ai.response.finish_reasons "CASE WHEN $llm AND $(gm_a stop_reason c.attrs) IS NOT NULL THEN json_array($(gm_a stop_reason c.attrs)) END" \
+    gen_ai.usage.input_tokens "CASE WHEN $llm THEN $(gm_a input_tokens c.attrs)+COALESCE($(gm_a cache_read_tokens c.attrs),0)+COALESCE($(gm_a cache_creation_tokens c.attrs),0) END" \
+    gen_ai.usage.output_tokens "CASE WHEN $llm THEN $(gm_a output_tokens c.attrs) END" \
+    gen_ai.usage.cache_read.input_tokens "CASE WHEN $llm THEN $(gm_a cache_read_tokens c.attrs) END" \
+    gen_ai.usage.cache_write.input_tokens "CASE WHEN $llm THEN $(gm_a cache_creation_tokens c.attrs) END" \
+    gen_ai.request.reasoning.level "$(gm_a effort c.attrs)" \
+    guild.ttft_ms "$(gm_a ttft_ms c.attrs)" \
+    guild.attempt "$(gm_a attempt c.attrs)" \
+    error.type "CASE WHEN $(gm_a success c.attrs) IN (0,'false') THEN COALESCE($(gm_a error c.attrs),'error') END" \
+    gen_ai.tool.name "CASE WHEN $tool THEN $(gm_a tool_name c.attrs) END" \
+    gen_ai.tool.call.id "$(gm_a tool_use_id c.attrs)" \
+    mcp.method.name "CASE WHEN $tool AND $(gm_a tool_name c.attrs) LIKE 'mcp\\_\\_%' ESCAPE '\\' THEN 'tools/call' END" \
+    guild.mcp.server "CASE WHEN $tool AND $(gm_a tool_name c.attrs) LIKE 'mcp\\_\\_%' ESCAPE '\\' THEN substr($(gm_a tool_name c.attrs),6,instr(substr($(gm_a tool_name c.attrs),6),'__')-1) END" \
+    guild.tool.command "(SELECT body FROM red WHERE kind='command' AND ref=c.tid||':'||c.sid)" \
+    prompt.id "c.prompt" \
+    events "(SELECT NULLIF(json_group_array(json_object('name',e.value->>'name','time_ms',CAST(e.value->>'timeUnixNano' AS INTEGER)/1000000,'attempt',$(gm_otlp_attrs "e.value->'attributes'")->>'attempt')),'[]')
+             FROM json_each(c.events) e WHERE CAST($(gm_otlp_attrs "e.value->'attributes'")->>'attempt' AS INTEGER)>1)" \
+    guild.source "'claude_code'")"
+}
+
+gm_cc_span_name() {
+  printf "CASE c.name WHEN 'claude_code.interaction' THEN 'invoke_agent '||COALESCE(%s,'party-leader') WHEN 'claude_code.llm_request' THEN 'chat '||replace(%s,'claude-','') WHEN 'claude_code.tool' THEN 'execute_tool '||COALESCE(%s,'?') ELSE c.name END" \
+    "$(gm_a guild.role c.attrs)" "$(gm_model_sql "COALESCE($(gm_a model c.attrs), $(gm_a gen_ai.request.model c.attrs), 'model')")" "$(gm_a tool_name c.attrs)"
+}
+
+# SQL: the attributes an api_request event gives its chat span. Columns of "e": the ce row.
+gm_cc_call_attrs() {
+  gm_jobj gen_ai.operation.name "'chat'" gen_ai.provider.name "'anthropic'" \
+    gen_ai.request.model "$(gm_model_sql "$(gm_a model e.attrs)")" \
+    gen_ai.response.id "$(gm_a request_id e.attrs)" \
+    gen_ai.usage.input_tokens "$(gm_a input_tokens e.attrs)+COALESCE($(gm_a cache_read_tokens e.attrs),0)+COALESCE($(gm_a cache_creation_tokens e.attrs),0)" \
+    gen_ai.usage.output_tokens "$(gm_a output_tokens e.attrs)" \
+    gen_ai.usage.cache_read.input_tokens "$(gm_a cache_read_tokens e.attrs)" \
+    gen_ai.usage.cache_write.input_tokens "$(gm_a cache_creation_tokens e.attrs)" \
+    gen_ai.request.reasoning.level "$(gm_a effort e.attrs)" \
+    guild.cost.usd "$(gm_a cost_usd e.attrs)" \
+    guild.ttft_ms "$(gm_a ttft_ms e.attrs)" \
+    guild.query_source "$(gm_a query_source e.attrs)" \
+    session.id "$(gm_a session.id e.attrs)" prompt.id "$(gm_a prompt.id e.attrs)" agent_id "$(gm_a agent_id e.attrs)" \
+    guild.focus "$(gm_a guild.focus e.attrs)" guild.role "$(gm_a guild.role e.attrs)" \
+    guild.source "'claude_code'"
+}
+
+# SQL adding the masked text of key $2 to the spans (or open spans, table $1) it belongs to, once.
+gm_cc_text_sql() {
+  local x
+  x="json_extract($1.attrs, '\$.\"$2\"')"
+  cat <<SQL
+UPDATE $1 SET attrs=json_set($1.attrs, '\$."$2"', CASE WHEN $x IS NULL THEN t.body WHEN instr($x, t.body)>0 THEN $x ELSE $x||char(10)||char(10)||t.body END)
+  FROM (SELECT at, body FROM txt1 WHERE k='$2') t WHERE $1.trace_id||' '||$1.span_id=t.at;
+SQL
+}
+
+# SQL: "trace_id span_id" of the span an event about session $1, prompt $2 (SQL expressions) belongs to:
+# the turn, else its exchange, else the session.
+gm_cc_fallback_sql() {
+  printf "COALESCE((SELECT trace_id||' '||span_id FROM anc WHERE kind='turn' AND k1=%s AND k2=%s), (SELECT trace_id||' '||span_id FROM anc WHERE kind='exchange' AND k1=%s AND k2=%s), (SELECT trace_id||' '||span_id FROM anc WHERE kind='session' AND k1=%s AND k2=''))" \
+    "$1" "$2" "$1" "$2" "$1"
+}
+
+# The resolution of one Claude Code span, given its parent's place in the register (SQL for the
+# parent's trace and span id; NULL when it has none). See gm_telemetry_fold_sql.
+gm_cc_act() {
+  printf "CASE WHEN c.m_sid IS NOT NULL THEN 'merge' WHEN c.name IN ('claude_code.tool.execution','claude_code.tool.blocked_on_user') THEN CASE WHEN %s IS NULL THEN 'skip' ELSE 'fold' END ELSE 'insert' END" "$2"
+}
+gm_cc_att() {
+  # $1 parent's trace, $2 parent's span, $3 tid or sid: which of the place to give
+  local p=$2
+  [ "$3" = sid ] || p=$1
+  printf "CASE WHEN c.a_sid IS NOT NULL THEN c.a_%s WHEN %s IS NOT NULL THEN %s WHEN c.f_sid IS NOT NULL THEN c.f_%s END" "$3" "$2" "$p" "$3"
+}
+gm_cc_res_cols() {
+  local act
+  act=$(gm_cc_act "$1" "$2")
+  printf "%s, CASE %s WHEN 'merge' THEN c.m_tid WHEN 'fold' THEN %s WHEN 'insert' THEN COALESCE(%s, c.tid) END, CASE %s WHEN 'merge' THEN c.m_sid WHEN 'fold' THEN %s WHEN 'insert' THEN c.sid END, CASE WHEN %s='insert' THEN %s END" \
+    "$act" "$act" "$1" "$(gm_cc_att "$1" "$2" tid)" "$act" "$2" "$act" "$(gm_cc_att "$1" "$2" sid)"
+}
+
+# The fold, in one transaction in the register. Spans first: each Claude Code span is merged into the span
+# gm's hooks already wrote for the same thing (the turn by session.id and prompt.id, the tool call by
+# tool_use_id), folded into its parent (tool.execution, tool.blocked_on_user), or inserted where it belongs:
+# a subagent's model call under its invoke_agent span (agent_id), any other span under its parent's place,
+# and a span with no parent under its turn, exchange or session. The original ids are kept as span links.
+# Then the events: api_request into its chat span (or a chat span of its own when the span was lost), the
+# masked prompt and response text onto the turn and the chat span, and errors and compactions as span events.
+gm_telemetry_fold_sql() {
+  local w=$1 s
+  s="(SELECT k FROM sess)"
+  cat <<SQL
+ATTACH $(gm_q "$w/stage.db") AS imp;
+CREATE TEMP TABLE red AS SELECT t.k, t.kind, t.ref, j.value AS body FROM imp.texts t JOIN json_each(CAST(readfile($(gm_q "$w/red.json")) AS TEXT)) j ON j.key+1=t.k;
+CREATE TEMP TABLE sess AS SELECT DISTINCT $(gm_a session.id) AS k FROM imp.cs WHERE $(gm_a session.id) IS NOT NULL
+  UNION SELECT $(gm_a session.id) FROM imp.ce WHERE $(gm_a session.id) IS NOT NULL;
+BEGIN IMMEDIATE;
+CREATE TEMP TABLE anc0 AS
+  SELECT 'turn' AS kind, $(gm_a session.id) AS k1, COALESCE($(gm_a prompt.id),'') AS k2, trace_id, span_id, start_ms, 0 AS open FROM span
+    WHERE name IN ('invoke_agent party-leader','invoke_agent adventurer') AND $(gm_a session.id) IN $s
+  UNION ALL SELECT 'turn', $(gm_a session.id), COALESCE($(gm_a prompt.id),''), trace_id, span_id, start_ms, 1 FROM open_span
+    WHERE name IN ('invoke_agent party-leader','invoke_agent adventurer') AND session_id IN $s
+  UNION ALL SELECT 'exchange', $(gm_a session.id), COALESCE($(gm_a prompt.id),''), trace_id, span_id, start_ms, 0 FROM span WHERE name='guild.exchange' AND $(gm_a session.id) IN $s
+  UNION ALL SELECT 'exchange', $(gm_a session.id), COALESCE($(gm_a prompt.id),''), trace_id, span_id, start_ms, 1 FROM open_span WHERE name='guild.exchange' AND session_id IN $s
+  UNION ALL SELECT 'session', $(gm_a session.id), '', trace_id, span_id, start_ms, 0 FROM span WHERE name='guild.session' AND $(gm_a session.id) IN $s
+  UNION ALL SELECT 'session', session_id, '', trace_id, span_id, start_ms, 1 FROM open_span WHERE name='guild.session' AND session_id IN $s
+  UNION ALL SELECT 'tool', $(gm_a gen_ai.tool.call.id), '', trace_id, span_id, start_ms, 0 FROM span WHERE name LIKE 'execute_tool %' AND $(gm_a session.id) IN $s
+  UNION ALL SELECT 'tool', $(gm_a gen_ai.tool.call.id), '', trace_id, span_id, start_ms, 1 FROM open_span WHERE name LIKE 'execute_tool %' AND session_id IN $s
+  UNION ALL SELECT 'agent', $(gm_a agent_id), '', trace_id, span_id, start_ms, 0 FROM span
+    WHERE name LIKE 'invoke_agent %' AND name NOT IN ('invoke_agent party-leader','invoke_agent adventurer') AND $(gm_a session.id) IN $s
+  UNION ALL SELECT 'agent', $(gm_a agent_id), '', trace_id, span_id, start_ms, 1 FROM open_span
+    WHERE name LIKE 'invoke_agent %' AND name NOT IN ('invoke_agent party-leader','invoke_agent adventurer') AND session_id IN $s
+  UNION ALL SELECT 'chat', $(gm_a gen_ai.response.id), '', trace_id, span_id, start_ms, 0 FROM span WHERE name LIKE 'chat %' AND $(gm_a session.id) IN $s
+  UNION ALL SELECT 'cc', span_id, '', trace_id, span_id, start_ms, 0 FROM span WHERE $(gm_a guild.source)='claude_code' AND $(gm_a session.id) IN $s
+  UNION ALL SELECT 'cc', linked_span_id, '', trace_id, span_id, 0, 0 FROM span_link WHERE $(gm_a guild.link)='claude_code';
+DELETE FROM anc0 WHERE k1 IS NULL;
+CREATE TEMP TABLE anc AS SELECT kind, k1, k2, trace_id, span_id FROM (
+  SELECT anc0.*, ROW_NUMBER() OVER (PARTITION BY kind, k1, k2 ORDER BY open, start_ms) AS rn FROM anc0) WHERE rn=1;
+CREATE UNIQUE INDEX temp.anc_key ON anc(kind, k1, k2);
+CREATE TEMP TABLE cn AS
+SELECT c.tid, c.sid, c.pid, c.name, c.prompt,
+       m.trace_id AS m_tid, m.span_id AS m_sid, ag.trace_id AS a_tid, ag.span_id AS a_sid,
+       COALESCE(ft.trace_id, fe.trace_id, fs.trace_id) AS f_tid, COALESCE(ft.span_id, fe.span_id, fs.span_id) AS f_sid,
+       pv.trace_id AS p_tid, pv.span_id AS p_sid,
+       EXISTS (SELECT 1 FROM imp.cs x WHERE x.tid=c.tid AND x.sid=c.pid) AS here
+FROM imp.cs c
+LEFT JOIN anc m ON m.kind=CASE c.name WHEN 'claude_code.interaction' THEN 'turn' WHEN 'claude_code.tool' THEN 'tool' WHEN 'claude_code.llm_request' THEN 'chat' END
+  AND m.k1=CASE c.name WHEN 'claude_code.interaction' THEN $(gm_a session.id c.attrs) WHEN 'claude_code.tool' THEN $(gm_a tool_use_id c.attrs) ELSE $(gm_a request_id c.attrs) END
+  AND m.k2=CASE WHEN c.name='claude_code.interaction' THEN COALESCE(c.prompt,'') ELSE '' END
+LEFT JOIN anc ag ON c.name='claude_code.llm_request' AND ag.kind='agent' AND ag.k1=$(gm_a agent_id c.attrs) AND ag.k2=''
+LEFT JOIN anc ft ON ft.kind='turn' AND ft.k1=$(gm_a session.id c.attrs) AND ft.k2=c.prompt
+LEFT JOIN anc fe ON fe.kind='exchange' AND fe.k1=$(gm_a session.id c.attrs) AND fe.k2=c.prompt
+LEFT JOIN anc fs ON fs.kind='session' AND fs.k1=$(gm_a session.id c.attrs) AND fs.k2=''
+LEFT JOIN anc pv ON pv.kind='cc' AND pv.k1=c.pid AND pv.k2='';
+CREATE TEMP TABLE res AS
+WITH RECURSIVE r(tid, sid, act, mt, ms, par) AS (
+  SELECT c.tid, c.sid, $(gm_cc_res_cols c.p_tid c.p_sid) FROM cn c WHERE NOT c.here
+  UNION ALL
+  SELECT c.tid, c.sid, $(gm_cc_res_cols r.mt r.ms) FROM cn c JOIN r ON c.tid=r.tid AND c.pid=r.sid
+)
+SELECT * FROM r;
+CREATE TEMP TABLE newsp AS SELECT mt AS trace_id, ms AS span_id FROM res WHERE act='insert' AND NOT EXISTS (SELECT 1 FROM span WHERE trace_id=res.mt AND span_id=res.ms);
+INSERT OR IGNORE INTO span(trace_id, span_id, parent_id, name, start_ms, end_ms, status, attrs)
+  SELECT r.mt, r.ms, r.par, $(gm_cc_span_name), c.start_ms, MAX(c.end_ms, c.start_ms),
+         CASE WHEN c.code IN (2,'2','STATUS_CODE_ERROR') OR $(gm_a success c.attrs) IN (0,'false') THEN 'error' ELSE 'ok' END, $(gm_cc_span_attrs)
+  FROM res r JOIN imp.cs c ON c.tid=r.tid AND c.sid=r.sid WHERE r.act='insert';
+UPDATE span SET attrs=json_patch(json_remove($(gm_cc_span_attrs), '\$."guild.source"'), span.attrs)
+  FROM (SELECT r.mt, r.ms, cs.* FROM res r JOIN imp.cs cs ON cs.tid=r.tid AND cs.sid=r.sid WHERE r.act='merge') c
+  WHERE span.trace_id=c.mt AND span.span_id=c.ms;
+UPDATE open_span SET attrs=json_patch(json_remove($(gm_cc_span_attrs), '\$."guild.source"'), open_span.attrs)
+  FROM (SELECT r.mt, r.ms, cs.* FROM res r JOIN imp.cs cs ON cs.tid=r.tid AND cs.sid=r.sid WHERE r.act='merge') c
+  WHERE open_span.trace_id=c.mt AND open_span.span_id=c.ms;
+INSERT OR IGNORE INTO span_link(trace_id, span_id, linked_trace_id, linked_span_id, attrs)
+  SELECT r.mt, r.ms, r.tid, r.sid, json_object('guild.link','claude_code','guild.import',r.act,'claude_code.span',c.name)
+  FROM res r JOIN imp.cs c ON c.tid=r.tid AND c.sid=r.sid
+  WHERE r.act IN ('merge','fold') OR (r.act='insert' AND r.mt<>r.tid);
+INSERT OR IGNORE INTO anc SELECT 'cc', sid, '', mt, ms FROM res WHERE act IN ('merge','fold','insert');
+INSERT OR IGNORE INTO anc SELECT 'turn', $(gm_a session.id c.attrs), c.prompt, r.mt, r.ms FROM res r JOIN imp.cs c ON c.tid=r.tid AND c.sid=r.sid
+  WHERE r.act='insert' AND c.name='claude_code.interaction' AND c.prompt IS NOT NULL;
+INSERT OR IGNORE INTO anc SELECT 'chat', $(gm_a gen_ai.response.id), '', trace_id, span_id FROM span
+  WHERE (trace_id, span_id) IN (SELECT trace_id, span_id FROM newsp) AND name LIKE 'chat %';
+-- Model calls: each api_request event completes its chat span, or is one when Claude Code's span was lost.
+CREATE TEMP TABLE ar AS
+SELECT e.*, $(gm_a request_id e.attrs) AS rid,
+       (SELECT trace_id||' '||span_id FROM anc WHERE kind='chat' AND k1=$(gm_a request_id e.attrs) AND k2='') AS chat,
+       COALESCE((SELECT trace_id||' '||span_id FROM span WHERE trace_id=e.tid AND span_id=e.sid),
+                (SELECT trace_id||' '||span_id FROM anc WHERE kind='cc' AND k1=e.sid AND k2=''),
+                (SELECT trace_id||' '||span_id FROM anc WHERE kind='agent' AND k1=$(gm_a agent_id e.attrs) AND k2=''),
+                $(gm_cc_fallback_sql "$(gm_a session.id e.attrs)" "$(gm_a prompt.id e.attrs)")) AS at
+FROM imp.ce e WHERE e.name='api_request';
+UPDATE span SET attrs=json_patch(span.attrs, $(gm_cc_call_attrs))
+  FROM ar e WHERE e.chat IS NOT NULL AND span.trace_id=substr(e.chat,1,instr(e.chat,' ')-1) AND span.span_id=substr(e.chat,instr(e.chat,' ')+1);
+INSERT INTO newsp
+  SELECT DISTINCT COALESCE(substr(at,1,instr(at,' ')-1), tid, lower(hex(randomblob(16)))), substr(lower(hex(rid)),-16) FROM ar WHERE chat IS NULL AND length(rid)>=8;
+INSERT OR IGNORE INTO span(trace_id, span_id, parent_id, name, start_ms, end_ms, status, attrs)
+  SELECT n.trace_id, n.span_id, substr(e.at,instr(e.at,' ')+1), 'chat '||replace($(gm_model_sql "COALESCE($(gm_a model e.attrs),'model')"),'claude-',''),
+         e.t_ms-COALESCE($(gm_a duration_ms e.attrs),0), e.t_ms, 'ok',
+         json_patch(json_remove(e.attrs, $GM_OTEL_CONTENT, '\$."event.name"', '\$."event.timestamp"'),
+                    json_patch($(gm_cc_call_attrs), json_object('guild.chat.from','api_request')))
+  FROM ar e JOIN newsp n ON n.span_id=substr(lower(hex(e.rid)),-16) WHERE e.chat IS NULL;
+INSERT OR IGNORE INTO anc SELECT 'chat', $(gm_a gen_ai.response.id), '', trace_id, span_id FROM span
+  WHERE (trace_id, span_id) IN (SELECT trace_id, span_id FROM newsp) AND name LIKE 'chat %';
+-- The masked prompt onto its turn, the masked response onto its model call.
+CREATE TEMP TABLE txt AS
+SELECT CASE e.name WHEN 'user_prompt' THEN 'guild.prompt.text' ELSE 'guild.response.text' END AS k,
+       COALESCE(CASE WHEN e.name='assistant_response' THEN (SELECT trace_id||' '||span_id FROM anc WHERE kind='chat' AND k1=$(gm_a request_id e.attrs) AND k2='') END,
+                $(gm_cc_fallback_sql "$(gm_a session.id e.attrs)" "$(gm_a prompt.id e.attrs)")) AS at,
+       r.body, e.n
+FROM imp.ce e JOIN red r ON r.ref=CAST(e.n AS TEXT) AND r.kind=CASE e.name WHEN 'user_prompt' THEN 'prompt' ELSE 'response' END
+WHERE e.name IN ('user_prompt','assistant_response');
+CREATE TEMP TABLE txt1 AS SELECT k, at, group_concat(body, char(10)||char(10)) AS body FROM (SELECT * FROM txt WHERE at IS NOT NULL ORDER BY n) GROUP BY k, at;
+$(gm_cc_text_sql span guild.prompt.text)
+$(gm_cc_text_sql span guild.response.text)
+$(gm_cc_text_sql open_span guild.prompt.text)
+$(gm_cc_text_sql open_span guild.response.text)
+-- Errors, refusals, compactions and finished subagents as span events.
+CREATE TEMP TABLE ev AS
+SELECT CASE WHEN e.name='compaction' THEN (SELECT trace_id||' '||span_id FROM anc WHERE kind='session' AND k1=$(gm_a session.id e.attrs) AND k2='')
+            WHEN e.name='subagent_completed' THEN COALESCE((SELECT trace_id||' '||span_id FROM anc WHERE kind='agent' AND k1=$(gm_a agent_id e.attrs) AND k2=''),
+                                                           $(gm_cc_fallback_sql "$(gm_a session.id e.attrs)" "$(gm_a prompt.id e.attrs)"))
+            ELSE $(gm_cc_fallback_sql "$(gm_a session.id e.attrs)" "$(gm_a prompt.id e.attrs)") END AS at,
+       json_patch(json_remove(e.attrs, $GM_OTEL_CONTENT, '\$."event.name"', '\$."event.timestamp"', '\$."session.id"', '\$."prompt.id"', '\$."guild.focus"', '\$."guild.role"',
+                              '\$."service.name"', '\$."service.version"', '\$."terminal.type"', '\$."os.type"', '\$."os.version"', '\$."host.arch"'),
+                  json_object('name', e.name, 'time_ms', e.t_ms)) AS ev, e.n
+FROM imp.ce e WHERE e.name IN ('api_error','api_retries_exhausted','api_refusal','compaction','subagent_completed');
+CREATE TEMP TABLE ev1 AS SELECT at, json_group_array(json(ev)) AS evs FROM (
+  SELECT * FROM ev WHERE at IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM (SELECT attrs FROM span WHERE trace_id||' '||span_id=ev.at UNION ALL SELECT attrs FROM open_span WHERE trace_id||' '||span_id=ev.at) s, json_each(s.attrs, '\$.events') x
+    WHERE x.value->>'name'=ev.ev->>'name' AND x.value->>'time_ms'=ev.ev->>'time_ms')
+  ORDER BY n) GROUP BY at;
+UPDATE span SET attrs=json_set(span.attrs, '\$.events', (SELECT json_group_array(json(value)) FROM (
+    SELECT value FROM json_each(COALESCE(span.attrs->'events','[]')) UNION ALL SELECT value FROM json_each(t.evs))))
+  FROM ev1 t WHERE span.trace_id||' '||span.span_id=t.at;
+UPDATE open_span SET attrs=json_set(open_span.attrs, '\$.events', (SELECT json_group_array(json(value)) FROM (
+    SELECT value FROM json_each(COALESCE(open_span.attrs->'events','[]')) UNION ALL SELECT value FROM json_each(t.evs))))
+  FROM ev1 t WHERE open_span.trace_id||' '||open_span.span_id=t.at;
+-- Every new span carries its posting and the camp commit last recorded for its session.
+UPDATE span SET attrs=json_patch(span.attrs, json_object('guild.posting', f.name||'#'||p.num, 'guild.posting.slug', p.slug, 'guild.focus', f.name))
+  FROM posting p JOIN focus f ON f.id=p.focus_id
+  WHERE span.trace_id=p.trace_id AND (span.trace_id, span.span_id) IN (SELECT trace_id, span_id FROM newsp);
+CREATE TEMP TABLE cm AS
+SELECT s.trace_id, s.span_id, (SELECT c FROM (SELECT $(gm_a guild.camp.commit o.attrs) AS c, o.end_ms<=s.end_ms AS before, abs(s.end_ms-o.end_ms) AS gap FROM span o
+         WHERE $(gm_a session.id o.attrs)=$(gm_a session.id s.attrs) AND $(gm_a guild.camp.commit o.attrs) IS NOT NULL)
+         ORDER BY before DESC, gap LIMIT 1) AS c
+FROM span s JOIN newsp n ON n.trace_id=s.trace_id AND n.span_id=s.span_id WHERE $(gm_a guild.camp.commit s.attrs) IS NULL;
+UPDATE span SET attrs=json_patch(span.attrs, json_object('guild.camp.commit', cm.c))
+  FROM cm WHERE span.trace_id=cm.trace_id AND span.span_id=cm.span_id AND cm.c IS NOT NULL;
+SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM imp.cs) AND NOT EXISTS (SELECT 1 FROM imp.ce) THEN 'Nothing new to import.' ELSE
+  'imported '||(SELECT count(*) FROM imp.cs)||' spans ('||(SELECT count(*) FROM res WHERE act='merge')||' merged into gm''s own, '
+  ||(SELECT count(*) FROM res WHERE act='fold')||' folded, '||(SELECT count(*) FROM res WHERE act='insert')||' added) and '
+  ||(SELECT count(*) FROM imp.ce)||' events: '||(SELECT count(*) FROM ar)||' model calls'
+  ||COALESCE(printf(' (\$%.4f est.)', (SELECT SUM($(gm_a cost_usd attrs)) FROM ar)),'')
+  ||', '||(SELECT count(*) FROM txt WHERE k='guild.prompt.text' AND at IS NOT NULL)||' prompts, '||(SELECT count(*) FROM txt WHERE k='guild.response.text' AND at IS NOT NULL)||' responses' END;
+COMMIT;
+SQL
+}
+
+# Per session the batch touched: the cost of its model calls in the register beside Claude Code's own
+# claude_code.cost.usage metric, which should agree to the cent once the session's metrics have arrived.
+gm_telemetry_reconcile_sql() {
+  local w=$1
+  cat <<SQL
+ATTACH $(gm_q "$w/stage.db") AS imp;
+WITH dp AS (
+  SELECT COALESCE(m.value->'sum'->>'aggregationTemporality', 1) AS temp, d.value AS d
+  FROM json_each(CAST(readfile($(gm_q "$w/metrics.json")) AS TEXT)) b, json_each(b.value->'resourceMetrics') rs,
+       json_each(rs.value->'scopeMetrics') ss, json_each(ss.value->'metrics') m, json_each(m.value->'sum'->'dataPoints') d
+  WHERE b.type='object' AND m.value->>'name'='claude_code.cost.usage'),
+pt AS (SELECT $(gm_otlp_attrs "d->'attributes'") AS a, temp, COALESCE(d->>'asDouble', d->>'asInt') AS v FROM dp),
+series AS (SELECT $(gm_a session.id a) AS session, CASE WHEN temp IN (2,'2','AGGREGATION_TEMPORALITY_CUMULATIVE') THEN MAX(v) ELSE SUM(v) END AS v FROM pt GROUP BY a, temp),
+metric AS (SELECT session, SUM(v) AS usd FROM series GROUP BY session),
+s AS (SELECT DISTINCT $(gm_a session.id) AS session FROM imp.ce WHERE name='api_request'),
+calls AS (SELECT s.session, count(c.span_id) AS n, SUM($(gm_a guild.cost.usd c.attrs)) AS usd
+          FROM s LEFT JOIN span c ON c.name LIKE 'chat %' AND $(gm_a session.id c.attrs)=s.session GROUP BY s.session)
+SELECT 'session '||substr(calls.session,1,8)||': '||calls.n||' model calls, '||printf('\$%.4f', COALESCE(calls.usd,0))||' est.; '
+  ||CASE WHEN metric.usd IS NULL THEN 'no claude_code.cost.usage for it yet (metrics are sent once a minute and at exit)'
+         WHEN printf('%.2f', metric.usd)=printf('%.2f', COALESCE(calls.usd,0)) THEN 'claude_code.cost.usage '||printf('\$%.4f', metric.usd)||', the same to the cent'
+         ELSE 'claude_code.cost.usage '||printf('\$%.4f', metric.usd)||', which differs (a session still running sends metrics once a minute; import again after it ends)' END
+FROM calls LEFT JOIN metric ON metric.session=calls.session ORDER BY calls.session;
+SQL
+}
+
 # ---- gm trace and gm stats: every view and measure is a query over span rows, never stored ----
+
+# SQL: what a span row (alias $1, a row of "sp") contributes to cost. A model call carries Claude Code's
+# own estimate; a turn carries the status line's only when no model call of its prompt was imported, so
+# nothing is counted twice when telemetry is on.
+gm_cost_sql() {
+  local a=$1
+  printf '%s' "CASE WHEN $a.name LIKE 'chat %' THEN $(gm_a guild.cost.usd "$a.attrs") WHEN $a.name IN ('invoke_agent party-leader','invoke_agent adventurer') AND NOT EXISTS (SELECT 1 FROM sp x WHERE x.trace_id=$a.trace_id AND x.name LIKE 'chat %' AND $(gm_a session.id x.attrs) IS $(gm_a session.id "$a.attrs") AND $(gm_a prompt.id x.attrs) IS $(gm_a prompt.id "$a.attrs")) THEN $(gm_a guild.cost.usd "$a.attrs") END"
+}
+
+# SQL: a dollar amount, with a third decimal under a cent.
+gm_usd_sql() { printf '%s' "CASE WHEN $1>0 AND $1<0.01 THEN printf('\$%.3f',$1) WHEN $1 IS NOT NULL THEN printf('\$%.2f',$1) END"; }
+
+# SQL: a token count as 950, 1.2k or 31k.
+gm_k_sql() { printf '%s' "CASE WHEN $1 IS NULL THEN '?' WHEN $1<1000 THEN CAST($1 AS TEXT) WHEN $1<10000 THEN printf('%.1fk',$1/1000.0) ELSE printf('%dk',$1/1000) END"; }
 
 # CTE "sp": the spans matching $1 (a condition on trace_id), with the spans still open drawn to now
 # and an open posting's root drawn from its posting row.
@@ -1665,7 +2339,11 @@ pm0 AS (
     COALESCE(SUM(s.name='guild.hook'),0) AS hooks,
     COALESCE(SUM(CASE WHEN s.name='guild.hook' THEN s.end_ms-s.start_ms END),0) AS hook_ms,
     COALESCE(SUM(s.name='guild.hook' AND $(gm_a guild.hook.decision s.attrs)='block'),0) AS blocks,
-    SUM($(gm_a guild.cost.usd s.attrs)) AS cost,
+    SUM($(gm_cost_sql s)) AS cost,
+    SUM(CASE WHEN s.name LIKE 'chat %' THEN $(gm_a gen_ai.usage.input_tokens s.attrs) END) AS tok_in,
+    SUM(CASE WHEN s.name LIKE 'chat %' THEN $(gm_a gen_ai.usage.output_tokens s.attrs) END) AS tok_out,
+    SUM(CASE WHEN s.name LIKE 'chat %' THEN $(gm_a gen_ai.usage.cache_read.input_tokens s.attrs) END) AS tok_read,
+    SUM(CASE WHEN s.name LIKE 'chat %' THEN $(gm_a gen_ai.usage.cache_write.input_tokens s.attrs) END) AS tok_write,
     MIN(CASE WHEN s.name='guild.posting' THEN s.start_ms END) AS start_ms,
     MAX(CASE WHEN s.name='guild.posting' THEN s.end_ms END) AS end_ms,
     MAX(CASE WHEN s.name='guild.posting' THEN s.open END) AS open,
@@ -1704,7 +2382,7 @@ gm_trace_tree() {
   e=$(gm_a gen_ai.request.reasoning.level r.attrs)
   gm_sql <<SQL
 WITH RECURSIVE $(gm_sp_cte "trace_id=$(gm_q "$tid")"),
-agg AS (SELECT SUM(name='guild.exchange') AS nex, SUM($(gm_a guild.cost.usd)) AS cost FROM sp),
+agg AS (SELECT SUM(a.name='guild.exchange') AS nex, SUM($(gm_cost_sql a)) AS cost FROM sp a),
 r AS (SELECT sp.*, CASE WHEN parent_id IN (SELECT span_id FROM sp) THEN parent_id END AS par FROM sp),
 l AS (
   SELECT r.span_id, r.par, r.name, r.start_ms, r.end_ms,
@@ -1723,7 +2401,13 @@ l AS (
       WHEN r.name='guild.notice' THEN 'notice '||COALESCE($(gm_ra guild.notice.verb),'?')||COALESCE(' '||$(gm_ra guild.phase),'')||COALESCE(': '||$(gm_ra guild.notice.detail),'')
       WHEN r.name LIKE 'invoke_agent %' THEN r.name
         ||CASE WHEN $m IS NULL AND $e IS NULL THEN '' ELSE '  '||COALESCE($m,'model ?')||' · '||COALESCE($e,'none') END||'  '||$d
-        ||CASE WHEN $(gm_ra guild.cost.usd) IS NULL THEN '' ELSE printf('  \$%.2f', $(gm_ra guild.cost.usd)) END
+        ||COALESCE('  '||$(gm_usd_sql "COALESCE((SELECT SUM($(gm_a guild.cost.usd x.attrs)) FROM sp x WHERE x.trace_id=r.trace_id AND x.name LIKE 'chat %'
+                                                   AND CASE WHEN r.name IN ('invoke_agent party-leader','invoke_agent adventurer')
+                                                            THEN $(gm_a session.id x.attrs) IS $(gm_ra session.id) AND $(gm_a prompt.id x.attrs) IS $(gm_ra prompt.id)
+                                                            ELSE x.parent_id=r.span_id END), $(gm_ra guild.cost.usd))"),'')
+      WHEN r.name LIKE 'chat %' THEN r.name||' · '||COALESCE($e,'none')
+        ||'  in '||$(gm_k_sql "$(gm_ra gen_ai.usage.input_tokens)")||' (cached '||$(gm_k_sql "$(gm_ra gen_ai.usage.cache_read.input_tokens)")||') out '||$(gm_k_sql "$(gm_ra gen_ai.usage.output_tokens)")
+        ||COALESCE('  '||$(gm_usd_sql "$(gm_ra guild.cost.usd)"),'')||'  '||$d
       WHEN r.name LIKE 'execute_tool %' THEN r.name
         ||COALESCE('  '||substr(replace($(gm_ra guild.tool.command),char(10),' '),1,60)||CASE WHEN length($(gm_ra guild.tool.command))>60 THEN '…' ELSE '' END,
                    '  '||$(gm_ra guild.subagent.type),'')
@@ -1764,6 +2448,11 @@ gm_trace_posting() {
 gm_cmd_trace() {
   [ $# -le 1 ] || gm_die "trace: gm trace <posting|focus>"
   gm_db_ensure
+  if [ "${1:-}" = import ]; then
+    gm_telemetry_import
+    return
+  fi
+  gm_telemetry_import quiet || true
   local ref=${1:-} kind id canon out
   [ -n "$ref" ] || ref=$(gm_require_focus)
   out=$(gm_resolve "$ref") || exit 1
@@ -1814,6 +2503,7 @@ gm_cmd_stats() {
     esac
   done
   gm_db_ensure
+  gm_telemetry_import quiet || true
   if [ -n "$by" ]; then
     gm_stats_by_prompt "$by" "$ref"
   elif [ -n "$compare" ]; then
@@ -1852,7 +2542,15 @@ iv3 AS (SELECT s, e, SUM(CASE WHEN pe IS NULL OR s>pe THEN 1 ELSE 0 END) OVER (O
 work AS (SELECT COALESCE(SUM(ge-gs),0) AS ms FROM (SELECT MIN(s) AS gs, MAX(e) AS ge FROM iv3 GROUP BY g)),
 nt AS (SELECT start_ms, $(gm_a guild.notice.verb ts.attrs) AS verb FROM ts WHERE name='guild.notice' AND $(gm_a guild.notice.verb ts.attrs)<>'update'),
 pk AS (SELECT COALESCE(SUM(COALESCE(nx, (SELECT end_ms FROM me))-start_ms),0) AS ms
-       FROM (SELECT start_ms, verb, LEAD(start_ms) OVER (ORDER BY start_ms) AS nx FROM nt) WHERE verb='parked')
+       FROM (SELECT start_ms, verb, LEAD(start_ms) OVER (ORDER BY start_ms) AS nx FROM nt) WHERE verb='parked'),
+br AS (SELECT model, effort, role, SUM(usd) AS usd, SUM(is_call) AS calls FROM (
+         SELECT replace(COALESCE($(gm_a gen_ai.request.model ts.attrs),'model ?'),'claude-','') AS model, COALESCE($(gm_a gen_ai.request.reasoning.level ts.attrs),'none') AS effort,
+                COALESCE($(gm_a guild.role ts.attrs),'party-leader') AS role, $(gm_cost_sql ts) AS usd, ts.name LIKE 'chat %' AS is_call
+         FROM ts WHERE $(gm_cost_sql ts) IS NOT NULL)
+       GROUP BY model, effort, role),
+brs AS (SELECT group_concat(t, ' · ') AS t FROM (
+         SELECT model||'/'||effort||' '||$(gm_usd_sql usd)||' ('||role||', '||CASE WHEN calls>0 THEN calls||CASE calls WHEN 1 THEN ' call' ELSE ' calls' END ELSE 'status line' END||')' AS t
+         FROM br ORDER BY usd DESC, model))
 SELECT me.ref||' '||me.slug||'  '||me.state
   ||char(10)||'  first reply '||CASE WHEN me.first_reply_ms IS NOT NULL THEN $(gm_dur_sql me.first_reply_ms) WHEN me.reply_waiting THEN 'not yet' ELSE '—' END
   ||' · first notice '||CASE WHEN me.first_notice_at IS NULL THEN '—' ELSE $(gm_dur_sql 'me.first_notice_at-me.start_ms') END
@@ -1862,11 +2560,13 @@ SELECT me.ref||' '||me.slug||'  '||me.state
   ||' · turns '||me.turns||' · right first time: '||CASE WHEN me.state<>'done' THEN 'not done' WHEN me.rft THEN 'yes' ELSE 'no' END
   ||char(10)||'  steps '||me.steps||': '||me.turns||' turn'||CASE me.turns WHEN 1 THEN '' ELSE 's' END||' · '||me.tools||' tool calls ('||me.mcp||' MCP, '||me.tool_failures||' failed) · '
   ||me.subagents||' subagent'||CASE me.subagents WHEN 1 THEN '' ELSE 's' END||' · '
-  ||CASE WHEN me.model_calls=0 THEN 'model calls need telemetry (slice 2)' ELSE me.model_calls||' model calls' END
+  ||CASE WHEN me.model_calls=0 THEN 'model calls need telemetry' ELSE me.model_calls||' model calls' END
   ||' · '||me.adventurer_runs||' Adventurer runs · '||me.failed_checks||' failed checks'
   ||char(10)||'  hooks '||me.hooks||' runs in '||$(gm_dur_sql me.hook_ms)||' · '||me.blocks||' Stop-guard block'||CASE me.blocks WHEN 1 THEN '' ELSE 's' END
-  ||char(10)||'  cost '||CASE WHEN me.cost IS NULL THEN 'unknown (no status line samples; per-call cost comes with telemetry, slice 2)'
+  ||char(10)||'  cost '||CASE WHEN me.model_calls>0 THEN $(gm_usd_sql me.cost)||' est., from Claude Code''s telemetry: '||COALESCE((SELECT t FROM brs),'')
+                             WHEN me.cost IS NULL THEN 'unknown (no status line samples and no telemetry imported; see gm doctor)'
                              ELSE printf('\$%.2f est., from Claude Code''s status line', me.cost) END
+  ||CASE WHEN me.model_calls>0 THEN char(10)||'  tokens in '||$(gm_k_sql me.tok_in)||' ('||$(gm_k_sql me.tok_read)||' read from cache, '||$(gm_k_sql me.tok_write)||' written to it) · out '||$(gm_k_sql me.tok_out) ELSE '' END
 FROM me, tp, work, pk;
 SQL
 }
@@ -1885,11 +2585,11 @@ SELECT $(gm_q "$focus")||': '||(SELECT count(*) FROM f)||' postings traced · '|
   ||' · median exchanges '||COALESCE((SELECT printf('%g', m) FROM mx),'—')
   ||COALESCE(' · '||NULLIF((SELECT count(*) FROM posting p JOIN focus g ON g.id=p.focus_id WHERE g.name=$(gm_q "$focus") AND p.trace_id IS NULL),0)||' made before tracing (ledger only)','');
 $w
-SELECT printf('%-36s %-10s %8s %5s %5s %5s %4s %9s', 'posting', 'state', 'reply', 'exch', 'turns', 'tools', 'rft', 'total') WHERE EXISTS (SELECT 1 FROM f);
+SELECT printf('%-36s %-10s %8s %5s %5s %5s %4s %9s %8s', 'posting', 'state', 'reply', 'exch', 'turns', 'tools', 'rft', 'total', 'cost') WHERE EXISTS (SELECT 1 FROM f);
 $w
-SELECT printf('%-36s %-10s %8s %5d %5d %5d %4s %9s', ref||' '||slug, state,
+SELECT printf('%-36s %-10s %8s %5d %5d %5d %4s %9s %8s', ref||' '||slug, state,
               CASE WHEN first_reply_ms IS NULL THEN '—' ELSE $(gm_dur_sql first_reply_ms) END, exchanges, turns, tools,
-              CASE WHEN state<>'done' THEN '—' WHEN rft THEN 'yes' ELSE 'no' END, $(gm_dur_sql 'end_ms-start_ms'))
+              CASE WHEN state<>'done' THEN '—' WHEN rft THEN 'yes' ELSE 'no' END, $(gm_dur_sql 'end_ms-start_ms'), COALESCE($(gm_usd_sql cost),'—'))
 FROM f ORDER BY num;
 SQL
 }
@@ -1949,6 +2649,10 @@ gm_stats_compare() {
       thr=$(gm_parse_ms "${over:-1s}")
       what="guild.hook spans slower than ${over:-1s}"
       pop="SELECT (end_ms-start_ms)>$thr AS sel, attrs FROM span WHERE name='guild.hook' AND $scope" ;;
+    slow-calls)
+      thr=$(gm_parse_ms "${over:-30s}")
+      what="chat spans (model calls) slower than ${over:-30s}"
+      pop="SELECT (end_ms-start_ms)>$thr AS sel, attrs FROM span WHERE name LIKE 'chat %' AND $scope" ;;
     slow-replies)
       thr=$(gm_parse_ms "${over:-2m}")
       what="exchanges whose reply took over ${over:-2m}"
@@ -1959,7 +2663,7 @@ gm_stats_compare() {
       pop="SELECT NOT pm.rft AS sel, json_remove(s.attrs,'\$.\"guild.state\"','\$.\"error.type\"') AS attrs
            FROM pm JOIN posting p ON p.id=pm.posting_id JOIN span s ON s.trace_id=p.trace_id AND s.span_id=p.span_id
            WHERE pm.state IN ('done','failed') AND $pscope" ;;
-    *) gm_die "stats: --compare takes slow-tools, slow-hooks, slow-replies or not-right-first-time" ;;
+    *) gm_die "stats: --compare takes slow-tools, slow-hooks, slow-replies, slow-calls or not-right-first-time" ;;
   esac
   local w
   w="WITH RECURSIVE $(gm_sp_cte),
@@ -1969,7 +2673,8 @@ tot AS (SELECT COALESCE(SUM(sel),0) AS n_sel, COALESCE(SUM(1-sel),0) AS n_base F
 kv AS (SELECT pop.sel, j.key, CAST(j.value AS TEXT) AS value FROM pop, json_each(pop.attrs) AS j
        WHERE j.type NOT IN ('object','array')
          AND j.key NOT IN ('guild.posting','guild.posting.slug','guild.message.id','session.id','prompt.id','agent_id','gen_ai.tool.call.id',
-                           'gen_ai.response.id','gen_ai.conversation.id','guild.writ.sha256','guild.camp.commit','guild.notice.detail')),
+                           'gen_ai.response.id','gen_ai.conversation.id','guild.writ.sha256','guild.camp.commit','guild.notice.detail',
+                           'request_id','client_request_id','tool_use_id','guild.prompt.text','guild.response.text')),
 card AS (SELECT key FROM kv GROUP BY key HAVING COUNT(DISTINCT value)*2<=COUNT(*))"
   gm_sql <<SQL
 $w
@@ -2264,6 +2969,8 @@ case $cmd in
   trace) gm_cmd_trace "$@" ;;
   stats) gm_cmd_stats "$@" ;;
   hook) gm_cmd_hook "$@" ;;
+  collector) gm_cmd_collector "$@" ;;
+  doctor) gm_cmd_doctor "$@" ;;
   help | -h | --help) gm_usage ;;
   *) gm_usage >&2; exit 1 ;;
 esac

@@ -421,7 +421,7 @@ sha12() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -c1-12
 }
 
-attr() { printf "json_extract(attrs,'\$.\"%s\"')" "$1"; }
+attr() { printf "json_extract(%s,'\$.\"%s\"')" "${2:-attrs}" "$1"; }
 
 # The tracing design's done-when posting: a message, a Bash call that runs gm, an MCP call and a subagent.
 scenario() {
@@ -488,7 +488,7 @@ t_stats_from_a_recorded_session() {
   assert_contains "$out" "appt-v2#1 owner-field-empty-after  done" "heading" &&
     assert_contains "$out" "  first reply " "first reply" &&
     assert_contains "$out" "  exchanges 1 · turns 1 · right first time: yes" "exchanges and turns" &&
-    assert_contains "$out" "  steps 6: 1 turn · 4 tool calls (1 MCP, 1 failed) · 1 subagent · model calls need telemetry (slice 2)" "steps" &&
+    assert_contains "$out" "  steps 6: 1 turn · 4 tool calls (1 MCP, 1 failed) · 1 subagent · model calls need telemetry" "steps" &&
     assert_contains "$out" "  hooks 2 runs in " "hook overhead" &&
     assert_contains "$out" "  cost \$0.21 est., from Claude Code's status line" "cost from the status line"
   out=$(gm stats)
@@ -534,7 +534,7 @@ t_each_stats_measure() {
   out=$(gm stats 1)
   assert_contains "$out" "  first reply 41s · first notice 9.0s · total 1h00m (working 1m00s, parked 5m00s)" "times" &&
     assert_contains "$out" "  exchanges 2 (topic 2, with #2) · turns 3 · right first time: no" "exchanges, topic, turns, right first time" &&
-    assert_contains "$out" "  steps 7: 3 turns · 3 tool calls (1 MCP, 1 failed) · 1 subagent · model calls need telemetry (slice 2) · 0 Adventurer runs · 0 failed checks" "steps" &&
+    assert_contains "$out" "  steps 7: 3 turns · 3 tool calls (1 MCP, 1 failed) · 1 subagent · model calls need telemetry · 0 Adventurer runs · 0 failed checks" "steps" &&
     assert_contains "$out" "  hooks 3 runs in 0.6s · 1 Stop-guard block" "hook overhead" &&
     assert_contains "$out" "  cost \$0.75 est." "cost"
   out=$(gm stats 2)
@@ -827,6 +827,297 @@ t_concurrent_span_writes_lose_nothing() {
     assert_eq "$(db "SELECT count(*) FROM open_span WHERE name LIKE 'execute_tool %';")" 0 "none left open" &&
     assert_eq "$(db "SELECT count(DISTINCT parent_id) FROM span WHERE name='execute_tool Bash';")" 1 "all under the one turn"
   [ ! -e "$GM_HALL/spans-dropped.log" ] || fail "spans dropped under load: $(cat "$GM_HALL/spans-dropped.log")"
+}
+
+# ---- Tracing, slice 2: Claude Code's telemetry from recorded OTLP files, no model ----
+# tests/fixtures/telemetry/recorded is one real headless Claude Code 2.1.288 session (Haiku 4.5) as the collector
+# in templates/otelcol.yaml wrote it, with its hook payloads; edge is made by hand around the slice-1 scenario.
+
+# telemetry <fixture>: the collector's files for a recorded session, put where gm trace import reads them.
+telemetry() {
+  mkdir -p "$GM_HALL/telemetry"
+  cp "$ROOT/tests/fixtures/telemetry/$1/traces.jsonl" "$ROOT/tests/fixtures/telemetry/$1/logs.jsonl" "$ROOT/tests/fixtures/telemetry/$1/metrics.jsonl" "$GM_HALL/telemetry/"
+}
+
+# The recorded session's hooks, replayed through gm: a prompt, a Bash call, a second message sent while the
+# turn ran (captured with the same prompt_id), and the Stop, once both postings have a state.
+replay_recorded_hooks() {
+  local l ev
+  while IFS= read -r l; do
+    ev=$(json "SELECT json_extract($(sqlq "$l"),'\$.hook_event_name');")
+    case $ev in
+      UserPromptSubmit) printf '%s' "$l" | gm hook prompt >/dev/null ;;
+      PreToolUse) printf '%s' "$l" | gm hook pre-tool ;;
+      PostToolUse) printf '%s' "$l" | gm hook post-tool ;;
+      Stop)
+        gm notice 1 queued >/dev/null
+        gm notice 2 queued >/dev/null
+        printf '%s' "$l" | gm hook stop >/dev/null ;;
+    esac
+  done <"$ROOT/tests/fixtures/telemetry/recorded/hooks.jsonl"
+}
+
+t_telemetry_from_a_recorded_session() {
+  setup tel-recorded
+  export GM_FOCUS=appt-v2
+  replay_recorded_hooks
+  telemetry recorded
+  local out
+  out=$(gm trace import)
+  assert_contains "$out" "imported 6 spans (2 merged into gm's own, 2 folded, 2 added) and 5 events: 2 model calls (\$0.0401 est.), 1 prompts, 1 responses" "the import" &&
+    assert_contains "$out" "session 2c2c6112: 2 model calls, \$0.0401 est.; claude_code.cost.usage \$0.0401, the same to the cent" "cost matches Claude Code's own metric" || return 1
+  out=$(gm trace 1)
+  assert_contains "$out" "invoke_agent party-leader  " "the turn" &&
+    assert_contains "$out" "chat haiku-4-5 · none  in 31k (cached 14k) out 143  \$0.04  1.9s" "the first model call, with tokens and cost" &&
+    assert_contains "$out" "chat haiku-4-5 · none  in 31k (cached 31k) out 54  \$0.004  1.2s" "the second" &&
+    assert_contains "$out" "execute_tool Bash  sleep 6  " "the Bash call" || return 1
+  assert_eq "$(db "SELECT count(*) FROM span WHERE name='execute_tool Bash';")" 1 "Claude Code's tool span merged into the hook's, not added beside it" &&
+    assert_eq "$(db "SELECT $(attr span.type)||' '||$(attr guild.tool.command)||' '||$(attr gen_ai.tool.call.id) FROM span WHERE name='execute_tool Bash';")" "tool sleep 6 toolu_01X6BSepMR1cMAEE1A3GKGk6" "with Claude Code's keys added" &&
+    assert_eq "$(db "SELECT count(*) FROM span s JOIN span p ON p.span_id=s.parent_id WHERE s.name LIKE 'chat %' AND p.name='invoke_agent party-leader';")" 2 "both calls under the turn, by session.id and prompt.id" &&
+    assert_eq "$(db "SELECT count(*) FROM span WHERE name='invoke_agent party-leader';")" 1 "the interaction span is the hooks' turn" &&
+    assert_eq "$(db "SELECT $(attr guild.prompt.text) FROM span WHERE name='invoke_agent party-leader';")" "Run the shell command: sleep 6 . Then reply with only the word one." "the prompt on its turn" &&
+    assert_eq "$(db "SELECT $(attr guild.response.text) FROM span WHERE $(attr gen_ai.response.id)='req_011CffNdMYFEgp9bQ499SYEa';")" "two" "the response on its model call" &&
+    assert_eq "$(db "SELECT count(*) FROM span_link WHERE json_extract(attrs,'\$.\"guild.link\"')='claude_code';")" 6 "Claude Code's own ids kept as links: two merged, two folded, two moved into the posting's trace" &&
+    assert_eq "$(db "SELECT count(*) FROM span WHERE name LIKE 'chat %' AND $(attr guild.posting)='appt-v2#1' AND $(attr guild.camp.commit) IS NOT NULL;")" 2 "imported spans carry the posting and the camp commit" || return 1
+  out=$(gm stats 1)
+  assert_contains "$out" "· 2 model calls ·" "model calls count as steps" &&
+    assert_contains "$out" "  cost \$0.04 est., from Claude Code's telemetry: haiku-4-5/none \$0.04 (party-leader, 2 calls)" "cost by model, effort and role" &&
+    assert_contains "$out" "  tokens in 62k (45k read from cache, 17k written to it) · out 197" "tokens"
+  assert_contains "$(gm stats)" "appt-v2#1 run-shell-command-sleep" "the focus table" &&
+    assert_contains "$(gm stats | sed -n 3p)" "\$0.04" "with a cost column"
+  # The second message, typed while the turn ran, has an exchange of its own that the same Stop ends.
+  assert_eq "$(db "SELECT status FROM span WHERE name='guild.exchange' AND $(attr guild.posting)='appt-v2#2';")" ok "the queued message's exchange" &&
+    assert_eq "$(db "SELECT count(*) FROM span_link WHERE json_extract(attrs,'\$.\"guild.link\"')='answered by turn';")" 1 "linked to the turn that answered it" &&
+    assert_not_contains "$(gm stats 2)" "first reply —" "so its reply is timed"
+  # Importing the same files again, from the start, adds nothing.
+  local before
+  before=$(db "SELECT count(*), round(sum($(attr guild.cost.usd)),6), (SELECT count(*) FROM span_link) FROM span;")
+  rm -f "$GM_HALL/telemetry/imported/offsets"
+  gm trace import >/dev/null
+  assert_eq "$(db "SELECT count(*), round(sum($(attr guild.cost.usd)),6), (SELECT count(*) FROM span_link) FROM span;")" "$before" "a second import is a no-op"
+  assert_contains "$(gm trace import)" "Nothing new to import." "and with nothing new, says so"
+  [ ! -e "$GM_HALL/spans-dropped.log" ] || fail "spans dropped: $(cat "$GM_HALL/spans-dropped.log")"
+}
+
+t_telemetry_reparents_masks_and_drops_identity() {
+  scenario tel-edge
+  telemetry edge
+  local out
+  out=$(gm trace import)
+  assert_contains "$out" "imported 8 spans (4 merged into gm's own, 1 folded, 3 added) and 8 events: 3 model calls (\$0.2700 est.), 1 prompts, 1 responses" "the import" &&
+    assert_contains "$out" "session s1: 3 model calls, \$0.2700 est.; claude_code.cost.usage \$0.2700, the same to the cent" "the cost check" || return 1
+  out=$(gm trace 1)
+  assert_contains "$out" "chat opus-5-5 · high  in 31k (cached 29k) out 1.2k  \$0.20  9.0s" "the turn's model call, model and effort" &&
+    assert_contains "$out" "invoke_agent Explore  haiku-4-5 · none  " "the subagent" &&
+    assert_contains "$out" "chat haiku-4-5 · none  in 12k (cached 11k) out 900  \$0.02  11s" "its model call" &&
+    assert_contains "$out" "chat opus-5-5 · high  in 33k (cached 33k) out 300  \$0.05  5.0s" "a call whose span was lost, from its api_request event" &&
+    assert_contains "$out" "execute_tool Bash  curl -H \"Authorization: <REDACTED:authorization>\" https://u:…" "a tool call no hook saw" &&
+    assert_contains "$(printf '%s\n' "$out" | grep 'invoke_agent Explore')" "  \$0.02" "a subagent's cost is its own calls'" || return 1
+  assert_eq "$(db "SELECT $(attr guild.tool.command) FROM span WHERE $(attr gen_ai.tool.call.id)='t9';")" \
+    "curl -H \"Authorization: <REDACTED:authorization>\" https://u:<REDACTED:url-password>@example.com --password <REDACTED:argument>" "its command masked" || return 1
+  assert_eq "$(db "SELECT p.name FROM span s JOIN span p ON p.span_id=s.parent_id WHERE $(attr gen_ai.response.id s.attrs)='req_edge_subagent_0002';")" "invoke_agent Explore" "a subagent's call hangs under its invoke_agent span, by agent_id" &&
+    assert_eq "$(db "SELECT p.name FROM span s JOIN span p ON p.span_id=s.parent_id WHERE $(attr gen_ai.response.id s.attrs)='req_edge_lost_span_0003';")" "invoke_agent party-leader" "the lost span's call under its turn" &&
+    assert_eq "$(db "SELECT count(*) FROM span WHERE name LIKE 'execute_tool %';")" 5 "four hook tool spans merged, one added" &&
+    assert_eq "$(db "SELECT $(attr guild.tool.command) FROM span WHERE $(attr gen_ai.tool.call.id)='t1';")" "GITHUB_TOKEN=<REDACTED:assignment> gm notice 1 started" "the hook's masked command kept" &&
+    assert_eq "$(db "SELECT $(attr guild.mcp.server) FROM span WHERE $(attr gen_ai.tool.call.id)='t2';")" "jira" "the MCP call" &&
+    assert_eq "$(db "SELECT json_extract(attrs,'\$.events[0].name')||' '||json_extract(attrs,'\$.events[0].attempt')||' '||$(attr guild.attempt) FROM span WHERE $(attr gen_ai.response.id)='req_edge_call_one_0001';")" "gen_ai.request.attempt 2 2" "a retry is an event on its call" &&
+    assert_eq "$(db "SELECT $(attr gen_ai.usage.input_tokens)||' '||$(attr gen_ai.usage.cache_read.input_tokens)||' '||$(attr gen_ai.usage.cache_write.input_tokens)||' '||$(attr gen_ai.request.model) FROM span WHERE $(attr gen_ai.response.id)='req_edge_lost_span_0003';")" \
+      "33103 33000 100 claude-opus-5-5" "GenAI input tokens include the cached ones; the date suffix is dropped" &&
+    assert_eq "$(db "SELECT group_concat(json_extract(e.value,'\$.name'), ' ') FROM span, json_each(json_extract(attrs,'\$.events')) e WHERE name='invoke_agent party-leader';")" "api_error" "an API error is an event on the turn" &&
+    assert_eq "$(db "SELECT group_concat(json_extract(e.value,'\$.name'), ' ') FROM span, json_each(json_extract(attrs,'\$.events')) e WHERE name='invoke_agent Explore';")" "subagent_completed" "a finished subagent is an event on it" &&
+    assert_eq "$(db "SELECT json_extract(e.value,'\$.post_tokens') FROM open_span o, json_each(json_extract(o.attrs,'\$.events')) e WHERE o.key='session:s1' AND json_extract(e.value,'\$.name')='compaction';")" "30000" "a compaction is an event on the session" &&
+    assert_eq "$(db "SELECT $(attr guild.prompt.text) FROM span WHERE name='invoke_agent party-leader';")" "my key is <REDACTED:api-key> and password=<REDACTED:assignment>" "the prompt, masked" &&
+    assert_eq "$(db "SELECT $(attr guild.response.text) FROM span WHERE $(attr gen_ai.response.id)='req_edge_lost_span_0003';")" "Fixed. I did not print the token <REDACTED:github-token>." "the response, masked" || return 1
+  local dump s
+  dump=$(sqlite3 "$GM_HALL/register.db" .dump)
+  for s in patron@example.com -identity user_identity user.email user.account organization.id FAKEfake hunter2 abc.def ':pw@'; do
+    case $dump in *"$s"*) fail "the register holds $s" ;; esac
+  done
+  out=$(gm stats 1)
+  assert_contains "$out" "  cost \$0.27 est., from Claude Code's telemetry: opus-5-5/high \$0.25 (party-leader, 2 calls) · haiku-4-5/none \$0.02 (party-leader, 1 call)" "telemetry's cost replaces the status line's, never adds to it" &&
+    assert_contains "$out" "· 3 model calls ·" "three model calls"
+  assert_contains "$(gm trace 1 | head -n 1)" "\$0.27 est." "the trace's total"
+  out=$(gm stats --compare slow-calls --over 10s)
+  assert_contains "$out" "selection: 1 chat spans (model calls) slower than 10s · baseline: 2 others" "slow model calls" &&
+    assert_contains "$(printf '%s\n' "$out" | tr -s ' ')" "gen_ai.request.reasoning.level high 0.0% 100.0%" "and what sets them apart"
+}
+
+t_telemetry_import_reads_each_line_once() {
+  setup tel-offsets
+  local t=$GM_HALL/telemetry src=$ROOT/tests/fixtures/telemetry/recorded first rest
+  mkdir -p "$t"
+  cp "$src/traces.jsonl" "$src/metrics.jsonl" "$t/"
+  first=$(head -n 1 "$src/logs.jsonl")
+  rest=$(tail -n +2 "$src/logs.jsonl")
+  printf '%s\n%s' "$first" "${rest:0:300}" >"$t/logs.jsonl"
+  gm trace import >/dev/null || fail "a line still being written broke the import"
+  assert_eq "$(awk -F '\t' '$3 ~ /logs.jsonl$/ {print $2}' "$t/imported/offsets")" "$((${#first} + 1))" "it stops before the unfinished line" &&
+    assert_eq "$(db "SELECT count(*) FROM span WHERE name LIKE 'chat %' AND $(attr guild.cost.usd) IS NOT NULL;")" 1 "and folds what was complete"
+  printf '%s\n' "${rest:300}" >>"$t/logs.jsonl"
+  gm trace import >/dev/null
+  assert_eq "$(db "SELECT count(*), round(sum($(attr guild.cost.usd)),7) FROM span WHERE name LIKE 'chat %';")" "2|0.0400932" "the rest arrives in the next import"
+  # The collector rotates by renaming; the renamed file is read on from where it stopped, then moved aside.
+  mv "$t/logs.jsonl" "$t/logs-2026-10-03T13-21-40.000.jsonl"
+  : >"$t/logs.jsonl"
+  gm trace import >/dev/null
+  [ -f "$t/imported/logs-2026-10-03T13-21-40.000.jsonl" ] && [ ! -e "$t/logs-2026-10-03T13-21-40.000.jsonl" ] || fail "a rotated file read to its end is moved to imported/"
+  assert_eq "$(db "SELECT count(*) FROM span WHERE name LIKE 'chat %';")" 2 "and nothing is read twice"
+  touch -t 202601010000 "$t/imported/logs-2026-10-03T13-21-40.000.jsonl"
+  gm trace import >/dev/null
+  [ ! -e "$t/imported/logs-2026-10-03T13-21-40.000.jsonl" ] || fail "imported files are deleted after 14 days"
+}
+
+t_open_sends_telemetry_only_to_loopback() {
+  setup tel-open
+  local out bad n=0
+  out=$(gm open appt-v2 --no-launch)
+  assert_contains "$out" "Start its Party Leader from a terminal with: gm open appt-v2" "how to start it" &&
+    assert_contains "$out" " -u OTEL_EXPORTER_OTLP_HEADERS " "inherited headers cleared" &&
+    assert_contains "$out" " CLAUDE_CODE_ENABLE_TELEMETRY=1 CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1 " "telemetry and spans on" &&
+    assert_contains "$out" " OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 " "the loopback collector" &&
+    assert_contains "$out" " OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:4318/v1/traces " "every signal's own endpoint replaced" &&
+    assert_contains "$out" " OTEL_RESOURCE_ATTRIBUTES=guild.focus=appt-v2,guild.role=party-leader " "the focus and role on every signal" &&
+    assert_contains "$out" " OTEL_LOG_USER_PROMPTS=1 OTEL_LOG_ASSISTANT_RESPONSES=1 OTEL_LOG_TOOL_DETAILS=1 claude --name appt-v2" "prompts, responses and tool details captured" &&
+    assert_contains "$out" " -u OTEL_LOG_TOOL_CONTENT -u OTEL_LOG_RAW_API_BODIES " "tool output and raw bodies not"
+  assert_contains "$(GM_OTEL_PORT=4999 gm open appt-v2 --no-launch)" "OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4999 " "GM_OTEL_PORT moves it"
+  for bad in http://example.com:4318 http://127.0.0.1.evil.example:4318 http://127.0.0.1@evil.example:4318 'http://localhost:4318@evil.example' \
+    http://10.0.0.1:4318 https://otel.example.com 'http://127.0.0.1:4318 http://evil.example' ftp://127.0.0.1:4318; do
+    n=$((n + 1))
+    out=$(GM_OTEL_ENDPOINT=$bad gm open "other$n" --repo "$REPO" --no-launch 2>&1) && fail "$bad was accepted"
+    assert_contains "$out" "telemetry goes only to 127.0.0.1, localhost or ::1" "$bad refused"
+    assert_eq "$(db "SELECT count(*) FROM focus WHERE name='other$n';")" 0 "nothing made for $bad"
+  done
+  for bad in http://localhost:4318 'http://[::1]:4318' http://127.0.0.1:4318/; do
+    GM_OTEL_ENDPOINT=$bad gm open appt-v2 --no-launch >/dev/null 2>&1 || fail "$bad was refused"
+  done
+  mkdir -p "$WORK/tel-open/home/.claude"
+  printf '{"env":{"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT":"https://otel.example.com/v1/logs"}}' >"$WORK/tel-open/home/.claude/settings.json"
+  out=$(HOME=$WORK/tel-open/home gm open appt-v2 --no-launch 2>&1) && fail "settings that send telemetry elsewhere were accepted"
+  assert_contains "$out" "settings.json: OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=https://otel.example.com/v1/logs" "and say which"
+  printf '{"env":{"OTEL_EXPORTER_OTLP_ENDPOINT":"http://localhost:4318"}}' >"$WORK/tel-open/home/.claude/settings.json"
+  HOME=$WORK/tel-open/home gm open appt-v2 --no-launch >/dev/null 2>&1 || fail "loopback settings were refused"
+  assert_contains "$(GM_TELEMETRY=off gm open appt-v2 --no-launch)" "' && claude --name appt-v2" "GM_TELEMETRY=off starts without it"
+}
+
+# Runs a command on a pseudo-terminal, so gm open launches; BSD and util-linux script differ.
+on_a_tty() {
+  if script -q /dev/null true >/dev/null 2>&1; then
+    script -q /dev/null "$@"
+  elif script -qec true /dev/null >/dev/null 2>&1; then
+    local c='' a
+    for a in "$@"; do c="$c $(printf '%q' "$a")"; done
+    script -qec "$c" /dev/null
+  else
+    return 2
+  fi
+}
+
+t_open_launches_claude_with_the_telemetry_env() {
+  setup tel-launch
+  local envf=$WORK/tel-launch/env.txt rc=0
+  [ -x "$ROOT/tests/fixtures/fake-claude" ] || fail "tests/fixtures/fake-claude is not executable"
+  GM_CLAUDE=$ROOT/tests/fixtures/fake-claude GM_FAKE_CLAUDE_ENV=$envf GM_OTEL_PORT=1 \
+    OTEL_EXPORTER_OTLP_HEADERS=x-api-key=sekrit OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://otel.example.com/v1/traces OTEL_LOG_RAW_API_BODIES=1 \
+    on_a_tty bash "$GM" open appt-v2 >/dev/null 2>&1 || rc=$?
+  if [ "$rc" = 2 ]; then
+    printf '    (no script(1) to make a terminal; skipped)\n'
+    return 0
+  fi
+  [ -s "$envf" ] || fail "claude was not started" || return 1
+  local e
+  e=$(cat "$envf")
+  assert_contains "$e" "OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:1" "the loopback endpoint" &&
+    assert_contains "$e" "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:1/v1/traces" "an inherited signal endpoint replaced" &&
+    assert_contains "$e" "OTEL_RESOURCE_ATTRIBUTES=guild.focus=appt-v2,guild.role=party-leader" "the resource attributes" &&
+    assert_contains "$e" "OTEL_LOG_ASSISTANT_RESPONSES=1" "responses captured" &&
+    assert_not_contains "$e" "sekrit" "inherited headers cleared" &&
+    assert_not_contains "$e" "OTEL_LOG_RAW_API_BODIES" "raw API bodies not captured" &&
+    assert_not_contains "$e" "otel.example.com" "nothing points elsewhere"
+}
+
+t_doctor_checks_loopback_and_the_collector() {
+  setup tel-doctor
+  local out
+  out=$(GM_OTELCOL=$WORK/none GM_OTEL_PORT=1 gm doctor 2>&1; printf 'rc=%s' "$?")
+  assert_contains "$out" "ok    telemetry endpoint http://127.0.0.1:1 is loopback" "loopback endpoint" &&
+    assert_contains "$out" "ok    collector configuration $ROOT/templates/otelcol.yaml: listens on loopback only, exports to files only" "the shipped configuration" &&
+    assert_contains "$out" "FAIL  no OpenTelemetry Collector found" "no collector installed" &&
+    assert_contains "$out" "FAIL  no collector answers at http://127.0.0.1:1: start it with gm collector" "none answering" &&
+    assert_contains "$out" "rc=1" "a failure fails"
+  assert_contains "$(GM_OTEL_ENDPOINT=http://example.com:4318 gm doctor 2>&1)" "FAIL  telemetry endpoint http://example.com:4318 is not loopback" "a remote endpoint"
+  cat >"$WORK/tel-doctor/bad.yaml" <<'YAML'
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+exporters:
+  otlphttp:
+    endpoint: https://otel.example.com
+  file:
+    path: /tmp/x.jsonl
+extensions:
+  health_check: {}
+service:
+  telemetry:
+    metrics:
+      level: detailed
+YAML
+  out=$(GM_COLLECTOR_CONFIG=$WORK/tel-doctor/bad.yaml gm doctor 2>&1 || true)
+  assert_contains "$out" "listens on 0.0.0.0:4318, not loopback" "a receiver open to the network" &&
+    assert_contains "$out" "listens on https://otel.example.com, not loopback" "an endpoint elsewhere" &&
+    assert_contains "$out" "exporter otlphttp is not a file exporter" "an exporter that sends" &&
+    assert_not_contains "$out" "exporter file is not" "a file exporter is fine" &&
+    assert_contains "$out" "extension health_check" "an extension" &&
+    assert_contains "$out" "serves its own metrics" "the collector's own metrics"
+  mkdir -p "$WORK/tel-doctor/home/.claude"
+  printf '{"env":{"BETA_TRACING_ENDPOINT":"https://trace.example.com"}}' >"$WORK/tel-doctor/home/.claude/settings.json"
+  assert_contains "$(HOME=$WORK/tel-doctor/home gm doctor 2>&1)" "FAIL  Claude Code settings send telemetry elsewhere: $WORK/tel-doctor/home/.claude/settings.json: BETA_TRACING_ENDPOINT=https://trace.example.com" "settings"
+}
+
+# post_otlp <port> <path> <file>: an OTLP/HTTP JSON export to 127.0.0.1, through bash's /dev/tcp; prints the status.
+post_otlp() {
+  local n
+  n=$(wc -c <"$3" | tr -d ' ')
+  (
+    exec 3<>"/dev/tcp/127.0.0.1/$1" || exit 1
+    printf 'POST %s HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: %s\r\nConnection: close\r\n\r\n' "$2" "$n" >&3
+    cat "$3" >&3
+    IFS=' ' read -r -t 5 _ code _ <&3 && printf '%s' "$code"
+  ) 2>/dev/null
+}
+
+t_collector_masks_secrets_and_drops_identity() {
+  local bin=${GM_OTELCOL:-$(command -v otelcol-contrib 2>/dev/null || true)}
+  [ -n "$bin" ] || { printf '    (no otelcol-contrib installed or GM_OTELCOL set; skipped)\n'; return 0; }
+  scenario tel-collector
+  local port=$((20000 + RANDOM % 20000)) pid i sig out files
+  GM_OTELCOL=$bin GM_OTEL_PORT=$port gm collector >"$WORK/tel-collector/collector.log" 2>&1 &
+  pid=$!
+  for i in $(seq 1 40); do
+    [ "$(printf '{"resourceLogs":[]}' >"$WORK/tel-collector/empty.json"; post_otlp "$port" /v1/logs "$WORK/tel-collector/empty.json")" = 200 ] && break
+    sleep 0.25
+  done
+  out=$(GM_OTELCOL=$bin GM_OTEL_PORT=$port gm doctor 2>&1 || true)
+  assert_contains "$out" "ok    a collector answers at http://127.0.0.1:$port" "doctor sees it" &&
+    assert_contains "$out" "ok    the collector accepts its configuration" "and its configuration"
+  for sig in traces logs metrics; do
+    assert_eq "$(post_otlp "$port" "/v1/$sig" "$ROOT/tests/fixtures/telemetry/edge/$sig.jsonl")" 200 "$sig accepted"
+  done
+  for i in $(seq 1 40); do
+    [ -s "$GM_HALL/telemetry/traces.jsonl" ] && [ -s "$GM_HALL/telemetry/logs.jsonl" ] && [ -s "$GM_HALL/telemetry/metrics.jsonl" ] && break
+    sleep 0.25
+  done
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  files=$(cat "$GM_HALL"/telemetry/*.jsonl)
+  assert_contains "$files" "<REDACTED:api-key>" "a prompt's key masked by the collector" &&
+    assert_contains "$files" "<REDACTED:github-token>" "a response's token masked" &&
+    assert_contains "$files" "--password <REDACTED:argument>" "a command's password masked"
+  for i in patron@example.com -identity user_identity user.email user.account organization.id FAKEfake hunter2 abc.def; do
+    case $files in *"$i"*) fail "the collector wrote $i" ;; esac
+  done
+  assert_contains "$(gm trace import)" "3 model calls (\$0.2700 est.)" "its files import"
 }
 
 t_shellcheck() {

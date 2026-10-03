@@ -13,7 +13,7 @@ This repository is at its beginning. The vocabulary comes first, because every l
 - `honeycomb/` is a research site on Honeycomb, the hosted observability service: its C4 model, data model, sampling, engineering decisions, and lessons for Guildmaster's tracing. Open `honeycomb/index.html` from disk.
 - `vision/` holds Guildmaster's own design material: the patron's notes, the requirements drawn from them, a Firstmate-informed consultation, the [step 1 design](vision/step-1-design.md), and the [tracing design](vision/tracing-design.md) with its [research](vision/tracing-research.md).
 - [vision/roadmap.md](vision/roadmap.md) is the tracked build plan: each step's goal, scope, done-when criteria, status and links.
-- `bin/gm` is the `gm` command; `templates/` holds the first charter, ticket playbook and repository rules it copies into the Guildhall; `tests/` holds its test suite (with the redaction cases and a schema-1 register to migrate) and an end-to-end demonstration.
+- `bin/gm` is the `gm` command; `templates/` holds the first charter, ticket playbook and repository rules it copies into the Guildhall, and the local OpenTelemetry Collector's configuration (`otelcol.yaml`); `tests/` holds its test suite (with the redaction cases, a schema-1 register to migrate, and recorded Claude Code telemetry under `tests/fixtures/telemetry/`) and an end-to-end demonstration.
 
 ## Step 1: one ticket that never forgets
 
@@ -123,8 +123,84 @@ appt-v2#12 fix-owner-empty  done  2h14m  1 exchange  $0.21 est.
 
 `--compare` takes `slow-tools` (over 30s by default), `slow-hooks` (1s), `slow-replies` (2m) and `not-right-first-time`.
 Every measure is computed from the spans when asked; none is stored.
-Per-call model, token and cost figures need Claude Code's own telemetry, which is slice 2; until then cost is the status line's estimate per turn.
+Per-call model, token and cost figures come from Claude Code's own telemetry (slice 2, below); without it, cost is the status line's estimate per turn.
 Postings made before this step have their ledgers (`gm show`) and no spans.
+
+## Tracing: slice 2, Claude Code's telemetry
+
+Claude Code reports every model call (model, effort, tokens, cost), tool call and prompt as OpenTelemetry traces, logs and metrics.
+`gm open` sends them to a local OpenTelemetry Collector on `127.0.0.1` and nowhere else; the collector deletes who you are, masks secrets and writes files under the Guildhall; `gm trace import` folds those files into the register beside the spans of slice 1.
+The design is build slice 2 of [vision/tracing-design.md](vision/tracing-design.md#as-built-in-slice-2).
+
+### Install the collector
+
+The collector is the official OpenTelemetry Collector, contrib distribution (it has the file exporter and the transform processor), one binary from its GitHub releases; there is no Homebrew formula for it.
+On an Apple-silicon Mac (pick the `darwin_amd64` or `linux_*` file otherwise):
+
+```sh
+v=0.162.0 f=otelcol-contrib_${v}_darwin_arm64.tar.gz
+curl -fLO https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v$v/$f
+curl -fL https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v$v/$f.sha256   # compare with:
+shasum -a 256 $f
+tar xzf $f otelcol-contrib && mv otelcol-contrib ~/.local/bin/   # any directory on your PATH
+```
+
+`gm` looks for `otelcol-contrib` on your `PATH`; `GM_OTELCOL` names another path.
+It was built and tested with 0.162.0. No binary is kept in this repository.
+
+### Run it
+
+```sh
+gm collector     # in a terminal tab of its own; Ctrl-C stops it
+gm doctor        # checks the endpoint is loopback, the configuration sends nothing out, and the collector answers
+gm open appt-v2  # the Party Leader now exports telemetry to it
+```
+
+`gm collector` runs `templates/otelcol.yaml` in the foreground: it listens on `127.0.0.1:4318` only (`GM_OTEL_PORT` moves it), deletes `user.email`, `user.id`, `user.account_uuid`, `user.account_id` and `organization.id` from everything, masks the same secret patterns as `gm`'s own redaction in prompts, responses and commands, and writes `traces.jsonl`, `logs.jsonl` and `metrics.jsonl` under `~/.guildmaster/telemetry/`, rotated at 20 MB and kept 14 days.
+It has no exporter except those files, and serves no telemetry of its own.
+
+`gm open` sets, on the `claude` process it starts and nowhere else, `CLAUDE_CODE_ENABLE_TELEMETRY`, the OTLP exporter pointed at `http://127.0.0.1:4318` (every signal's own endpoint too, and any inherited headers cleared), `OTEL_RESOURCE_ATTRIBUTES=guild.focus=<focus>,guild.role=party-leader`, and `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_ASSISTANT_RESPONSES` and `OTEL_LOG_TOOL_DETAILS`, so prompts and responses are captured to find which prompt works best.
+Tool output (`OTEL_LOG_TOOL_CONTENT`) and raw API bodies are not.
+It refuses to start a session when `GM_OTEL_ENDPOINT` is anything but `127.0.0.1`, `localhost` or `::1`, or when your Claude Code settings (`~/.claude/settings.json` or managed settings) send telemetry elsewhere, and warns when no collector answers.
+`GM_TELEMETRY=off gm open appt-v2` starts a session without telemetry.
+Your other Claude Code sessions are untouched.
+
+### Read it
+
+`gm trace` and `gm stats` import whatever the collector has written since last time before they answer; `gm trace import` does it by hand and says what it did:
+
+```
+$ gm trace import
+imported 6 spans (2 merged into gm's own, 2 folded, 2 added) and 5 events: 2 model calls ($0.0401 est.), 1 prompts, 1 responses
+session 2c2c6112: 2 model calls, $0.0401 est.; claude_code.cost.usage $0.0401, the same to the cent
+```
+
+Each model call becomes a `chat` span under the turn that made it (a subagent's under its `invoke_agent` span), and Claude Code's tool and turn spans merge into the ones the hooks already wrote, matched by `session.id`, `prompt.id`, `tool_use_id` and `agent_id`.
+The masked prompt is kept on its turn and the masked response on its model call.
+
+```
+$ gm trace appt-v2#12
+appt-v2#12 fix-owner-empty  done  2h14m  1 exchange  $0.27 est.
+├─ exchange 1  "the owner field is empty after save, fix it"  reply in 41s
+│  ├─ hook UserPromptSubmit  capture  0.2s
+│  ├─ invoke_agent party-leader  opus-5-5 · high  41s  $0.27
+│  │  ├─ chat opus-5-5 · high  in 31k (cached 29k) out 1.2k  $0.20  9.0s
+│  │  ├─ execute_tool Agent  Explore  haiku-4-5  14s
+│  │  │  └─ invoke_agent Explore  haiku-4-5 · none  13s  $0.02
+│  │  │     └─ chat haiku-4-5 · none  in 12k (cached 11k) out 900  $0.02  11s
+│  │  └─ chat opus-5-5 · high  in 33k (cached 33k) out 300  $0.05  5.0s
+│  └─ hook Stop  guard allow  0.2s
+└─ notice done: fixed
+
+$ gm stats appt-v2#12
+  …
+  cost $0.27 est., from Claude Code's telemetry: opus-5-5/high $0.25 (party-leader, 2 calls) · haiku-4-5/none $0.02 (party-leader, 1 call)
+  tokens in 76k (73k read from cache, 3.1k written to it) · out 2.4k
+```
+
+When telemetry is on, a turn's cost is the sum of its model calls and the status line's estimate is not added.
+`gm stats --compare slow-calls` asks what sets slow model calls apart.
+Cost is Claude Code's own estimate, not billing.
 
 ## Prior art
 
