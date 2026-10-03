@@ -22,7 +22,8 @@ The design, and the Claude Code contracts it rests on, are in [vision/step-1-des
 
 ### Install
 
-`gm` needs bash, `sqlite3` 3.38 or later (for its JSON functions), git, and Claude Code.
+`gm` needs bash, `sqlite3` 3.38 or later (for its JSON functions), git, Claude Code, and herdr (the terminal workspace manager, `herdr` on your `PATH`; its official install is `curl -fsSL https://herdr.dev/install.sh | sh`, or `brew install herdr`, see <https://herdr.dev/docs/install/>).
+The first `gm` command you run in a terminal checks all of this for you, see First run below.
 
 ```sh
 git clone <this repository> ~/src/guildmaster
@@ -87,6 +88,33 @@ bash tests/demo.sh   # a real Claude Code session in a throwaway repository; use
 
 The demo makes a throwaway repository and Guildhall under a temporary directory, sends ten patron messages in a row and checks that all ten are recorded with their words and states, then kills a session mid-posting and shows a fresh session resuming from the register when told only `continue`.
 
+## First run
+
+The first time a `gm` command that needs the Guildhall (`open`, `post`, `list`, `trace`, and the rest) runs in a terminal, `gm` checks what it needs and says what is there and what is not, before going on with your command:
+
+```
+gm: first run. Checking what gm needs; this happens once. gm init runs it again, gm doctor shows the state.
+  ok       bash 5.3.15(1)-release
+  ok       sqlite3 3.51.0 (JSON functions work)
+  ok       git version 2.50.1
+  ok       Claude Code 2.1.288 at /Users/you/.local/bin/claude
+  ok       herdr 0.9.1 at /Users/you/.local/bin/herdr
+  ok       standard tools (sed awk tr grep mktemp and the rest)
+  ok       a SHA-256 tool
+  missing  otelcol-contrib (the OpenTelemetry Collector): not found
+
+otelcol-contrib (the OpenTelemetry Collector, tracing slice 2, v0.162.0) is not installed.
+  Without it, tracing will record gm's own spans but not Claude Code's per-call model, tokens and cost; ...
+  i  install it now: the official GitHub release, SHA-256 checked, into a directory you own, no sudo
+  s  skip it, I am fine without it
+  l  ask me again later (gm init asks again)
+```
+
+- **Required** pieces (bash, sqlite3 3.38+ with its JSON functions, git, Claude Code, herdr, `sed` and the other standard tools) are never asked about: if one is missing, `gm` stops with what to install and nothing is recorded.
+- **Optional** pieces (today, the collector) are asked about. *Install* downloads the pinned release for your OS and CPU from the official GitHub releases, checks its SHA-256 against the published checksum, and puts `otelcol-contrib` in `~/.local/bin` (or the directory you type, or `--bin-dir`), never with `sudo`; it reports each step, and on any failure, including a checksum that does not match, removes everything it fetched and installs nothing. *Skip* means you are fine without it. *Later* asks again at the next `gm init`.
+- Your answer is recorded in `setup.conf` in the Guildhall, a plain `key: value` file you can read and edit (`collector: installed | skipped | later`, and where `gm` put the collector). Later commands respect it and never nag; `gm doctor` keeps reporting the state, and `gm init` (with `--again` to revisit a skip) changes it.
+- It never asks without a terminal, and never in a hook or the status line, so nothing blocks. Scripts answer with `gm init --yes` (install what is missing) or `gm init --no` (go without), and `--bin-dir DIR` chooses where; without an answer, `gm init` only reports.
+
 ## Tracing: slice 1
 
 Each posting is one trace, kept as span rows in the register beside its ledger, so nothing new is installed and nothing leaves the machine.
@@ -134,7 +162,7 @@ The design is build slice 2 of [vision/tracing-design.md](vision/tracing-design.
 
 ### Install the collector
 
-The collector is the official OpenTelemetry Collector, contrib distribution (it has the file exporter and the transform processor), one binary from its GitHub releases; there is no Homebrew formula for it.
+`gm init` does this for you (see First run above); by hand, it goes like this. The collector is the official OpenTelemetry Collector, contrib distribution (it has the file exporter and the transform processor), one binary from its GitHub releases; there is no Homebrew formula for it.
 On an Apple-silicon Mac (pick the `darwin_amd64` or `linux_*` file otherwise):
 
 ```sh

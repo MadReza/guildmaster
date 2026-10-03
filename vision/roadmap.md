@@ -49,6 +49,8 @@ The Adventurer spans the design defines are built with step 3, where Adventurers
 
 **Done when** (proposed in [tracing-design.md](tracing-design.md#build-plan), for the patron's agreement): the patron sends a message, the Party Leader answers it with a tool call, an MCP call and a subagent, and `gm trace` shows that tree with its times, tool names, model and effort; `gm stats` gives time to first reply, exchanges, steps, and tokens and cost per posting by model and effort; `gm stats --compare` ranks what sets a selection apart; `gm stats --by-prompt` compares outcomes per prompt version; Jaeger shows the same posting as a waterfall; and nothing is sent anywhere but `127.0.0.1`.
 
+**Setup.** A quick first run: the first `gm` command in a terminal checks bash, sqlite3, git, Claude Code, herdr and the collector, says what is missing and what that costs, and asks the patron to install the collector, skip it or decide later, recording the answer in `setup.conf` in the Guildhall; `gm init` runs it again and `gm doctor` keeps reporting it. Herdr is required; the integration itself is built elsewhere. In review: PR_URL
+
 ## Step 3: Adventurers and enforced rules
 
 **Status:** Planned. No PR yet. It was the next step until the patron moved tracing ahead of it on 2026-09-30.
