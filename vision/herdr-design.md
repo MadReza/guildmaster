@@ -67,13 +67,13 @@ Any other `gm` command run in a terminal says once, on stderr, that no Party Lea
 ```
 herdr session  (GM_HERDR_SESSION, default "default": the one plain `herdr` attaches to)
 └─ workspace "guild"  (GM_HERDR_WORKSPACE)
-   ├─ tab "guildmaster"   the front desk: a shell in the Guildhall
+   ├─ tab "guildmaster"   the front desk: the Guildmaster, claude --name guildmaster, in the Guildhall's front-desk folder
    ├─ tab "appt-v2"       Party Leader appt-v2: claude --name appt-v2, in its camp
    │   └─ (step 3) Adventurer and Scout panes, split below their Party Leader
    └─ tab "saved-views"   Party Leader saved-views
 ```
 
-- **One workspace for the guild.** Its first tab is renamed `guildmaster`. It is the front desk: today a shell in the Guildhall for `gm roster`, `gm list` and the rest, and at step 4 the place where the Guildmaster session sits.
+- **One workspace for the guild.** Its first tab is renamed `guildmaster`. It is the front desk, where the Guildmaster session sits, kept running by the muster like a Party Leader ([zero-touch-start.md](zero-touch-start.md); until then it was a shell in the Guildhall).
 - **One tab per Party Leader**, labelled with the focus name, its pane started in the camp. The patron switches tabs to talk to a Party Leader, as before, but never opens them by hand.
 - **Adventurers and Scouts** (steps 3 and later, proposed here, not built): each one runs in a pane split below its Party Leader in the focus's tab (`herdr pane split <leader pane> --direction down --cwd <camp>`). The patron then sees a Party Leader and its workers together. Each pane is recorded in the same `endpoint` table under `adventurer:<focus>#<n>` or `scout:<focus>#<n>`. A worker is not relaunched by the muster: it is ephemeral, so a dead one ends its run and its posting is reported instead. Step 3 settles that rule with the patron.
 
@@ -139,7 +139,7 @@ When Claude Code exits, the pane drops back to its shell. That husk is what the 
 | `gm open <focus>` | the whole muster, reporting that focus's line, and where to see it in herdr |
 | `gm up` | one line per focus |
 | any other `gm` command in a terminal (`gm list`, `gm roster`, and the rest) | only what it started, or could not; nothing when all are running. Never from a hook, the status line, a pipe, or inside a Party Leader (`GM_FOCUS` or `CLAUDECODE` set); `GM_HERDR_AUTO=off` turns it off |
-| the end of `gm init` | as above, and on macOS the hint `gm autostart on` |
+| the end of `gm init` | as above, and on macOS it turns autostart on, unless the patron turned it off ([zero-touch-start.md](zero-touch-start.md)) |
 | `gm autostart on [--every MINUTES]` | installs a launchd user agent, `~/Library/LaunchAgents/com.guildmaster.up.plist` (with a suffix for any other `GM_HALL`), that runs `gm up --quiet` at login (`RunAtLoad`) and every 5 minutes (`StartInterval`, `--every` changes it). It carries the current `PATH`, `GM_HALL` and herdr variables, because launchd's own `PATH` finds neither herdr nor claude, and writes to `autostart.log` in the Guildhall. `gm autostart off` removes it; `gm autostart` shows it. On Linux, run `gm up --quiet` from a systemd user timer (not built) |
 
 So after a reboot or a herdr restart, the agent starts herdr's server headless, and herdr restores the guild workspace with husks. The muster then starts every Party Leader again in its own pane, before the patron types anything.
@@ -225,4 +225,4 @@ By hand, on 2026-10-03, against real herdr 0.9.1 and Claude Code 2.1.288, in an 
 5. `gm close` refused the live one.
 6. The lab was torn down, and the helper confirmed the default session was unchanged.
 
-Not in this change: the Guildmaster session at the front desk (step 4), Adventurer and Scout panes (step 3), a Linux timer, and a desktop notification for a held Party Leader.
+Not in this change: the Guildmaster session at the front desk (built since, in [zero-touch-start.md](zero-touch-start.md)), Adventurer and Scout panes (step 3), a Linux timer, and a desktop notification for a held Party Leader.
