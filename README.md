@@ -11,9 +11,9 @@ This repository is at its beginning. The vocabulary comes first, because every l
 - [TERMINOLOGY.md](TERMINOLOGY.md) is the single owner of the project's vocabulary. Read it before writing anything else here.
 - `firstmate/` holds the research into the prior system this one succeeds, kept separate from Guildmaster's own design.
 - `honeycomb/` is a research site on Honeycomb, the hosted observability service: its C4 model, data model, sampling, engineering decisions, and lessons for Guildmaster's tracing. Open `honeycomb/index.html` from disk.
-- `vision/` holds Guildmaster's own design material: the patron's notes, the requirements drawn from them, a Firstmate-informed consultation, the [step 1 design](vision/step-1-design.md), and the [tracing design](vision/tracing-design.md) with its [research](vision/tracing-research.md).
+- `vision/` holds Guildmaster's own design material: the patron's notes, the requirements drawn from them, a Firstmate-informed consultation, the [step 1 design](vision/step-1-design.md), the [herdr design](vision/herdr-design.md) (Party Leaders kept running and brought back), and the [tracing design](vision/tracing-design.md) with its [research](vision/tracing-research.md).
 - [vision/roadmap.md](vision/roadmap.md) is the tracked build plan: each step's goal, scope, done-when criteria, status and links.
-- `bin/gm` is the `gm` command; `templates/` holds the first charter, ticket playbook and repository rules it copies into the Guildhall, and the local OpenTelemetry Collector's configuration (`otelcol.yaml`); `tests/` holds its test suite (with the redaction cases, a schema-1 register to migrate, and recorded Claude Code telemetry under `tests/fixtures/telemetry/`) and an end-to-end demonstration.
+- `bin/gm` is the `gm` command; `templates/` holds the first charter, ticket playbook and repository rules it copies into the Guildhall, and the local OpenTelemetry Collector's configuration (`otelcol.yaml`); `tests/` holds its test suite (with the redaction cases, a schema-1 register to migrate, and recorded Claude Code telemetry under `tests/fixtures/telemetry/`, and stand-ins for herdr and launchctl so no test touches the real ones) and an end-to-end demonstration.
 
 ## Step 1: one ticket that never forgets
 
@@ -40,8 +40,12 @@ gm open appt-v2 --repo ~/work/appointments --ticket CRM-8965
 
 This records the focus `appt-v2` with ticket `CRM-8965`, and adds a camp with `git worktree add` on the clone you named, at `~/.guildmaster/camps/appt-v2`, on the ticket's feature branch (`feature/CRM-8965` by default; an existing branch is reused, `--branch` names another).
 Your clone is never cloned, moved or switched.
-It then writes the camp's own `.claude/settings.local.json` (hooks and status line, nothing global) and starts `claude --name appt-v2` in the camp.
+It then writes the camp's own `.claude/settings.local.json` (hooks and status line, nothing global) and starts the Party Leader, `claude --name appt-v2` in the camp, in a tab of its own in herdr, whichever terminal you ran `gm open` from.
 Claude Code asks once whether to trust the new camp folder.
+
+The tabs live in one herdr workspace, `guild`, in herdr's default session: a `guildmaster` tab (the front desk, a shell in the Guildhall) and one tab per focus, named after it.
+Run `herdr` to see them; detach (`ctrl+b q`) or close the terminal and they keep running.
+`gm open` on an existing focus leaves a running Party Leader as it is.
 
 The first time, `gm` copies the charter, the ticket playbook and the repository's rules into the Guildhall (`charter.md`, `playbooks/ticket.md`, `rules/appointments.md`). They are yours to edit; `gm` never overwrites them. The rules file's `feature-branch:` line sets the branch pattern for later focuses on that repository.
 
@@ -71,13 +75,35 @@ gm phase appt-v2 build   # the playbook's phases, in order
 
 ### Kill it and come back
 
-Close the tab, kill the process, or let it compact. Then:
+Exit Claude Code (`/exit`), kill the process, close its pane, restart the machine, or let it compact.
+The next `gm` command you run in a terminal (`gm list`, `gm roster`, anything) first starts again every Party Leader that is dead or missing, and says so in one line; `gm up` does only that.
+A fresh session starts in the same camp. Its `SessionStart` hook injects the summary built from the register (active and queued postings with your words, parked ones with their reasons, the last notices and messages, the camp's git state), so typing `continue` is enough.
+
+To have them back without typing anything, after a reboot too:
 
 ```sh
-gm open appt-v2
+gm autostart on     # macOS: a launchd agent runs gm up --quiet at login and every 5 minutes (--every MINUTES)
+gm autostart off
 ```
 
-starts a fresh session in the same camp. Its `SessionStart` hook injects the summary built from the register (active and queued postings with your words, parked ones with their reasons, the last notices and messages, the camp's git state), so typing `continue` is enough.
+The checking and restarting is plain code, never a model, and tells no one when all is well: each restart is one row in the ledger and the "last started" in `gm roster`.
+A Party Leader that fails to start 3 times in a row is held, said once, and left until `gm open` tries it again.
+A running Party Leader is never ended or replaced, and one whose state herdr cannot make out is reported, not restarted.
+
+```sh
+gm roster           # the front desk and each Party Leader: pane and state
+gm close appt-v2    # retire a focus: not started again (end its Party Leader first); camp and postings kept
+```
+
+```
+guildmaster              front desk    open     w1:p1
+appt-v2                  party leader  alive    w1:p2    idle · last started 2026-10-03 19:28
+saved-views              party leader  dead     w1:p3    the pane holds only a shell · last started 2026-10-03 09:02
+```
+
+States are `alive`, `starting` (just launched), `dead` (its pane holds only a shell), `missing` (no pane), `held` and `unknown`.
+The design, and how it follows and differs from Firstmate, is [vision/herdr-design.md](vision/herdr-design.md).
+`GM_HERDR_SESSION` and `GM_HERDR_WORKSPACE` choose another herdr session and workspace; `GM_HERDR_AUTO=off` stops the check before other commands.
 
 ### Try it end to end, safely
 

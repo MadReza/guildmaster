@@ -51,6 +51,8 @@ The Adventurer spans the design defines are built with step 3, where Adventurers
 
 **Setup.** A quick first run: the first `gm` command in a terminal checks bash, sqlite3, git, Claude Code, herdr and the collector, says what is missing and what that costs, and asks the patron to install the collector, skip it or decide later, recording the answer in `setup.conf` in the Guildhall; `gm init` runs it again and `gm doctor` keeps reporting it. Herdr is required; the integration itself is built elsewhere. In review: <https://github.com/MadReza/guildmaster/pull/21>.
 
+**Party Leaders in herdr.** Herdr is required, and every Party Leader runs in its own tab of the herdr workspace `guild` (`gm open`), stays there, and comes back on its own: `gm up`, run before any `gm` command in a terminal, at the end of `gm init`, and by a launchd agent at login and every 5 minutes (`gm autostart on`), starts again only the dead and the missing, in plain code with no model, telling no one unless one fails to start 3 times in a row; `gm roster` and `gm close` come with it. This moves part of step 4 (`gm roster`, one tab per Party Leader) and of step 6 (a muster at every start) forward, at the patron's request of 2026-10-03. Design in [herdr-design.md](herdr-design.md). In review: <PR>.
+
 ## Step 3: Adventurers and enforced rules
 
 **Status:** Planned. No PR yet. It was the next step until the patron moved tracing ahead of it on 2026-09-30.
@@ -64,7 +66,7 @@ With it come the Adventurer spans of [tracing-design.md](tracing-design.md#how-t
 
 ## Step 4: Several Party Leaders and the Guildmaster lobby
 
-**Status:** Planned. No PR yet.
+**Status:** Planned. `gm roster` (minimal) and one herdr tab per Party Leader, with the `guildmaster` front-desk tab, were built early with herdr ([herdr-design.md](herdr-design.md)); the Guildmaster session is not.
 
 **Goal.** More than one focus at once, with a quiet front desk that knows everything and says little.
 
@@ -84,7 +86,7 @@ With it come the Adventurer spans of [tracing-design.md](tracing-design.md#how-t
 
 ## Step 6: Hardening
 
-**Status:** Planned. No PR yet.
+**Status:** Planned. The muster against live sessions (`gm up`, at every terminal command and from a launchd agent) was built early with herdr ([herdr-design.md](herdr-design.md)); reconciling with `git worktree list` was not.
 
 **Goal.** Make the guild survive reboots, sleep, quota limits and months of use.
 
