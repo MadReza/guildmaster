@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# gm: the Guildmaster's single command. Step 1, one ticket that never forgets, tracing slices 1 and 2, and
-# Party Leaders kept running in herdr.
+# gm: the Guildmaster's single command. Step 1, one ticket that never forgets, tracing slices 1 and 2, Party
+# Leaders kept running in herdr, and the zero-touch start: gm alone opens the Guildmaster at the front desk.
 set -euo pipefail
 
 gm_realpath() {
@@ -20,7 +20,7 @@ case $GM_HALL in /*) ;; *) GM_HALL=$PWD/$GM_HALL ;; esac
 GM_DB=$GM_HALL/register.db
 GM_SETUP=$GM_HALL/setup.conf
 GM_OTELCOL_PINNED=0.162.0
-GM_SCHEMA_VERSION=3
+GM_SCHEMA_VERSION=4
 GM_STOP_BUDGET=${GM_STOP_BUDGET:-3}
 GM_NOW="strftime('%Y-%m-%dT%H:%M:%fZ','now')"
 GM_NOW_MS="CAST(ROUND((julianday('now')-2440587.5)*86400000) AS INTEGER)"
@@ -203,6 +203,17 @@ PRAGMA user_version=3;
 SQL
 }
 
+# Schema 3 to 4: the front desk's Guildmaster is kept running like a Party Leader, with its own start count and
+# hold on its endpoint row. Only adds.
+gm_schema4_sql() {
+  cat <<'SQL'
+ALTER TABLE endpoint ADD COLUMN start_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE endpoint ADD COLUMN held_at TEXT;
+ALTER TABLE endpoint ADD COLUMN held_told INTEGER NOT NULL DEFAULT 0;
+PRAGMA user_version=4;
+SQL
+}
+
 gm_db_init() {
   mkdir -p "$GM_HALL"
   local tmp=$GM_DB.init.$$
@@ -213,6 +224,7 @@ BEGIN IMMEDIATE;
 $(gm_schema1_sql)
 $(gm_schema2_sql)
 $(gm_schema3_sql)
+$(gm_schema4_sql)
 COMMIT;
 SQL
   # ln refuses an existing target, so exactly one concurrent first caller installs its register.
@@ -225,8 +237,9 @@ SQL
 gm_db_migrate() {
   local from=$1 sql err
   case $from in
-    1) sql="$(gm_schema2_sql) $(gm_schema3_sql)" ;;
-    2) sql=$(gm_schema3_sql) ;;
+    1) sql="$(gm_schema2_sql) $(gm_schema3_sql) $(gm_schema4_sql)" ;;
+    2) sql="$(gm_schema3_sql) $(gm_schema4_sql)" ;;
+    3) sql=$(gm_schema4_sql) ;;
   esac
   if ! err=$(sqlite3 -bail -batch -cmd '.timeout 15000' "$GM_DB" "BEGIN IMMEDIATE; $sql COMMIT;" 2>&1 >/dev/null); then
     [ "$(gm_sql 'PRAGMA user_version;')" = "$GM_SCHEMA_VERSION" ] || gm_die "could not migrate the register at $GM_DB to schema $GM_SCHEMA_VERSION: $err"
@@ -239,8 +252,8 @@ gm_db_ensure() {
   local v
   v=$(gm_sql 'PRAGMA user_version;')
   case $v in
-    3) ;;
-    1 | 2) gm_db_migrate "$v" ;;
+    4) ;;
+    1 | 2 | 3) gm_db_migrate "$v" ;;
     *) gm_die "the register at $GM_DB is schema $v; this gm knows schema $GM_SCHEMA_VERSION" ;;
   esac
   GM_DB_READY=1
@@ -414,23 +427,33 @@ gm_gm_command() {
 
 gm_usage() {
   cat <<'EOF'
-usage: gm <command> [arguments]
+usage: gm [<command> [arguments]]
 
+  (no command)            the one thing to know: opens herdr at the guildmaster tab, where the Guildmaster, a
+                          Claude Code session, sits at the front desk; it checks the setup, keeps autostart on,
+                          brings every Party Leader up and opens new ones in their own tabs when asked. Without a
+                          terminal it only starts the Guildmaster and says where it is
   open <focus> --repo <path> [--ticket KEY]... [--branch NAME] [--base REF] [--kind ticket] [--no-launch]
                           record a focus, make its camp, install its Claude Code hooks, and start its Party
-                          Leader in its own herdr tab (workspace guild), where it stays
+                          Leader in its own herdr tab (workspace guild), where it stays; never takes over the
+                          terminal it runs in, and needs none. With --ticket, the focus name may be left out:
+                          it is the first ticket key in lower case (crm-1234)
   open <focus>            the same for an existing focus: a running Party Leader is left as it is, a dead or
                           missing one starts again (a fresh session resumes from records); reopens a closed focus
   up [--quiet]            the muster, plain code with no model: start every open focus's Party Leader that is
                           dead or missing, leave the running ones alone; one that fails to start 3 times in a
                           row is held until gm open; any other gm command at a terminal does the same, quietly
   autostart [on [--every MINUTES] | off | status]
-                          a launchd agent (macOS) that runs gm up --quiet at login and every 5 minutes
-  roster [--all]          each Party Leader and the front desk with its herdr pane and state
+                          a launchd agent (macOS) that runs gm up --quiet at login and every 5 minutes. The
+                          Guildmaster turns it on by itself; off is the switch to stop it, and it stays off
+  roster [--all]          the front desk's Guildmaster and each Party Leader with its herdr pane and state
                           (alive, starting, dead, missing, held, unknown; --all adds closed focuses)
   close <focus>           retire a focus: its Party Leader is not started again (end a running one first);
                           its camp and postings are kept
-  start <focus> --pane ID what a Party Leader's herdr pane runs: claude in the camp (only in that pane)
+  start <focus> --pane ID what a Party Leader's herdr pane runs: claude in the camp (only in that pane);
+                          start guildmaster --pane ID is what the front desk's pane runs
+  repos [<word>]          repositories gm knows (from focuses) and git clones under the usual source folders
+                          (setup.conf repo-roots: overrides them) whose folder name contains the word
   post [--slug S] [--from REF] [--follows REF] <words|->
                           add a posting to the current focus (state received)
   resolve <ref>           print the one record a reference names: 12, #12, focus#12, focus#slug, focus, KEY-123
@@ -456,11 +479,12 @@ usage: gm <command> [arguments]
                           what sets a selection apart from the rest; selections: slow-tools (30s),
                           slow-hooks (1s), slow-replies (2m), slow-calls (30s), not-right-first-time
   collector               run the local OpenTelemetry Collector (templates/otelcol.yaml) in the foreground
-  init [--yes | --no] [--again] [--bin-dir DIR]
+  init [--yes | --no | --later] [--again] [--bin-dir DIR]
                           the first-run check: what gm needs and what is missing; asks whether to install
                           the collector, skip it or decide later, and records the answer in setup.conf.
-                          --yes installs every missing optional piece, --no goes without; --again asks
-                          about a piece you skipped. Runs by itself, once, in a terminal.
+                          --yes installs every missing optional piece, --no goes without, --later decides
+                          later; --again asks about a piece you skipped. The Guildmaster runs it by itself
+                          at every start, without questions, and offers the collector in chat.
   doctor                  the state of setup and dependencies; that telemetry goes only to 127.0.0.1 and
                           that the collector answers
 
@@ -470,7 +494,7 @@ Environment: GM_HALL (default ~/.guildmaster), GM_FOCUS (focus context override)
   GM_BIN_DIR (where gm init installs it, default ~/.local/bin), GM_INTERACTIVE=1|0 (force or forbid questions
   and the muster before commands), GM_CLAUDE and GM_HERDR (the claude and herdr commands, default found on PATH),
   GM_HERDR_SESSION (herdr session, default default), GM_HERDR_WORKSPACE (default guild),
-  GM_HERDR_AUTO=off (no muster before other commands).
+  GM_HERDR_AUTO=off (no muster before other commands), GM_ATTACH=off (gm alone never attaches herdr).
 EOF
 }
 
@@ -489,8 +513,14 @@ gm_cmd_open() {
     esac
   done
   local re_focus='^[a-z0-9][a-z0-9-]{0,31}$' re_key='^[A-Z][A-Z0-9]*-[0-9]+$' t
-  [[ $focus =~ $re_focus ]] || gm_die "open: a focus name is lowercase letters, digits and dashes, for example appt-v2"
   for t in $tickets; do [[ $t =~ $re_key ]] || gm_die "open: '$t' is not a ticket key like CRM-8965"; done
+  if [ -z "$focus" ] && [ -n "$tickets" ]; then
+    set -f
+    for t in $tickets; do focus=${focus:-$(printf '%s' "$t" | tr '[:upper:]' '[:lower:]')}; done
+    set +f
+  fi
+  [[ $focus =~ $re_focus ]] || gm_die "open: a focus name is lowercase letters, digits and dashes, for example appt-v2"
+  [ "$focus" != "$GM_FRONT_DESK" ] || gm_die "open: $GM_FRONT_DESK is the front desk's name; choose another focus name"
   [ "$kind" = ticket ] || gm_die "open: step 1 knows only the ticket kind"
   gm_telemetry_refuse
   [ "$launch" = 0 ] || gm_herdr_require open
@@ -595,6 +625,7 @@ SQL
   gm_reopen_focus "$focus"
   if [ "$launch" = 1 ]; then
     gm_party_leader_up "$focus"
+    gm_party_leader_where "$focus"
   else
     printf 'Start its Party Leader in herdr with: gm open %s\n' "$focus"
   fi
@@ -654,6 +685,121 @@ SQL
     mkdir -p "$(dirname "$exclude")"
     printf '%s\n' '/.claude/settings.local.json' >>"$exclude"
   fi
+}
+
+# ---- The front desk: the Guildmaster's own Claude Code session (vision/zero-touch-start.md) ----
+# It sits in a folder of its own in the Guildhall, never above a camp, so its CLAUDE.md never reaches a Party Leader.
+
+gm_front_desk_dir() { printf '%s' "$GM_HALL/front-desk"; }
+
+# What the Guildmaster's session carries, so the gm it runs reaches the same Guildhall, herdr session and launchd.
+GM_DESK_VARS="GM_HALL GM_CLAUDE GM_TELEMETRY GM_OTEL_ENDPOINT GM_OTEL_PORT GM_HERDR GM_HERDR_SESSION GM_HERDR_WORKSPACE GM_LAUNCH_AGENTS GM_LAUNCHCTL"
+
+# The front desk's Claude Code files. CLAUDE.md, the Guildmaster's charter, is copied once and is the patron's from
+# then on; .claude/settings.local.json is gm's and kept current: the SessionStart hook, gm allowed, and no file edits,
+# so the Guildmaster cannot do a Party Leader's work.
+gm_front_desk_files() {
+  local dir settings prefix tmp v val env="'GM_ROLE', 'guildmaster'"
+  dir=$(gm_front_desk_dir)
+  mkdir -p "$dir/.claude"
+  [ -e "$dir/CLAUDE.md" ] || cp "$GM_TEMPLATES/guildmaster.md" "$dir/CLAUDE.md"
+  settings=$dir/.claude/settings.local.json
+  prefix="GM_HALL=$(gm_shq "$GM_HALL") bash $(gm_shq "$GM_SELF")"
+  for v in $GM_DESK_VARS; do
+    eval "val=\${$v:-}"
+    [ -z "$val" ] || env="$env, $(gm_q "$v"), $(gm_q "$val")"
+  done
+  tmp=$(gm_tmp)
+  sqlite3 -batch :memory: >"$tmp" <<SQL
+SELECT json_object(
+  'env', json_object($env),
+  'permissions', json_object(
+    'allow', json_array('Bash(gm *)', $(gm_q "Bash(bash $GM_SELF *)")),
+    'deny', json_array('Edit', 'Write', 'NotebookEdit')),
+  'hooks', json_object(
+    'SessionStart', json_array(json_object('hooks', json_array(
+      json_object('type','command','command', $(gm_q "$prefix hook front-desk"), 'timeout', 120)))))
+);
+SQL
+  if cmp -s "$tmp" "$settings"; then rm -f "$tmp"; else mv "$tmp" "$settings"; fi
+}
+
+# The required pieces that are missing, one "what: what to do" line each; nothing when gm can run.
+gm_required_problems() {
+  local id level state detail
+  while IFS=$'\t' read -r id level state detail; do
+    [ -n "$id" ] && [ "$level" = required ] && [ "$state" != ok ] || continue
+    printf -- '- %s: %s\n' "$detail" "$(gm_init_meaning "$id")"
+  done <<<"$(gm_init_probe)"
+}
+
+# The Guildmaster's SessionStart hook, with no patron action: the first-run check without questions, autostart on
+# (unless the patron turned it off), the muster, and a short summary for the Guildmaster alone: the setup, the
+# roster, and only what needs the patron (a required piece missing, a held Party Leader, the collector offer at most
+# once a day). It prints only the hook's JSON, so nothing reaches the patron's screen.
+gm_hook_front_desk() {
+  local problems text gmc collector auto up line routine='' tell='' offer='' setup roster
+  cat >/dev/null
+  gmc=$(gm_gm_command)
+  problems=$(gm_required_problems)
+  if [ -n "$problems" ]; then
+    text="gm front desk: gm cannot run yet, because these required pieces are missing:
+$problems
+Tell the patron plainly, in a sentence or two, what to install. Once it is installed, they start you again with gm and the rest happens by itself. Run nothing else until then."
+    gm_hook_json SessionStart "$text"
+    return
+  fi
+  gm_db_ensure
+  [ -n "$(gm_setup_get initialized)" ] || gm_setup_set initialized "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if [ -n "$(gm_otelcol)" ]; then
+    collector='installed'
+  elif [ "$(gm_setup_get collector)" = skipped ]; then
+    collector='skipped by the patron (do not offer it)'
+  else
+    collector='not installed, and the patron has not decided'
+    local last
+    last=$(gm_setup_get collector-offered)
+    if [ -z "$last" ] || [ "$(sqlite3 -batch :memory: "SELECT julianday('now')-julianday($(gm_q "$last"))>=1;" 2>/dev/null)" = 1 ]; then
+      gm_setup_set collector-offered "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      offer="Offer the tracing collector once, in one line, after your first answer to the patron, for example: \"Optional: I can install the OpenTelemetry Collector so tracing also shows each model call's tokens and cost (official release, checksum-checked, no sudo). Install, skip, or later?\" Record the answer with $gmc init --yes (install), $gmc init --no (skip) or $gmc init --later (later), and say the one line it ends with. Do not raise it again this session."
+    fi
+  fi
+  auto=$(gm_autostart_ensure)
+  case $auto in
+    installed | on) auto='on (launchd runs the muster at login and every 5 minutes)' ;;
+    off) auto='off: the patron turned it off with gm autostart off; leave it off unless they ask' ;;
+    unsupported) auto='not available here (launchd is macOS'"'"'s); Party Leaders come back whenever gm runs' ;;
+    failed:*) tell="${tell}- autostart could not be turned on: ${auto#failed: }
+"; auto='could not be turned on' ;;
+  esac
+  up=$( (gm_telemetry_refuse && gm_herdr_lock 30 && gm_reconcile changes) 2>&1) || true
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    case $line in
+      *': held: '* | *': could not start '* | 'gm: '*) tell="${tell}- $line
+" ;;
+      *) routine="${routine}- $line
+" ;;
+    esac
+  done <<<"$up"
+  setup="first-run check passed; autostart $auto; tracing collector $collector."
+  roster=$(gm_cmd_roster 2>&1 || true)
+  text="gm front desk, $(date -u +%Y-%m-%dT%H:%MZ). You are the Guildmaster: your charter is CLAUDE.md in this folder. Run gm as: $gmc
+Setup: $setup"
+  [ -z "$routine" ] || text="$text
+Done just now by gm (routine; do not mention it unless asked):
+${routine%
+}"
+  [ -z "$tell" ] || text="$text
+Tell the patron, once, one line each:
+${tell%
+}"
+  [ -z "$offer" ] || text="$text
+$offer"
+  text="$text
+Roster:
+${roster:-(no Party Leaders yet)}"
+  gm_hook_json SessionStart "$text" "" "$GM_FRONT_DESK"
 }
 
 gm_new_posting_sql() {
@@ -2055,7 +2201,8 @@ gm_init_ask() {
   printf 'l'
 }
 
-# The collector question and its consequences. $1 mode (ask, yes, no), $2 1 to ask again about a skip, $3 a bin dir.
+# The collector question and its consequences. $1 mode (ask, yes, no, later), $2 1 to ask again about a skip, $3 a
+# bin dir.
 # Returns 0 when settled, 1 when an install failed (recorded as "later"), 2 when left undecided (no way to ask).
 gm_init_collector() {
   local mode=$1 again=$2 dir=${3:-${GM_BIN_DIR:-$HOME/.local/bin}} cur choice='' out
@@ -2066,6 +2213,7 @@ gm_init_collector() {
   case $mode in
     yes) choice=i ;;
     no) choice=s ;;
+    later) choice=l ;;
     *)
       if [ "$cur" = skipped ] && [ "$again" != 1 ]; then
         gm_say "  You chose to go without it on $(gm_setup_get initialized); not asking again (gm init --again changes that)."
@@ -2094,7 +2242,7 @@ gm_init_collector() {
       return 0 ;;
     l)
       gm_setup_set collector later
-      gm_say "  Later. gm init asks again; nothing else changes."
+      gm_say "  Later. gm init asks again, and so does the Guildmaster another day; nothing else changes."
       return 0 ;;
   esac
   if [ "$mode" = ask ] && [ -z "$3" ]; then
@@ -2182,9 +2330,10 @@ gm_cmd_init() {
     case $1 in
       --yes | -y) mode=yes; shift ;;
       --no | -n) mode=no; shift ;;
+      --later) mode=later; shift ;;
       --again) again=1; shift ;;
       --bin-dir) dir=${2:?--bin-dir needs a directory}; shift 2 ;;
-      *) gm_die "init: unknown argument $1 (gm init [--yes | --no] [--again] [--bin-dir DIR])" ;;
+      *) gm_die "init: unknown argument $1 (gm init [--yes | --no | --later] [--again] [--bin-dir DIR])" ;;
     esac
   done
   local rc=0
@@ -3358,6 +3507,7 @@ gm_cmd_hook() {
     charter) gm_hook_charter ;;
     stop) gm_hook_stop ;;
     precompact) gm_hook_precompact ;;
+    front-desk) gm_hook_front_desk ;;
     session-end | pre-tool | post-tool | post-tool-failure | subagent-start | subagent-stop | stop-failure) gm_record_hook "$which" ;;
     *) gm_die "hook: unknown hook '$which'" ;;
   esac
@@ -3458,7 +3608,8 @@ gm_herdr_workspace() {
     printf '%s' "$ws"
     return 0
   done
-  out=$(gm_herdr "$s" workspace create --cwd "$GM_HALL" --label "$GM_HERDR_WORKSPACE" --no-focus)
+  mkdir -p "$(gm_front_desk_dir)"
+  out=$(gm_herdr "$s" workspace create --cwd "$(gm_front_desk_dir)" --label "$GM_HERDR_WORKSPACE" --no-focus)
   IFS=$'\t' read -r ws tab pane <<<"$(gm_hj "$out" '$.result.workspace.workspace_id' '$.result.tab.tab_id' '$.result.root_pane.pane_id')"
   [ -n "$ws" ] && [ -n "$pane" ] || gm_die "herdr would not make the $GM_HERDR_WORKSPACE workspace: ${out:-no answer}"
   gm_herdr "$s" tab rename "$tab" "$GM_FRONT_DESK" >/dev/null
@@ -3466,7 +3617,8 @@ gm_herdr_workspace() {
   printf '%s' "$ws"
 }
 
-# The front desk is the workspace's first tab, a shell in the Guildhall where the Guildmaster will sit (step 4).
+# The front desk is the workspace's first tab, where the Guildmaster sits: a Claude Code session in the front desk's
+# folder, kept running by the muster like a Party Leader.
 gm_front_desk_ensure() {
   local ws=$1 s=$GM_HERDR_SESSION row rs rws pane out tab
   row=$(gm_endpoint front-desk)
@@ -3474,7 +3626,8 @@ gm_front_desk_ensure() {
   if [ -n "$row" ] && [ "$rs" = "$s" ] && [ "$rws" = "$ws" ] && [ "$(gm_herdr_pane_presence "$s" "$ws" "$pane")" != gone ]; then
     return 0
   fi
-  out=$(gm_herdr "$s" tab create --workspace "$ws" --cwd "$GM_HALL" --label "$GM_FRONT_DESK" --no-focus)
+  mkdir -p "$(gm_front_desk_dir)"
+  out=$(gm_herdr "$s" tab create --workspace "$ws" --cwd "$(gm_front_desk_dir)" --label "$GM_FRONT_DESK" --no-focus)
   IFS=$'\t' read -r tab pane <<<"$(gm_hj "$out" '$.result.tab.tab_id' '$.result.root_pane.pane_id')"
   [ -z "$pane" ] || gm_endpoint_record front-desk front-desk '' "$s" "$ws" "$tab" "$pane" "$GM_FRONT_DESK"
 }
@@ -3574,87 +3727,121 @@ gm_endpoint_state() {
   esac
 }
 
-# Starts a focus's Party Leader: in its recorded pane when that holds only a shell, otherwise in a new tab
-# named after the focus in the guild's workspace. The pane runs gm start, which starts claude in the camp.
-gm_party_leader_launch() {
-  local focus=$1 state=$2 cause=$3 key="party-leader:$1" s ws tab pane out camp line v val
-  camp=$(gm_focus_field "$focus" camp)
+# Starts a focus's Party Leader, or the front desk's Guildmaster (key front-desk): in its recorded pane when that
+# holds only a shell, otherwise in a new tab in the guild's workspace. The pane runs gm start, which starts claude in
+# the camp, or in the front desk's folder.
+gm_endpoint_launch() {
+  local key=$1 state=$2 cause=$3 name s ws tab pane out dir line v val fid vars
+  if [ "$key" = front-desk ]; then
+    name=$GM_FRONT_DESK
+    dir=$(gm_front_desk_dir)
+    gm_front_desk_files
+    fid=NULL
+  else
+    name=${key#party-leader:}
+    dir=$(gm_focus_field "$name" camp)
+    fid="(SELECT id FROM focus WHERE name=$(gm_q "$name"))"
+  fi
   if [ "$state" = dead ]; then
     IFS=$'\t' read -r s ws tab pane _ _ <<<"$(gm_endpoint "$key")"
+  elif [ "$key" = front-desk ]; then
+    s=$GM_HERDR_SESSION
+    ws=$(gm_herdr_workspace) || return 1
+    IFS=$'\t' read -r _ _ tab pane _ _ <<<"$(gm_endpoint front-desk)"
   else
     s=$GM_HERDR_SESSION
     ws=$(gm_herdr_workspace) || return 1
-    out=$(gm_herdr "$s" tab create --workspace "$ws" --cwd "$camp" --label "$focus" --no-focus)
+    out=$(gm_herdr "$s" tab create --workspace "$ws" --cwd "$dir" --label "$name" --no-focus)
     IFS=$'\t' read -r tab pane <<<"$(gm_hj "$out" '$.result.tab.tab_id' '$.result.root_pane.pane_id')"
     if [ -z "$pane" ]; then
       printf 'herdr would not open a tab: %s' "${out:-no answer}"
       return 1
     fi
-    gm_endpoint_record "$key" party-leader "$focus" "$s" "$ws" "$tab" "$pane" "$focus"
+    gm_endpoint_record "$key" party-leader "$name" "$s" "$ws" "$tab" "$pane" "$name"
   fi
-  line="cd $(gm_shq "$camp") && env"
-  for v in GM_HALL GM_CLAUDE GM_TELEMETRY GM_OTEL_ENDPOINT GM_OTEL_PORT; do
+  [ -n "$pane" ] || { printf 'no pane for %s' "$name"; return 1; }
+  line="cd $(gm_shq "$dir") && env"
+  vars="GM_HALL GM_CLAUDE GM_TELEMETRY GM_OTEL_ENDPOINT GM_OTEL_PORT"
+  [ "$key" != front-desk ] || vars=$GM_DESK_VARS
+  for v in $vars; do
     eval "val=\${$v:-}"
     [ -z "$val" ] || line="$line $v=$(gm_shq "$val")"
   done
-  line="$line bash $(gm_shq "$GM_SELF") start $(gm_shq "$focus") --pane $(gm_shq "$pane")"
+  line="$line bash $(gm_shq "$GM_SELF") start $(gm_shq "$name") --pane $(gm_shq "$pane")"
   gm_sql "BEGIN IMMEDIATE;
 UPDATE endpoint SET launched_ms=$GM_NOW_MS WHERE key=$(gm_q "$key");
 INSERT INTO event(at, actor, kind, focus_id, detail)
-  SELECT $GM_NOW, 'gm', 'party-leader.launched', id, $(gm_q "$state: $cause; herdr session $s pane $pane") FROM focus WHERE name=$(gm_q "$focus");
+  VALUES ($GM_NOW, 'gm', $(gm_q "${key%%:*}.launched"), $fid, $(gm_q "$state: $cause; herdr session $s pane $pane"));
 COMMIT;"
   gm_herdr "$s" pane run "$pane" "$line" >/dev/null
   printf '%s' "$pane"
 }
 
-# The muster against herdr, in plain code and with no model: every open focus's Party Leader is checked, the dead
-# and the missing are started again in their camps (the SessionStart hook resumes them from the register), the
-# alive are left as they are, and anything else is reported and left alone. A Party Leader that has failed to
-# start GM_START_TRIES times in a row is held, with one notice, until gm open tries it again.
-# $1 is what to print: all (gm up), changes (before a command at a terminal), quiet (the launchd agent: changes,
-# without counting a held notice as told), or one focus's name (that focus's line, and changes).
+# The muster against herdr, in plain code and with no model: the front desk's Guildmaster and every open focus's
+# Party Leader are checked, the dead and the missing are started again (the SessionStart hooks resume them from the
+# register), the alive are left as they are, and anything else is reported and left alone. One that has failed to
+# start GM_START_TRIES times in a row is held, with one notice, until gm open (or gm alone, for the Guildmaster).
+# $1 is what to print: all (gm up), changes (before a command at a terminal, and the Guildmaster's start), quiet (the
+# launchd agent: changes, without counting a held notice as told), or one focus's name (that focus's line, and
+# changes).
 gm_reconcile() {
-  local show=$1 focus st detail line pane attempts held told tell
+  local show=$1 focus
   gm_herdr_server_ensure "$GM_HERDR_SESSION"
   gm_herdr_workspace >/dev/null
+  gm_muster_one front-desk "$show"
   for focus in $(gm_sql "SELECT name FROM focus WHERE closed_at IS NULL ORDER BY name;"); do
-    IFS=$'\t' read -r st detail <<<"$(gm_endpoint_state "party-leader:$focus")"
-    IFS=$'\t' read -r attempts held told <<<"$(gm_sql "SELECT start_attempts, held_at IS NOT NULL, held_told FROM focus WHERE name=$(gm_q "$focus");")"
-    [ "$held" = 1 ] || held=''
-    line=''
-    case $st in
-      dead | missing)
-        if [ -z "$held" ] && [ "$attempts" -ge "$GM_START_TRIES" ]; then
-          held=1 told=0
-          gm_sql "BEGIN IMMEDIATE;
-UPDATE focus SET held_at=$GM_NOW, held_told=0 WHERE name=$(gm_q "$focus");
-INSERT INTO event(at, actor, kind, focus_id, detail) SELECT $GM_NOW, 'gm', 'party-leader.held', id, $(gm_q "failed to start $attempts times in a row; last $st: $detail") FROM focus WHERE name=$(gm_q "$focus");
-COMMIT;"
-        fi
-        if [ -n "$held" ]; then
-          # Told once in the agent's log (held_told 1) and once at a terminal (2); gm up by hand always says it.
-          tell=2
-          [ "$show" != quiet ] || tell=1
-          if [ "$show" = all ] || [ "$show" = "$focus" ] || [ "$told" -lt "$tell" ]; then
-            line="$focus: held: its Party Leader failed to start $attempts times in a row ($st: $detail); gm open $focus tries again"
-            [ "$told" -ge "$tell" ] || gm_sql "BEGIN IMMEDIATE; UPDATE focus SET held_told=$tell WHERE name=$(gm_q "$focus"); COMMIT;"
-          fi
-        else
-          gm_sql "BEGIN IMMEDIATE; UPDATE focus SET start_attempts=start_attempts+1 WHERE name=$(gm_q "$focus"); COMMIT;"
-          if pane=$(gm_party_leader_launch "$focus" "$st" "$detail"); then
-            line="$focus: Party Leader started in herdr pane $pane ($st: $detail)"
-          else
-            line="$focus: could not start its Party Leader ($st: $detail): $pane"
-          fi
-        fi ;;
-      alive)
-        [ "$attempts" = 0 ] && [ -z "$held" ] ||
-          gm_sql "BEGIN IMMEDIATE; UPDATE focus SET start_attempts=0, held_at=NULL, held_told=0 WHERE name=$(gm_q "$focus"); COMMIT;"
-        [ "$show" != all ] && [ "$show" != "$focus" ] || line="$focus: Party Leader already running ($detail), left as it is" ;;
-      *) line="$focus: $st ($detail); left alone" ;;
-    esac
-    [ -z "$line" ] || printf '%s\n' "$line"
+    gm_muster_one "party-leader:$focus" "$show"
   done
+}
+
+# gm_muster_one <endpoint key> <show>: one Guildmaster or Party Leader, checked and acted on.
+gm_muster_one() {
+  local key=$1 show=$2 name table where who its retry st detail line pane attempts held told tell fid
+  if [ "$key" = front-desk ]; then
+    name=$GM_FRONT_DESK table=endpoint where="key='front-desk'" who=Guildmaster its='the Guildmaster' retry='gm tries again'
+    fid=NULL
+  else
+    name=${key#party-leader:}
+    table=focus where="name=$(gm_q "$name")" who='Party Leader' its='its Party Leader' retry="gm open $name tries again"
+    fid="(SELECT id FROM focus WHERE $where)"
+  fi
+  IFS=$'\t' read -r st detail <<<"$(gm_endpoint_state "$key")"
+  IFS=$'\t' read -r attempts held told <<<"$(gm_sql "SELECT start_attempts, held_at IS NOT NULL, held_told FROM $table WHERE $where;")"
+  attempts=${attempts:-0} told=${told:-0}
+  [ "$held" = 1 ] || held=''
+  line=''
+  case $st in
+    dead | missing)
+      if [ -z "$held" ] && [ "$attempts" -ge "$GM_START_TRIES" ]; then
+        held=1 told=0
+        gm_sql "BEGIN IMMEDIATE;
+UPDATE $table SET held_at=$GM_NOW, held_told=0 WHERE $where;
+INSERT INTO event(at, actor, kind, focus_id, detail) VALUES ($GM_NOW, 'gm', $(gm_q "${key%%:*}.held"), $fid, $(gm_q "failed to start $attempts times in a row; last $st: $detail"));
+COMMIT;"
+      fi
+      if [ -n "$held" ]; then
+        # Told once in the agent's log (held_told 1) and once at a terminal (2); gm up by hand always says it.
+        tell=2
+        [ "$show" != quiet ] || tell=1
+        if [ "$show" = all ] || [ "$show" = "$name" ] || [ "$told" -lt "$tell" ]; then
+          line="$name: held: $its failed to start $attempts times in a row ($st: $detail); $retry"
+          [ "$told" -ge "$tell" ] || gm_sql "BEGIN IMMEDIATE; UPDATE $table SET held_told=$tell WHERE $where; COMMIT;"
+        fi
+      else
+        gm_sql "BEGIN IMMEDIATE; UPDATE $table SET start_attempts=start_attempts+1 WHERE $where; COMMIT;"
+        if pane=$(gm_endpoint_launch "$key" "$st" "$detail"); then
+          line="$name: $who started in herdr pane $pane ($st: $detail)"
+        else
+          line="$name: could not start $its ($st: $detail): $pane"
+        fi
+      fi ;;
+    alive)
+      [ "$attempts" = 0 ] && [ -z "$held" ] ||
+        gm_sql "BEGIN IMMEDIATE; UPDATE $table SET start_attempts=0, held_at=NULL, held_told=0 WHERE $where; COMMIT;"
+      [ "$show" != all ] && [ "$show" != "$name" ] || line="$name: $who already running ($detail), left as it is" ;;
+    *) line="$name: $st ($detail); left alone" ;;
+  esac
+  [ -z "$line" ] || printf '%s\n' "$line"
 }
 
 GM_HERDR_LOCKED=''
@@ -3701,7 +3888,23 @@ gm_party_leader_up() {
   gm_sql "BEGIN IMMEDIATE; UPDATE focus SET start_attempts=0, held_at=NULL, held_told=0 WHERE name=$(gm_q "$focus"); COMMIT;"
   gm_reconcile "$focus"
   gm_herdr_unlock
-  gm_herdr_attach_hint
+}
+
+# One line saying which herdr tab a focus's Party Leader is in: what the Guildmaster tells the patron.
+gm_party_leader_where() {
+  local focus=$1 s pane label
+  IFS=$'\t' read -r s _ _ pane label _ <<<"$(gm_endpoint "party-leader:$focus")"
+  [ -n "$pane" ] || return 0
+  if [ "$s" = default ]; then
+    printf "%s's Party Leader is in herdr tab %s (workspace %s, pane %s); see it with: herdr\n" "$focus" "$label" "$GM_HERDR_WORKSPACE" "$pane"
+  else
+    printf "%s's Party Leader is in herdr tab %s (workspace %s, pane %s); see it with: herdr --session %s\n" "$focus" "$label" "$GM_HERDR_WORKSPACE" "$pane" "$s"
+  fi
+}
+
+# Whether there is anything for the muster to keep running: an open focus, or the front desk.
+gm_guild_exists() {
+  [ -s "$GM_DB" ] && [ -n "$(gm_sql "SELECT 1 FROM focus WHERE closed_at IS NULL UNION ALL SELECT 1 FROM endpoint WHERE key='front-desk' LIMIT 1;" 2>/dev/null)" ]
 }
 
 gm_reopen_focus() {
@@ -3712,14 +3915,18 @@ INSERT INTO event(at, actor, kind, focus_id, line) SELECT $GM_NOW, 'patron', 'fo
 COMMIT;"
 }
 
-# After gm init: the muster once, and how to have it run at login without any gm command.
+# After gm init: the muster once, and autostart on, since it is always on unless the patron turned it off.
 gm_init_muster() {
   command -v "$GM_HERDR" >/dev/null 2>&1 && [ -s "$GM_DB" ] || return 0
-  if [ -n "$(gm_sql "SELECT 1 FROM focus WHERE closed_at IS NULL LIMIT 1;")" ]; then
+  if gm_guild_exists; then
     (gm_telemetry_refuse && gm_herdr_lock 30 && gm_reconcile changes) >&2 || true
   fi
-  [ "$(uname -s)" != Darwin ] || [ -f "$GM_LAUNCH_AGENTS/$(gm_autostart_label).plist" ] ||
-    gm_say "To bring Party Leaders back at login and every 5 minutes without a gm command: gm autostart on"
+  local auto
+  auto=$(gm_autostart_ensure)
+  case $auto in
+    installed) gm_say "autostart is on: launchd brings the Guildmaster and the Party Leaders back at login and every 5 minutes (gm autostart off stops it)" ;;
+    failed:*) gm_say "autostart could not be turned on: ${auto#failed: }" ;;
+  esac
 }
 
 gm_cmd_up() {
@@ -3733,8 +3940,8 @@ gm_cmd_up() {
   gm_telemetry_refuse
   gm_db_ensure
   gm_herdr_lock 30 || gm_die "up: another gm is bringing Party Leaders up; try again in a moment"
-  if [ -z "$(gm_sql "SELECT 1 FROM focus WHERE closed_at IS NULL LIMIT 1;")" ]; then
-    [ "$show" = quiet ] || printf 'No open focus; gm open <focus> --repo <path> makes one.\n'
+  if ! gm_guild_exists; then
+    [ "$show" = quiet ] || printf 'Nothing to bring up yet: run gm to open the front desk, or gm open <focus> --repo <path>.\n'
     return 0
   fi
   gm_reconcile "$show"
@@ -3748,8 +3955,7 @@ gm_auto_reconcile() {
   [ "${GM_HERDR_AUTO:-on}" != off ] || return 0
   [ -z "${GM_FOCUS:-}" ] && [ -z "${CLAUDECODE:-}" ] || return 0
   gm_init_interactive || return 0
-  [ -s "$GM_DB" ] || return 0
-  [ -n "$(gm_sql "SELECT 1 FROM focus WHERE closed_at IS NULL LIMIT 1;" 2>/dev/null)" ] || return 0
+  gm_guild_exists || return 0
   if ! command -v "$GM_HERDR" >/dev/null 2>&1; then
     printf 'gm: herdr is not installed, so no Party Leader is kept running (README.md)\n' >&2
     return 0
@@ -3770,12 +3976,20 @@ gm_cmd_roster() {
   gm_roster_line() { printf '%-24s %-13s %-8s %-8s %s\n' "$@"; }
   row=$(gm_endpoint front-desk)
   if [ -n "$row" ]; then
-    IFS=$'\t' read -r s ws _ pane _ _ <<<"$row"
-    st=unknown
-    if [ "$have" = 1 ] && gm_herdr_running "$s"; then
-      case $(gm_herdr_pane_presence "$s" "$ws" "$pane") in present) st=open ;; gone) st=missing ;; esac
+    IFS=$'\t' read -r _ _ _ pane _ _ <<<"$row"
+    if [ "$have" = 0 ]; then
+      st=unknown detail="herdr is not installed"
+    else
+      IFS=$'\t' read -r st detail <<<"$(gm_endpoint_state front-desk)"
     fi
-    gm_roster_line "$GM_FRONT_DESK" "front desk" "$st" "$pane" ''
+    IFS=$'\t' read -r held attempts last <<<"$(gm_sql "SELECT COALESCE(held_at,'-'), start_attempts,
+      COALESCE((SELECT replace(substr(e.at,1,16),'T',' ') FROM event e WHERE e.kind='front-desk.launched' ORDER BY e.id DESC LIMIT 1),'-')
+      FROM endpoint WHERE key='front-desk';")"
+    if [ "$held" != - ] && [ "$st" != alive ]; then
+      st=held detail="failed to start $attempts times in a row; gm tries again"
+    fi
+    [ "$last" = - ] || detail="${detail:+$detail · }last started $last"
+    gm_roster_line "$GM_FRONT_DESK" "front desk" "$st" "$pane" "$detail"
   fi
   where="f.closed_at IS NULL"
   [ "$all" = 0 ] || where=1
@@ -3854,6 +4068,10 @@ gm_cmd_start() {
   done
   [ -n "$focus" ] || gm_die "start: name the focus"
   gm_db_ensure
+  if [ "$focus" = "$GM_FRONT_DESK" ]; then
+    gm_front_desk_start "$pane"
+    return
+  fi
   [ -n "$(gm_focus_id "$focus")" ] || gm_die "no focus named '$focus'"
   [ -z "$(gm_focus_field "$focus" closed_at)" ] || gm_die "start: $focus is closed; gm open $focus reopens it"
   [ -n "$pane" ] && [ "$pane" = "$(gm_sql "SELECT pane_id FROM endpoint WHERE key=$(gm_q "party-leader:$focus");")" ] ||
@@ -3869,6 +4087,18 @@ gm_cmd_start() {
   cd "$camp"
   exec env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_SESSION_ID -u TRACEPARENT -u GM_FOCUS \
     ${envargs[@]+"${envargs[@]}"} "$claude" --name "$focus"
+}
+
+# What the front desk's pane runs: the Guildmaster, claude in the front desk's folder, whose own SessionStart hook
+# does the rest. Only in the pane gm recorded for the front desk, so there is never a second one beside it.
+gm_front_desk_start() {
+  local pane=$1 claude=${GM_CLAUDE:-claude}
+  [ -n "$pane" ] && [ "$pane" = "$(gm_sql "SELECT pane_id FROM endpoint WHERE key='front-desk';")" ] ||
+    gm_die "start: gm start $GM_FRONT_DESK runs only in the front desk's own herdr pane; gm opens it there"
+  gm_front_desk_files
+  cd "$(gm_front_desk_dir)"
+  exec env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_SESSION_ID -u TRACEPARENT -u GM_FOCUS \
+    "$claude" --name "$GM_FRONT_DESK"
 }
 
 # ---- Autostart: a launchd user agent runs gm up --quiet at login and every few minutes (macOS) ----
@@ -3921,8 +4151,39 @@ $env  </dict>
 EOF
 }
 
+# Writes and loads the agent; gm_autostart_install <minutes>.
+gm_autostart_install() {
+  local every=$1 label plist domain
+  label=$(gm_autostart_label)
+  plist=$GM_LAUNCH_AGENTS/$label.plist
+  domain=gui/$(id -u)
+  mkdir -p "$GM_LAUNCH_AGENTS" "$GM_HALL"
+  gm_autostart_plist "$label" $((every * 60)) >"$plist.tmp"
+  mv "$plist.tmp" "$plist"
+  "$GM_LAUNCHCTL" bootout "$domain/$label" >/dev/null 2>&1 || true
+  "$GM_LAUNCHCTL" bootstrap "$domain" "$plist" >/dev/null 2>&1 || { printf 'launchctl would not load %s' "$plist"; return 1; }
+}
+
+# Autostart is always on unless the patron turned it off (setup.conf autostart: off). The agent is written and loaded
+# only when it is not loaded already, so a repeat changes nothing. Prints installed, on, off, unsupported, or
+# failed: <why>.
+gm_autostart_ensure() {
+  local label out
+  [ "$(uname -s)" = Darwin ] || { printf 'unsupported'; return 0; }
+  [ "$(gm_setup_get autostart)" != off ] || { printf 'off'; return 0; }
+  command -v "$GM_HERDR" >/dev/null 2>&1 || { printf 'failed: herdr is not installed'; return 0; }
+  label=$(gm_autostart_label)
+  if [ -f "$GM_LAUNCH_AGENTS/$label.plist" ] && "$GM_LAUNCHCTL" print "gui/$(id -u)/$label" >/dev/null 2>&1; then
+    printf 'on'
+  elif out=$(gm_autostart_install 5 2>&1); then
+    printf 'installed'
+  else
+    printf 'failed: %s' "$out"
+  fi
+}
+
 gm_cmd_autostart() {
-  local action=${1:-status} every=5 label plist domain
+  local action=${1:-status} every=5 label plist domain err
   [ $# -eq 0 ] || shift
   while [ $# -gt 0 ]; do
     case $1 in
@@ -3938,16 +4199,14 @@ gm_cmd_autostart() {
   case $action in
     on)
       gm_herdr_require autostart
-      mkdir -p "$GM_LAUNCH_AGENTS" "$GM_HALL"
-      gm_autostart_plist "$label" $((every * 60)) >"$plist.tmp"
-      mv "$plist.tmp" "$plist"
-      "$GM_LAUNCHCTL" bootout "$domain/$label" >/dev/null 2>&1 || true
-      "$GM_LAUNCHCTL" bootstrap "$domain" "$plist" || gm_die "autostart: launchctl would not load $plist"
+      err=$(gm_autostart_install "$every") || gm_die "autostart: $err"
+      gm_setup_set autostart on
       printf 'autostart is on: launchd runs gm up --quiet at login and every %s minutes (%s, log %s)\n' "$every" "$plist" "$GM_HALL/autostart.log" ;;
     off)
       "$GM_LAUNCHCTL" bootout "$domain/$label" >/dev/null 2>&1 || true
       rm -f "$plist"
-      printf 'autostart is off: Party Leaders come back when a gm command runs at a terminal, or with gm up\n' ;;
+      gm_setup_set autostart off
+      printf 'autostart is off, and stays off: the Guildmaster no longer turns it on. Party Leaders come back when you run gm, or with gm up; gm autostart on turns it back on\n' ;;
     status)
       if [ -f "$plist" ] && "$GM_LAUNCHCTL" print "$domain/$label" >/dev/null 2>&1; then
         printf 'autostart is on: %s\n' "$plist"
@@ -3960,8 +4219,85 @@ gm_cmd_autostart() {
   esac
 }
 
+# ---- gm alone: the one thing the patron runs (vision/zero-touch-start.md) ----
+
+# Opens the front desk: the Guildmaster's files, the muster (which starts the Guildmaster in the guild workspace's
+# first tab, and every Party Leader), and then herdr at that tab. Inside herdr it only switches to the tab; without
+# a terminal, or with GM_ATTACH=off, it says where the Guildmaster is and returns.
+gm_cmd_front_desk() {
+  local problems s ws tab pane out auto
+  [ $# -eq 0 ] || gm_die "unknown command '$1' (gm help lists them; gm alone opens the front desk)"
+  problems=$(gm_required_problems)
+  [ -z "$problems" ] || gm_die "the Guildmaster cannot start until these are installed:
+${problems%
+}"
+  gm_telemetry_refuse
+  gm_db_ensure
+  gm_front_desk_files
+  gm_herdr_lock 30 || gm_die "another gm is bringing the guild up; try again in a moment"
+  gm_sql "BEGIN IMMEDIATE; UPDATE endpoint SET start_attempts=0, held_at=NULL, held_told=0 WHERE key='front-desk'; COMMIT;"
+  out=$(gm_reconcile changes)
+  gm_herdr_unlock
+  [ -z "$out" ] || printf '%s\n' "$out" >&2
+  auto=$(gm_autostart_ensure)
+  case $auto in failed:*) gm_say "gm: autostart could not be turned on: ${auto#failed: }" ;; esac
+  IFS=$'\t' read -r s ws tab pane _ _ <<<"$(gm_endpoint front-desk)"
+  [ -n "$pane" ] || gm_die "herdr gave the front desk no pane"
+  if gm_attach_ok; then
+    gm_herdr "$s" workspace focus "$ws" >/dev/null
+    gm_herdr "$s" tab focus "$tab" >/dev/null
+    if [ -n "${HERDR_ENV:-}" ]; then
+      printf 'The Guildmaster is in the %s tab of workspace %s.\n' "$GM_FRONT_DESK" "$GM_HERDR_WORKSPACE"
+      return 0
+    fi
+    if [ "$s" = default ]; then exec "$GM_HERDR"; else exec "$GM_HERDR" --session "$s"; fi
+  fi
+  if [ "$s" = default ]; then
+    printf 'The Guildmaster is in herdr tab %s (workspace %s, pane %s); see it with: herdr\n' "$GM_FRONT_DESK" "$GM_HERDR_WORKSPACE" "$pane"
+  else
+    printf 'The Guildmaster is in herdr tab %s (workspace %s, pane %s); see it with: herdr --session %s\n' "$GM_FRONT_DESK" "$GM_HERDR_WORKSPACE" "$pane" "$s"
+  fi
+}
+
+# Whether gm alone may attach herdr in this terminal: GM_ATTACH=off never; GM_INTERACTIVE as for questions (tests);
+# otherwise when both stdin and stdout are a terminal.
+gm_attach_ok() {
+  [ "${GM_ATTACH:-on}" != off ] || return 1
+  case ${GM_INTERACTIVE:-} in
+    1) return 0 ;;
+    0) return 1 ;;
+  esac
+  [ -t 0 ] && [ -t 1 ]
+}
+
+# Repositories the Guildmaster can open a focus on: those gm already knows from its focuses, then git clones under
+# the usual source folders (or setup.conf's repo-roots:, space-separated) whose folder name contains the word. One
+# path a line, known ones first; the Guildmaster asks the patron when it is not exactly one.
+gm_cmd_repos() {
+  local word=${1:-} roots r known
+  [ $# -le 1 ] || gm_die "repos: gm repos [<word>]"
+  word=$(printf '%s' "$word" | tr '[:upper:]' '[:lower:]')
+  known=''
+  if [ -s "$GM_DB" ]; then
+    known=$(gm_sql "SELECT DISTINCT repo FROM focus ORDER BY repo;")
+  fi
+  roots=$(gm_setup_get repo-roots)
+  [ -n "$roots" ] || roots="$HOME/IdeaProjects $HOME/src $HOME/work $HOME/code $HOME/projects $HOME/dev $HOME/git $HOME/repos $HOME/Developer $HOME/workspace"
+  {
+    printf '%s\n' "$known"
+    set -f
+    for r in $roots; do
+      case $r in \~) r=$HOME ;; \~/*) r=$HOME/${r#\~/} ;; esac
+      [ -d "$r" ] || continue
+      find "$r" -maxdepth 4 \( -name node_modules -o -name .gradle -o -name target -o -name vendor \) -prune -o \
+        -name .git -print 2>/dev/null | sed 's#/\.git$##'
+    done
+    set +f
+  } | awk -v w="$word" 'NF && !seen[$0]++ { n = split($0, p, "/"); if (w == "" || index(tolower(p[n]), w)) print }'
+}
+
 command -v sqlite3 >/dev/null 2>&1 || gm_die "gm needs the sqlite3 command"
-cmd=${1:-help}
+cmd=${1:-front-desk}
 [ $# -eq 0 ] || shift
 case $cmd in
   open | post | resolve | list | ls | show | notice | park | phase | where | trace | stats | collector) gm_init_auto ;;
@@ -3979,10 +4315,12 @@ if [ -s "$GM_DB" ]; then
   esac
 fi
 case $cmd in
-  open | up | close | start | autostart | hook | statusline | collector | help | -h | --help) ;;
+  front-desk | open | up | close | start | autostart | hook | statusline | collector | repos | help | -h | --help) ;;
   *) gm_auto_reconcile ;;
 esac
 case $cmd in
+  front-desk) gm_cmd_front_desk "$@" ;;
+  repos) gm_cmd_repos "$@" ;;
   open) gm_cmd_open "$@" ;;
   up) gm_cmd_up "$@" ;;
   roster) gm_cmd_roster "$@" ;;
@@ -4005,5 +4343,5 @@ case $cmd in
   init) gm_cmd_init "$@" ;;
   doctor) gm_cmd_doctor "$@" ;;
   help | -h | --help) gm_usage ;;
-  *) gm_usage >&2; exit 1 ;;
+  *) printf "gm: unknown command '%s'\n\n" "$cmd" >&2; gm_usage >&2; exit 1 ;;
 esac

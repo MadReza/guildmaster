@@ -8,6 +8,8 @@
 #   calls        every call, one a line
 #   runs         pane<TAB>the line typed into it by pane run
 #   run-proc     what a pane runs after pane run (default claude)
+#   focused      each workspace or tab focused, one a line
+#   attached     present once a client attached (herdr with no command)
 # Every call must carry --session $HERDR_STUB_SESSION; any other session is refused and recorded in violations.
 set -u
 D=${HERDR_STUB:?HERDR_STUB is not set}
@@ -62,6 +64,13 @@ opt() { # <name> <args...>: the value after --name
 }
 
 case "${1:-} ${2:-}" in
+  " ")
+    # herdr alone attaches a client; the stub only records it.
+    touch "$D/attached" ;;
+  "workspace focus" | "tab focus")
+    up
+    printf '%s\n' "$3" >>"$D/focused"
+    printf '{"result":{"type":"ok"}}\n' ;;
   "status --json")
     if [ -e "$D/running" ]; then r=true; else r=false; fi
     printf '{"client":{"version":"0.9.1"},"server":{"running":%s}}\n' "$r" ;;
