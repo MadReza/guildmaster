@@ -10,7 +10,7 @@ Vocabulary is [TERMINOLOGY.md](../TERMINOLOGY.md)'s.
 | # | Step | Status |
 | --- | --- | --- |
 | 1 | One ticket that never forgets | Done |
-| 2 | Tracing and audit | Next |
+| 2 | Tracing and audit | In progress |
 | 3 | Adventurers and enforced rules | Planned |
 | 4 | Several Party Leaders and the Guildmaster lobby | Planned |
 | 5 | The other kinds | Planned |
@@ -29,7 +29,16 @@ In this step the Party Leader still does the work itself, one posting at a time:
 
 ## Step 2: Tracing and audit
 
-**Status:** Next. Design in [tracing-design.md](tracing-design.md), on the landscape in [tracing-research.md](tracing-research.md); the patron answered its five questions on 2026-10-02; no build PR yet.
+**Status:** In progress. Design in [tracing-design.md](tracing-design.md), on the landscape in [tracing-research.md](tracing-research.md); the patron answered its five questions on 2026-10-02.
+
+| Slice | What | Status |
+| --- | --- | --- |
+| 1 | Spans in the register, `gm trace`, `gm stats` with `--follows`, `--by-prompt` and `--compare` | In review: PR_URL |
+| 2 | Claude Code's telemetry through a local collector | Planned |
+| 3 | Adventurer spans (with step 3) | Planned |
+| 4 | A local Jaeger beside `gm trace` | Planned |
+| 5 | Follow-up suggestions from a local model | Planned |
+
 Moved forward from fourth place at the patron's request of 2026-09-30: "let's determine what's the best way of tracing. I think that should be our next step."
 
 **Goal.** Show what was triggered, when and by whom, and let the patron see a posting's whole path as one trace: each message and reply, each tool, MCP and subagent call, each hook, each Party Leader session and Adventurer run, with the model, effort, time and cost of each.

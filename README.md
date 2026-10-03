@@ -13,7 +13,7 @@ This repository is at its beginning. The vocabulary comes first, because every l
 - `honeycomb/` is a research site on Honeycomb, the hosted observability service: its C4 model, data model, sampling, engineering decisions, and lessons for Guildmaster's tracing. Open `honeycomb/index.html` from disk.
 - `vision/` holds Guildmaster's own design material: the patron's notes, the requirements drawn from them, a Firstmate-informed consultation, the [step 1 design](vision/step-1-design.md), and the [tracing design](vision/tracing-design.md) with its [research](vision/tracing-research.md).
 - [vision/roadmap.md](vision/roadmap.md) is the tracked build plan: each step's goal, scope, done-when criteria, status and links.
-- `bin/gm` is the `gm` command; `templates/` holds the first charter, ticket playbook and repository rules it copies into the Guildhall; `tests/` holds its test suite and an end-to-end demonstration.
+- `bin/gm` is the `gm` command; `templates/` holds the first charter, ticket playbook and repository rules it copies into the Guildhall; `tests/` holds its test suite (with the redaction cases and a schema-1 register to migrate) and an end-to-end demonstration.
 
 ## Step 1: one ticket that never forgets
 
@@ -86,6 +86,45 @@ bash tests/demo.sh   # a real Claude Code session in a throwaway repository; use
 ```
 
 The demo makes a throwaway repository and Guildhall under a temporary directory, sends ten patron messages in a row and checks that all ten are recorded with their words and states, then kills a session mid-posting and shows a fresh session resuming from the register when told only `continue`.
+
+## Tracing: slice 1
+
+Each posting is one trace, kept as span rows in the register beside its ledger, so nothing new is installed and nothing leaves the machine.
+The design is [vision/tracing-design.md](vision/tracing-design.md); this is its build slice 1.
+
+`gm open` installs record-only hooks beside the step 1 ones (`PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `SubagentStart`, `SubagentStop`, `StopFailure`, `SessionEnd`); they never block and print nothing.
+From them and from `gm`'s own commands the register gets a span for each patron message and its reply (an exchange), each Party Leader turn, tool call, MCP call, subagent, hook and notice, and each session.
+The status line records the model, effort and running cost Claude Code reports, so each turn carries them.
+A Bash command is stored in full with secrets masked (`<REDACTED:kind>`) before it reaches the register; the known cases are in `tests/redaction-cases.tsv`.
+Run `gm open <focus>` once on an existing focus to install the new hooks into its camp.
+
+```sh
+gm trace appt-v2#12        # the posting as a text waterfall; a focus name shows every posting and session
+gm stats appt-v2#12        # first reply, first notice, total and working time, exchanges, steps, hooks, cost
+gm stats appt-v2           # one line per posting, with medians
+gm notice 13 queued --follows 12           # #13 continues #12: exchanges count per topic
+gm stats --by-prompt charter               # outcomes per version (hash) of the charter
+gm stats --compare slow-tools --over 10s   # what sets slow tool calls apart from the rest
+```
+
+```
+appt-v2#12 fix-owner-empty  done  2h14m  1 exchange  $0.21 est.
+├─ exchange 1  "the owner field is empty after save, fix it"  reply in 41s
+│  ├─ hook UserPromptSubmit  capture  0.2s
+│  ├─ invoke_agent party-leader  opus-5-5 · high  41s  $0.21
+│  │  ├─ execute_tool Bash  gm notice 12 started  0.4s
+│  │  │  └─ notice started
+│  │  ├─ execute_tool mcp__jira__getIssue  1.8s
+│  │  └─ execute_tool Agent  Explore  haiku-4-5  14s
+│  │     └─ invoke_agent Explore  haiku-4-5 · none  13s
+│  └─ hook Stop  guard allow  0.2s
+└─ notice done: fixed
+```
+
+`--compare` takes `slow-tools` (over 30s by default), `slow-hooks` (1s), `slow-replies` (2m) and `not-right-first-time`.
+Every measure is computed from the spans when asked; none is stored.
+Per-call model, token and cost figures need Claude Code's own telemetry, which is slice 2; until then cost is the status line's estimate per turn.
+Postings made before this step have their ledgers (`gm show`) and no spans.
 
 ## Prior art
 
