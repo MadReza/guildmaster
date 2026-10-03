@@ -1,0 +1,104 @@
+# The Guildhall's OpenTelemetry Collector (tracing-design.md, build slice 2).
+# Receives Claude Code's traces, logs and metrics on 127.0.0.1 only, deletes the identity attributes,
+# masks secret patterns, and writes rotating files under the Guildhall for `gm trace import`.
+# It has no exporter that sends anywhere: the only exporters are files. `gm doctor` checks that.
+# Run it with `gm collector`, which sets GM_HALL; GM_OTEL_PORT changes the port (default 4318).
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:${env:GM_OTEL_PORT:-4318}
+
+processors:
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 256
+  # Identity first, then the same secret patterns as gm's own redaction (gm_redact in bin/gm,
+  # tested from tests/redaction-cases.tsv). RE2 syntax; $$1 is the first group, escaped from the
+  # collector's own ${...} expansion.
+  transform/identity:
+    error_mode: ignore
+    trace_statements:
+      - delete_matching_keys(resource.attributes, "^(user\\.(email|id|account_uuid|account_id)|organization\\.id)$")
+      - delete_matching_keys(span.attributes, "^(user\\.(email|id|account_uuid|account_id)|organization\\.id)$")
+    log_statements:
+      - delete_matching_keys(resource.attributes, "^(user\\.(email|id|account_uuid|account_id)|organization\\.id)$")
+      - delete_matching_keys(log.attributes, "^(user\\.(email|id|account_uuid|account_id)|organization\\.id)$")
+    metric_statements:
+      - delete_matching_keys(resource.attributes, "^(user\\.(email|id|account_uuid|account_id)|organization\\.id)$")
+      - delete_matching_keys(datapoint.attributes, "^(user\\.(email|id|account_uuid|account_id)|organization\\.id)$")
+  transform/redact:
+    error_mode: ignore
+    log_statements:
+      - 'replace_all_patterns(log.attributes, "value", "(?is)-----begin [a-z ]*private key-----.*?(-----end [a-z ]*private key-----|$)", "<REDACTED:private-key>")'
+      - 'replace_all_patterns(log.attributes, "value", "(?i)((?:proxy-)?authorization\\s*:\\s*)[^\\n\"'']+", "$${1}<REDACTED:authorization>")'
+      - 'replace_all_patterns(log.attributes, "value", "(?i)(bearer\\s+)[^\\s\"''&;|`)<>]+", "$${1}<REDACTED:bearer>")'
+      - 'replace_all_patterns(log.attributes, "value", "(?i)([a-z][a-z0-9+.-]*://[^/\\s:@\"'']+:)[^/\\s@\"'']+@", "$${1}<REDACTED:url-password>@")'
+      - 'replace_all_patterns(log.attributes, "value", "(?i)((?:^|\\s)--?[a-z0-9_-]*(?:token|password|passwd|secret|api[-_]?key)[a-z0-9_-]*(?:=|\\s+)[\"'']?)[^-\\s\"''&;|`)<>][^\\s\"''&;|`)<>]*", "$${1}<REDACTED:argument>")'
+      - 'replace_all_patterns(log.attributes, "value", "(?i)((?:^|[^a-z0-9_-])[a-z0-9_]*(?:token|secret|password|passwd|key|credential)[a-z0-9_]*=[\"'']?)[^\\s\"''&;|`)<>]+", "$${1}<REDACTED:assignment>")'
+      - 'replace_all_patterns(log.attributes, "value", "(?i)(^|[^a-z0-9_])github_pat_[a-z0-9_]+", "$${1}<REDACTED:github-token>")'
+      - 'replace_all_patterns(log.attributes, "value", "(?i)(^|[^a-z0-9_])gh[pousr]_[a-z0-9]{20,}", "$${1}<REDACTED:github-token>")'
+      - 'replace_all_patterns(log.attributes, "value", "(?i)(^|[^a-z0-9_])glpat-[a-z0-9_-]{20,}", "$${1}<REDACTED:gitlab-token>")'
+      - 'replace_all_patterns(log.attributes, "value", "(?i)(^|[^a-z0-9_])xox[abposr]-[a-z0-9-]{10,}", "$${1}<REDACTED:slack-token>")'
+      - 'replace_all_patterns(log.attributes, "value", "(?i)(^|[^a-z0-9_])sk-[a-z0-9_-]{20,}", "$${1}<REDACTED:api-key>")'
+      - 'replace_all_patterns(log.attributes, "value", "(?i)(^|[^a-z0-9_])[rs]k_(?:live|test)_[a-z0-9]{10,}", "$${1}<REDACTED:stripe-key>")'
+      - 'replace_all_patterns(log.attributes, "value", "(?i)(^|[^a-z0-9_])(?:akia|asia)[a-z0-9]{16}", "$${1}<REDACTED:aws-access-key>")'
+      - 'replace_all_patterns(log.attributes, "value", "(?i)(^|[^a-z0-9_])aiza[a-z0-9_-]{35}", "$${1}<REDACTED:google-api-key>")'
+      - 'replace_all_patterns(log.attributes, "value", "(?i)(^|[^a-z0-9_])npm_[a-z0-9]{36}", "$${1}<REDACTED:npm-token>")'
+    trace_statements:
+      - 'replace_all_patterns(span.attributes, "value", "(?is)-----begin [a-z ]*private key-----.*?(-----end [a-z ]*private key-----|$)", "<REDACTED:private-key>")'
+      - 'replace_all_patterns(span.attributes, "value", "(?i)((?:proxy-)?authorization\\s*:\\s*)[^\\n\"'']+", "$${1}<REDACTED:authorization>")'
+      - 'replace_all_patterns(span.attributes, "value", "(?i)(bearer\\s+)[^\\s\"''&;|`)<>]+", "$${1}<REDACTED:bearer>")'
+      - 'replace_all_patterns(span.attributes, "value", "(?i)([a-z][a-z0-9+.-]*://[^/\\s:@\"'']+:)[^/\\s@\"'']+@", "$${1}<REDACTED:url-password>@")'
+      - 'replace_all_patterns(span.attributes, "value", "(?i)((?:^|\\s)--?[a-z0-9_-]*(?:token|password|passwd|secret|api[-_]?key)[a-z0-9_-]*(?:=|\\s+)[\"'']?)[^-\\s\"''&;|`)<>][^\\s\"''&;|`)<>]*", "$${1}<REDACTED:argument>")'
+      - 'replace_all_patterns(span.attributes, "value", "(?i)((?:^|[^a-z0-9_-])[a-z0-9_]*(?:token|secret|password|passwd|key|credential)[a-z0-9_]*=[\"'']?)[^\\s\"''&;|`)<>]+", "$${1}<REDACTED:assignment>")'
+      - 'replace_all_patterns(span.attributes, "value", "(?i)(^|[^a-z0-9_])github_pat_[a-z0-9_]+", "$${1}<REDACTED:github-token>")'
+      - 'replace_all_patterns(span.attributes, "value", "(?i)(^|[^a-z0-9_])gh[pousr]_[a-z0-9]{20,}", "$${1}<REDACTED:github-token>")'
+      - 'replace_all_patterns(span.attributes, "value", "(?i)(^|[^a-z0-9_])glpat-[a-z0-9_-]{20,}", "$${1}<REDACTED:gitlab-token>")'
+      - 'replace_all_patterns(span.attributes, "value", "(?i)(^|[^a-z0-9_])xox[abposr]-[a-z0-9-]{10,}", "$${1}<REDACTED:slack-token>")'
+      - 'replace_all_patterns(span.attributes, "value", "(?i)(^|[^a-z0-9_])sk-[a-z0-9_-]{20,}", "$${1}<REDACTED:api-key>")'
+      - 'replace_all_patterns(span.attributes, "value", "(?i)(^|[^a-z0-9_])[rs]k_(?:live|test)_[a-z0-9]{10,}", "$${1}<REDACTED:stripe-key>")'
+      - 'replace_all_patterns(span.attributes, "value", "(?i)(^|[^a-z0-9_])(?:akia|asia)[a-z0-9]{16}", "$${1}<REDACTED:aws-access-key>")'
+      - 'replace_all_patterns(span.attributes, "value", "(?i)(^|[^a-z0-9_])aiza[a-z0-9_-]{35}", "$${1}<REDACTED:google-api-key>")'
+      - 'replace_all_patterns(span.attributes, "value", "(?i)(^|[^a-z0-9_])npm_[a-z0-9]{36}", "$${1}<REDACTED:npm-token>")'
+  batch:
+    timeout: 2s
+
+exporters:
+  file/traces:
+    path: ${env:GM_HALL}/telemetry/traces.jsonl
+    format: json
+    rotation: &rotation
+      max_megabytes: 20
+      max_days: 14
+      max_backups: 200
+  file/logs:
+    path: ${env:GM_HALL}/telemetry/logs.jsonl
+    format: json
+    rotation: *rotation
+  file/metrics:
+    path: ${env:GM_HALL}/telemetry/metrics.jsonl
+    format: json
+    rotation: *rotation
+
+service:
+  telemetry:
+    # The collector's own metrics would listen on a port of their own; there are none.
+    metrics:
+      level: none
+    logs:
+      level: warn
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, transform/identity, transform/redact, batch]
+      exporters: [file/traces]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, transform/identity, transform/redact, batch]
+      exporters: [file/logs]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, transform/identity, batch]
+      exporters: [file/metrics]
