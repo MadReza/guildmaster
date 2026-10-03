@@ -440,9 +440,10 @@ usage: gm [<command> [arguments]]
                           it is the first ticket key in lower case (crm-1234)
   open <focus>            the same for an existing focus: a running Party Leader is left as it is, a dead or
                           missing one starts again (a fresh session resumes from records); reopens a closed focus
-  up [--quiet]            the muster, plain code with no model: start every open focus's Party Leader that is
-                          dead or missing, leave the running ones alone; one that fails to start 3 times in a
-                          row is held until gm open; any other gm command at a terminal does the same, quietly
+  up [--quiet]            the muster, plain code with no model: start the front desk's Guildmaster and every open
+                          focus's Party Leader that is dead or missing, leave the running ones alone; one that
+                          fails to start 3 times in a row is held until gm open (gm, for the Guildmaster); any
+                          other gm command at a terminal does the same, quietly
   autostart [on [--every MINUTES] | off | status]
                           a launchd agent (macOS) that runs gm up --quiet at login and every 5 minutes. The
                           Guildmaster turns it on by itself; off is the switch to stop it, and it stays off
