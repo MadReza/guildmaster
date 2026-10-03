@@ -10,6 +10,8 @@ WORK=$(cd "$WORK" && pwd -P)
 trap 'rm -rf "$WORK"' EXIT
 # The suite may itself run inside Claude Code, whose session variables would join gm's spans to it.
 unset CLAUDE_CODE_SESSION_ID CLAUDE_EFFORT TRACEPARENT GM_FOCUS
+# gm never asks a question or looks for the real Claude Code unless a test says so.
+export GM_INTERACTIVE=0 GM_CLAUDE=$ROOT/tests/fixtures/fake-claude GM_HERDR=$ROOT/tests/fixtures/fake-claude
 pass=0
 fail=0
 failed=''
@@ -968,6 +970,7 @@ t_telemetry_import_reads_each_line_once() {
 }
 
 t_open_sends_telemetry_only_to_loopback() {
+  unset GM_CLAUDE # the command shown is the real default, claude
   setup tel-open
   local out bad n=0
   out=$(gm open appt-v2 --no-launch)
@@ -1118,6 +1121,223 @@ t_collector_masks_secrets_and_drops_identity() {
     case $files in *"$i"*) fail "the collector wrote $i" ;; esac
   done
   assert_contains "$(gm trace import)" "3 model calls (\$0.2700 est.)" "its files import"
+}
+
+# First run (gm init). A fixture release stands in for GitHub: a tar.gz holding an executable named otelcol-contrib
+# (a copy of fake-claude) and its published checksum, fetched through GM_OTELCOL_BASE_URL=file://. No test touches the
+# network, a real bin directory, or chmod.
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d ' ' -f1
+}
+
+otel_release() {
+  # otel_release <scenario>: makes $WORK/<scenario>/release for linux amd64 and sets REL, TARBALL and SUM
+  REL=$WORK/$1/release
+  mkdir -p "$REL/pkg" "$WORK/$1/tmpd"
+  cp "$ROOT/tests/fixtures/fake-claude" "$REL/pkg/otelcol-contrib"
+  TARBALL=$REL/otelcol-contrib_0.162.0_linux_amd64.tar.gz
+  tar -czf "$TARBALL" -C "$REL/pkg" otelcol-contrib
+  SUM=$(sha256_of "$TARBALL")
+  printf '%s' "$SUM" >"$TARBALL.sha256"
+}
+
+# gm init against the fixture: the collector is missing, the platform is linux amd64, files come from REL.
+ginit() {
+  GM_OTELCOL=$WORK/no-collector GM_PLATFORM_OS=Linux GM_PLATFORM_ARCH=x86_64 GM_OTELCOL_BASE_URL=file://$REL \
+    TMPDIR=$WORK/$SCENARIO/tmpd gm "$@"
+}
+
+t_first_run_is_detected_asks_once_and_records_the_choice() {
+  export GM_HALL=$WORK/fr-once/hall
+  local out
+  out=$(printf 's\n' | GM_INTERACTIVE=1 GM_OTELCOL=$WORK/none gm list 2>&1) || fail "the command did not go on after the first run"
+  assert_contains "$out" "gm: first run" "first run announced" &&
+    assert_contains "$out" "ok       sqlite3" "what is present" &&
+    assert_contains "$out" "missing  otelcol-contrib" "what is missing" &&
+    assert_contains "$out" "per-call model, tokens and cost" "what the missing piece means" &&
+    assert_contains "$out" "Skipped" "the choice taken"
+  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/setup.conf")" skipped "the choice recorded" &&
+    [ -n "$(sed -n 's/^initialized: //p' "$GM_HALL/setup.conf")" ] || fail "initialized not recorded"
+  [ -s "$GM_HALL/register.db" ] || fail "the command did not run after the first run"
+  out=$(GM_INTERACTIVE=1 GM_OTELCOL=$WORK/none gm list </dev/null 2>&1)
+  assert_not_contains "$out" "first run" "it never nags afterwards"
+  assert_not_contains "$out" "Install, skip" "it never asks again"
+}
+
+t_first_run_respects_a_hand_written_setup_file() {
+  export GM_HALL=$WORK/fr-hand/hall
+  mkdir -p "$GM_HALL"
+  printf 'initialized: 2026-01-01T00:00:00Z\ncollector: skipped\n' >"$GM_HALL/setup.conf"
+  local out
+  out=$(GM_INTERACTIVE=1 GM_OTELCOL=$WORK/none gm list </dev/null 2>&1)
+  assert_not_contains "$out" "first run" "a written setup file means the first run is over"
+}
+
+t_first_run_never_blocks_without_a_terminal() {
+  export GM_HALL=$WORK/fr-quiet/hall
+  local out
+  out=$(gm list </dev/null 2>&1) || fail "a command failed for want of a terminal"
+  assert_not_contains "$out" "first run" "no questions without a terminal"
+  [ ! -e "$GM_HALL/setup.conf" ] || fail "setup recorded though nobody answered"
+  out=$(GM_OTELCOL=$WORK/none gm init </dev/null 2>&1) || fail "gm init without a terminal failed"
+  assert_contains "$out" "missing  otelcol-contrib" "it still reports" &&
+    assert_contains "$out" "Not asking: this is not a terminal" "and says why it did not ask" &&
+    assert_contains "$out" "gm init --yes" "and how to answer"
+  [ ! -e "$GM_HALL/setup.conf" ] || fail "gm init recorded a choice nobody made"
+}
+
+t_first_run_never_runs_in_a_hook_or_the_status_line() {
+  export GM_HALL=$WORK/fr-hook/hall
+  local out
+  out=$(printf '{}' | GM_INTERACTIVE=1 GM_OTELCOL=$WORK/none gm hook session-end 2>&1 </dev/null)
+  out="$out$(printf '{}' | GM_INTERACTIVE=1 GM_OTELCOL=$WORK/none gm statusline 2>&1)"
+  assert_not_contains "$out" "first run" "hooks and the status line never ask"
+  [ ! -e "$GM_HALL/setup.conf" ] || fail "a hook ran the first run"
+}
+
+t_init_yes_and_no_answer_for_scripts() {
+  export GM_HALL=$WORK/fr-flags/hall
+  GM_OTELCOL=$WORK/none gm init --no >/dev/null 2>&1 || fail "gm init --no failed"
+  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/setup.conf")" skipped "--no skips" &&
+    [ -n "$(sed -n 's/^initialized: //p' "$GM_HALL/setup.conf")" ] || fail "--no leaves it uninitialized"
+  export GM_HALL=$WORK/fr-flags2/hall SCENARIO=fr-flags2
+  otel_release fr-flags2
+  local bin=$WORK/fr-flags2/bin out
+  out=$(ginit init --yes --bin-dir "$bin" 2>&1) || fail "gm init --yes failed: $out"
+  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/setup.conf")" installed "--yes installs" &&
+    [ -x "$bin/otelcol-contrib" ] || fail "nothing installed at $bin/otelcol-contrib"
+}
+
+t_choosing_later_asks_again_only_in_gm_init() {
+  export GM_HALL=$WORK/fr-later/hall
+  local out
+  out=$(printf 'l\n' | GM_INTERACTIVE=1 GM_OTELCOL=$WORK/none gm list 2>&1)
+  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/setup.conf")" later "later recorded"
+  out=$(GM_INTERACTIVE=1 GM_OTELCOL=$WORK/none gm list </dev/null 2>&1)
+  assert_not_contains "$out" "first run" "later does not nag in other commands"
+  out=$(printf 's\n' | GM_INTERACTIVE=1 GM_OTELCOL=$WORK/none gm init 2>&1)
+  assert_contains "$out" "Install, skip, or later?" "gm init asks again" &&
+    assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/setup.conf")" skipped "and the new answer replaces the old"
+  out=$(GM_INTERACTIVE=1 GM_OTELCOL=$WORK/none gm init </dev/null 2>&1)
+  assert_contains "$out" "not asking again" "a skip is respected by gm init" &&
+    assert_not_contains "$out" "Install, skip" "and not asked"
+  out=$(printf 'l\n' | GM_INTERACTIVE=1 GM_OTELCOL=$WORK/none gm init --again 2>&1)
+  assert_contains "$out" "Install, skip, or later?" "--again asks about a skip"
+}
+
+t_init_installs_the_collector_after_checking_its_checksum() {
+  export GM_HALL=$WORK/fr-install/hall SCENARIO=fr-install
+  otel_release fr-install
+  local bin=$WORK/fr-install/newdir/bin out leftovers
+  out=$(printf 'i\n%s\n' "$bin" | GM_INTERACTIVE=1 ginit init 2>&1) || fail "install failed: $out"
+  assert_contains "$out" "SHA-256 matches the published checksum: $SUM" "the checksum is shown" &&
+    assert_contains "$out" "installed $bin/otelcol-contrib" "it says exactly where" &&
+    assert_contains "$out" "is not on your PATH" "and what the patron must do about the PATH"
+  [ -x "$bin/otelcol-contrib" ] || fail "no executable at $bin/otelcol-contrib"
+  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/setup.conf")" installed "recorded as installed" &&
+    assert_eq "$(sed -n 's/^collector-path: //p' "$GM_HALL/setup.conf")" "$bin/otelcol-contrib" "with its path" &&
+    assert_eq "$(sed -n 's/^collector-sha256: //p' "$GM_HALL/setup.conf")" "$SUM" "and its checksum" &&
+    assert_eq "$(sed -n 's/^collector-version: //p' "$GM_HALL/setup.conf")" 0.162.0 "and the pinned version"
+  leftovers=$(find "$WORK/fr-install/tmpd" "$bin" -mindepth 1 | sed "s|^$WORK/fr-install/||")
+  assert_eq "$leftovers" "newdir/bin/otelcol-contrib" "no temporary file or staged copy left"
+  if command -v otelcol-contrib >/dev/null 2>&1; then
+    printf '    (otelcol-contrib is on the PATH; recorded-path lookup skipped)\n'
+  else
+    out=$(GM_PLATFORM_OS=Linux gm doctor 2>&1 || true)
+    assert_contains "$out" "ok    collector $bin/otelcol-contrib" "gm finds the installed collector without the PATH"
+  fi
+  out=$(ginit init --yes --bin-dir "$bin" 2>&1)
+  assert_contains "$out" "is already there; using it" "a collector already at the destination is not fetched again" &&
+    assert_not_contains "$out" "  downloading https" "nothing downloaded"
+}
+
+t_init_refuses_a_collector_whose_checksum_does_not_match() {
+  export GM_HALL=$WORK/fr-badsum/hall SCENARIO=fr-badsum
+  otel_release fr-badsum
+  printf '%064d' 0 >"$TARBALL.sha256"
+  local bin=$WORK/fr-badsum/newdir/bin out rc=0
+  out=$(ginit init --yes --bin-dir "$bin" 2>&1) || rc=$?
+  assert_eq "$rc" 1 "a mismatch fails" &&
+    assert_contains "$out" "REFUSED" "and says it refused" &&
+    assert_contains "$out" "$SUM" "showing what the file really hashes to" &&
+    assert_contains "$out" "nothing was installed" "and that nothing happened"
+  [ ! -e "$bin" ] && [ ! -e "$WORK/fr-badsum/newdir" ] || fail "a refused install left a directory behind"
+  assert_eq "$(find "$WORK/fr-badsum/tmpd" -mindepth 1 | wc -l | tr -d ' ')" 0 "no temporary file left"
+  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/setup.conf")" later "recorded so gm init offers it again" &&
+    assert_not_contains "$(cat "$GM_HALL/setup.conf")" collector-path "no path recorded"
+}
+
+t_init_leaves_nothing_when_the_download_fails() {
+  export GM_HALL=$WORK/fr-nodl/hall SCENARIO=fr-nodl
+  otel_release fr-nodl
+  rm -f "$TARBALL.sha256"
+  local bin=$WORK/fr-nodl/newdir/bin out rc=0
+  out=$(ginit init --yes --bin-dir "$bin" 2>&1) || rc=$?
+  assert_eq "$rc" 1 "a failed download fails" &&
+    assert_contains "$out" "could not download the published checksum" "and says which file" &&
+    assert_contains "$out" "nothing was installed" "and that nothing happened"
+  [ ! -e "$WORK/fr-nodl/newdir" ] || fail "a failed install left a directory behind"
+  assert_eq "$(find "$WORK/fr-nodl/tmpd" -mindepth 1 | wc -l | tr -d ' ')" 0 "no temporary file left"
+}
+
+t_init_offers_no_install_for_a_platform_without_a_build() {
+  export GM_HALL=$WORK/fr-plan9/hall SCENARIO=fr-plan9
+  otel_release fr-plan9
+  local out
+  out=$(printf 's\n' | GM_INTERACTIVE=1 GM_PLATFORM_OS=Plan9 GM_OTELCOL=$WORK/none gm init 2>&1)
+  assert_contains "$out" "has no build of it for" "it says so" &&
+    assert_not_contains "$out" "i  install it now" "and offers no install"
+  out=$(GM_PLATFORM_OS=Plan9 GM_OTELCOL=$WORK/none gm init --yes 2>&1) && fail "--yes cannot install on a platform without a build"
+  assert_contains "$out" "no official build" "and says why"
+}
+
+t_init_stops_with_instructions_when_something_required_is_missing() {
+  export GM_HALL=$WORK/fr-req/hall
+  local out rc=0
+  out=$(GM_CLAUDE=$WORK/no-claude GM_OTELCOL=$WORK/none gm init --yes 2>&1) || rc=$?
+  assert_eq "$rc" 1 "init fails" &&
+    assert_contains "$out" "MISSING  Claude Code" "the missing piece is marked" &&
+    assert_contains "$out" "Install Claude Code" "with a plain instruction" &&
+    assert_not_contains "$out" "Install, skip" "and no question"
+  [ ! -e "$GM_HALL/setup.conf" ] || fail "a failed first run recorded something"
+  rc=0
+  out=$(GM_INTERACTIVE=1 GM_CLAUDE=$WORK/no-claude gm list </dev/null 2>&1) || rc=$?
+  assert_eq "$rc" 1 "the command that triggered the first run stops" &&
+    assert_contains "$out" "Install Claude Code" "with the same instruction"
+}
+
+t_init_requires_herdr() {
+  export GM_HALL=$WORK/fr-herdr/hall
+  local out rc=0 fakebin=$WORK/fr-herdr/bin
+  out=$(GM_HERDR=$WORK/no-herdr GM_OTELCOL=$WORK/none gm init --yes 2>&1) || rc=$?
+  assert_eq "$rc" 1 "a missing herdr stops init" &&
+    assert_contains "$out" "MISSING  herdr" "it is marked missing" &&
+    assert_contains "$out" "https://herdr.dev/docs/install/" "with the official install page" &&
+    assert_contains "$out" "curl -fsSL https://herdr.dev/install.sh | sh" "and the official command" &&
+    assert_not_contains "$out" "Install, skip" "and no question"
+  [ ! -e "$GM_HALL/setup.conf" ] || fail "a failed first run recorded something"
+  # A herdr that reports its version is listed with it.
+  mkdir -p "$fakebin"
+  cp "$ROOT/tests/fixtures/fake-claude" "$fakebin/herdr-run"
+  out=$(GM_HERDR=$fakebin/herdr-run GM_OTELCOL=$WORK/none gm init --no 2>&1)
+  assert_contains "$out" "ok       " "present herdr passes"
+  out=$(GM_HERDR=$WORK/no-herdr GM_OTELCOL=$WORK/none gm doctor 2>&1 || true)
+  assert_contains "$out" "FAIL  herdr: " "doctor reports it too"
+}
+
+t_doctor_keeps_reporting_the_setup_state() {
+  export GM_HALL=$WORK/fr-doctor/hall
+  gm list >/dev/null
+  local out rc=0
+  out=$(GM_OTELCOL=$WORK/none GM_OTEL_PORT=1 gm doctor 2>&1) || rc=$?
+  assert_contains "$out" "warn  first-run setup not done: run gm init" "before the first run" &&
+    assert_contains "$out" "ok    sqlite3" "dependencies are listed" &&
+    assert_contains "$out" "FAIL  no OpenTelemetry Collector found" "a missing collector nobody decided on fails"
+  GM_OTELCOL=$WORK/none gm init --no >/dev/null 2>&1
+  out=$(GM_OTELCOL=$WORK/none GM_OTEL_PORT=1 gm doctor 2>&1) || rc=$?
+  assert_contains "$out" "ok    first-run setup done" "after it" &&
+    assert_contains "$out" "warn  no OpenTelemetry Collector: you chose to go without it" "a skip is a warning, not a failure" &&
+    assert_not_contains "$out" "FAIL" "doctor passes for a patron who chose to go without"
 }
 
 t_shellcheck() {

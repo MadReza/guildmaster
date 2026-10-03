@@ -17,6 +17,8 @@ GM_TEMPLATES=$GM_ROOT/templates
 GM_HALL=${GM_HALL:-$HOME/.guildmaster}
 case $GM_HALL in /*) ;; *) GM_HALL=$PWD/$GM_HALL ;; esac
 GM_DB=$GM_HALL/register.db
+GM_SETUP=$GM_HALL/setup.conf
+GM_OTELCOL_PINNED=0.162.0
 GM_SCHEMA_VERSION=2
 GM_STOP_BUDGET=${GM_STOP_BUDGET:-3}
 GM_NOW="strftime('%Y-%m-%dT%H:%M:%fZ','now')"
@@ -413,11 +415,19 @@ usage: gm <command> [arguments]
                           what sets a selection apart from the rest; selections: slow-tools (30s),
                           slow-hooks (1s), slow-replies (2m), slow-calls (30s), not-right-first-time
   collector               run the local OpenTelemetry Collector (templates/otelcol.yaml) in the foreground
-  doctor                  check that telemetry goes only to 127.0.0.1 and that the collector answers
+  init [--yes | --no] [--again] [--bin-dir DIR]
+                          the first-run check: what gm needs and what is missing; asks whether to install
+                          the collector, skip it or decide later, and records the answer in setup.conf.
+                          --yes installs every missing optional piece, --no goes without; --again asks
+                          about a piece you skipped. Runs by itself, once, in a terminal.
+  doctor                  the state of setup and dependencies; that telemetry goes only to 127.0.0.1 and
+                          that the collector answers
 
 Environment: GM_HALL (default ~/.guildmaster), GM_FOCUS (focus context override),
   GM_OTEL_PORT (collector port, default 4318), GM_TELEMETRY=off (gm open starts sessions without telemetry),
-  GM_OTELCOL (the collector binary, default otelcol-contrib on PATH).
+  GM_OTELCOL (the collector binary, default otelcol-contrib on PATH or where gm init put it),
+  GM_BIN_DIR (where gm init installs it, default ~/.local/bin), GM_INTERACTIVE=1|0 (force or forbid questions),
+  GM_CLAUDE and GM_HERDR (the claude and herdr commands, default found on PATH).
 EOF
 }
 
@@ -1755,7 +1765,14 @@ gm_otelcol() {
   if [ -n "${GM_OTELCOL:-}" ]; then
     [ ! -x "$GM_OTELCOL" ] || printf '%s' "$GM_OTELCOL"
   else
-    command -v otelcol-contrib 2>/dev/null || true
+    local p
+    p=$(command -v otelcol-contrib 2>/dev/null || true)
+    if [ -z "$p" ]; then
+      # A collector that gm init installed need not be on the PATH; the Guildhall recorded where it put it.
+      p=$(gm_setup_get collector-path)
+      [ -x "$p" ] || p=''
+    fi
+    printf '%s' "$p"
   fi
 }
 
@@ -1794,6 +1811,359 @@ gm_collector_config_problems() {
   grep -q '^[[:space:]]*level:[[:space:]]*none' "$cfg" || printf '%s\n' "service.telemetry.metrics.level is not none: the collector would serve its own metrics"
 }
 
+# ---- First run: gm init -------------------------------------------------------------------------------------
+# The patron's answers live in $GM_HALL/setup.conf, one "key: value" a line, readable and editable:
+#   initialized: when a first run was completed (a choice made, or nothing optional missing)
+#   collector: installed | skipped | later, the patron's answer about the OpenTelemetry Collector
+#   collector-path / -version / -sha256 / -installed-at: what gm init installed, and where
+# Everything gm init says goes to stderr, so it never mixes with the output of the command that triggered it.
+
+gm_setup_get() { gm_setting "$GM_SETUP" "$1"; }
+
+gm_setup_set() {
+  local key=$1 val=$2 tmp
+  mkdir -p "$GM_HALL"
+  tmp=$GM_SETUP.$$
+  if [ -f "$GM_SETUP" ]; then
+    K=$key V=$val awk 'index($0, ENVIRON["K"] ":") == 1 { if (!d) print ENVIRON["K"] ": " ENVIRON["V"]; d = 1; next } { print } END { if (!d) print ENVIRON["K"] ": " ENVIRON["V"] }' "$GM_SETUP" >"$tmp"
+  else
+    {
+      printf '%s\n' "# Guildmaster first-run setup, written by gm init. Plain text: edit it, or run gm init again." \
+        "# collector: installed | skipped | later   (the OpenTelemetry Collector, for tracing slice 2)"
+      printf '%s: %s\n' "$key" "$val"
+    } >"$tmp"
+  fi
+  mv -f "$tmp" "$GM_SETUP"
+}
+
+gm_say() { printf '%s\n' "$*" >&2; }
+
+# True when gm may ask the patron a question: both stdin and stderr are a terminal, or GM_INTERACTIVE=1
+# (tests, which answer on stdin); GM_INTERACTIVE=0 forbids it.
+gm_init_interactive() {
+  case ${GM_INTERACTIVE:-} in
+    1) return 0 ;;
+    0) return 1 ;;
+  esac
+  [ -t 0 ] && [ -t 2 ]
+}
+
+# gm_ver_ge 3.51.0 3.38: whether the first dotted version is at least the second.
+gm_ver_ge() {
+  local a='' b='' x='' y=''
+  IFS=. read -r a b _ <<<"$(printf '%s' "$1" | sed 's/[^0-9.].*//')"
+  IFS=. read -r x y _ <<<"$2"
+  [ "${a:-0}" -gt "${x:-0}" ] || { [ "${a:-0}" -eq "${x:-0}" ] && [ "${b:-0}" -ge "${y:-0}" ]; }
+}
+
+# What gm uses and whether it is there: one row a line, "id<TAB>required|optional<TAB>ok|missing|old<TAB>detail".
+gm_init_probe() {
+  local v p t missing='' claude=${GM_CLAUDE:-claude} herdr=${GM_HERDR:-herdr}
+  printf 'bash\trequired\tok\tbash %s\n' "$BASH_VERSION"
+  if v=$(sqlite3 --version 2>/dev/null | awk '{ print $1; exit }') && [ -n "$v" ]; then
+    if gm_ver_ge "$v" 3.38 && [ "$(sqlite3 -batch :memory: "SELECT '{\"a\":1}'->>'a';" 2>/dev/null || true)" = 1 ]; then
+      printf 'sqlite3\trequired\tok\tsqlite3 %s (JSON functions work)\n' "$v"
+    else
+      printf 'sqlite3\trequired\told\tsqlite3 %s: too old or without the JSON functions (needs 3.38 or later)\n' "$v"
+    fi
+  else
+    printf 'sqlite3\trequired\tmissing\tsqlite3: not found\n'
+  fi
+  if v=$(git --version 2>/dev/null); then
+    printf 'git\trequired\tok\t%s\n' "$v"
+  else
+    printf 'git\trequired\tmissing\tgit: not found\n'
+  fi
+  p=$(command -v "$claude" 2>/dev/null || true)
+  if [ -n "$p" ]; then
+    v=$("$claude" --version 2>/dev/null | head -n 1 || true)
+    printf 'claude\trequired\tok\tClaude Code %s at %s\n' "${v:-(version not reported)}" "$p"
+  else
+    printf 'claude\trequired\tmissing\tClaude Code: %s not found on PATH\n' "$claude"
+  fi
+  p=$(command -v "$herdr" 2>/dev/null || true)
+  if [ -n "$p" ]; then
+    v=$("$herdr" --version 2>/dev/null | head -n 1 || true)
+    printf 'herdr\trequired\tok\t%s at %s\n' "${v:-herdr (version not reported)}" "$p"
+  else
+    printf 'herdr\trequired\tmissing\therdr: %s not found on PATH\n' "$herdr"
+  fi
+  for t in sed awk tr head tail cut grep wc mktemp od find basename dirname readlink date env; do
+    command -v "$t" >/dev/null 2>&1 || missing="$missing $t"
+  done
+  if [ -z "$missing" ]; then
+    printf 'tools\trequired\tok\tstandard tools (sed awk tr grep mktemp and the rest)\n'
+  else
+    printf 'tools\trequired\tmissing\tstandard tools missing:%s\n' "$missing"
+  fi
+  if command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || command -v openssl >/dev/null 2>&1; then
+    printf 'sha256\trequired\tok\ta SHA-256 tool\n'
+  else
+    printf 'sha256\trequired\tmissing\tno SHA-256 tool (sha256sum, shasum or openssl)\n'
+  fi
+  p=$(gm_otelcol)
+  if [ -n "$p" ]; then
+    v=$("$p" --version 2>/dev/null | head -n 1 || true)
+    printf 'collector\toptional\tok\tOpenTelemetry Collector%s at %s\n' "${v:+ ($v)}" "$p"
+  else
+    printf 'collector\toptional\tmissing\totelcol-contrib (the OpenTelemetry Collector): not found\n'
+  fi
+}
+
+# What a missing or old piece means, and what to do about it.
+gm_init_meaning() {
+  case $1 in
+    bash) printf 'gm is a bash script; install bash 3.2 or later.' ;;
+    sqlite3) printf 'the register is a sqlite3 file. Install sqlite3 3.38 or later (macOS: brew install sqlite; Debian or Ubuntu: apt install sqlite3).' ;;
+    git) printf 'camps are git worktrees. Install git from your package manager.' ;;
+    claude) printf 'gm open starts a Party Leader as a Claude Code session. Install Claude Code (https://docs.claude.com/en/docs/claude-code/overview) and put claude on your PATH, or set GM_CLAUDE.' ;;
+    herdr) printf 'herdr, the terminal workspace manager, houses the Party Leaders and Adventurers. Install it from its official docs (https://herdr.dev/docs/install/): curl -fsSL https://herdr.dev/install.sh | sh, or brew install herdr, or mise use -g herdr; then check that herdr is on your PATH (or set GM_HERDR).' ;;
+    tools) printf 'gm uses them in every command; install them from your package manager.' ;;
+    sha256) printf 'gm fingerprints prompts and checks downloads with it; install coreutils, or openssl.' ;;
+    collector) printf "tracing will record gm's own spans but not Claude Code's per-call model, tokens and cost; gm trace and gm stats still work, and cost is the status line's estimate." ;;
+  esac
+}
+
+# "os arch" in the words of the OpenTelemetry Collector's release files; fails for a platform it has none for.
+gm_otelcol_target() {
+  local s=${GM_PLATFORM_OS:-$(uname -s)} m=${GM_PLATFORM_ARCH:-$(uname -m)} os arch
+  case $s in
+    Darwin) os=darwin ;;
+    Linux) os=linux ;;
+    *) return 1 ;;
+  esac
+  case $m in
+    arm64 | aarch64) arch=arm64 ;;
+    x86_64 | amd64) arch=amd64 ;;
+    *) return 1 ;;
+  esac
+  printf '%s %s' "$os" "$arch"
+}
+
+# Installs the pinned collector into $1, with no sudo and nothing left behind on failure: the release file and its
+# published SHA-256 are fetched into a temporary directory, checked, unpacked there, and only then copied next to
+# its destination and renamed into place. Prints the installed path on stdout, and says what it did on stderr.
+gm_init_install_collector() {
+  local dir=$1 ver=$GM_OTELCOL_PINNED target os arch file base proto=https dest
+  target=$(gm_otelcol_target) || {
+    gm_say "  cannot install: the collector has no official build for $(uname -s) $(uname -m) that gm fetches; see README.md"
+    return 1
+  }
+  read -r os arch <<<"$target"
+  file=otelcol-contrib_${ver}_${os}_${arch}.tar.gz
+  base=${GM_OTELCOL_BASE_URL:-https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v$ver}
+  base=${base%/}
+  case $base in file://*) proto='file' ;; esac
+  dest=$dir/otelcol-contrib
+  command -v curl >/dev/null 2>&1 || { gm_say "  cannot install: curl is not installed"; return 1; }
+  command -v tar >/dev/null 2>&1 || { gm_say "  cannot install: tar is not installed"; return 1; }
+  if [ -e "$dest" ]; then
+    [ -x "$dest" ] || { gm_say "  cannot install: $dest exists and is not executable; move it away or choose another directory"; return 1; }
+    gm_say "  $dest is already there; using it, downloading nothing"
+    printf '%s' "$dest"
+    return 0
+  fi
+  (
+    tmp=$(mktemp -d "${TMPDIR:-/tmp}/gm-otelcol.XXXXXX") || { gm_say "  cannot install: no temporary directory"; exit 1; }
+    staged='' made='' placed=''
+    # shellcheck disable=SC2329  # run by the EXIT trap
+    cleanup() {
+      [ -z "$staged" ] || rm -f -- "$staged"
+      if [ -z "$placed" ] && [ -n "$made" ]; then
+        d=$dir
+        while [ "$d" != "$(dirname "$made")" ] && rmdir "$d" 2>/dev/null; do d=$(dirname "$d"); done
+      fi
+      case $tmp in */gm-otelcol.*) rm -rf -- "$tmp" ;; esac
+    }
+    trap cleanup EXIT
+    trap 'exit 130' INT TERM HUP
+    bad() { gm_say "  $1"; gm_say "  nothing was installed."; exit 1; }
+    gm_say "  downloading $base/$file"
+    curl -fsSL --proto "=$proto" --max-time 300 -o "$tmp/$file" "$base/$file" || bad "could not download $base/$file"
+    curl -fsSL --proto "=$proto" --max-time 60 -o "$tmp/$file.sha256" "$base/$file.sha256" || bad "could not download the published checksum $base/$file.sha256"
+    want=$(awk 'NR == 1 { print tolower($1) }' "$tmp/$file.sha256")
+    [[ $want =~ ^[0-9a-f]{64}$ ]] || bad "the published checksum file is not a SHA-256: refusing to continue"
+    got=$(gm_sha256_file "$tmp/$file")
+    [ "$got" = "$want" ] || bad "REFUSED: the SHA-256 of $file is $got but the published checksum is $want"
+    gm_say "  SHA-256 matches the published checksum: $got"
+    tar -xzf "$tmp/$file" -C "$tmp" otelcol-contrib 2>/dev/null && [ -f "$tmp/otelcol-contrib" ] || bad "the release file does not contain otelcol-contrib"
+    if [ ! -d "$dir" ]; then
+      first=$dir
+      while [ ! -d "$(dirname "$first")" ]; do first=$(dirname "$first"); done
+      made=$first
+      mkdir -p "$dir" || bad "could not make $dir (gm never uses sudo; choose a directory you own with --bin-dir)"
+    fi
+    staged=$dir/.otelcol-contrib.gm-$$
+    cp "$tmp/otelcol-contrib" "$staged" 2>/dev/null || bad "could not write into $dir (gm never uses sudo; choose a directory you own with --bin-dir)"
+    [ -x "$staged" ] || chmod u+x "$staged" || bad "could not make $staged executable"
+    mv -f "$staged" "$dest" || bad "could not move the collector into place at $dest"
+    staged=''
+    placed=1
+    gm_say "  installed $dest ($("$dest" --version 2>/dev/null | head -n 1 || true))"
+    printf '%s\t%s' "$dest" "$got"
+  )
+}
+
+# Reads one answer from stdin; prints the first letter it recognises among $2 (lower case), "l" at end of input,
+# and after three unrecognised answers.
+gm_init_ask() {
+  local prompt=$1 valid=$2 ans n=0 c
+  while [ "$n" -lt 3 ]; do
+    printf '%s' "$prompt" >&2
+    IFS= read -r ans || { printf 'l'; return 0; }
+    [ -t 0 ] || printf '\n' >&2
+    c=$(printf '%s' "${ans:-l}" | head -c 1 | tr '[:upper:]' '[:lower:]')
+    case $c in y) c=i ;; n) c=s ;; esac
+    case $valid in *"$c"*) printf '%s' "$c"; return 0 ;; esac
+    gm_say "  please answer with one of: $valid"
+    n=$((n + 1))
+  done
+  printf 'l'
+}
+
+# The collector question and its consequences. $1 mode (ask, yes, no), $2 1 to ask again about a skip, $3 a bin dir.
+# Returns 0 when settled, 1 when an install failed (recorded as "later"), 2 when left undecided (no way to ask).
+gm_init_collector() {
+  local mode=$1 again=$2 dir=${3:-${GM_BIN_DIR:-$HOME/.local/bin}} cur choice='' out
+  cur=$(gm_setup_get collector)
+  gm_say ""
+  gm_say "otelcol-contrib (the OpenTelemetry Collector, tracing slice 2, v$GM_OTELCOL_PINNED) is not installed."
+  gm_say "  Without it, $(gm_init_meaning collector)"
+  case $mode in
+    yes) choice=i ;;
+    no) choice=s ;;
+    *)
+      if [ "$cur" = skipped ] && [ "$again" != 1 ]; then
+        gm_say "  You chose to go without it on $(gm_setup_get initialized); not asking again (gm init --again changes that)."
+        return 0
+      fi
+      if ! gm_init_interactive; then
+        gm_say "  Not asking: this is not a terminal. gm init --yes installs it, gm init --no goes without it."
+        return 2
+      fi
+      if gm_otelcol_target >/dev/null; then
+        gm_say "  i  install it now: the official GitHub release, SHA-256 checked, into a directory you own, no sudo"
+        gm_say "  s  skip it, I am fine without it"
+        gm_say "  l  ask me again later (gm init asks again)"
+        choice=$(gm_init_ask "Install, skip, or later? [i/s/l] " isl)
+      else
+        gm_say "  gm has no build of it for $(uname -s) $(uname -m); install it by hand (README.md) or skip it."
+        gm_say "  s  skip it, I am fine without it"
+        gm_say "  l  ask me again later"
+        choice=$(gm_init_ask "Skip or later? [s/l] " sl)
+      fi ;;
+  esac
+  case $choice in
+    s)
+      gm_setup_set collector skipped
+      gm_say "  Skipped. Recorded in $GM_SETUP; gm will not ask again, and gm doctor keeps saying so."
+      return 0 ;;
+    l)
+      gm_setup_set collector later
+      gm_say "  Later. gm init asks again; nothing else changes."
+      return 0 ;;
+  esac
+  if [ "$mode" = ask ] && [ -z "$3" ]; then
+    local tilde='~' shown typed
+    shown=${dir/#$HOME/$tilde}
+    typed=$(gm_init_ask_dir "Install into [$shown]: ")
+    if [ -n "$typed" ]; then
+      case $typed in \~) typed=$HOME ;; \~/*) typed=$HOME/${typed#\~/} ;; esac
+      case $typed in /*) dir=$typed ;; *) dir=$PWD/$typed ;; esac
+    fi
+  fi
+  case $dir in /*) ;; *) dir=$PWD/$dir ;; esac
+  gm_say "  Installing into $dir:"
+  if out=$(gm_init_install_collector "$dir"); then
+    local path=${out%%$'\t'*} sum=${out#*$'\t'}
+    gm_setup_set collector installed
+    gm_setup_set collector-path "$path"
+    gm_setup_set collector-version "$GM_OTELCOL_PINNED"
+    [ "$sum" = "$out" ] || gm_setup_set collector-sha256 "$sum"
+    gm_setup_set collector-installed-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    case ":$PATH:" in
+      *":$(dirname "$path"):"*) ;;
+      *) gm_say "  $(dirname "$path") is not on your PATH. gm finds the collector through $GM_SETUP; add the directory to PATH to run it yourself." ;;
+    esac
+    gm_say "  Done: $path. Recorded in $GM_SETUP. Start it with gm collector."
+    return 0
+  fi
+  gm_setup_set collector later
+  gm_say "  The install did not happen; gm init will offer it again."
+  return 1
+}
+
+gm_init_ask_dir() {
+  local ans=''
+  printf '%s' "$1" >&2
+  IFS= read -r ans || true
+  [ -t 0 ] || printf '\n' >&2
+  printf '%s' "$ans"
+}
+
+# The first-run check and the choices it asks for. $1 mode (ask, yes, no), $2 again, $3 bin dir, $4 auto.
+gm_init_run() {
+  local mode=$1 again=$2 dir=$3 auto=${4:-} id level state detail tag problems='' rc=0
+  if [ -n "$auto" ]; then
+    gm_say "gm: first run. Checking what gm needs; this happens once. gm init runs it again, gm doctor shows the state."
+  else
+    gm_say "gm: checking what gm needs."
+  fi
+  while IFS=$'\t' read -r id level state detail; do
+    [ -n "$id" ] || continue
+    case $state in
+      ok) tag=ok ;;
+      *) if [ "$level" = required ]; then tag=MISSING; else tag=missing; fi ;;
+    esac
+    gm_say "$(printf '  %-8s %s' "$tag" "$detail")"
+    if [ "$state" != ok ] && [ "$level" = required ]; then
+      problems="${problems}  $detail: $(gm_init_meaning "$id")
+"
+    fi
+  done <<<"$(gm_init_probe)"
+  if [ -n "$problems" ]; then
+    gm_die "init: gm cannot run without what is missing above; nothing was changed. Fix these, then run gm init again:
+${problems%
+}"
+  fi
+  if [ -z "$(gm_otelcol)" ]; then
+    gm_init_collector "$mode" "$again" "$dir" || rc=$?
+  fi
+  if [ "$rc" = 2 ]; then
+    gm_say ""
+    gm_say "Nothing was recorded; gm asks on the first run in a terminal."
+    return 0
+  fi
+  if [ -z "$(gm_setup_get initialized)" ] || [ "$mode" != ask ]; then
+    gm_setup_set initialized "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  fi
+  gm_say ""
+  gm_say "Setup recorded in $GM_SETUP. gm will not ask again unprompted; gm doctor reports the state, gm init changes it."
+  return "$rc"
+}
+
+gm_cmd_init() {
+  local mode=ask again=0 dir=''
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --yes | -y) mode=yes; shift ;;
+      --no | -n) mode=no; shift ;;
+      --again) again=1; shift ;;
+      --bin-dir) dir=${2:?--bin-dir needs a directory}; shift 2 ;;
+      *) gm_die "init: unknown argument $1 (gm init [--yes | --no] [--again] [--bin-dir DIR])" ;;
+    esac
+  done
+  gm_init_run "$mode" "$again" "$dir"
+}
+
+# The first run, started by the first interactive gm command that needs the Guildhall. It never runs without a
+# terminal to answer it, and never in a hook, so nothing blocks.
+gm_init_auto() {
+  [ -z "$(gm_setup_get initialized)" ] || return 0
+  gm_init_interactive || return 0
+  gm_init_run ask 0 '' auto || true
+}
+
 gm_cmd_doctor() {
   [ $# -eq 0 ] || gm_die "doctor: gm doctor takes no arguments"
   local fails=0 ep code bin cfg line pending=0 f n
@@ -1801,7 +2171,18 @@ gm_cmd_doctor() {
     printf '%-5s %s\n' "$1" "$2"
     [ "$1" != FAIL ] || fails=$((fails + 1))
   }
+  local skipped=0 id level state detail
+  [ "$(gm_setup_get collector)" != skipped ] || skipped=1
   gm_doc ok "register schema $(gm_sql 'PRAGMA user_version;') at $GM_DB"
+  if [ -n "$(gm_setup_get initialized)" ]; then
+    gm_doc ok "first-run setup done $(gm_setup_get initialized) ($GM_SETUP)"
+  else
+    gm_doc warn "first-run setup not done: run gm init"
+  fi
+  while IFS=$'\t' read -r id level state detail; do
+    [ "$id" != collector ] || continue
+    if [ "$state" = ok ]; then gm_doc ok "$detail"; else gm_doc FAIL "$detail: $(gm_init_meaning "$id")"; fi
+  done <<<"$(gm_init_probe)"
   ep=$(gm_otel_endpoint)
   if [ "${GM_TELEMETRY:-on}" = off ]; then
     gm_doc warn "GM_TELEMETRY=off: gm open starts sessions without telemetry"
@@ -1828,7 +2209,11 @@ gm_cmd_doctor() {
   fi
   bin=$(gm_otelcol)
   if [ -z "$bin" ]; then
-    gm_doc FAIL "no OpenTelemetry Collector found: install otelcol-contrib (README.md) or set GM_OTELCOL"
+    if [ "$skipped" = 1 ]; then
+      gm_doc warn "no OpenTelemetry Collector: you chose to go without it; $(gm_init_meaning collector) gm init --again changes that"
+    else
+      gm_doc FAIL "no OpenTelemetry Collector found: install otelcol-contrib (gm init, or README.md) or set GM_OTELCOL"
+    fi
   else
     gm_doc ok "collector $bin ($("$bin" --version 2>/dev/null | head -n 1))"
     if [ -f "$cfg" ]; then
@@ -1838,6 +2223,7 @@ gm_cmd_doctor() {
   if gm_is_loopback "$ep"; then
     code=$(gm_otlp_status "$ep")
     if [ "$code" = 200 ]; then gm_doc ok "a collector answers at $ep"
+    elif [ "$skipped" = 1 ] && [ -z "$bin" ]; then gm_doc warn "no collector answers at $ep (skipped, see above)"
     else gm_doc FAIL "no collector answers at $ep${code:+ (HTTP $code)}: start it with gm collector"; fi
   fi
   if [ -d "$GM_HALL/telemetry" ]; then
@@ -2943,6 +3329,9 @@ gm_cmd_hook() {
 command -v sqlite3 >/dev/null 2>&1 || gm_die "gm needs the sqlite3 command"
 cmd=${1:-help}
 [ $# -eq 0 ] || shift
+case $cmd in
+  open | post | resolve | list | ls | show | notice | park | phase | where | trace | stats | collector) gm_init_auto ;;
+esac
 if [ -s "$GM_DB" ]; then
   case $cmd in
     statusline) ;;
@@ -2970,6 +3359,7 @@ case $cmd in
   stats) gm_cmd_stats "$@" ;;
   hook) gm_cmd_hook "$@" ;;
   collector) gm_cmd_collector "$@" ;;
+  init) gm_cmd_init "$@" ;;
   doctor) gm_cmd_doctor "$@" ;;
   help | -h | --help) gm_usage ;;
   *) gm_usage >&2; exit 1 ;;
