@@ -67,7 +67,7 @@ With it come the Adventurer spans of [tracing-design.md](tracing-design.md#how-t
 ## Step 4: Several Party Leaders and the Guildmaster lobby
 
 **Status:** In progress. `gm roster` (minimal) and one herdr tab per Party Leader, with the `guildmaster` front-desk tab, were built early with herdr ([herdr-design.md](herdr-design.md)).
-The Guildmaster session at the front desk was pulled forward at the patron's request of 2026-10-03 ("User should know the least amount. So user starts Claude."), and is done in [zero-touch-start.md](zero-touch-start.md): the patron runs `gm` and talks; the Guildmaster's start runs the first-run check, keeps autostart on and brings every Party Leader up with no patron action, and the Guildmaster opens a focus's Party Leader in a new herdr tab when asked in plain words. In review: <https://github.com/MadReza/guildmaster/pull/PRNUM>.
+The Guildmaster session at the front desk was pulled forward at the patron's request of 2026-10-03 ("User should know the least amount. So user starts Claude."), and is done in [zero-touch-start.md](zero-touch-start.md): the patron runs `gm` and talks; the Guildmaster's start runs the first-run check, keeps autostart on and brings every Party Leader up with no patron action, and the Guildmaster opens a focus's Party Leader in a new herdr tab when asked in plain words. In review: <https://github.com/MadReza/guildmaster/pull/23>.
 Still to build: phase-change digests, history questions answered from events, the guild line in every status line, and talking to a Party Leader (Q22).
 
 **Goal.** More than one focus at once, with a quiet front desk that knows everything and says little.
