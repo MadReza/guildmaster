@@ -33,7 +33,7 @@ In this step the Party Leader still does the work itself, one posting at a time:
 
 | Slice | What | Status |
 | --- | --- | --- |
-| 1 | Spans in the register, `gm trace`, `gm stats` with `--follows`, `--by-prompt` and `--compare` | In review: PR_URL |
+| 1 | Spans in the register, `gm trace`, `gm stats` with `--follows`, `--by-prompt` and `--compare` | In review: <https://github.com/MadReza/guildmaster/pull/18> |
 | 2 | Claude Code's telemetry through a local collector | Planned |
 | 3 | Adventurer spans (with step 3) | Planned |
 | 4 | A local Jaeger beside `gm trace` | Planned |
