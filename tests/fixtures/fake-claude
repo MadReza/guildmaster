@@ -1,3 +1,5 @@
 #!/bin/sh
-# Stands in for claude in tests/run.sh: records the environment gm open started it with.
+# Stands in for claude in tests/run.sh: records the environment, arguments and directory it was started with.
 env >"${GM_FAKE_CLAUDE_ENV:?}"
+printf '%s\n' "$@" >"$GM_FAKE_CLAUDE_ENV.args"
+pwd -P >"$GM_FAKE_CLAUDE_ENV.pwd"

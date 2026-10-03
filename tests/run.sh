@@ -9,9 +9,13 @@ WORK=$(mktemp -d "${TMPDIR:-/tmp}/gm-tests.XXXXXX")
 WORK=$(cd "$WORK" && pwd -P)
 trap 'rm -rf "$WORK"' EXIT
 # The suite may itself run inside Claude Code, whose session variables would join gm's spans to it.
-unset CLAUDE_CODE_SESSION_ID CLAUDE_EFFORT TRACEPARENT GM_FOCUS
+unset CLAUDE_CODE_SESSION_ID CLAUDE_EFFORT TRACEPARENT GM_FOCUS CLAUDECODE GM_HERDR_WORKSPACE GM_HERDR_AUTO
 # gm never asks a question or looks for the real Claude Code unless a test says so.
-export GM_INTERACTIVE=0 GM_CLAUDE=$ROOT/tests/fixtures/fake-claude GM_HERDR=$ROOT/tests/fixtures/fake-claude
+export GM_INTERACTIVE=0 GM_CLAUDE=$ROOT/tests/fixtures/fake-claude GM_HERDR=$ROOT/tests/fixtures/herdr
+# No test reaches a real herdr or launchd: the stubs in tests/fixtures come first on PATH; the herdr stub keeps its
+# state under $HERDR_STUB (one directory a test) and refuses any session but this one.
+export PATH="$ROOT/tests/fixtures:$PATH" GM_HERDR_SESSION=gm-test HERDR_STUB_SESSION=gm-test GM_HERDR_RESAMPLE=1 GM_LAUNCH_GRACE=0
+FAKE=$ROOT/tests/fixtures/fake-claude
 pass=0
 fail=0
 failed=''
@@ -68,14 +72,34 @@ setup() {
   CAMP=$GM_HALL/camps/appt-v2
 }
 
+# ---- herdr, through the stub ----
+# A Guildhall past its first run, so GM_INTERACTIVE=1 brings the muster and not gm init's questions.
+initialized() { printf 'initialized: 2026-01-01T00:00:00Z\ncollector: skipped\n' >"$GM_HALL/setup.conf"; }
+
+pl_pane() { db "SELECT pane_id FROM endpoint WHERE key='party-leader:$1';"; }
+
+# stub_proc <pane> <shell|claude|command name>: what the stub says the pane runs.
+stub_proc() {
+  awk -F '\t' -v OFS='\t' -v k="$1" -v v="$2" '$1 == k { $4 = v } { print }' "$HERDR_STUB/panes" >"$HERDR_STUB/panes.new" &&
+    mv "$HERDR_STUB/panes.new" "$HERDR_STUB/panes"
+}
+
+stub_close() {
+  awk -F '\t' -v k="$1" '$1 != k' "$HERDR_STUB/panes" >"$HERDR_STUB/panes.new" && mv "$HERDR_STUB/panes.new" "$HERDR_STUB/panes"
+}
+
+runs_in() { awk -F '\t' -v p="$1" '$1 == p' "$HERDR_STUB/runs" 2>/dev/null | grep -c . || true; }
+
+roster_state() { gm roster | awk -v f="$1" '$1 == f { print $4 }'; }
+
 t_schema_created_on_first_use() {
   export GM_HALL=$WORK/schema/hall
   [ ! -e "$GM_HALL" ] || return 1
   gm list >/dev/null || fail "first gm call failed"
   assert_eq "$(db 'PRAGMA journal_mode;')" wal "journal mode" &&
-    assert_eq "$(db 'PRAGMA user_version;')" 2 "schema version" &&
+    assert_eq "$(db 'PRAGMA user_version;')" 3 "schema version" &&
     assert_eq "$(db "SELECT group_concat(name, ' ') FROM (SELECT name FROM sqlite_master WHERE type='table' ORDER BY name);")" \
-      "event focus guard message model_sample open_span posting prompt_version span span_link ticket" "tables"
+      "endpoint event focus guard message model_sample open_span posting prompt_version span span_link ticket" "tables"
 }
 
 t_home_is_configurable() {
@@ -798,8 +822,8 @@ t_migration_keeps_schema1_data() {
   for i in 1 2 3 4 5 6; do gm list --all >/dev/null 2>"$WORK/migrate/err$i" & done
   wait
   for i in 1 2 3 4 5 6; do assert_eq "$(cat "$WORK/migrate/err$i")" "" "migration $i ran clean"; done
-  assert_eq "$(db 'PRAGMA user_version;')" 2 "migrated to schema 2" &&
-    assert_eq "$(for t in $tables; do db "SELECT $(db "SELECT group_concat(name, ',') FROM pragma_table_info('$t') WHERE name NOT IN ('trace_id','span_id','span_start_ms','follows_id');") FROM $t ORDER BY rowid;"; done)" "$before" "every schema-1 row kept as it was" &&
+  assert_eq "$(db 'PRAGMA user_version;')" 3 "migrated to schema 3" &&
+    assert_eq "$(for t in $tables; do db "SELECT $(db "SELECT group_concat(name, ',') FROM pragma_table_info('$t') WHERE name NOT IN ('trace_id','span_id','span_start_ms','follows_id','closed_at','start_attempts','held_at','held_told');") FROM $t ORDER BY rowid;"; done)" "$before" "every schema-1 row kept as it was" &&
     assert_eq "$(db "SELECT count(*) FROM posting WHERE trace_id IS NULL;")" 2 "old postings have no trace" &&
     assert_eq "$(db "SELECT group_concat(name, ' ') FROM (SELECT name FROM sqlite_master WHERE type='table' AND name IN ('span','span_link','open_span','prompt_version','model_sample') ORDER BY name);")" \
       "model_sample open_span prompt_version span span_link" "the tracing tables" &&
@@ -969,20 +993,28 @@ t_telemetry_import_reads_each_line_once() {
   [ ! -e "$t/imported/logs-2026-10-03T13-21-40.000.jsonl" ] || fail "imported files are deleted after 14 days"
 }
 
+# pane_start <env file> [VAR=value...]: runs the last line gm typed into a herdr pane, as the pane's shell would,
+# with fake-claude recording what it was started with.
+pane_start() {
+  local f=$1 line
+  shift
+  line=$(awk -F '\t' 'END { print $2 }' "$HERDR_STUB/runs")
+  [ -n "$line" ] || fail "nothing was typed into a pane" || return 1
+  env "$@" GM_FAKE_CLAUDE_ENV="$f" sh -c "$line" </dev/null >/dev/null 2>&1
+}
+
 t_open_sends_telemetry_only_to_loopback() {
   unset GM_CLAUDE # the command shown is the real default, claude
   setup tel-open
-  local out bad n=0
-  out=$(gm open appt-v2 --no-launch)
-  assert_contains "$out" "Start its Party Leader from a terminal with: gm open appt-v2" "how to start it" &&
-    assert_contains "$out" " -u OTEL_EXPORTER_OTLP_HEADERS " "inherited headers cleared" &&
-    assert_contains "$out" " CLAUDE_CODE_ENABLE_TELEMETRY=1 CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1 " "telemetry and spans on" &&
-    assert_contains "$out" " OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 " "the loopback collector" &&
-    assert_contains "$out" " OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:4318/v1/traces " "every signal's own endpoint replaced" &&
-    assert_contains "$out" " OTEL_RESOURCE_ATTRIBUTES=guild.focus=appt-v2,guild.role=party-leader " "the focus and role on every signal" &&
-    assert_contains "$out" " OTEL_LOG_USER_PROMPTS=1 OTEL_LOG_ASSISTANT_RESPONSES=1 OTEL_LOG_TOOL_DETAILS=1 claude --name appt-v2" "prompts, responses and tool details captured" &&
-    assert_contains "$out" " -u OTEL_LOG_TOOL_CONTENT -u OTEL_LOG_RAW_API_BODIES " "tool output and raw bodies not"
-  assert_contains "$(GM_OTEL_PORT=4999 gm open appt-v2 --no-launch)" "OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4999 " "GM_OTEL_PORT moves it"
+  local out bad n=0 e f=$WORK/tel-open/env.txt
+  GM_CLAUDE=$FAKE GM_OTEL_PORT=4999 gm open appt-v2 >/dev/null 2>&1 || fail "open failed"
+  pane_start "$f"
+  e=$(cat "$f")
+  assert_contains "$e" "OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4999" "GM_OTEL_PORT moves it" &&
+    assert_contains "$e" "CLAUDE_CODE_ENABLE_TELEMETRY=1" "telemetry on" &&
+    assert_contains "$e" "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1" "spans on" &&
+    assert_contains "$e" "OTEL_LOG_USER_PROMPTS=1" "prompts captured" &&
+    assert_contains "$e" "OTEL_LOG_TOOL_DETAILS=1" "tool details captured"
   for bad in http://example.com:4318 http://127.0.0.1.evil.example:4318 http://127.0.0.1@evil.example:4318 'http://localhost:4318@evil.example' \
     http://10.0.0.1:4318 https://otel.example.com 'http://127.0.0.1:4318 http://evil.example' ftp://127.0.0.1:4318; do
     n=$((n + 1))
@@ -990,6 +1022,8 @@ t_open_sends_telemetry_only_to_loopback() {
     assert_contains "$out" "telemetry goes only to 127.0.0.1, localhost or ::1" "$bad refused"
     assert_eq "$(db "SELECT count(*) FROM focus WHERE name='other$n';")" 0 "nothing made for $bad"
   done
+  out=$(GM_OTEL_ENDPOINT=http://example.com:4318 gm up 2>&1) && fail "gm up launched with a remote endpoint"
+  assert_contains "$out" "telemetry goes only to 127.0.0.1" "gm up refuses it too"
   for bad in http://localhost:4318 'http://[::1]:4318' http://127.0.0.1:4318/; do
     GM_OTEL_ENDPOINT=$bad gm open appt-v2 --no-launch >/dev/null 2>&1 || fail "$bad was refused"
   done
@@ -997,45 +1031,43 @@ t_open_sends_telemetry_only_to_loopback() {
   printf '{"env":{"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT":"https://otel.example.com/v1/logs"}}' >"$WORK/tel-open/home/.claude/settings.json"
   out=$(HOME=$WORK/tel-open/home gm open appt-v2 --no-launch 2>&1) && fail "settings that send telemetry elsewhere were accepted"
   assert_contains "$out" "settings.json: OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=https://otel.example.com/v1/logs" "and say which"
+  out=$(HOME=$WORK/tel-open/home pane_start "$f.2"; cat "$f.2" 2>/dev/null || true)
+  assert_not_contains "$out" "CLAUDE_CODE_ENABLE_TELEMETRY" "gm start refuses those settings too"
   printf '{"env":{"OTEL_EXPORTER_OTLP_ENDPOINT":"http://localhost:4318"}}' >"$WORK/tel-open/home/.claude/settings.json"
   HOME=$WORK/tel-open/home gm open appt-v2 --no-launch >/dev/null 2>&1 || fail "loopback settings were refused"
-  assert_contains "$(GM_TELEMETRY=off gm open appt-v2 --no-launch)" "' && claude --name appt-v2" "GM_TELEMETRY=off starts without it"
+  stub_proc "$(pl_pane appt-v2)" shell
+  GM_TELEMETRY=off GM_CLAUDE=$FAKE gm open appt-v2 >/dev/null 2>&1 || fail "relaunch failed"
+  pane_start "$f.off"
+  assert_not_contains "$(cat "$f.off")" "CLAUDE_CODE_ENABLE_TELEMETRY" "GM_TELEMETRY=off starts without it" &&
+    assert_contains "$(cat "$f.off.args")" "appt-v2" "and still names the session"
 }
 
-# Runs a command on a pseudo-terminal, so gm open launches; BSD and util-linux script differ.
-on_a_tty() {
-  if script -q /dev/null true >/dev/null 2>&1; then
-    script -q /dev/null "$@"
-  elif script -qec true /dev/null >/dev/null 2>&1; then
-    local c='' a
-    for a in "$@"; do c="$c $(printf '%q' "$a")"; done
-    script -qec "$c" /dev/null
-  else
-    return 2
-  fi
-}
-
-t_open_launches_claude_with_the_telemetry_env() {
+t_open_starts_the_party_leader_in_herdr_with_the_telemetry_env() {
   setup tel-launch
-  local envf=$WORK/tel-launch/env.txt rc=0
-  [ -x "$ROOT/tests/fixtures/fake-claude" ] || fail "tests/fixtures/fake-claude is not executable"
-  GM_CLAUDE=$ROOT/tests/fixtures/fake-claude GM_FAKE_CLAUDE_ENV=$envf GM_OTEL_PORT=1 \
-    OTEL_EXPORTER_OTLP_HEADERS=x-api-key=sekrit OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://otel.example.com/v1/traces OTEL_LOG_RAW_API_BODIES=1 \
-    on_a_tty bash "$GM" open appt-v2 >/dev/null 2>&1 || rc=$?
-  if [ "$rc" = 2 ]; then
-    printf '    (no script(1) to make a terminal; skipped)\n'
-    return 0
-  fi
-  [ -s "$envf" ] || fail "claude was not started" || return 1
-  local e
-  e=$(cat "$envf")
+  local f=$WORK/tel-launch/env.txt out e pane
+  out=$(GM_CLAUDE=$FAKE GM_OTEL_PORT=1 gm open appt-v2 2>&1) || fail "open failed: $out"
+  pane=$(pl_pane appt-v2)
+  assert_contains "$out" "appt-v2: Party Leader started in herdr pane $pane (missing: no pane recorded)" "says where it started" &&
+    assert_contains "$out" "See them in herdr, workspace guild: run herdr --session gm-test" "and how to see it" &&
+    assert_eq "$(awk -F '\t' -v p="$pane" '$1 == p { print $2 }' "$HERDR_STUB/panes")" "$(db "SELECT tab_id FROM endpoint WHERE key='party-leader:appt-v2';")" "the recorded tab" &&
+    assert_eq "$(awk -F '\t' -v t="$(db "SELECT tab_id FROM endpoint WHERE key='party-leader:appt-v2';")" '$1 == t { print $3 }' "$HERDR_STUB/tabs")" appt-v2 "a tab named after the focus"
+  assert_contains "$(cat "$HERDR_STUB/runs")" "start 'appt-v2' --pane '$pane'" "the pane runs gm start"
+  pane_start "$f" OTEL_EXPORTER_OTLP_HEADERS=x-api-key=sekrit OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://otel.example.com/v1/traces \
+    OTEL_LOG_RAW_API_BODIES=1 CLAUDECODE=1 GM_FOCUS=elsewhere
+  [ -s "$f" ] || fail "claude was not started" || return 1
+  e=$(cat "$f")
   assert_contains "$e" "OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:1" "the loopback endpoint" &&
     assert_contains "$e" "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:1/v1/traces" "an inherited signal endpoint replaced" &&
     assert_contains "$e" "OTEL_RESOURCE_ATTRIBUTES=guild.focus=appt-v2,guild.role=party-leader" "the resource attributes" &&
     assert_contains "$e" "OTEL_LOG_ASSISTANT_RESPONSES=1" "responses captured" &&
     assert_not_contains "$e" "sekrit" "inherited headers cleared" &&
     assert_not_contains "$e" "OTEL_LOG_RAW_API_BODIES" "raw API bodies not captured" &&
-    assert_not_contains "$e" "otel.example.com" "nothing points elsewhere"
+    assert_not_contains "$e" "otel.example.com" "nothing points elsewhere" &&
+    assert_not_contains "$e" "CLAUDECODE=" "the server's Claude Code variables are not passed on" &&
+    assert_not_contains "$e" "GM_FOCUS=elsewhere" "nor a stray focus" &&
+    assert_eq "$(cat "$f.args")" "--name
+appt-v2" "claude --name <focus>" &&
+    assert_eq "$(cat "$f.pwd")" "$CAMP" "in the camp"
 }
 
 t_doctor_checks_loopback_and_the_collector() {
@@ -1340,16 +1372,279 @@ t_doctor_keeps_reporting_the_setup_state() {
     assert_not_contains "$out" "FAIL" "doctor passes for a patron who chose to go without"
 }
 
+t_herdr_states_alive_dead_missing_unknown() {
+  setup states
+  local out pane
+  out=$(gm roster)
+  assert_contains "$out" "appt-v2                  party leader  missing  -        no pane recorded" "never started: missing"
+  gm open appt-v2 >/dev/null 2>&1 || fail "open failed"
+  pane=$(pl_pane appt-v2)
+  [ -n "$pane" ] || fail "no pane recorded" || return 1
+  out=$(gm roster)
+  assert_contains "$out" "guildmaster              front desk    open     " "the front desk" &&
+    assert_contains "$out" "appt-v2                  party leader  alive    $pane" "claude in the pane: alive" &&
+    assert_contains "$out" " idle" "with herdr's agent status"
+  stub_proc "$pane" shell
+  assert_contains "$(gm roster)" "party leader  dead     $pane    the pane holds only a shell" "a shell only: dead"
+  assert_contains "$(GM_LAUNCH_GRACE=600 gm roster)" "starting" "a shell moments after launch: starting"
+  stub_proc "$pane" vim
+  assert_contains "$(gm roster)" "unknown  $pane    the pane runs vim, not a Party Leader" "something else: unknown"
+  stub_proc "$pane" claude
+  rm -f "$HERDR_STUB/running"
+  assert_contains "$(gm roster)" "unknown  $pane    herdr session gm-test is not running" "no server: unknown, not missing"
+  touch "$HERDR_STUB/running"
+  stub_close "$pane"
+  assert_contains "$(gm roster)" "missing  $pane    pane $pane is gone" "pane gone: missing"
+  printf '%s\t%s\t%s\tclaude\n' "$pane" w99:t1 w99 >>"$HERDR_STUB/panes"
+  assert_eq "$(roster_state appt-v2)" missing "the same pane id in another workspace is not this Party Leader"
+}
+
+t_up_relaunches_only_dead_and_missing() {
+  setup up
+  local f out before_b before_c
+  for f in bravo charlie delta; do gm open "$f" --repo "$REPO" --no-launch >/dev/null 2>&1 || fail "open $f"; done
+  out=$(gm up 2>&1) || fail "gm up failed: $out"
+  assert_eq "$(grep -c . "$HERDR_STUB/runs")" 4 "every open focus started once"
+  for f in appt-v2 bravo charlie delta; do
+    assert_contains "$out" "$f: Party Leader started in herdr pane $(pl_pane "$f") (missing: no pane recorded)" "$f started"
+  done
+  before_b=$(pl_pane bravo)
+  before_c=$(pl_pane charlie)
+  stub_proc "$before_b" shell
+  stub_close "$before_c"
+  stub_proc "$(pl_pane delta)" vim
+  : >"$HERDR_STUB/runs"
+  : >"$HERDR_STUB/calls"
+  out=$(gm up 2>&1) || fail "second gm up failed: $out"
+  assert_eq "$(pl_pane bravo)" "$before_b" "a dead Party Leader restarts in its own pane" &&
+    assert_eq "$(runs_in "$before_b")" 1 "once" &&
+    assert_eq "$(runs_in "$(pl_pane charlie)")" 1 "a missing one gets a new pane" &&
+    assert_eq "$(runs_in "$(pl_pane appt-v2)")" 0 "the live one is left alone" &&
+    assert_eq "$(runs_in "$(pl_pane delta)")" 0 "the unknown one is left alone" &&
+    assert_eq "$(grep -c . "$HERDR_STUB/runs")" 2 "nothing else typed"
+  [ "$(pl_pane charlie)" != "$before_c" ] || fail "charlie kept a gone pane"
+  assert_contains "$out" "appt-v2: Party Leader already running (idle), left as it is" "live reported" &&
+    assert_contains "$out" "bravo: Party Leader started in herdr pane $before_b (dead: the pane holds only a shell)" "dead relaunched" &&
+    assert_contains "$out" "charlie: Party Leader started in herdr pane $(pl_pane charlie) (missing: pane $before_c is gone)" "missing relaunched" &&
+    assert_contains "$out" "delta: unknown (the pane runs vim, not a Party Leader); left alone" "ambiguous reported"
+  if grep -q 'close' "$HERDR_STUB/calls"; then fail "gm up closed something"; fi
+  assert_eq "$(db "SELECT count(*) FROM event WHERE kind='party-leader.launched';")" 6 "each launch is in the ledger"
+}
+
+t_no_double_launch() {
+  setup double
+  mkdir -p "$GM_HALL"
+  initialized
+  gm open bravo --repo "$REPO" --no-launch >/dev/null 2>&1
+  gm up >/dev/null 2>&1
+  gm up >/dev/null 2>&1
+  assert_eq "$(grep -c . "$HERDR_STUB/runs")" 2 "a second muster starts nothing"
+  : >"$HERDR_STUB/runs"
+  printf 'shell' >"$HERDR_STUB/run-proc"
+  stub_proc "$(pl_pane appt-v2)" shell
+  stub_proc "$(pl_pane bravo)" shell
+  db "UPDATE endpoint SET launched_ms=0;"
+  export GM_LAUNCH_GRACE=600
+  gm up >/dev/null 2>&1 &
+  gm up >/dev/null 2>&1 &
+  GM_INTERACTIVE=1 gm list >/dev/null 2>&1 &
+  wait
+  assert_eq "$(grep -c . "$HERDR_STUB/runs")" 2 "three musters at once start each Party Leader once"
+  assert_contains "$(gm up 2>&1)" "appt-v2: starting (launched moments ago); left alone" "one still starting is not started again"
+  assert_eq "$(grep -c . "$HERDR_STUB/runs")" 2 "still once each"
+  [ ! -e "$GM_HALL/herdr.lock" ] || fail "the lock was left behind"
+}
+
+t_roster_lists_each_focus() {
+  setup roster
+  gm open bravo --repo "$REPO" >/dev/null 2>&1
+  local out
+  out=$(gm roster)
+  assert_eq "$(printf '%s\n' "$out" | awk '{ print $1 }' | tr '\n' ' ')" "guildmaster appt-v2 bravo " "front desk, then each focus by name" &&
+    assert_eq "$(roster_state appt-v2)" alive "opening one focus musters the others too" &&
+    assert_eq "$(roster_state bravo)" alive "bravo running"
+}
+
+t_open_needs_herdr() {
+  export GM_HALL=$WORK/needs/hall
+  mkdir -p "$GM_HALL"
+  initialized
+  REPO=$(new_repo needs/repo)
+  local out
+  out=$(GM_HERDR=$WORK/no-herdr gm open appt-v2 --repo "$REPO" 2>&1) && fail "gm open launched without herdr"
+  assert_contains "$out" "gm needs herdr" "says herdr is required"
+  [ ! -s "$GM_HALL/register.db" ] || assert_eq "$(db 'SELECT count(*) FROM focus;')" 0 "nothing recorded"
+  GM_HERDR=$WORK/no-herdr gm open appt-v2 --repo "$REPO" --no-launch >/dev/null 2>&1 || fail "--no-launch needs no herdr"
+  out=$(GM_HERDR=$WORK/no-herdr gm up 2>&1) && fail "gm up ran without herdr"
+  assert_contains "$out" "gm needs herdr" "gm up says so"
+  assert_contains "$(GM_HERDR=$WORK/no-herdr GM_INTERACTIVE=1 gm list 2>&1)" "herdr is not installed" "other commands warn and still answer"
+}
+
+t_init_musters_and_offers_autostart() {
+  setup init-muster
+  initialized
+  local out
+  out=$(GM_OTELCOL=$WORK/none gm init --no 2>&1) || true
+  assert_eq "$(roster_state appt-v2)" alive "gm init brings the Party Leaders up" &&
+    assert_contains "$out" "appt-v2: Party Leader started in herdr pane" "and says so"
+  if [ "$(uname -s)" = Darwin ]; then assert_contains "$out" "gm autostart on" "and offers the launchd agent"; fi
+}
+
+t_close_retires_a_focus() {
+  setup close
+  local out pane
+  gm open appt-v2 >/dev/null 2>&1
+  pane=$(pl_pane appt-v2)
+  out=$(gm close appt-v2 2>&1) && fail "a live Party Leader was closed"
+  assert_contains "$out" "appt-v2's Party Leader is alive (idle) in herdr pane $pane; end it there first (/exit)" "says to end it first"
+  assert_eq "$(db "SELECT closed_at IS NULL FROM focus;")" 1 "still open"
+  if grep -q 'pane close' "$HERDR_STUB/calls"; then fail "a live pane was closed"; fi
+  stub_proc "$pane" shell
+  out=$(gm close appt-v2) || fail "close failed"
+  assert_contains "$out" "appt-v2 is closed: its Party Leader is not started again. Its camp $CAMP and its postings are kept" "says what stays"
+  grep -q "pane close $pane --session gm-test" "$HERDR_STUB/calls" || fail "its husk pane was not closed"
+  assert_eq "$(db "SELECT count(*) FROM endpoint WHERE key='party-leader:appt-v2';")" 0 "endpoint forgotten"
+  [ -d "$CAMP" ] || fail "the camp was removed"
+  : >"$HERDR_STUB/runs"
+  gm up >/dev/null 2>&1
+  assert_eq "$(grep -c . "$HERDR_STUB/runs")" 0 "a closed focus is not started"
+  assert_not_contains "$(gm roster)" "appt-v2" "nor listed" &&
+    assert_contains "$(gm roster --all)" "closed" "except with --all"
+  assert_contains "$(gm close appt-v2)" "already closed" "closing twice is harmless"
+  gm open appt-v2 >/dev/null 2>&1 || fail "reopen failed"
+  assert_eq "$(db "SELECT closed_at IS NULL FROM focus;")" 1 "gm open reopens it" &&
+    assert_eq "$(roster_state appt-v2)" alive "and starts it"
+}
+
+t_start_runs_only_in_the_recorded_pane() {
+  setup start
+  local out
+  out=$(GM_CLAUDE=$FAKE GM_FAKE_CLAUDE_ENV=$WORK/start/env gm start appt-v2 --pane w9:p9 2>&1) && fail "gm start ran in an unrecorded pane"
+  assert_contains "$out" "gm start runs only in appt-v2's own herdr pane" "and says why"
+  GM_CLAUDE=$FAKE GM_FAKE_CLAUDE_ENV=$WORK/start/env gm start appt-v2 >/dev/null 2>&1 && fail "gm start ran with no pane"
+  [ ! -e "$WORK/start/env" ] || fail "claude was started"
+}
+
+t_muster_before_interactive_commands() {
+  setup muster
+  mkdir -p "$GM_HALL"
+  initialized
+  local pane out
+  gm open appt-v2 >/dev/null 2>&1
+  pane=$(pl_pane appt-v2)
+  stub_proc "$pane" shell
+  : >"$HERDR_STUB/runs"
+  gm list >/dev/null 2>&1
+  GM_INTERACTIVE=1 GM_FOCUS=appt-v2 gm list >/dev/null 2>&1
+  GM_INTERACTIVE=1 GM_HERDR_AUTO=off gm list >/dev/null 2>&1
+  GM_INTERACTIVE=1 gm hook stop </dev/null >/dev/null 2>&1
+  assert_eq "$(grep -c . "$HERDR_STUB/runs")" 0 "no muster from a pipe, a Party Leader, when turned off, or from a hook"
+  out=$(GM_INTERACTIVE=1 gm list 2>&1 >/dev/null)
+  assert_contains "$out" "appt-v2: Party Leader started in herdr pane $pane (dead: the pane holds only a shell)" "a terminal command musters first" &&
+    assert_eq "$(runs_in "$pane")" 1 "and restarts the dead one"
+  assert_eq "$(GM_INTERACTIVE=1 gm list 2>&1 >/dev/null)" "" "quiet when all are running"
+}
+
+t_herdr_server_and_workspace_come_back() {
+  setup server
+  rm -f "$HERDR_STUB/running"
+  gm up >/dev/null 2>&1 || fail "gm up failed"
+  grep -q '^server --session gm-test' "$HERDR_STUB/calls" || fail "the server was not started"
+  local ws
+  ws=$(db "SELECT workspace_id FROM endpoint WHERE key='front-desk';")
+  assert_eq "$(awk -F '\t' -v w="$ws" '$1 == w { print $2 }' "$HERDR_STUB/workspaces")" guild "the guild workspace" &&
+    assert_eq "$(awk -F '\t' -v t="$(db "SELECT tab_id FROM endpoint WHERE key='front-desk';")" '$1 == t { print $3 }' "$HERDR_STUB/tabs")" guildmaster "its first tab is the front desk"
+  : >"$HERDR_STUB/workspaces"
+  : >"$HERDR_STUB/tabs"
+  : >"$HERDR_STUB/panes"
+  printf 'w99\tguild\n' >"$HERDR_STUB/workspaces"
+  gm up >/dev/null 2>&1 || fail "gm up after the layout was lost"
+  local ws2
+  ws2=$(db "SELECT workspace_id FROM endpoint WHERE key='party-leader:appt-v2';")
+  [ -n "$ws2" ] && [ "$ws2" != w99 ] && [ "$ws2" != "$ws" ] || fail "another guild workspace was adopted by its label, or none made ($ws2)"
+  assert_eq "$(roster_state appt-v2)" alive "the Party Leader is back"
+}
+
+t_failing_party_leader_is_held_with_one_notice() {
+  setup held
+  mkdir -p "$GM_HALL"
+  initialized
+  local out
+  printf 'shell' >"$HERDR_STUB/run-proc"
+  gm up >/dev/null 2>&1
+  gm up >/dev/null 2>&1
+  gm up >/dev/null 2>&1
+  assert_eq "$(grep -c . "$HERDR_STUB/runs")" 3 "three tries"
+  out=$(gm up --quiet 2>&1)
+  assert_eq "$(gm up --quiet 2>&1)" "" "the agent logs it once"
+  assert_contains "$out" "appt-v2: held: its Party Leader failed to start 3 times in a row (dead: the pane holds only a shell); gm open appt-v2 tries again" "one line says so"
+  assert_eq "$(grep -c . "$HERDR_STUB/runs")" 3 "and no fourth try"
+  out=$(GM_INTERACTIVE=1 gm list 2>&1 >/dev/null)
+  assert_contains "$out" "appt-v2: held" "the next command at a terminal says it once"
+  assert_eq "$(GM_INTERACTIVE=1 gm list 2>&1 >/dev/null)" "" "and only once"
+  assert_eq "$(gm up --quiet 2>&1)" "" "nor again in the agent's log"
+  assert_contains "$(gm up 2>&1)" "appt-v2: held" "gm up by hand always says it"
+  assert_eq "$(db "SELECT count(*) FROM event WHERE kind='party-leader.held';")" 1 "one ledger entry, not one a muster" &&
+    assert_eq "$(roster_state appt-v2)" held "the roster shows it"
+  rm -f "$HERDR_STUB/run-proc"
+  gm open appt-v2 >/dev/null 2>&1
+  assert_eq "$(grep -c . "$HERDR_STUB/runs")" 4 "gm open tries again" &&
+    assert_eq "$(roster_state appt-v2)" alive "and it runs"
+  gm up >/dev/null 2>&1
+  assert_eq "$(db "SELECT start_attempts||held_told||COALESCE(held_at,'-') FROM focus;")" "00-" "seen alive, the count starts over"
+}
+
+t_restarts_stay_out_of_the_party_leaders_chat() {
+  setup quiet
+  gm open appt-v2 >/dev/null 2>&1
+  stub_proc "$(pl_pane appt-v2)" shell
+  gm up --quiet >/dev/null 2>&1
+  assert_eq "$(db "SELECT count(*) FROM event WHERE kind='party-leader.launched';")" 2 "both starts recorded"
+  assert_not_contains "$(gm where appt-v2)" "herdr" "the resume summary does not carry them"
+  assert_contains "$(gm roster)" "last started " "the roster does"
+  assert_eq "$(gm up --quiet 2>&1)" "" "a muster with nothing to do says nothing"
+}
+
+t_autostart_installs_a_launchd_agent() {
+  [ "$(uname -s)" = Darwin ] || { printf '    (not macOS; skipped)\n'; return 0; }
+  setup autostart
+  export GM_LAUNCH_AGENTS=$WORK/autostart/LaunchAgents
+  local out plist
+  out=$(gm autostart on --every 7) || fail "autostart on failed: $out"
+  plist=$(ls "$GM_LAUNCH_AGENTS"/com.guildmaster.up.*.plist)
+  [ -f "$plist" ] || fail "no property list" || return 1
+  if command -v plutil >/dev/null 2>&1; then plutil -lint "$plist" >/dev/null || fail "the property list is not valid"; fi
+  local x
+  x=$(tr -d '\n ' <"$plist")
+  assert_contains "$x" "<string>up</string><string>--quiet</string>" "runs gm up --quiet" &&
+    assert_contains "$x" "<key>RunAtLoad</key><true/>" "at login" &&
+    assert_contains "$x" "<key>StartInterval</key><integer>420</integer>" "and every 7 minutes" &&
+    assert_contains "$x" "<key>GM_HALL</key><string>$GM_HALL</string>" "for this Guildhall" &&
+    assert_contains "$x" "<key>GM_HERDR_SESSION</key><string>gm-test</string>" "and this herdr session" &&
+    assert_contains "$(cat "$HERDR_STUB/launchctl")" "bootstrap gui/$(id -u) $plist" "loaded into the user's launchd"
+  assert_contains "$(gm autostart)" "autostart is on" "status"
+  gm autostart off >/dev/null
+  [ ! -e "$plist" ] || fail "off left the agent"
+  assert_contains "$(cat "$HERDR_STUB/launchctl")" "bootout gui/$(id -u)/com.guildmaster.up." "and unloaded it" &&
+    assert_contains "$(gm autostart)" "autostart is off" "status after"
+}
+
 t_shellcheck() {
   command -v shellcheck >/dev/null 2>&1 || { printf '    (shellcheck not installed; skipped)\n'; return 0; }
-  shellcheck "$GM" "$ROOT/tests/run.sh" "$ROOT/tests/demo.sh"
+  shellcheck "$GM" "$ROOT/tests/run.sh" "$ROOT/tests/demo.sh" "$ROOT/tests/fixtures/herdr" "$ROOT/tests/fixtures/launchctl"
 }
 
 for t in $(declare -F | awk '{print $3}' | grep '^t_'); do
   case $t in *"$FILTER"*) ;; *) continue ;; esac
   rm -f "$WORK/failed-mark"
-  (set -e; "$t") >"$WORK/out.txt" 2>&1
+  export HERDR_STUB=$WORK/herdr.$t
+  mkdir -p "$HERDR_STUB"
+  (set -e; [ -z "${GM_TEST_TRACE:-}" ] || set -x; "$t") >"$WORK/out.txt" 2>&1
   rc=$?
+  if [ -e "$HERDR_STUB/violations" ]; then
+    printf '    FAIL: herdr was called outside the test session:\n%s\n' "$(cat "$HERDR_STUB/violations")" >>"$WORK/out.txt"
+    : >"$WORK/failed-mark"
+  fi
   if [ "$rc" -eq 0 ] && [ ! -e "$WORK/failed-mark" ]; then
     pass=$((pass + 1))
     printf 'ok   %s\n' "${t#t_}"
