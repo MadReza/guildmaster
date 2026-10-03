@@ -1,0 +1,35 @@
+# Known cases for gm's secret masking (tracing-design.md, Retention and redaction): input, a tab, the text gm must store.
+# tests/run.sh sends each input as a Bash command through the PreToolUse hook and reads back what the register holds.
+# Token shapes are written with {} inside them so this file is not itself a secret-scanning hit; the test removes every {}.
+# {nl} is a newline.
+curl -H "Authorization: Bearer abc.def-ghi" https://api.example.com/v1	curl -H "Authorization: <REDACTED:authorization>" https://api.example.com/v1
+curl -H 'proxy-authorization: Basic dXNlcjpwYXNz' https://x.example.com	curl -H 'proxy-authorization: <REDACTED:authorization>' https://x.example.com
+http GET https://api.example.com Bearer abc123def	http GET https://api.example.com Bearer <REDACTED:bearer>
+git clone https://alice:s3cr3t@github.com/acme/app.git	git clone https://alice:<REDACTED:url-password>@github.com/acme/app.git
+psql postgres://app:hunter2@db.internal:5432/main	psql postgres://app:<REDACTED:url-password>@db.internal:5432/main
+deploy --token abc123 --env dev	deploy --token <REDACTED:argument> --env dev
+mysql --password=hunter2 -u root	mysql --password=<REDACTED:argument> -u root
+vault write auth --client-secret "s3cr3t-value"	vault write auth --client-secret "<REDACTED:argument>"
+tool --API-KEY 12345 run	tool --API-KEY <REDACTED:argument> run
+export GITHUB_TOKEN=abc123 && gh pr list	export GITHUB_TOKEN=<REDACTED:assignment> && gh pr list
+AWS_SECRET_ACCESS_KEY='wJalrXUtnFEMI/K7MDENG' aws s3 ls	AWS_SECRET_ACCESS_KEY='<REDACTED:assignment>' aws s3 ls
+DB_PASSWORD=pw1 API_KEY=k2 ./run.sh	DB_PASSWORD=<REDACTED:assignment> API_KEY=<REDACTED:assignment> ./run.sh
+PASSWORD=Hunter2 make deploy	PASSWORD=<REDACTED:assignment> make deploy
+SERVICE_CREDENTIALS=abc:def node app.js	SERVICE_CREDENTIALS=<REDACTED:assignment> node app.js
+curl "https://api.example.com/x?api_key=abc123&page=2"	curl "https://api.example.com/x?api_key=<REDACTED:assignment>&page=2"
+gh auth login --with-token <<< gh{}p_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789	gh auth login --with-token <<< <REDACTED:github-token>
+echo github_p{}at_11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyz	echo <REDACTED:github-token>
+GITLAB=glp{}at-abcdefghijklmnopqrstuv glab mr list	GITLAB=<REDACTED:gitlab-token> glab mr list
+git push https://oauth2:glp{}at-abcdefghijklmnopqrst@gitlab.com/a/b.git	git push https://oauth2:<REDACTED:url-password>@gitlab.com/a/b.git
+slack-cli send --as xo{}xb-1234567890-abcdefghij	slack-cli send --as <REDACTED:slack-token>
+ANTHROPIC=s{}k-ant-api03-abcdefghijklmnopqrstuvwxyz claude -p hi	ANTHROPIC=<REDACTED:api-key> claude -p hi
+aws configure set aws_access_key_id AK{}IAIOSFODNN7EXAMPLE	aws configure set aws_access_key_id <REDACTED:aws-access-key>
+maps --api AI{}zaSyA-abcdefghijklmnopqrstuvwxyz01234 --region ca	maps --api <REDACTED:google-api-key> --region ca
+STRIPE=s{}k_live_abcdefghij1234 node pay.js	STRIPE=<REDACTED:stripe-key> node pay.js
+NPM=np{}m_abcdefghijklmnopqrstuvwxyz0123456789 npm publish	NPM=<REDACTED:npm-token> npm publish
+cat > id <<EOT{nl}-----BEGIN OPENSSH PRIV{}ATE KEY-----{nl}b3BlbnNzaC1rZXktdjEAAAA{nl}Proc-Type: 4,ENCRYPTED{nl}-----END OPENSSH PRIV{}ATE KEY-----{nl}EOT	cat > id <<EOT{nl}<REDACTED:private-key>{nl}EOT
+git commit -m "fix the task-list and disk-usage views"	git commit -m "fix the task-list and disk-usage views"
+npm test -- --grep "password reset"	npm test -- --grep "password reset"
+docker login --password-stdin -u bob	docker login --password-stdin -u bob
+ls -la /Users/me/keys && grep -rn TODO src/	ls -la /Users/me/keys && grep -rn TODO src/
+gm notice 12 done "fixed in 3f2a1c"	gm notice 12 done "fixed in 3f2a1c"

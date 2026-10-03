@@ -5,7 +5,7 @@ It answers the patron's request of 2026-09-30, quoted below, and requirements 6.
 The landscape it rests on (standards, what Claude Code emits, tracing tools, how other orchestrators trace, and a local test of Claude Code 2.1.286) is in [tracing-research.md](tracing-research.md); a claim here without its own link is sourced there.
 Vocabulary is [TERMINOLOGY.md](../TERMINOLOGY.md)'s.
 Three habits taken from the study of Honeycomb, whose lessons are in [honeycomb/lessons.html](../honeycomb/lessons.html), are folded in: one complete row per span with an open attribute set ([Storage](#storage-and-viewer)), identifying details on every span with every measure a query ([Guild attributes](#guild-attributes), [Derived measures](#derived-measures)), and `gm stats --compare` ([Comparing a selection](#comparing-a-selection)).
-Nothing here is built yet; [the build plan](#build-plan) says in what order it would be.
+Build slice 1 is built ([As built in slice 1](#as-built-in-slice-1)); the rest is not, and [the build plan](#build-plan) says in what order it would be.
 
 ## The patron's words
 
@@ -135,7 +135,7 @@ The conventions also leave open whether a separate `claude -p` process is a CLIE
 | `guild.ttft_ms`, `guild.attempt` | int | Time to first token and attempts, from Claude Code. |
 | `guild.mcp.server` | string | The MCP server's name, from the hooks' `mcp_server.name`. |
 | `guild.tool.command` | string | The full Bash command, or a file tool's path, with secret patterns redacted before it is stored; kept 30 days ([Retention and redaction](#retention-and-redaction)). |
-| `guild.prompt.template`, `guild.prompt.sha256` | string | The name of the prompt template in force (`charter`, `playbook`, `resume`, `writ-contract`, `writ-survey`) and the hash of its rendered text, on the session, exchange and dispatch spans and on every span of an Adventurer run ([Prompt effectiveness](#prompt-effectiveness)). |
+| `guild.prompt.<template>.sha256` | string | The hash of the rendered text of each prompt template in force, one key per template (`guild.prompt.charter.sha256`, `guild.prompt.playbook.sha256`, `guild.prompt.rules.sha256`, `guild.prompt.resume.sha256`, `guild.prompt.stop-guard.sha256`, and with step 3 `writ-contract` and `writ-survey`), on the session, exchange and dispatch spans and on every span of an Adventurer run ([Prompt effectiveness](#prompt-effectiveness)). One key per template, because a session runs under several at once. |
 | `guild.follows.p` | double | The probability the local model gave that this posting continues the one in `guild.follows`, when the link began as a suggestion ([Follow-up suggestions](#follow-up-suggestions)). |
 | `guild.background` | bool | A subagent or Adventurer that ran in the background. |
 | `guild.dispatch.kind` | string | Contract or survey. |
@@ -226,7 +226,7 @@ appt-v2#12 fix-owner-empty  done
 
 The patron "needs to eventually figure out which prompt works best" (relayed 2026-10-02), so every prompt Guildmaster hands a model is versioned and every posting's outcome is tied to the version it ran under.
 
-- **What is versioned.** The charter, the ticket playbook and the repository's rules as loaded at `SessionStart`, the resume text `gm hook session-start` injects, the Stop guard's block message, and the writ and its template for each Adventurer (the hash requirement 5.2 already asks for). Each gets a name and the SHA-256 of its rendered text, recorded as `guild.prompt.template` and `guild.prompt.sha256` on the session, exchange and dispatch spans and, by the same stamping as `guild.writ.sha256`, on every span of an Adventurer run. The rendered text itself is stored once per hash in a `prompt_version` table (hash, name, first seen, text), so a hash can always be read back; an edit to a template is a new hash, never an overwrite.
+- **What is versioned.** The charter, the ticket playbook and the repository's rules as loaded at `SessionStart`, the resume text `gm hook session-start` injects, the Stop guard's block message, and the writ and its template for each Adventurer (the hash requirement 5.2 already asks for). Each gets a name and the SHA-256 of its rendered text, recorded as `guild.prompt.<name>.sha256` on the session, exchange and dispatch spans and, by the same stamping as `guild.writ.sha256`, on every span of an Adventurer run. The rendered text itself is stored once per hash in a `prompt_version` table (hash, name, first seen, text), so a hash can always be read back; an edit to a template is a new hash, never an overwrite.
 - **What is compared.** `gm stats --by-prompt <template>` groups the postings that ran under each hash of that template and prints, per hash: postings, done, right first time, median exchanges, median steps, failed checks and median cost. It is a query over spans like every other measure, and `gm stats --compare` can already ask what separates postings under one hash from the rest.
 - **What it cannot say.** A posting's difficulty, the model and effort, and the repository all move the outcome as much as the prompt does, so the output prints each group's size and its mix of model and focus beside the numbers, and `gm` does not rank hashes with fewer than 10 postings. It shows a difference; it does not prove a cause. The patron's own messages are stored word for word in the register, but the design makes no attempt to score the patron's phrasing.
 - **Prompts as sent, not only as written.** With prompt and response capture on ([Retention and redaction](#retention-and-redaction)), the exact text the model received and returned for a call is in Claude Code's events, so a template can be checked against what it rendered into.
@@ -380,6 +380,20 @@ Each slice is usable alone.
 5. **Follow-up suggestions** (after slice 1; independent of slices 2 to 4).
    The `follow_suggestion` table, `gm follows accept|reject|suggest`, and the suggestion shown in `gm list` and `gm show`, as in [Follow-up suggestions](#follow-up-suggestions). First an FTS5 baseline with no model; then the candidates tried one at a time against the patron's own `--follows` tags, one chosen, and its probability calibrated.
    *Done when* a new posting that continues an earlier one shows that posting as a suggestion with a probability, accepting it moves "exchanges per topic" in `gm stats`, nothing leaves the machine, and on the patron's tagged pairs the chosen approach beats the FTS5 baseline at the 90% threshold.
+
+### As built in slice 1
+
+Slice 1 is in `bin/gm`, tested by `tests/run.sh` from recorded hook payloads, with no model call; the hook names and payload fields it reads were checked against Claude Code 2.1.288 and its hooks, status line and environment-variable documentation on 2026-10-02.
+Where the text above left a choice open, slice 1 settled it so:
+
+- **Without telemetry the hooks write the turn.** `invoke_agent party-leader` runs from the capture hook to the `Stop` that lets the turn end, with the model, effort and cost (the change in Claude Code's running cost over the turn) taken from what `gm statusline` recorded in the `model_sample` table and from the hook's `effort.level`; a `StopFailure` ends it in error.
+- **What ends a span the hooks never close.** A turn and exchange left open by an interrupted turn (Claude Code runs no `Stop` then) are closed by the session's next allowed `Stop`, with status `unset` and `guild.closed_by=interrupted`; `SessionEnd` closes everything its session left open; a session that ended without `SessionEnd` and starts again under the same id is closed by that `SessionStart`. Each ends at the last time it was seen. The muster that would close the rest is step 6.
+- **`open_span`** has a `key` (`session:`, `turn:`, `exchange:`, `tool:` or `agent:` with the ids that close it) and the session id, beside the span's own columns.
+- **A notice finds its Bash call** through `CLAUDE_CODE_SESSION_ID`, which Claude Code sets in Bash subprocesses: the session's open `execute_tool Bash` span. When that call is in another posting's trace, the notice hangs under its own posting and links to the call. A phase change, which belongs to the focus, hangs under its Bash call or is a span of its own.
+- **A background subagent** is joined to its `Agent` call by the `agentId` the call returned; a foreground one by its type, the oldest open `Agent` call of that type.
+- **Commands kept** are the Bash and PowerShell commands and the file tools' paths, masked by `gm`'s redaction before they are written; the masking is tested from `tests/redaction-cases.tsv`.
+- **`gm stats --compare` selections** are `slow-tools`, `slow-hooks`, `slow-replies` (with `--over`) and `not-right-first-time`.
+- **The 30-day and 90-day clearing** of command and prompt text is not built yet.
 
 To verify early in slice 2, because the local test could not settle them: whether a shorter `OTEL_TRACES_EXPORT_INTERVAL` or a longer `CLAUDE_CODE_OTEL_SHUTDOWN_TIMEOUT_MS` stops a short headless run from losing its last spans; when `UserPromptSubmit` fires for a message typed during a running turn; and whether `effort` appears on Party Leader calls with the models the patron uses.
 

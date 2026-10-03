@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gm: the Guildmaster's single command. Step 1: one ticket that never forgets.
+# gm: the Guildmaster's single command. Step 1, one ticket that never forgets, and tracing slice 1.
 set -euo pipefail
 
 gm_realpath() {
@@ -17,9 +17,10 @@ GM_TEMPLATES=$GM_ROOT/templates
 GM_HALL=${GM_HALL:-$HOME/.guildmaster}
 case $GM_HALL in /*) ;; *) GM_HALL=$PWD/$GM_HALL ;; esac
 GM_DB=$GM_HALL/register.db
-GM_SCHEMA_VERSION=1
+GM_SCHEMA_VERSION=2
 GM_STOP_BUDGET=${GM_STOP_BUDGET:-3}
-GM_NOW="strftime('%Y-%m-%dT%H:%M:%SZ','now')"
+GM_NOW="strftime('%Y-%m-%dT%H:%M:%fZ','now')"
+GM_NOW_MS="CAST(ROUND((julianday('now')-2440587.5)*86400000) AS INTEGER)"
 GM_STOPWORDS="a an the to of in on at for and or but is are was were be been it its this that these those i me my we our you your he she they them please can could would should will just also so here there now then some any with from into about as by if not do does did have has had get got make let lets s t m ll re ve d ok okay hey hi hello"
 
 gm_die() { printf 'gm: %s\n' "$*" >&2; exit 1; }
@@ -51,13 +52,9 @@ gm_tmp() {
   mktemp "$GM_HALL/tmp/gm.XXXXXX"
 }
 
-gm_db_init() {
-  mkdir -p "$GM_HALL"
-  local tmp=$GM_DB.init.$$
-  rm -f "$tmp"
-  sqlite3 -bail -batch "$tmp" >/dev/null <<SQL
-PRAGMA journal_mode=WAL;
-BEGIN IMMEDIATE;
+# Schema 1, as step 1 created it; a new register runs it and then the migration to schema 2.
+gm_schema1_sql() {
+  cat <<'SQL'
 CREATE TABLE focus(
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
@@ -117,7 +114,78 @@ CREATE INDEX posting_state ON posting(focus_id, state);
 CREATE INDEX message_focus ON message(focus_id, sorted_at);
 CREATE INDEX event_focus ON event(focus_id, id);
 CREATE INDEX event_posting ON event(posting_id, id);
-PRAGMA user_version=$GM_SCHEMA_VERSION;
+SQL
+}
+
+# Schema 1 to 2: tracing. Only adds; nothing in schema 1 is rewritten or dropped.
+gm_schema2_sql() {
+  cat <<'SQL'
+ALTER TABLE posting ADD COLUMN trace_id TEXT;
+ALTER TABLE posting ADD COLUMN span_id TEXT;
+ALTER TABLE posting ADD COLUMN span_start_ms INTEGER;
+ALTER TABLE posting ADD COLUMN follows_id INTEGER REFERENCES posting(id);
+CREATE TABLE span(
+  trace_id TEXT NOT NULL,
+  span_id TEXT NOT NULL,
+  parent_id TEXT,
+  name TEXT NOT NULL,
+  start_ms INTEGER NOT NULL,
+  end_ms INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('ok','error','unset')),
+  attrs TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(attrs)),
+  PRIMARY KEY (trace_id, span_id)
+);
+CREATE INDEX span_parent ON span(trace_id, parent_id);
+CREATE INDEX span_start ON span(start_ms);
+CREATE TABLE span_link(
+  trace_id TEXT NOT NULL,
+  span_id TEXT NOT NULL,
+  linked_trace_id TEXT NOT NULL,
+  linked_span_id TEXT NOT NULL,
+  attrs TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(attrs)),
+  PRIMARY KEY (trace_id, span_id, linked_trace_id, linked_span_id)
+);
+CREATE TABLE open_span(
+  key TEXT PRIMARY KEY,
+  session_id TEXT,
+  trace_id TEXT NOT NULL,
+  span_id TEXT NOT NULL,
+  parent_id TEXT,
+  name TEXT NOT NULL,
+  start_ms INTEGER NOT NULL,
+  attrs TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(attrs))
+);
+CREATE INDEX open_span_session ON open_span(session_id);
+CREATE TABLE prompt_version(
+  name TEXT NOT NULL,
+  sha256 TEXT NOT NULL,
+  first_seen TEXT NOT NULL,
+  text TEXT NOT NULL,
+  PRIMARY KEY (name, sha256)
+);
+CREATE TABLE model_sample(
+  id INTEGER PRIMARY KEY,
+  at_ms INTEGER NOT NULL,
+  session_id TEXT,
+  prompt_id TEXT,
+  model TEXT,
+  effort TEXT,
+  cost_usd REAL
+);
+CREATE INDEX model_sample_session ON model_sample(session_id, id);
+PRAGMA user_version=2;
+SQL
+}
+
+gm_db_init() {
+  mkdir -p "$GM_HALL"
+  local tmp=$GM_DB.init.$$
+  rm -f "$tmp"
+  sqlite3 -bail -batch "$tmp" >/dev/null <<SQL
+PRAGMA journal_mode=WAL;
+BEGIN IMMEDIATE;
+$(gm_schema1_sql)
+$(gm_schema2_sql)
 COMMIT;
 SQL
   # ln refuses an existing target, so exactly one concurrent first caller installs its register.
@@ -125,8 +193,26 @@ SQL
   rm -f "$tmp" "$tmp-wal" "$tmp-shm"
 }
 
+# A schema-1 register is migrated in place, in one transaction, by the first gm command that finds it.
+# Two callers may race: the loser's ALTER fails and rolls back, and it finds schema 2 already there.
+gm_db_migrate() {
+  local err
+  if ! err=$(sqlite3 -bail -batch -cmd '.timeout 15000' "$GM_DB" "BEGIN IMMEDIATE; $(gm_schema2_sql) COMMIT;" 2>&1 >/dev/null); then
+    [ "$(gm_sql 'PRAGMA user_version;')" = 2 ] || gm_die "could not migrate the register at $GM_DB to schema 2: $err"
+  fi
+}
+
 gm_db_ensure() {
   [ -s "$GM_DB" ] || gm_db_init
+  [ -z "${GM_DB_READY:-}" ] || return 0
+  local v
+  v=$(gm_sql 'PRAGMA user_version;')
+  case $v in
+    2) ;;
+    1) gm_db_migrate ;;
+    *) gm_die "the register at $GM_DB is schema $v; this gm knows schema $GM_SCHEMA_VERSION" ;;
+  esac
+  GM_DB_READY=1
 }
 
 # Event and notice summaries quote the start of the patron's own words.
@@ -302,20 +388,28 @@ usage: gm <command> [arguments]
   open <focus> --repo <path> [--ticket KEY]... [--branch NAME] [--base REF] [--kind ticket] [--no-launch]
                           record a focus, make its camp, install its Claude Code hooks, start its Party Leader
   open <focus>            start the Party Leader of an existing focus again (a fresh session resumes from records)
-  post [--slug S] [--from REF] <words|->
+  post [--slug S] [--from REF] [--follows REF] <words|->
                           add a posting to the current focus (state received)
   resolve <ref>           print the one record a reference names: 12, #12, focus#12, focus#slug, focus, KEY-123
   list [--all] [--state S] [focus]
                           postings of the current focus (or every focus at the front desk)
   show <ref>              a posting with the patron's words, additions and history
-  notice <ref> <verb> [detail] [--slug S]
-                          record an event and print its one-line notice
+  notice <ref> <verb> [detail] [--slug S] [--follows REF]
+                          record an event and print its one-line notice; --follows ties the posting
+                          to an earlier one on the same topic
                           verbs: queued started resumed needs-you done failed closed update
   park <ref> --why TEXT [--until TIME-OR-EVENT]
                           set a posting aside, visibly, with a reason
   phase [focus] [phase]   show or set the focus's playbook phase
   where [focus]           the resume summary, built from the register
   statusline              the Claude Code status line (reads the session JSON on stdin)
+  trace [posting|focus]   a posting's trace as a text waterfall (a focus: every posting and session)
+  stats [posting|focus]   measures computed from the spans: first reply, exchanges, steps, cost
+  stats --by-prompt <template> [focus]
+                          outcomes per version of a prompt template (charter, playbook, rules, resume)
+  stats --compare <selection> [--over DURATION] [focus]
+                          what sets a selection apart from the rest; selections: slow-tools (30s),
+                          slow-hooks (1s), slow-replies (2m), not-right-first-time
 
 Environment: GM_HALL (default ~/.guildmaster), GM_FOCUS (focus context override).
 EOF
@@ -473,7 +567,21 @@ SELECT json_object(
     'Stop', json_array(json_object('hooks', json_array(
       json_object('type','command','command', $(gm_q "$prefix hook stop"))))),
     'PreCompact', json_array(json_object('hooks', json_array(
-      json_object('type','command','command', $(gm_q "$prefix hook precompact")))))
+      json_object('type','command','command', $(gm_q "$prefix hook precompact"))))),
+    'SessionEnd', json_array(json_object('hooks', json_array(
+      json_object('type','command','command', $(gm_q "$prefix hook session-end"), 'timeout', 5)))),
+    'PreToolUse', json_array(json_object('hooks', json_array(
+      json_object('type','command','command', $(gm_q "$prefix hook pre-tool"), 'timeout', 10)))),
+    'PostToolUse', json_array(json_object('hooks', json_array(
+      json_object('type','command','command', $(gm_q "$prefix hook post-tool"), 'timeout', 10)))),
+    'PostToolUseFailure', json_array(json_object('hooks', json_array(
+      json_object('type','command','command', $(gm_q "$prefix hook post-tool-failure"), 'timeout', 10)))),
+    'SubagentStart', json_array(json_object('hooks', json_array(
+      json_object('type','command','command', $(gm_q "$prefix hook subagent-start"), 'timeout', 10)))),
+    'SubagentStop', json_array(json_object('hooks', json_array(
+      json_object('type','command','command', $(gm_q "$prefix hook subagent-stop"), 'timeout', 10)))),
+    'StopFailure', json_array(json_object('hooks', json_array(
+      json_object('type','command','command', $(gm_q "$prefix hook stop-failure"), 'timeout', 10))))
   ),
   'statusLine', json_object('type','command','command', $(gm_q "$prefix statusline"), 'refreshInterval', 5)
 );
@@ -492,10 +600,10 @@ gm_new_posting_sql() {
   local f
   f=$(gm_q "$1")
   cat <<SQL
-INSERT INTO posting(focus_id, num, slug, words, state, message_id, created_at, updated_at)
+INSERT INTO posting(focus_id, num, slug, words, state, message_id, created_at, updated_at, trace_id, span_id, span_start_ms)
   SELECT f.id, n.n,
          CASE WHEN EXISTS (SELECT 1 FROM posting WHERE focus_id=f.id AND slug=$(gm_q "$2")) THEN $(gm_q "$2")||'-'||n.n ELSE $(gm_q "$2") END,
-         $3, 'received', $6, $GM_NOW, $GM_NOW
+         $3, 'received', $6, $GM_NOW, $GM_NOW, lower(hex(randomblob(16))), lower(hex(randomblob(8))), $GM_NOW_MS
   FROM focus f, (SELECT COALESCE(MAX(p.num),0)+1 AS n FROM posting p JOIN focus g ON g.id=p.focus_id WHERE g.name=$f) n
   WHERE f.name=$f;
 INSERT INTO v VALUES ('posting', last_insert_rowid());
@@ -507,11 +615,13 @@ SQL
 }
 
 gm_cmd_post() {
-  local slug='' from='' words='' focus
+  local slug='' from='' words='' focus follows='' t0
+  t0=$(gm_now_ms)
   while [ $# -gt 0 ]; do
     case $1 in
       --slug) slug=${2:?--slug needs a value}; shift 2 ;;
       --from) from=${2:?--from needs a reference}; shift 2 ;;
+      --follows) follows=${2:?--follows needs a reference}; shift 2 ;;
       -) words=$(cat); shift ;;
       -*) gm_die "post: unknown option $1" ;;
       *) words=${words:+$words }$1; shift ;;
@@ -534,14 +644,44 @@ gm_cmd_post() {
              f.name||'#'||p.num||' '||p.slug||' split from '||(SELECT g.name||'#'||o.num FROM posting o JOIN focus g ON g.id=o.focus_id WHERE o.id=$from_id)
       FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.id=(SELECT id FROM v WHERE k='posting');"
   fi
-  gm_sql <<SQL
+  local follows_sql='' fid out pid
+  if [ -n "$follows" ]; then
+    fid=$(gm_resolve_posting "$follows")
+    follows_sql=$(gm_follows_sql "(SELECT id FROM v WHERE k='posting')" "$fid")
+  fi
+  out=$(gm_sql <<SQL
 CREATE TEMP TABLE v(k TEXT PRIMARY KEY, id INTEGER);
 BEGIN IMMEDIATE;
 $(gm_new_posting_sql "$focus" "$slug" "$(gm_q "$words")" party-leader "" "$msg_sql")
 $from_sql
+$follows_sql
+SELECT id FROM v WHERE k='posting';
 SELECT line FROM event WHERE posting_id=(SELECT id FROM v WHERE k='posting') AND verb='received';
 COMMIT;
 SQL
+) || exit 1
+  pid=${out%%$'\n'*}
+  printf '%s\n' "${out#*$'\n'}"
+  (gm_trace_notice "$pid" received '' received '' "$t0" post) >/dev/null 2>&1 || gm_span_dropped "guild.notice received"
+}
+
+# SQL making posting $1 (an SQL expression) follow posting id $2, with its ledger line.
+gm_follows_sql() {
+  cat <<SQL
+UPDATE posting SET follows_id=$2 WHERE id=$1;
+INSERT INTO event(at, actor, kind, focus_id, posting_id, detail, line)
+  SELECT $GM_NOW, 'party-leader', 'posting.follows', p.focus_id, p.id, 'follows posting '||$2,
+         f.name||'#'||p.num||' '||p.slug||' follows '||(SELECT g.name||'#'||o.num||' '||o.slug FROM posting o JOIN focus g ON g.id=o.focus_id WHERE o.id=$2)
+  FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.id=$1;
+SQL
+}
+
+# Refuses a follow-up link that would point a posting at itself or close a loop.
+gm_follows_check() {
+  local pid=$1 fid=$2 loop
+  [ "$pid" != "$fid" ] || gm_die "notice: a posting cannot follow itself"
+  loop=$(gm_sql "WITH RECURSIVE up(id) AS (SELECT $fid UNION SELECT p.follows_id FROM posting p JOIN up ON p.id=up.id WHERE p.follows_id IS NOT NULL) SELECT count(*) FROM up WHERE id=$pid;")
+  [ "$loop" = 0 ] || gm_die "notice: that posting already follows this one; a topic cannot loop"
 }
 
 gm_verb_state() {
@@ -559,8 +699,10 @@ gm_verb_state() {
 }
 
 gm_record_notice() {
-  # $1 posting id, $2 verb, $3 detail, $4 new state or '', $5 slug or '', $6 park why, $7 park until, $8 actor
-  local pid=$1 verb=$2 detail=$3 state=$4 slug=$5 why=$6 until=$7 actor=$8
+  # $1 posting id, $2 verb, $3 detail, $4 new state or '', $5 slug or '', $6 park why, $7 park until, $8 actor, $9 extra SQL
+  local pid=$1 verb=$2 detail=$3 state=$4 slug=$5 why=$6 until=$7 actor=$8 extra=${9:-} t0 before
+  t0=$(gm_now_ms)
+  before=$(gm_sql "SELECT state FROM posting WHERE id=$pid;")
   local state_sql slug_sql park_sql shown
   shown=$verb
   [ "$verb" = needs-you ] && shown='needs you'
@@ -582,6 +724,7 @@ gm_record_notice() {
 BEGIN IMMEDIATE;
 UPDATE posting SET $state_sql $slug_sql $park_sql updated_at=$GM_NOW WHERE id=$pid;
 UPDATE message SET sorted_at=$GM_NOW WHERE posting_id=$pid AND sorted_at IS NULL;
+$extra
 INSERT INTO event(at, actor, kind, focus_id, posting_id, session_id, verb, detail, line)
   SELECT $GM_NOW, $(gm_q "$actor"), 'notice', p.focus_id, p.id, NULL, $(gm_q "$verb"), $(gm_qn "$detail"),
          f.name||'#'||p.num||' '||p.slug||' '||$(gm_q "$shown")||$tail||' ("'||$(gm_summary_sql p.words)||'")'
@@ -589,13 +732,17 @@ INSERT INTO event(at, actor, kind, focus_id, posting_id, session_id, verb, detai
 SELECT line FROM event WHERE id=last_insert_rowid();
 COMMIT;
 SQL
+  local word=notice
+  [ "$verb" != parked ] || word=park
+  (gm_trace_notice "$pid" "$verb" "$before" "$state" "$detail" "$t0" "$word") >/dev/null 2>&1 || gm_span_dropped "guild.notice $verb"
 }
 
 gm_cmd_notice() {
-  local ref='' verb='' detail='' slug='' state pid cur
+  local ref='' verb='' detail='' slug='' state pid cur follows='' extra=''
   while [ $# -gt 0 ]; do
     case $1 in
       --slug) slug=${2:?--slug needs a value}; shift 2 ;;
+      --follows) follows=${2:?--follows needs a reference}; shift 2 ;;
       *)
         if [ -z "$ref" ]; then ref=$1
         elif [ -z "$verb" ]; then verb=$1
@@ -618,7 +765,13 @@ gm_cmd_notice() {
     cur=$(gm_sql "SELECT state FROM posting WHERE id=$pid;")
     [ "$cur" = received ] || gm_die "notice: a posting's slug can only be set while it is received"
   fi
-  gm_record_notice "$pid" "$verb" "$detail" "$state" "$slug" "" "" party-leader
+  if [ -n "$follows" ]; then
+    local fid
+    fid=$(gm_resolve_posting "$follows")
+    gm_follows_check "$pid" "$fid"
+    extra=$(gm_follows_sql "$pid" "$fid")
+  fi
+  gm_record_notice "$pid" "$verb" "$detail" "$state" "$slug" "" "" party-leader "$extra"
 }
 
 gm_cmd_park() {
@@ -639,7 +792,8 @@ gm_cmd_park() {
 }
 
 gm_set_phase() {
-  local focus=$1 phase=$2 actor=$3 kind playbook pos
+  local focus=$1 phase=$2 actor=$3 kind playbook pos t0
+  t0=$(gm_now_ms)
   kind=$(gm_focus_field "$focus" kind)
   playbook=$(gm_playbook_path "$kind")
   if [ -n "$(gm_phases "$playbook")" ] && ! gm_phases "$playbook" | grep -qx "$phase"; then
@@ -654,6 +808,7 @@ INSERT INTO event(at, actor, kind, focus_id, verb, detail, line)
 SELECT line FROM event WHERE id=last_insert_rowid();
 COMMIT;
 SQL
+  (gm_trace_phase "$focus" "$phase" "$t0") >/dev/null 2>&1 || gm_span_dropped "guild.notice phase"
 }
 
 gm_cmd_phase() {
@@ -828,7 +983,18 @@ gm_cmd_statusline() {
   input=$(cat || true)
   [ -n "$input" ] || input='{}'
   [ -s "$GM_DB" ] || { printf 'gm · no register yet\n'; return 0; }
-  IFS='|' read -r ctx model cwd <<<"$(sqlite3 -batch -separator '|' :memory: "SELECT CAST(round(json_extract(j,'\$.context_window.used_percentage')) AS INTEGER), json_extract(j,'\$.model.display_name'), json_extract(j,'\$.workspace.current_dir') FROM (SELECT $(gm_q "$input") AS j);" 2>/dev/null || true)"
+  local us sid pid mid effort cost
+  us=$(printf '\037')
+  IFS=$us read -r ctx model cwd sid pid mid effort cost <<<"$(sqlite3 -batch -separator "$us" :memory: "SELECT CAST(round(json_extract(j,'\$.context_window.used_percentage')) AS INTEGER), json_extract(j,'\$.model.display_name'), json_extract(j,'\$.workspace.current_dir'), json_extract(j,'\$.session_id'), json_extract(j,'\$.prompt_id'), json_extract(j,'\$.model.id'), json_extract(j,'\$.effort.level'), json_extract(j,'\$.cost.total_cost_usd') FROM (SELECT $(gm_q "$input") AS j);" 2>/dev/null || true)"
+  # Model, effort and running cost per prompt_id, recorded only when one of them changes (tracing-design.md).
+  if [ -n "$sid" ] && { [ -n "$mid" ] || [ -n "$effort" ] || [ -n "$cost" ]; }; then
+    local num='^[0-9]+([.][0-9]+)?([eE][-+]?[0-9]+)?$' c=NULL
+    [[ $cost =~ $num ]] && c=$cost
+    sqlite3 -batch -cmd '.timeout 1000' "$GM_DB" "INSERT INTO model_sample(at_ms, session_id, prompt_id, model, effort, cost_usd)
+      SELECT $GM_NOW_MS, $(gm_q "$sid"), $(gm_qn "$pid"), $(gm_qn "$mid"), $(gm_qn "$effort"), $c
+      WHERE NOT EXISTS (SELECT 1 FROM (SELECT prompt_id, model, effort, cost_usd FROM model_sample WHERE session_id=$(gm_q "$sid") ORDER BY id DESC LIMIT 1) l
+                        WHERE l.prompt_id IS $(gm_qn "$pid") AND l.model IS $(gm_qn "$mid") AND l.effort IS $(gm_qn "$effort") AND l.cost_usd IS $c);" >/dev/null 2>&1 || true
+  fi
   focus=${GM_FOCUS:-}
   if [ -z "$focus" ] && [ -n "$cwd" ]; then
     focus=$(cd "$cwd" 2>/dev/null && gm_context_focus || true)
@@ -860,11 +1026,977 @@ SELECT 'guild '||(SELECT count(*) FROM focus)||' focus'||CASE WHEN (SELECT count
 SQL
 }
 
+# ---- Tracing: build slice 1 of vision/tracing-design.md ----
+# A posting is a trace. Spans are rows in the register, each written once, complete, when it ends;
+# a hook-bracketed span waits in open_span until its closing hook writes it.
+# Tracing never stops work: every span write is its own transaction after the work it describes,
+# and a write that fails is dropped and counted in spans-dropped.log.
+
+# The time now in epoch milliseconds, for SQL. Bash 5 reads its own clock; older bash (macOS's 3.2)
+# gets an SQL expression instead, which takes the time when the span is written, a moment later.
+gm_now_ms() {
+  if [ -n "${EPOCHREALTIME:-}" ]; then
+    local t=${EPOCHREALTIME//[!0-9]/}
+    printf '%s' "${t%???}"
+  else
+    printf '(%s)' "$GM_NOW_MS"
+  fi
+}
+
+gm_sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1"
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1"
+  else
+    openssl dgst -sha256 -r "$1"
+  fi 2>/dev/null | sed -n '1s/^\([0-9a-f]\{64\}\).*/\1/p'
+}
+
+gm_commit() {
+  [ -n "$1" ] && [ -d "$1" ] && git -C "$1" rev-parse HEAD 2>/dev/null || true
+}
+
+# SQL reading one attribute: attribute names are flat dotted keys, as OpenTelemetry writes them.
+gm_a() { printf "json_extract(%s,'\$.\"%s\"')" "${2:-attrs}" "$1"; }
+
+# SQL for a JSON object of attributes from key / SQL-expression pairs; NULL values are left out.
+gm_jobj() {
+  local out='' sep=''
+  while [ $# -ge 2 ]; do
+    out="$out$sep$(gm_q "$1"),$2"
+    sep=','
+    shift 2
+  done
+  printf "json_patch('{}',json_object(%s))" "$out"
+}
+
+# SQL appending one span event (a JSON object) to the events array of an attrs expression.
+gm_event_sql() {
+  printf "json_insert(json_set(%s,'\$.events',json(COALESCE(json_extract(%s,'\$.events'),'[]'))),'\$.events[#]',json(%s))" "$1" "$1" "$2"
+}
+
+gm_dur_sql() {
+  local d="($1)"
+  printf "CASE WHEN %s IS NULL THEN '?' WHEN %s<10000 THEN printf('%%.1fs',%s/1000.0) WHEN %s<60000 THEN printf('%%ds',%s/1000) WHEN %s<3600000 THEN printf('%%dm%%02ds',%s/60000,(%s/1000)%%60) ELSE printf('%%dh%%02dm',%s/3600000,(%s/60000)%%60) END" \
+    "$d" "$d" "$d" "$d" "$d" "$d" "$d" "$d" "$d" "$d"
+}
+
+gm_span_dropped() {
+  { printf '%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" >>"$GM_HALL/spans-dropped.log"; } 2>/dev/null || true
+}
+
+# Runs span SQL in one transaction of its own; never fails, and counts what it could not write.
+gm_trace() {
+  [ -s "$GM_DB" ] || return 0
+  if ! sqlite3 -bail -batch -noheader -cmd '.timeout 5000' "$GM_DB" >/dev/null 2>&1 <<SQL
+BEGIN IMMEDIATE;
+$2
+COMMIT;
+SQL
+  then
+    gm_span_dropped "$1"
+  fi
+  return 0
+}
+
+# Prints the focus's camp, then each JSON path of a hook payload, on one line separated by \037.
+# The payload is a file, or with gm_payload_json the JSON text itself.
+gm_payload() {
+  local f=$1
+  shift
+  gm_payload_from "CAST(readfile($(gm_q "$f")) AS TEXT)" "$@"
+}
+
+gm_payload_json() {
+  local j=$1
+  shift
+  gm_payload_from "$(gm_q "$j")" "$@"
+}
+
+gm_payload_from() {
+  local src=$1 sel p
+  shift
+  sel="(SELECT camp FROM focus WHERE name=$(gm_q "${GM_FOCUS:-}"))"
+  for p in "$@"; do
+    sel="$sel, $(gm_payload_field "$p")"
+  done
+  # A register that cannot be read still leaves the payload readable, so its span is counted as dropped.
+  sqlite3 -batch -noheader -separator "$(printf '\037')" -cmd '.timeout 5000' "$GM_DB" "SELECT $sel FROM (SELECT $src AS j);" 2>/dev/null ||
+    sqlite3 -batch -noheader -separator "$(printf '\037')" :memory: "SELECT ''${sel#"(SELECT camp FROM focus WHERE name=$(gm_q "${GM_FOCUS:-}"))"} FROM (SELECT $src AS j);" 2>/dev/null || true
+}
+
+# One payload field on one line. A path starting with % keeps its text whole, escaped with
+# backslashes for printf %b (the sqlite3 shell prints other control characters as ^X).
+gm_payload_field() {
+  local path=${1#%} x
+  x="COALESCE(json_extract(j,$(gm_q "\$.${1#%}")),'')"
+  if [ "$path" != "$1" ]; then
+    printf '%s' "replace(replace(replace(replace($x,'\','\\\\'),char(10),'\n'),char(9),'\t'),char(13),'\r')"
+  else
+    printf '%s' "replace(replace(replace($x,char(10),' '),char(9),' '),char(13),' ')"
+  fi
+}
+
+# Masks secrets in text on stdin before it is stored (tracing-design.md, Retention and redaction).
+# Best effort: tests/redaction-cases.tsv holds the known cases it must catch.
+gm_redact() {
+  LC_ALL=C awk '
+function rep(c, n,   s) { s = ""; while (n-- > 0) s = s c; return s }
+function red(re, pre, kind, keep,   out, rest, s0, l0, m, p, t) {
+  out = ""
+  rest = buf
+  while (match(tolower(rest), re)) {
+    s0 = RSTART
+    l0 = RLENGTH
+    if (l0 < 1) break
+    m = substr(rest, s0, l0)
+    p = ""
+    if (pre != "" && match(tolower(m), "^(" pre ")")) p = substr(m, 1, RLENGTH)
+    t = (keep != "" && substr(m, l0) == keep) ? keep : ""
+    out = out substr(rest, 1, s0 - 1) p "\001" kind "\002" t
+    rest = substr(rest, s0 + l0)
+  }
+  buf = out rest
+}
+{ buf = (NR == 1) ? $0 : buf "\n" $0 }
+END {
+  q = "\047"
+  buf = " " buf
+  v = "[^[:space:]\"" q "&;|`)<>\001\002]"
+  v1 = "[^-[:space:]\"" q "&;|`)<>\001\002]"
+  b = "[^a-z0-9_]"
+  red("-----begin [a-z ]*private key-----([^-]|-[^-])*(-----end [a-z ]*private key-----)?", "", "private-key", "")
+  red("(proxy-)?authorization[[:space:]]*:[[:space:]]*[^\n\"" q "\001\002]+", "(proxy-)?authorization[[:space:]]*:[[:space:]]*", "authorization", "")
+  red("bearer[[:space:]]+" v "+", "bearer[[:space:]]+", "bearer", "")
+  red("[a-z][a-z0-9+.-]*://[^/[:space:]:@\"" q "]+:[^/[:space:]@\"" q "\001\002]+@", "[a-z][a-z0-9+.-]*://[^/[:space:]:@\"" q "]+:", "url-password", "@")
+  f = "[[:space:]]--?[a-z0-9_-]*(token|password|passwd|secret|api[-_]?key)[a-z0-9_-]*(=|[[:space:]]+)[\"" q "]?"
+  red(f v1 v "*", f, "argument", "")
+  a = "[^a-z0-9_-][a-z0-9_]*(token|secret|password|passwd|key|credential)[a-z0-9_]*=[\"" q "]?"
+  red(a v "+", a, "assignment", "")
+  red(b "github_pat_[a-z0-9_]+", b, "github-token", "")
+  red(b "gh[pousr]_" rep("[a-z0-9]", 20) "[a-z0-9]*", b, "github-token", "")
+  red(b "glpat-" rep("[a-z0-9_-]", 20) "[a-z0-9_-]*", b, "gitlab-token", "")
+  red(b "xox[abposr]-" rep("[a-z0-9-]", 10) "[a-z0-9-]*", b, "slack-token", "")
+  red(b "sk-" rep("[a-z0-9_-]", 20) "[a-z0-9_-]*", b, "api-key", "")
+  red(b "[rs]k_(live|test)_" rep("[a-z0-9]", 10) "[a-z0-9]*", b, "stripe-key", "")
+  red(b "(akia|asia)" rep("[a-z0-9]", 16), b, "aws-access-key", "")
+  red(b "aiza" rep("[a-z0-9_-]", 35), b, "google-api-key", "")
+  red(b "npm_" rep("[a-z0-9]", 36), b, "npm-token", "")
+  buf = substr(buf, 2)
+  gsub(/\001/, "<REDACTED:", buf)
+  gsub(/\002/, ">", buf)
+  printf "%s", buf
+}'
+}
+
+# SQL: open the session's guild.session span unless one is open; a session first seen mid-way starts now.
+gm_session_open_sql() {
+  cat <<SQL
+INSERT OR IGNORE INTO open_span(key, session_id, trace_id, span_id, parent_id, name, start_ms, attrs)
+  VALUES ($(gm_q "session:$1"), $(gm_q "$1"), lower(hex(randomblob(16))), lower(hex(randomblob(8))), NULL, 'guild.session', $2,
+          $(gm_jobj session.id "$(gm_q "$1")" guild.focus "$(gm_qn "${GM_FOCUS:-}")" guild.role "'party-leader'"));
+SQL
+}
+
+# SQL: write the open spans matching the condition $1 as finished spans, and remove them.
+# $2 end time in ms (an SQL expression that may use open_span's columns), $3 status, $4 attributes to add,
+# $5 optional start time (default: when it was opened).
+gm_close_sql() {
+  local start=${5:-start_ms}
+  cat <<SQL
+INSERT OR IGNORE INTO span(trace_id, span_id, parent_id, name, start_ms, end_ms, status, attrs)
+  SELECT trace_id, span_id, parent_id, name, $start, MAX($start, $2), $3, json_patch(attrs, $4) FROM open_span WHERE $1;
+DELETE FROM open_span WHERE $1;
+SQL
+}
+
+# The last time an open span was seen alive: the end of its latest child, or its start.
+GM_LAST_SEEN="COALESCE((SELECT MAX(s.end_ms) FROM span s WHERE s.trace_id=open_span.trace_id AND s.parent_id=open_span.span_id), open_span.start_ms)"
+
+# SQL: the open Bash tool call of this Claude Code session most likely to have run this gm command.
+gm_calling_tool_sql() {
+  local sid=${CLAUDE_CODE_SESSION_ID:-}
+  if [ -z "$sid" ]; then
+    printf "SELECT NULL AS trace_id, NULL AS span_id, '{}' AS attrs WHERE 0"
+    return
+  fi
+  printf "SELECT trace_id, span_id, attrs FROM open_span WHERE session_id=%s AND name='execute_tool Bash' ORDER BY instr(COALESCE(%s,''),%s)>0 DESC, start_ms DESC LIMIT 1" \
+    "$(gm_q "$sid")" "$(gm_a guild.tool.command)" "$(gm_q "$1")"
+}
+
+# Records a prompt template's rendered text once per hash; prints the hash.
+gm_prompt_sql() {
+  # $1 template name, $2 file holding the rendered text, $3 its sha256
+  printf "INSERT OR IGNORE INTO prompt_version(name, sha256, first_seen, text) VALUES (%s, %s, %s, CAST(readfile(%s) AS TEXT));\n" \
+    "$(gm_q "$1")" "$(gm_q "$3")" "$GM_NOW" "$(gm_q "$2")"
+}
+
+# Spans for gm's own commands: a guild.notice span in the posting's trace, written when the command is done.
+gm_trace_notice() {
+  # $1 posting id, $2 verb, $3 state before, $4 state after ('' when unchanged), $5 detail, $6 start ms, $7 tool word
+  local pid=$1 verb=$2 before=$3 after=$4 detail=$5 t0=$6 word=${7:-notice} commit reopen='' close=''
+  commit=$(gm_commit "$(gm_sql "SELECT f.camp FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.id=$pid;" 2>/dev/null || true)")
+  case $before in done | failed | closed) case $after in '' | done | failed | closed) ;; *) reopen=1 ;; esac ;; esac
+  case $after in done | failed | closed) case $before in done | failed | closed) ;; *) close=1 ;; esac ;; esac
+  local sql
+  sql="CREATE TEMP TABLE c AS
+  SELECT p.id, p.trace_id AS tid, p.span_id AS old_span, f.name AS focus, f.name||'#'||p.num AS ref, p.slug, p.state,
+         (SELECT g.name||'#'||o.num FROM posting o JOIN focus g ON g.id=o.focus_id WHERE o.id=p.follows_id) AS follows
+  FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.id=$pid AND p.trace_id IS NOT NULL;
+CREATE TEMP TABLE tool AS $(gm_calling_tool_sql "$word");
+CREATE TEMP TABLE n AS SELECT lower(hex(randomblob(8))) AS span_id;"
+  if [ -n "$reopen" ]; then
+    sql="$sql
+UPDATE posting SET span_id=lower(hex(randomblob(8))), span_start_ms=$t0 WHERE id=$pid AND trace_id IS NOT NULL;
+INSERT INTO span_link(trace_id, span_id, linked_trace_id, linked_span_id, attrs)
+  SELECT p.trace_id, p.span_id, c.tid, c.old_span, json_object('guild.link','reopens') FROM posting p JOIN c ON c.id=p.id;"
+  fi
+  sql="$sql
+INSERT INTO span(trace_id, span_id, parent_id, name, start_ms, end_ms, status, attrs)
+  SELECT c.tid, n.span_id, CASE WHEN tool.trace_id=c.tid THEN tool.span_id ELSE p.span_id END, 'guild.notice', $t0, $GM_NOW_MS, 'ok',
+         $(gm_jobj guild.notice.verb "$(gm_q "$verb")" guild.notice.detail "$(gm_qn "$detail")" guild.state c.state \
+           guild.focus c.focus guild.posting c.ref guild.posting.slug c.slug guild.follows c.follows guild.role "'party-leader'" \
+           session.id "$(gm_qn "${CLAUDE_CODE_SESSION_ID:-}")" guild.camp.commit "$(gm_qn "$commit")")
+  FROM c JOIN posting p ON p.id=c.id JOIN n LEFT JOIN tool ON 1;
+INSERT INTO span_link(trace_id, span_id, linked_trace_id, linked_span_id, attrs)
+  SELECT c.tid, n.span_id, tool.trace_id, tool.span_id, json_object('guild.link','ran in') FROM c, n, tool WHERE tool.trace_id<>c.tid;"
+  if [ -n "$close" ]; then
+    sql="$sql
+INSERT OR IGNORE INTO span(trace_id, span_id, parent_id, name, start_ms, end_ms, status, attrs)
+  SELECT p.trace_id, p.span_id, NULL, 'guild.posting', COALESCE(p.span_start_ms, $t0), $GM_NOW_MS, CASE p.state WHEN 'failed' THEN 'error' ELSE 'ok' END,
+         json_patch($(gm_jobj guild.focus c.focus guild.posting c.ref guild.posting.slug c.slug guild.state c.state guild.follows c.follows \
+           error.type "CASE p.state WHEN 'failed' THEN 'failed' END" guild.camp.commit "$(gm_qn "$commit")" \
+           gen_ai.request.model "(SELECT $(gm_a gen_ai.request.model) FROM span WHERE trace_id=p.trace_id AND name='invoke_agent party-leader' ORDER BY start_ms LIMIT 1)" \
+           gen_ai.request.reasoning.level "(SELECT $(gm_a gen_ai.request.reasoning.level) FROM span WHERE trace_id=p.trace_id AND name='invoke_agent party-leader' ORDER BY start_ms LIMIT 1)"),
+           (SELECT json_group_object(j.key, j.value)
+            FROM (SELECT attrs FROM (SELECT attrs, start_ms FROM span WHERE trace_id=p.trace_id AND name='guild.exchange'
+                                     UNION ALL SELECT attrs, start_ms FROM open_span WHERE trace_id=p.trace_id AND name='guild.exchange')
+                  ORDER BY start_ms LIMIT 1) e, json_each(e.attrs) j
+            WHERE j.key LIKE 'guild.prompt.%'))
+  FROM posting p JOIN c ON c.id=p.id;"
+  fi
+  gm_trace "guild.notice $verb" "$sql"
+}
+
+# A phase change belongs to the focus: it hangs under the Bash call that ran it, or is a span of its own.
+gm_trace_phase() {
+  local focus=$1 phase=$2 t0=$3 commit
+  commit=$(gm_commit "$(gm_focus_field "$focus" camp 2>/dev/null || true)")
+  gm_trace "guild.notice phase" "CREATE TEMP TABLE tool AS $(gm_calling_tool_sql phase);
+INSERT INTO span(trace_id, span_id, parent_id, name, start_ms, end_ms, status, attrs)
+  SELECT COALESCE(tool.trace_id, lower(hex(randomblob(16)))), lower(hex(randomblob(8))), tool.span_id, 'guild.notice', $t0, $GM_NOW_MS, 'ok',
+         $(gm_jobj guild.notice.verb "'phase'" guild.phase "$(gm_q "$phase")" guild.focus "$(gm_q "$focus")" \
+           guild.posting "$(gm_a guild.posting tool.attrs)" guild.role "'party-leader'" \
+           session.id "$(gm_qn "${CLAUDE_CODE_SESSION_ID:-}")" guild.camp.commit "$(gm_qn "$commit")")
+  FROM (SELECT 1) LEFT JOIN tool ON 1;"
+}
+
+# ---- Hook handlers that only record (tracing-design.md, Spans) ----
+# Each reads its payload, writes or opens spans, prints nothing and exits 0: they never block.
+
+gm_record_hook() {
+  local which=${1//-/_} json=''
+  IFS= read -r -d '' json || true
+  [ -s "$GM_DB" ] || return 0
+  ("gm_record_$which" "$json") >/dev/null 2>&1 || gm_span_dropped "hook $which"
+  return 0
+}
+
+# SQL: the span a tool call or subagent hangs under: the subagent it runs in, the turn, or the session.
+gm_parent_sql() {
+  # $1 session id, $2 prompt id, $3 agent id
+  cat <<SQL
+SELECT trace_id, span_id, attrs FROM (
+  SELECT trace_id, span_id, attrs, 1 AS pri FROM open_span WHERE key=$(gm_q "agent:$3") AND $(gm_q "$3")<>''
+  UNION ALL SELECT trace_id, span_id, attrs, 2 FROM open_span WHERE key=$(gm_q "turn:$1:$2")
+  UNION ALL SELECT trace_id, span_id, attrs, 3 FROM open_span WHERE key=$(gm_q "session:$1")
+  ORDER BY pri LIMIT 1)
+SQL
+}
+
+# The fields of a tool hook's payload; the last three, the command or file path, escaped for printf %b.
+gm_tool_fields() {
+  gm_payload_json "$1" session_id prompt_id agent_id tool_name tool_use_id mcp_server.name tool_input.subagent_type \
+    tool_input.run_in_background duration_ms is_interrupt error tool_response.status tool_response.resolvedModel \
+    tool_response.totalToolUseCount tool_response.agentId effort.level %tool_input.command %tool_input.file_path %tool_input.notebook_path
+}
+
+# The full command of a Bash call, or a file tool's path, with secrets masked; empty for other tools.
+gm_tool_command() {
+  # $1 tool name, $2 the command or path as gm_tool_fields printed it
+  case $1 in
+    Bash | PowerShell | Read | Write | Edit | MultiEdit | NotebookEdit)
+      [ -z "$2" ] || printf '%b' "$2" | gm_redact ;;
+  esac
+}
+
+# SQL opening a tool call's span (PreToolUse, or a PostToolUse whose PreToolUse was not seen).
+gm_tool_open_sql() {
+  # $1 masked command, $2 session, $3 prompt, $4 agent, $5 tool name, $6 tool_use_id, $7 mcp server, $8 subagent type, $9 background, $10 start ms
+  local cmd=$1 sid=$2 pid=$3 aid=$4 tool=$5 tuid=$6 mcp=$7 subtype=$8 bg=$9 t0=${10} server='' bgsql=NULL mcpsql=NULL
+  [ "$bg" != 1 ] || bgsql="json('true')"
+  case $tool in
+    mcp__*)
+      server=$mcp
+      if [ -z "$server" ]; then server=${tool#mcp__}; server=${server%%__*}; fi ;;
+  esac
+  [ -z "$server" ] || mcpsql="'tools/call'"
+  cat <<SQL
+$(gm_session_open_sql "$sid" "$t0")
+INSERT OR IGNORE INTO open_span(key, session_id, trace_id, span_id, parent_id, name, start_ms, attrs)
+  SELECT $(gm_q "tool:$tuid"), $(gm_q "$sid"), par.trace_id, lower(hex(randomblob(8))), par.span_id, $(gm_q "execute_tool $tool"), $t0,
+         $(gm_jobj gen_ai.operation.name "'execute_tool'" gen_ai.tool.name "$(gm_q "$tool")" gen_ai.tool.call.id "$(gm_qn "$tuid")" \
+           mcp.method.name "$mcpsql" guild.mcp.server "$(gm_qn "$server")" \
+           guild.tool.command "$(gm_qn "$cmd")" guild.subagent.type "$(gm_qn "$subtype")" \
+           guild.background "$bgsql" \
+           session.id "$(gm_qn "$sid")" prompt.id "$(gm_qn "$pid")" agent_id "$(gm_qn "$aid")" \
+           guild.focus "$(gm_a guild.focus par.attrs)" guild.posting "$(gm_a guild.posting par.attrs)")
+  FROM ($(gm_parent_sql "$sid" "$pid" "$aid")) par;
+SQL
+}
+
+gm_record_pre_tool() {
+  local t0 camp sid pid aid tool tuid mcp subtype bg dur intr err rstatus rmodel ruses rid effort c1 c2 c3
+  t0=$(gm_now_ms)
+  IFS=$'\037' read -r camp sid pid aid tool tuid mcp subtype bg dur intr err rstatus rmodel ruses rid effort c1 c2 c3 <<<"$(gm_tool_fields "$1")"
+  [ -n "$tuid" ] || return 0
+  gm_trace "execute_tool $tool" "$(gm_tool_open_sql "$(gm_tool_command "$tool" "${c1:-${c2:-$c3}}")" "$sid" "$pid" "$aid" "$tool" "$tuid" "$mcp" "$subtype" "$bg" "$t0")"
+}
+
+gm_record_tool_end() {
+  # $1 payload file, $2 ok or error
+  local t1 camp sid pid aid tool tuid mcp subtype bg dur intr err rstatus rmodel ruses rid effort c1 c2 c3 commit start
+  t1=$(gm_now_ms)
+  IFS=$'\037' read -r camp sid pid aid tool tuid mcp subtype bg dur intr err rstatus rmodel ruses rid effort c1 c2 c3 <<<"$(gm_tool_fields "$1")"
+  [ -n "$tuid" ] || return 0
+  commit=$(gm_commit "$camp")
+  start=start_ms
+  if gm_is_int "$dur"; then start="MAX(start_ms, $t1-$dur)"; fi
+  [ "$rstatus" != async_launched ] || bg=1
+  local errtype=NULL status="'ok'" code=NULL uses=NULL bgsql=NULL
+  gm_is_int "$ruses" && uses=$ruses
+  [ "$bg" != 1 ] || bgsql="json('true')"
+  if [ "$2" = error ]; then
+    status="'error'"
+    if [ "$intr" = 1 ]; then errtype="'interrupt'"; else errtype="'tool_error'"; fi
+    case $err in
+      "Exit code "[0-9]*)
+        code=${err#Exit code }
+        code=${code%%[!0-9]*}
+        gm_is_int "$code" || code=NULL ;;
+    esac
+  fi
+  local t0=$t1
+  if gm_is_int "$dur"; then t0="($t1-$dur)"; fi
+  gm_trace "execute_tool $tool" "$(gm_tool_open_sql "$(gm_tool_command "$tool" "${c1:-${c2:-$c3}}")" "$sid" "$pid" "$aid" "$tool" "$tuid" "$mcp" "$subtype" "$bg" "$t0")
+$(gm_close_sql "key=$(gm_q "tool:$tuid")" "$t1" "$status" "$(gm_jobj error.type "$errtype" guild.exit_code "$code" \
+  gen_ai.request.model "$(gm_qn "$rmodel")" guild.subagent.tool_uses "$uses" guild.subagent.id "$(gm_qn "$rid")" guild.background "$bgsql" guild.camp.commit "$(gm_qn "$commit")")" "$start")"
+}
+
+gm_is_int() {
+  case $1 in '' | *[!0-9]*) return 1 ;; *) return 0 ;; esac
+}
+
+gm_record_post_tool() { gm_record_tool_end "$1" ok; }
+gm_record_post_tool_failure() { gm_record_tool_end "$1" error; }
+
+gm_record_subagent_start() {
+  local t0 camp sid pid aid atype rest
+  t0=$(gm_now_ms)
+  IFS=$'\037' read -r camp sid pid aid atype rest <<<"$(gm_payload_json "$1" session_id prompt_id agent_id agent_type)"
+  [ -n "$aid" ] || return 0
+  gm_trace "invoke_agent $atype" "$(gm_session_open_sql "$sid" "$t0")
+CREATE TEMP TABLE par AS
+  SELECT trace_id, span_id, attrs FROM span WHERE name='execute_tool Agent' AND $(gm_a guild.subagent.id)=$(gm_q "$aid") LIMIT 1;
+INSERT INTO par
+  SELECT trace_id, span_id, attrs FROM open_span t
+  WHERE NOT EXISTS (SELECT 1 FROM par)
+    AND t.session_id=$(gm_q "$sid") AND t.name='execute_tool Agent' AND COALESCE($(gm_a guild.subagent.type t.attrs),'')=$(gm_q "$atype")
+    AND NOT EXISTS (SELECT 1 FROM open_span o WHERE o.parent_id=t.span_id AND o.name LIKE 'invoke_agent %')
+    AND NOT EXISTS (SELECT 1 FROM span s WHERE s.trace_id=t.trace_id AND s.parent_id=t.span_id AND s.name LIKE 'invoke_agent %')
+  ORDER BY t.start_ms LIMIT 1;
+INSERT INTO par SELECT * FROM ($(gm_parent_sql "$sid" "$pid" "")) WHERE NOT EXISTS (SELECT 1 FROM par);
+INSERT OR IGNORE INTO open_span(key, session_id, trace_id, span_id, parent_id, name, start_ms, attrs)
+  SELECT $(gm_q "agent:$aid"), $(gm_q "$sid"), par.trace_id, lower(hex(randomblob(8))), par.span_id, $(gm_q "invoke_agent ${atype:-subagent}"), $t0,
+         $(gm_jobj gen_ai.operation.name "'invoke_agent'" gen_ai.agent.name "$(gm_qn "$atype")" agent_id "$(gm_q "$aid")" \
+           session.id "$(gm_qn "$sid")" prompt.id "$(gm_qn "$pid")" guild.background "CASE WHEN $(gm_a guild.background par.attrs) THEN json('true') END" \
+           guild.focus "$(gm_a guild.focus par.attrs)" guild.posting "$(gm_a guild.posting par.attrs)")
+  FROM par LIMIT 1;"
+}
+
+gm_record_subagent_stop() {
+  local t1 camp sid aid effort rest commit
+  t1=$(gm_now_ms)
+  IFS=$'\037' read -r camp sid aid effort rest <<<"$(gm_payload_json "$1" session_id agent_id effort.level)"
+  [ -n "$aid" ] || return 0
+  commit=$(gm_commit "$camp")
+  gm_trace "invoke_agent" "$(gm_close_sql "key=$(gm_q "agent:$aid")" "$t1" "'ok'" "$(gm_jobj gen_ai.request.reasoning.level "$(gm_qn "$effort")" guild.camp.commit "$(gm_qn "$commit")")")"
+}
+
+# The turn's model, effort and cost: from Claude Code's status line samples (gm statusline) and the hook's effort.
+gm_turn_attrs_sql() {
+  # $1 session, $2 effort from the hook, $3 end ms, $4 commit
+  local s
+  s=$(gm_q "$1")
+  gm_jobj gen_ai.request.model "(SELECT model FROM model_sample WHERE session_id=$s AND model IS NOT NULL AND at_ms<=$3 ORDER BY id DESC LIMIT 1)" \
+    gen_ai.request.reasoning.level "COALESCE($(gm_qn "$2"), (SELECT effort FROM model_sample WHERE session_id=$s AND at_ms<=$3 ORDER BY id DESC LIMIT 1))" \
+    guild.cost.usd "(SELECT ROUND(e.cost_usd-COALESCE((SELECT cost_usd FROM model_sample WHERE session_id=$s AND cost_usd IS NOT NULL AND at_ms<=open_span.start_ms ORDER BY id DESC LIMIT 1),0),6)
+                     FROM model_sample e WHERE e.session_id=$s AND e.cost_usd IS NOT NULL AND e.at_ms>open_span.start_ms AND e.at_ms<=$3 ORDER BY e.id DESC LIMIT 1)" \
+    guild.camp.commit "$(gm_qn "$4")"
+}
+
+# SQL ending the turn of prompt $2 and its exchange, and turns of earlier prompts left open (interrupted).
+gm_turn_end_sql() {
+  # $1 session, $2 prompt, $3 end ms, $4 status SQL, $5 error type, $6 effort, $7 commit, $8 extra turn attrs SQL
+  local s ex
+  s=$(gm_q "$1")
+  ex="key=$(gm_q "exchange:$1:$2")"
+  cat <<SQL
+INSERT OR IGNORE INTO span_link(trace_id, span_id, linked_trace_id, linked_span_id, attrs)
+  SELECT e.trace_id, e.span_id, s.trace_id, s.span_id, json_object('guild.link','served by session')
+  FROM open_span e, open_span s WHERE e.$ex AND s.key=$(gm_q "session:$1");
+$(gm_close_sql "key=$(gm_q "turn:$1:$2")" "$3" "$4" "json_patch($(gm_turn_attrs_sql "$1" "$6" "$3" "$7"), json_patch($(gm_jobj error.type "$(gm_qn "$5")"), $8))")
+$(gm_close_sql "$ex" "$3" "$4" "$(gm_jobj error.type "$(gm_qn "$5")" guild.camp.commit "$(gm_qn "$7")")")
+$(gm_close_sql "session_id=$s AND (name='guild.exchange' OR name='invoke_agent party-leader') AND start_ms<$3" "$GM_LAST_SEEN" "'unset'" "$(gm_jobj guild.closed_by "'interrupted'")")
+SQL
+}
+
+gm_record_stop_failure() {
+  local t1 camp sid pid err effort rest commit
+  t1=$(gm_now_ms)
+  IFS=$'\037' read -r camp sid pid err effort rest <<<"$(gm_payload_json "$1" session_id prompt_id error effort.level)"
+  commit=$(gm_commit "$camp")
+  gm_trace "stop failure" "$(gm_turn_end_sql "$sid" "$pid" "$t1" "'error'" "${err:-unknown}" "$effort" "$commit" \
+    "$(gm_event_sql "'{}'" "json_object('name','stop_failure','time_ms',$t1,'error',$(gm_qn "$err"))")")"
+}
+
+gm_record_session_end() {
+  local t1 camp sid reason rest commit
+  t1=$(gm_now_ms)
+  IFS=$'\037' read -r camp sid reason rest <<<"$(gm_payload_json "$1" session_id reason)"
+  [ -n "$sid" ] || return 0
+  commit=$(gm_commit "$camp")
+  gm_trace "guild.session" "$(gm_session_open_sql "$sid" "$t1")
+$(gm_close_sql "session_id=$(gm_q "$sid") AND key<>$(gm_q "session:$sid")" "$GM_LAST_SEEN" "'unset'" "$(gm_jobj guild.closed_by "'session-end'")")
+$(gm_close_sql "key=$(gm_q "session:$sid")" "$t1" "'ok'" "$(gm_jobj guild.session.end_reason "$(gm_qn "$reason")" guild.camp.commit "$(gm_qn "$commit")")")"
+}
+
+# ---- Spans of the hooks that decide or inject: guild.hook, written when the handler returns ----
+
+# SQL inserting one guild.hook span under the span keyed $3 (falling back to the session's).
+gm_hook_span_sql() {
+  # $1 event, $2 handler, $3 parent key, $4 session, $5 prompt, $6 start ms, $7 decision, $8 extra attrs SQL, $9 commit
+  cat <<SQL
+INSERT INTO span(trace_id, span_id, parent_id, name, start_ms, end_ms, status, attrs)
+  SELECT par.trace_id, lower(hex(randomblob(8))), par.span_id, 'guild.hook', $6, $GM_NOW_MS, 'ok',
+         json_patch($(gm_jobj guild.hook.event "$(gm_q "$1")" guild.hook.handler "$(gm_q "$2")" guild.hook.decision "$(gm_q "$7")" \
+           session.id "$(gm_qn "$4")" prompt.id "$(gm_qn "$5")" guild.focus "$(gm_a guild.focus par.attrs)" guild.posting "$(gm_a guild.posting par.attrs)" \
+           guild.camp.commit "$(gm_qn "$9")"), $8)
+  FROM (SELECT trace_id, span_id, attrs, 1 AS pri FROM open_span WHERE key=$(gm_q "$3")
+        UNION ALL SELECT trace_id, span_id, attrs, 2 FROM open_span WHERE key=$(gm_q "session:$4")
+        ORDER BY pri LIMIT 1) par;
+SQL
+}
+
+gm_trace_prompt() {
+  # $1 payload file, $2 message id, $3 start ms
+  local f=$1 mid=$2 t0=$3 camp sid pid rest commit
+  IFS=$'\037' read -r camp sid pid rest <<<"$(gm_payload "$f" session_id prompt_id)"
+  commit=$(gm_commit "$camp")
+  local ex turn
+  ex=$(gm_q "exchange:$sid:$pid")
+  turn=$(gm_q "turn:$sid:$pid")
+  gm_trace "guild.exchange" "$(gm_session_open_sql "$sid" "$t0")
+CREATE TEMP TABLE c AS
+  SELECT m.id AS mid, m.disposition AS kind, p.trace_id AS tid, p.span_id AS psid, f.name AS focus, f.name||'#'||p.num AS ref, p.slug,
+         (SELECT count(*) FROM message x WHERE x.posting_id=m.posting_id AND x.id<=m.id) AS n
+  FROM message m LEFT JOIN posting p ON p.id=m.posting_id LEFT JOIN focus f ON f.id=m.focus_id WHERE m.id=$mid;
+INSERT OR IGNORE INTO open_span(key, session_id, trace_id, span_id, parent_id, name, start_ms, attrs)
+  SELECT $ex, $(gm_q "$sid"), c.tid, lower(hex(randomblob(8))), c.psid, 'guild.exchange', $t0,
+         json_patch($(gm_jobj guild.focus c.focus guild.posting c.ref guild.posting.slug c.slug guild.message.id c.mid guild.message.kind c.kind \
+           guild.exchange.n c.n guild.role "'patron'" session.id "$(gm_qn "$sid")" prompt.id "$(gm_qn "$pid")"),
+           (SELECT json_group_object(j.key, j.value) FROM open_span s, json_each(s.attrs) j WHERE s.key=$(gm_q "session:$sid") AND j.key LIKE 'guild.prompt.%'))
+  FROM c WHERE c.tid IS NOT NULL;
+INSERT OR IGNORE INTO open_span(key, session_id, trace_id, span_id, parent_id, name, start_ms, attrs)
+  SELECT $turn, $(gm_q "$sid"), par.trace_id, lower(hex(randomblob(8))), par.span_id, 'invoke_agent party-leader', $t0,
+         $(gm_jobj gen_ai.operation.name "'invoke_agent'" gen_ai.agent.name "'party-leader'" gen_ai.conversation.id "$(gm_qn "$sid")" \
+           guild.role "'party-leader'" session.id "$(gm_qn "$sid")" prompt.id "$(gm_qn "$pid")" \
+           guild.focus "COALESCE($(gm_a guild.focus par.attrs),$(gm_qn "${GM_FOCUS:-}"))" guild.posting "$(gm_a guild.posting par.attrs)")
+  FROM (SELECT trace_id, span_id, attrs, 1 AS pri FROM open_span WHERE key=$ex
+        UNION ALL SELECT trace_id, span_id, attrs, 2 FROM open_span WHERE key=$(gm_q "session:$sid")
+        ORDER BY pri LIMIT 1) par;
+$(gm_hook_span_sql UserPromptSubmit capture "exchange:$sid:$pid" "$sid" "$pid" "$t0" none \
+  "(SELECT $(gm_jobj guild.message.id c.mid guild.message.kind c.kind) FROM c)" "$commit")"
+}
+
+gm_trace_stop() {
+  # $1 payload file, $2 start ms, $3 decision (block, allow), $4 blocks, $5 gave up (1 or ''), $6 block reason file
+  local f=$1 t0=$2 decision=$3 blocks=$4 gaveup=$5 reasonf=${6:-} camp sid pid effort rest commit extra psql='' sha=''
+  IFS=$'\037' read -r camp sid pid effort rest <<<"$(gm_payload "$f" session_id prompt_id effort.level)"
+  commit=$(gm_commit "$camp")
+  extra=$(gm_jobj guild.hook.blocks "${blocks:-0}")
+  if [ -n "$reasonf" ] && [ -s "$reasonf" ]; then
+    sha=$(gm_sha256_file "$reasonf")
+    if [ -n "$sha" ]; then
+      psql=$(gm_prompt_sql stop-guard "$reasonf" "$sha")
+      extra="json_patch($extra, $(gm_jobj guild.prompt.stop-guard.sha256 "$(gm_q "$sha")"))"
+    fi
+  fi
+  [ -z "$gaveup" ] || extra=$(gm_event_sql "$extra" "json_object('name','guard.gave-up','time_ms',$t0)")
+  local sql
+  sql="$(gm_session_open_sql "$sid" "$t0")
+$psql
+$(gm_hook_span_sql Stop guard "exchange:$sid:$pid" "$sid" "$pid" "$t0" "$decision" "$extra" "$commit")"
+  if [ "$decision" != block ]; then
+    sql="$sql
+$(gm_turn_end_sql "$sid" "$pid" "$t0" "'ok'" "" "$effort" "$commit" "'{}'")"
+  fi
+  gm_trace "guild.hook Stop" "$sql"
+}
+
+gm_trace_session_start() {
+  # $1 payload file, $2 start ms, $3 file holding the injected resume text
+  local f=$1 t0=$2 textf=$3 camp sid source model rest commit sha key psql=''
+  IFS=$'\037' read -r camp sid source model rest <<<"$(gm_payload "$f" session_id source model)"
+  commit=$(gm_commit "$camp")
+  sha=$(gm_sha256_file "$textf")
+  [ -z "$sha" ] || psql=$(gm_prompt_sql resume "$textf" "$sha")
+  key=$(gm_q "session:$sid")
+  local sql
+  if [ "$source" = compact ]; then
+    sql="$(gm_session_open_sql "$sid" "$t0")
+UPDATE open_span SET attrs=$(gm_event_sql attrs "json_object('name','session.resumed-after-compaction','time_ms',$t0)") WHERE key=$key;"
+  else
+    sql="$(gm_close_sql "key=$key AND $(gm_a guild.session.source) IS NOT NULL" "$GM_LAST_SEEN" "'unset'" "$(gm_jobj guild.closed_by "'session-start'")")
+$(gm_session_open_sql "$sid" "$t0")
+UPDATE open_span SET attrs=json_patch(attrs, $(gm_jobj guild.session.source "$(gm_qn "$source")" gen_ai.request.model "$(gm_qn "$model")")) WHERE key=$key;"
+  fi
+  [ -z "$model" ] || sql="$sql
+INSERT INTO model_sample(at_ms, session_id, model) VALUES ($t0, $(gm_q "$sid"), $(gm_q "$model"));"
+  [ -z "$sha" ] || sql="$sql
+$psql
+UPDATE open_span SET attrs=json_patch(attrs, $(gm_jobj guild.prompt.resume.sha256 "$(gm_q "$sha")")) WHERE key=$key;"
+  gm_trace "guild.hook SessionStart" "$sql
+$(gm_hook_span_sql SessionStart resume "session:$sid" "$sid" "" "$t0" none \
+  "$(gm_jobj guild.session.source "$(gm_qn "$source")" guild.prompt.resume.sha256 "$(gm_qn "$sha")")" "$commit")"
+}
+
+gm_trace_charter() {
+  # $1 payload file, $2 start ms, then template name / file pairs
+  local f=$1 t0=$2 camp sid rest commit name file sha sql='' attrs=''
+  shift 2
+  IFS=$'\037' read -r camp sid rest <<<"$(gm_payload "$f" session_id)"
+  commit=$(gm_commit "$camp")
+  while [ $# -ge 2 ]; do
+    name=$1 file=$2
+    shift 2
+    [ -f "$file" ] || continue
+    sha=$(gm_sha256_file "$file")
+    [ -n "$sha" ] || continue
+    sql="$sql$(gm_prompt_sql "$name" "$file" "$sha")"
+    attrs="$attrs guild.prompt.$name.sha256 $sha"
+  done
+  local obj
+  # shellcheck disable=SC2086
+  obj=$(set -f; gm_jobj_strings $attrs)
+  gm_trace "guild.hook SessionStart" "$(gm_session_open_sql "$sid" "$t0")
+$sql
+UPDATE open_span SET attrs=json_patch(attrs, $obj) WHERE key=$(gm_q "session:$sid");
+$(gm_hook_span_sql SessionStart charter "session:$sid" "$sid" "" "$t0" none "$obj" "$commit")"
+}
+
+# gm_jobj for string values only.
+gm_jobj_strings() {
+  local args=()
+  while [ $# -ge 2 ]; do
+    args+=("$1" "$(gm_q "$2")")
+    shift 2
+  done
+  if [ ${#args[@]} -eq 0 ]; then printf "'{}'"; else gm_jobj "${args[@]}"; fi
+}
+
+gm_trace_precompact() {
+  # $1 payload file, $2 start ms
+  local f=$1 t0=$2 camp sid trigger rest commit
+  IFS=$'\037' read -r camp sid trigger rest <<<"$(gm_payload "$f" session_id trigger)"
+  commit=$(gm_commit "$camp")
+  gm_trace "guild.hook PreCompact" "$(gm_session_open_sql "$sid" "$t0")
+UPDATE open_span SET attrs=$(gm_event_sql attrs "json_object('name','compaction','time_ms',$t0,'trigger',$(gm_qn "$trigger"))") WHERE key=$(gm_q "session:$sid");
+$(gm_hook_span_sql PreCompact snapshot "session:$sid" "$sid" "" "$t0" none "$(gm_jobj guild.compaction.trigger "$(gm_qn "$trigger")")" "$commit")"
+}
+
+# ---- gm trace and gm stats: every view and measure is a query over span rows, never stored ----
+
+# CTE "sp": the spans matching $1 (a condition on trace_id), with the spans still open drawn to now
+# and an open posting's root drawn from its posting row.
+gm_sp_cte() {
+  local w=${1:-1}
+  cat <<SQL
+sp AS MATERIALIZED (
+  SELECT trace_id, span_id, parent_id, name, start_ms, end_ms, status, attrs, 0 AS open FROM span WHERE $w
+  UNION ALL
+  SELECT trace_id, span_id, parent_id, name, start_ms, MAX(start_ms, $GM_NOW_MS), 'unset', attrs, 1 FROM open_span WHERE $w
+  UNION ALL
+  SELECT p.trace_id, p.span_id, NULL, 'guild.posting', COALESCE(p.span_start_ms, $GM_NOW_MS), MAX(COALESCE(p.span_start_ms, 0), $GM_NOW_MS), 'unset',
+         json_object('guild.focus', f.name, 'guild.posting', f.name||'#'||p.num, 'guild.posting.slug', p.slug, 'guild.state', p.state), 1
+  FROM posting p JOIN focus f ON f.id=p.focus_id
+  WHERE p.trace_id IS NOT NULL AND $w AND NOT EXISTS (SELECT 1 FROM span s WHERE s.trace_id=p.trace_id AND s.span_id=p.span_id)
+)
+SQL
+}
+
+# CTE "pm": the measures of every traced posting (tracing-design.md, Derived measures). Needs "sp".
+gm_pm_cte() {
+  cat <<SQL
+pm0 AS (
+  SELECT p.id AS posting_id, p.num, f.name AS focus, f.name||'#'||p.num AS ref, p.slug, p.state, p.trace_id, p.follows_id,
+    MAX(CASE WHEN s.name='guild.exchange' AND s.open=0 AND $(gm_a guild.exchange.n s.attrs)=1 THEN s.end_ms-s.start_ms END) AS first_reply_ms,
+    COALESCE(MAX(s.name='guild.exchange' AND s.open=1 AND $(gm_a guild.exchange.n s.attrs)=1),0) AS reply_waiting,
+    COALESCE(SUM(s.name='guild.exchange'),0) AS exchanges,
+    COALESCE(SUM(s.name='invoke_agent party-leader'),0) AS turns,
+    COALESCE(SUM(s.name LIKE 'execute_tool %'),0) AS tools,
+    COALESCE(SUM(s.name LIKE 'execute_tool mcp\_\_%' ESCAPE '\\'),0) AS mcp,
+    COALESCE(SUM(s.name LIKE 'execute_tool %' AND s.status='error'),0) AS tool_failures,
+    COALESCE(SUM(s.name LIKE 'invoke_agent %' AND s.name NOT IN ('invoke_agent party-leader','invoke_agent adventurer')),0) AS subagents,
+    COALESCE(SUM(s.name LIKE 'chat %'),0) AS model_calls,
+    COALESCE(SUM(s.name='guild.dispatch'),0) AS adventurer_runs,
+    COALESCE(SUM(s.name='guild.check' AND $(gm_a guild.check.result s.attrs)='fail'),0) AS failed_checks,
+    COALESCE(SUM(s.name='guild.hook'),0) AS hooks,
+    COALESCE(SUM(CASE WHEN s.name='guild.hook' THEN s.end_ms-s.start_ms END),0) AS hook_ms,
+    COALESCE(SUM(s.name='guild.hook' AND $(gm_a guild.hook.decision s.attrs)='block'),0) AS blocks,
+    SUM($(gm_a guild.cost.usd s.attrs)) AS cost,
+    MIN(CASE WHEN s.name='guild.posting' THEN s.start_ms END) AS start_ms,
+    MAX(CASE WHEN s.name='guild.posting' THEN s.end_ms END) AS end_ms,
+    MAX(CASE WHEN s.name='guild.posting' THEN s.open END) AS open,
+    MIN(CASE WHEN s.name='guild.notice' AND $(gm_a guild.notice.verb s.attrs)<>'received' THEN s.start_ms END) AS first_notice_at
+  FROM posting p JOIN focus f ON f.id=p.focus_id LEFT JOIN sp s ON s.trace_id=p.trace_id
+  WHERE p.trace_id IS NOT NULL
+  GROUP BY p.id
+),
+pm AS (
+  SELECT pm0.*, turns+model_calls+tools+subagents+adventurer_runs+failed_checks AS steps,
+         (state='done' AND exchanges=1 AND adventurer_runs<=1 AND failed_checks=0) AS rft
+  FROM pm0
+)
+SQL
+}
+
+# SQL selecting (g, m): the median of column $2 of table $1 per group $3.
+gm_median_sql() {
+  printf "SELECT g, AVG(v) AS m FROM (SELECT %s AS g, %s AS v, ROW_NUMBER() OVER (PARTITION BY %s ORDER BY %s) AS rn, COUNT(*) OVER (PARTITION BY %s) AS c FROM %s WHERE %s IS NOT NULL) WHERE rn IN ((c+1)/2, (c+2)/2) GROUP BY g" \
+    "$3" "$2" "$3" "$2" "$3" "$1" "$2"
+}
+
+gm_dropped_note() {
+  local n=0
+  [ ! -f "$GM_HALL/spans-dropped.log" ] || n=$(grep -c . "$GM_HALL/spans-dropped.log" || true)
+  [ "$n" = 0 ] || printf 'spans dropped: %s (could not be written; see %s)\n' "$n" "$GM_HALL/spans-dropped.log"
+}
+
+gm_ra() { gm_a "$1" r.attrs; }
+
+# Prints one trace as a text waterfall.
+gm_trace_tree() {
+  local tid=$1 d m e
+  d=$(gm_dur_sql 'r.end_ms-r.start_ms')
+  m="replace(COALESCE($(gm_a gen_ai.request.model r.attrs),$(gm_a gen_ai.request.model pa.attrs)),'claude-','')"
+  e=$(gm_a gen_ai.request.reasoning.level r.attrs)
+  gm_sql <<SQL
+WITH RECURSIVE $(gm_sp_cte "trace_id=$(gm_q "$tid")"),
+agg AS (SELECT SUM(name='guild.exchange') AS nex, SUM($(gm_a guild.cost.usd)) AS cost FROM sp),
+r AS (SELECT sp.*, CASE WHEN parent_id IN (SELECT span_id FROM sp) THEN parent_id END AS par FROM sp),
+l AS (
+  SELECT r.span_id, r.par, r.name, r.start_ms, r.end_ms,
+    CASE
+      WHEN r.name='guild.posting' THEN COALESCE($(gm_ra guild.posting),'?')||' '||COALESCE($(gm_ra guild.posting.slug),'')||'  '||COALESCE($(gm_ra guild.state),'')
+        ||'  '||$d||CASE WHEN r.open=1 THEN ' so far' ELSE '' END
+        ||'  '||agg.nex||CASE agg.nex WHEN 1 THEN ' exchange' ELSE ' exchanges' END
+        ||CASE WHEN agg.cost IS NULL THEN '' ELSE printf('  \$%.2f est.', agg.cost) END
+      WHEN r.name='guild.exchange' THEN 'exchange '||COALESCE($(gm_ra guild.exchange.n),'?')
+        ||'  "'||COALESCE((SELECT $(gm_summary_sql words) FROM message WHERE id=$(gm_ra guild.message.id)),'')||'"  '
+        ||CASE WHEN r.open=1 THEN 'no reply yet ('||$d||')' ELSE 'reply in '||$d END
+      WHEN r.name='guild.hook' THEN 'hook '||COALESCE($(gm_ra guild.hook.event),'?')||'  '||COALESCE($(gm_ra guild.hook.handler),'')
+        ||CASE WHEN $(gm_ra guild.hook.decision) IN ('block','allow') THEN ' '||$(gm_ra guild.hook.decision) ELSE '' END||'  '||$d
+      WHEN r.name='guild.session' THEN 'session '||substr(COALESCE($(gm_ra session.id),'?'),1,8)||COALESCE('  '||$(gm_ra guild.session.source),'')
+        ||COALESCE(' → '||$(gm_ra guild.session.end_reason),'')||'  '||$d
+      WHEN r.name='guild.notice' THEN 'notice '||COALESCE($(gm_ra guild.notice.verb),'?')||COALESCE(' '||$(gm_ra guild.phase),'')||COALESCE(': '||$(gm_ra guild.notice.detail),'')
+      WHEN r.name LIKE 'invoke_agent %' THEN r.name
+        ||CASE WHEN $m IS NULL AND $e IS NULL THEN '' ELSE '  '||COALESCE($m,'model ?')||' · '||COALESCE($e,'none') END||'  '||$d
+        ||CASE WHEN $(gm_ra guild.cost.usd) IS NULL THEN '' ELSE printf('  \$%.2f', $(gm_ra guild.cost.usd)) END
+      WHEN r.name LIKE 'execute_tool %' THEN r.name
+        ||COALESCE('  '||substr(replace($(gm_ra guild.tool.command),char(10),' '),1,60)||CASE WHEN length($(gm_ra guild.tool.command))>60 THEN '…' ELSE '' END,
+                   '  '||$(gm_ra guild.subagent.type),'')
+        ||CASE WHEN $(gm_ra gen_ai.request.model) IS NULL THEN '' ELSE '  '||replace($(gm_ra gen_ai.request.model),'claude-','') END||'  '||$d
+      ELSE r.name||'  '||$d
+    END
+    ||CASE WHEN r.status='error' THEN '  ✗ '||COALESCE($(gm_ra error.type),'error')||COALESCE(' (exit '||$(gm_ra guild.exit_code)||')','') ELSE '' END
+    ||CASE WHEN r.open=1 AND r.name NOT IN ('guild.posting','guild.exchange') THEN '  (open)' ELSE '' END
+    ||CASE WHEN $(gm_ra guild.closed_by) IS NULL THEN '' ELSE '  (closed: '||$(gm_ra guild.closed_by)||')' END AS label
+  FROM r LEFT JOIN sp pa ON pa.span_id=r.parent_id, agg
+),
+o AS (
+  SELECT l.*, ROW_NUMBER() OVER (PARTITION BY par ORDER BY start_ms, CASE name WHEN 'guild.hook' THEN 0 ELSE 1 END, end_ms, span_id) AS rn,
+         COUNT(*) OVER (PARTITION BY par) AS cnt
+  FROM l
+),
+t(span_id, sortkey, kid, line) AS (
+  SELECT span_id, printf('%06d', rn), '', label FROM o WHERE par IS NULL
+  UNION ALL
+  SELECT o.span_id, t.sortkey||'.'||printf('%06d', o.rn), t.kid||CASE WHEN o.rn=o.cnt THEN '   ' ELSE '│  ' END,
+         t.kid||CASE WHEN o.rn=o.cnt THEN '└─ ' ELSE '├─ ' END||o.label
+  FROM o JOIN t ON o.par=t.span_id
+)
+SELECT line FROM t ORDER BY sortkey;
+SQL
+}
+
+gm_trace_posting() {
+  local pid=$1 tid
+  tid=$(gm_sql "SELECT COALESCE(trace_id,'') FROM posting WHERE id=$pid;")
+  if [ -z "$tid" ]; then
+    gm_sql "SELECT f.name||'#'||p.num||' '||p.slug||'  '||p.state||'  (made before tracing began: a ledger, gm show '||f.name||'#'||p.num||', and no spans)' FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.id=$pid;"
+    return
+  fi
+  gm_trace_tree "$tid"
+}
+
+gm_cmd_trace() {
+  [ $# -le 1 ] || gm_die "trace: gm trace <posting|focus>"
+  gm_db_ensure
+  local ref=${1:-} kind id canon out
+  [ -n "$ref" ] || ref=$(gm_require_focus)
+  out=$(gm_resolve "$ref") || exit 1
+  IFS=$'\t' read -r kind id canon <<<"$out"
+  if [ "$kind" = posting ]; then
+    gm_trace_posting "$id"
+  else
+    local p first=1 legacy t
+    for p in $(gm_sql "SELECT id FROM posting WHERE focus_id=$id AND trace_id IS NOT NULL ORDER BY num;"); do
+      [ "$first" = 1 ] || printf '\n'
+      first=0
+      gm_trace_posting "$p"
+    done
+    legacy=$(gm_sql "SELECT count(*) FROM posting WHERE focus_id=$id AND trace_id IS NULL;")
+    [ "$legacy" = 0 ] || printf '\n%s postings of %s were made before tracing began: gm show has their ledgers.\n' "$legacy" "$canon"
+    for t in $(gm_sql "SELECT trace_id FROM (SELECT trace_id, start_ms FROM span WHERE name='guild.session' AND $(gm_a guild.focus)=$(gm_q "$canon")
+                       UNION SELECT trace_id, start_ms FROM open_span WHERE name='guild.session' AND $(gm_a guild.focus)=$(gm_q "$canon")) ORDER BY start_ms;"); do
+      printf '\n'
+      gm_trace_tree "$t"
+    done
+    gm_sql "SELECT char(10)||'focus notices:' WHERE EXISTS (SELECT 1 FROM span WHERE parent_id IS NULL AND name='guild.notice' AND $(gm_a guild.focus)=$(gm_q "$canon"));
+SELECT '  '||strftime('%Y-%m-%d %H:%M', start_ms/1000, 'unixepoch')||'  notice '||$(gm_a guild.notice.verb)||COALESCE(' '||$(gm_a guild.phase),'')
+FROM span WHERE parent_id IS NULL AND name='guild.notice' AND $(gm_a guild.focus)=$(gm_q "$canon") ORDER BY start_ms;"
+  fi
+  gm_dropped_note
+}
+
+gm_parse_ms() {
+  local re='^([0-9]+)(ms|s|m|h)?$'
+  [[ $1 =~ $re ]] || gm_die "stats: '$1' is not a duration (try 500ms, 30s, 2m, 1h)"
+  case ${BASH_REMATCH[2]} in
+    ms) printf '%s' "${BASH_REMATCH[1]}" ;;
+    m) printf '%s' "$((BASH_REMATCH[1] * 60000))" ;;
+    h) printf '%s' "$((BASH_REMATCH[1] * 3600000))" ;;
+    *) printf '%s' "$((BASH_REMATCH[1] * 1000))" ;;
+  esac
+}
+
+gm_cmd_stats() {
+  local by='' compare='' over='' ref=''
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --by-prompt) by=${2:?--by-prompt needs a template name}; shift 2 ;;
+      --compare) compare=${2:?--compare needs a selection}; shift 2 ;;
+      --over) over=${2:?--over needs a duration}; shift 2 ;;
+      -*) gm_die "stats: unknown option $1" ;;
+      *) [ -z "$ref" ] || gm_die "stats: one posting or focus at a time"; ref=$1; shift ;;
+    esac
+  done
+  gm_db_ensure
+  if [ -n "$by" ]; then
+    gm_stats_by_prompt "$by" "$ref"
+  elif [ -n "$compare" ]; then
+    gm_stats_compare "$compare" "$over" "$ref"
+  else
+    [ -z "$over" ] || gm_die "stats: --over goes with --compare"
+    local kind id canon out
+    [ -n "$ref" ] || ref=$(gm_require_focus)
+    out=$(gm_resolve "$ref") || exit 1
+    IFS=$'\t' read -r kind id canon <<<"$out"
+    if [ "$kind" = posting ]; then gm_stats_posting "$id"; else gm_stats_focus "$canon"; fi
+  fi
+  gm_dropped_note
+}
+
+gm_stats_posting() {
+  local pid=$1 tid
+  tid=$(gm_sql "SELECT COALESCE(trace_id,'') FROM posting WHERE id=$pid;")
+  if [ -z "$tid" ]; then
+    gm_trace_posting "$pid"
+    return
+  fi
+  gm_sql <<SQL
+WITH RECURSIVE $(gm_sp_cte),
+$(gm_pm_cte),
+up(id) AS (SELECT $pid UNION SELECT p.follows_id FROM posting p JOIN up ON p.id=up.id WHERE p.follows_id IS NOT NULL),
+top AS (SELECT id FROM up u WHERE NOT EXISTS (SELECT 1 FROM posting p WHERE p.id=u.id AND p.follows_id IS NOT NULL) LIMIT 1),
+topic(id) AS (SELECT id FROM top UNION SELECT p.id FROM posting p JOIN topic ON p.follows_id=topic.id),
+tp AS (SELECT COALESCE(SUM(exchanges),0) AS ex, group_concat(CASE WHEN posting_id<>$pid THEN '#'||num END, ', ') AS others
+       FROM (SELECT pm.* FROM topic JOIN pm ON pm.posting_id=topic.id ORDER BY pm.num)),
+me AS (SELECT * FROM pm WHERE posting_id=$pid),
+ts AS (SELECT * FROM sp WHERE trace_id=$(gm_q "$tid")),
+iv AS (SELECT start_ms AS s, end_ms AS e FROM ts WHERE name IN ('invoke_agent party-leader','invoke_agent adventurer')),
+iv2 AS (SELECT s, e, MAX(e) OVER (ORDER BY s, e ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS pe FROM iv),
+iv3 AS (SELECT s, e, SUM(CASE WHEN pe IS NULL OR s>pe THEN 1 ELSE 0 END) OVER (ORDER BY s, e ROWS UNBOUNDED PRECEDING) AS g FROM iv2),
+work AS (SELECT COALESCE(SUM(ge-gs),0) AS ms FROM (SELECT MIN(s) AS gs, MAX(e) AS ge FROM iv3 GROUP BY g)),
+nt AS (SELECT start_ms, $(gm_a guild.notice.verb ts.attrs) AS verb FROM ts WHERE name='guild.notice' AND $(gm_a guild.notice.verb ts.attrs)<>'update'),
+pk AS (SELECT COALESCE(SUM(COALESCE(nx, (SELECT end_ms FROM me))-start_ms),0) AS ms
+       FROM (SELECT start_ms, verb, LEAD(start_ms) OVER (ORDER BY start_ms) AS nx FROM nt) WHERE verb='parked')
+SELECT me.ref||' '||me.slug||'  '||me.state
+  ||char(10)||'  first reply '||CASE WHEN me.first_reply_ms IS NOT NULL THEN $(gm_dur_sql me.first_reply_ms) WHEN me.reply_waiting THEN 'not yet' ELSE '—' END
+  ||' · first notice '||CASE WHEN me.first_notice_at IS NULL THEN '—' ELSE $(gm_dur_sql 'me.first_notice_at-me.start_ms') END
+  ||' · total '||$(gm_dur_sql 'me.end_ms-me.start_ms')||CASE WHEN me.open=1 THEN ' so far' ELSE '' END
+  ||' (working '||$(gm_dur_sql work.ms)||', parked '||$(gm_dur_sql pk.ms)||')'
+  ||char(10)||'  exchanges '||me.exchanges||CASE WHEN tp.others IS NULL THEN '' ELSE ' (topic '||tp.ex||', with '||tp.others||')' END
+  ||' · turns '||me.turns||' · right first time: '||CASE WHEN me.state<>'done' THEN 'not done' WHEN me.rft THEN 'yes' ELSE 'no' END
+  ||char(10)||'  steps '||me.steps||': '||me.turns||' turn'||CASE me.turns WHEN 1 THEN '' ELSE 's' END||' · '||me.tools||' tool calls ('||me.mcp||' MCP, '||me.tool_failures||' failed) · '
+  ||me.subagents||' subagent'||CASE me.subagents WHEN 1 THEN '' ELSE 's' END||' · '
+  ||CASE WHEN me.model_calls=0 THEN 'model calls need telemetry (slice 2)' ELSE me.model_calls||' model calls' END
+  ||' · '||me.adventurer_runs||' Adventurer runs · '||me.failed_checks||' failed checks'
+  ||char(10)||'  hooks '||me.hooks||' runs in '||$(gm_dur_sql me.hook_ms)||' · '||me.blocks||' Stop-guard block'||CASE me.blocks WHEN 1 THEN '' ELSE 's' END
+  ||char(10)||'  cost '||CASE WHEN me.cost IS NULL THEN 'unknown (no status line samples; per-call cost comes with telemetry, slice 2)'
+                             ELSE printf('\$%.2f est., from Claude Code''s status line', me.cost) END
+FROM me, tp, work, pk;
+SQL
+}
+
+gm_stats_focus() {
+  local focus=$1 w
+  w="WITH RECURSIVE $(gm_sp_cte),
+$(gm_pm_cte),
+f AS (SELECT * FROM pm WHERE focus=$(gm_q "$focus")),
+mr AS ($(gm_median_sql f first_reply_ms 1)),
+mx AS ($(gm_median_sql f exchanges 1))"
+  gm_sql <<SQL
+$w
+SELECT $(gm_q "$focus")||': '||(SELECT count(*) FROM f)||' postings traced · '||(SELECT COALESCE(SUM(state='done'),0) FROM f)||' done · '
+  ||(SELECT COALESCE(SUM(rft),0) FROM f)||' right first time · median first reply '||COALESCE((SELECT $(gm_dur_sql 'CAST(m AS INTEGER)') FROM mr),'—')
+  ||' · median exchanges '||COALESCE((SELECT printf('%g', m) FROM mx),'—')
+  ||COALESCE(' · '||NULLIF((SELECT count(*) FROM posting p JOIN focus g ON g.id=p.focus_id WHERE g.name=$(gm_q "$focus") AND p.trace_id IS NULL),0)||' made before tracing (ledger only)','');
+$w
+SELECT printf('%-36s %-10s %8s %5s %5s %5s %4s %9s', 'posting', 'state', 'reply', 'exch', 'turns', 'tools', 'rft', 'total') WHERE EXISTS (SELECT 1 FROM f);
+$w
+SELECT printf('%-36s %-10s %8s %5d %5d %5d %4s %9s', ref||' '||slug, state,
+              CASE WHEN first_reply_ms IS NULL THEN '—' ELSE $(gm_dur_sql first_reply_ms) END, exchanges, turns, tools,
+              CASE WHEN state<>'done' THEN '—' WHEN rft THEN 'yes' ELSE 'no' END, $(gm_dur_sql 'end_ms-start_ms'))
+FROM f ORDER BY num;
+SQL
+}
+
+gm_stats_by_prompt() {
+  local tpl=$1 ref=$2 scope=1 re='^[a-z0-9][a-z0-9-]*$'
+  [[ $tpl =~ $re ]] || gm_die "stats: a template name is like charter, playbook, rules, resume or stop-guard"
+  [ -z "$ref" ] || scope="pm.focus=$(gm_q "$(gm_require_focus "$ref")")"
+  local key
+  key=$(gm_a "guild.prompt.$tpl.sha256" s.attrs)
+  local w
+  w="WITH RECURSIVE $(gm_sp_cte),
+$(gm_pm_cte),
+ph AS (SELECT DISTINCT $key AS sha, pm.posting_id FROM sp s JOIN pm ON pm.trace_id=s.trace_id WHERE s.name='guild.exchange' AND $key IS NOT NULL AND $scope),
+g AS (SELECT ph.sha, pm.* FROM ph JOIN pm ON pm.posting_id=ph.posting_id),
+agg AS (SELECT sha, COUNT(*) AS n, SUM(state='done') AS done, SUM(rft) AS rft, SUM(failed_checks) AS fc FROM g GROUP BY sha),
+mx AS ($(gm_median_sql g exchanges sha)),
+ms AS ($(gm_median_sql g steps sha)),
+mc AS ($(gm_median_sql g cost sha)),
+mix AS (SELECT g.sha, group_concat(DISTINCT replace(m.model,'claude-','')) AS models, group_concat(DISTINCT g.focus) AS focuses
+        FROM g LEFT JOIN (SELECT trace_id, $(gm_a gen_ai.request.model) AS model FROM sp WHERE name='invoke_agent party-leader') m ON m.trace_id=g.trace_id
+        GROUP BY g.sha),
+ranked AS (SELECT (SELECT MIN(n) FROM agg)>=10 AND (SELECT count(*) FROM agg)>1 AS yes)"
+  gm_sql <<SQL
+$w
+SELECT 'No posting has run under a recorded $tpl prompt yet.' WHERE NOT EXISTS (SELECT 1 FROM agg);
+$w
+SELECT CASE WHEN yes THEN 'Ranked by share right first time.' ELSE 'In order of first use, not ranked: gm ranks prompt versions only when each has 10 postings or more.' END
+FROM ranked WHERE EXISTS (SELECT 1 FROM agg);
+$w
+SELECT char(10)||$(gm_q "$tpl")||' '||substr(agg.sha,1,12)||COALESCE('  first seen '||substr(v.first_seen,1,16),'')
+  ||char(10)||'  postings '||agg.n||' · done '||agg.done||' · right first time '||agg.rft
+  ||' · median exchanges '||printf('%g', mx.m)||' · median steps '||printf('%g', ms.m)||' · failed checks '||agg.fc
+  ||' · median cost '||CASE WHEN mc.m IS NULL THEN 'unknown' ELSE printf('\$%.2f est.', mc.m) END
+  ||char(10)||'  mix: models '||COALESCE(mix.models,'unknown')||' · focuses '||mix.focuses
+  ||CASE WHEN agg.n<10 THEN ' · fewer than 10 postings' ELSE '' END
+FROM agg JOIN mx ON mx.g=agg.sha JOIN ms ON ms.g=agg.sha LEFT JOIN mc ON mc.g=agg.sha JOIN mix ON mix.sha=agg.sha
+  LEFT JOIN prompt_version v ON v.name=$(gm_q "$tpl") AND v.sha256=agg.sha, ranked
+ORDER BY CASE WHEN ranked.yes THEN -1.0*agg.rft/agg.n ELSE 0 END, v.first_seen, agg.sha;
+SQL
+}
+
+# What sets a selection apart from the rest: the BubbleUp of honeycomb/lessons.html, one query over attrs.
+gm_stats_compare() {
+  local sel=$1 over=$2 ref=$3 thr pop what scope=1 pscope=1 focus
+  if [ -n "$ref" ]; then
+    focus=$(gm_require_focus "$ref")
+    scope="$(gm_a guild.focus)=$(gm_q "$focus")"
+    pscope="pm.focus=$(gm_q "$focus")"
+  fi
+  case $sel in
+    slow-tools)
+      thr=$(gm_parse_ms "${over:-30s}")
+      what="execute_tool spans slower than ${over:-30s}"
+      pop="SELECT (end_ms-start_ms)>$thr AS sel, attrs FROM span WHERE name LIKE 'execute_tool %' AND $scope" ;;
+    slow-hooks)
+      thr=$(gm_parse_ms "${over:-1s}")
+      what="guild.hook spans slower than ${over:-1s}"
+      pop="SELECT (end_ms-start_ms)>$thr AS sel, attrs FROM span WHERE name='guild.hook' AND $scope" ;;
+    slow-replies)
+      thr=$(gm_parse_ms "${over:-2m}")
+      what="exchanges whose reply took over ${over:-2m}"
+      pop="SELECT (end_ms-start_ms)>$thr AS sel, attrs FROM span WHERE name='guild.exchange' AND $scope" ;;
+    not-right-first-time)
+      [ -z "$over" ] || gm_die "stats: --over does not apply to not-right-first-time"
+      what="postings not right first time (of those done or failed)"
+      pop="SELECT NOT pm.rft AS sel, json_remove(s.attrs,'\$.\"guild.state\"','\$.\"error.type\"') AS attrs
+           FROM pm JOIN posting p ON p.id=pm.posting_id JOIN span s ON s.trace_id=p.trace_id AND s.span_id=p.span_id
+           WHERE pm.state IN ('done','failed') AND $pscope" ;;
+    *) gm_die "stats: --compare takes slow-tools, slow-hooks, slow-replies or not-right-first-time" ;;
+  esac
+  local w
+  w="WITH RECURSIVE $(gm_sp_cte),
+$(gm_pm_cte),
+pop AS ($pop),
+tot AS (SELECT COALESCE(SUM(sel),0) AS n_sel, COALESCE(SUM(1-sel),0) AS n_base FROM pop),
+kv AS (SELECT pop.sel, j.key, CAST(j.value AS TEXT) AS value FROM pop, json_each(pop.attrs) AS j
+       WHERE j.type NOT IN ('object','array')
+         AND j.key NOT IN ('guild.posting','guild.posting.slug','guild.message.id','session.id','prompt.id','agent_id','gen_ai.tool.call.id',
+                           'gen_ai.response.id','gen_ai.conversation.id','guild.writ.sha256','guild.camp.commit','guild.notice.detail')),
+card AS (SELECT key FROM kv GROUP BY key HAVING COUNT(DISTINCT value)*2<=COUNT(*))"
+  gm_sql <<SQL
+$w
+SELECT 'selection: '||n_sel||' $what · baseline: '||n_base||' others'
+  ||CASE WHEN n_sel=0 THEN char(10)||'The selection is empty, so there is nothing to compare.'
+         WHEN n_base=0 THEN char(10)||'The baseline is empty: every one is in the selection, so there is nothing to compare against.' ELSE '' END
+FROM tot;
+$w
+SELECT printf('%-34s %-18s %9s %9s', 'key', 'value', 'selection', 'baseline') FROM tot WHERE n_sel>0 AND n_base>0;
+$w
+SELECT printf('%-34s %-18s %8.1f%% %8.1f%%', key, substr(value,1,18), 100.0*SUM(sel)/tot.n_sel, 100.0*SUM(1-sel)/tot.n_base)
+FROM kv, tot WHERE tot.n_sel>0 AND tot.n_base>0 AND key IN (SELECT key FROM card)
+GROUP BY key, value
+ORDER BY ABS(1.0*SUM(sel)/tot.n_sel-1.0*SUM(1-sel)/tot.n_base) DESC, key, value
+LIMIT 10;
+SQL
+}
+
 gm_hook_prompt() {
-  local tmp out spill
+  local tmp out spill t0 mid
+  t0=$(gm_now_ms)
   tmp=$(gm_tmp)
   cat >"$tmp"
   if out=$(gm_hook_prompt_record "$tmp") && [ -n "$out" ]; then
+    mid=${out%%$'\n'*}
+    out=${out#*$'\n'}
+    (gm_trace_prompt "$tmp" "$mid" "$t0") >/dev/null 2>&1 || gm_span_dropped "guild.exchange"
     rm -f "$tmp"
     gm_hook_json UserPromptSubmit "$out"
   else
@@ -925,6 +2057,7 @@ BEGIN IMMEDIATE;
 INSERT INTO message(focus_id, at, session_id, prompt_id, words, disposition)
   VALUES ($focus_sql, $GM_NOW, $(gm_qn "$sid"), $(gm_qn "$pid"), $wsql, $(gm_q "$disposition"));
 INSERT INTO v VALUES ('message', last_insert_rowid());
+SELECT id FROM v WHERE k='message';
 INSERT INTO guard(session_id, blocks) VALUES ($(gm_q "${sid:-none}"), 0) ON CONFLICT(session_id) DO UPDATE SET blocks=0;
 $sql
 COMMIT;
@@ -944,14 +2077,15 @@ gm_hook_json() {
 }
 
 gm_hook_session_start() {
-  local tmp source sid focus text
+  local tmp source sid focus text t0
+  t0=$(gm_now_ms)
   tmp=$(gm_tmp)
   cat >"$tmp"
   focus=${GM_FOCUS:-}
   source=$(gm_json_field "$tmp" source)
   sid=$(gm_json_field "$tmp" session_id)
-  rm -f "$tmp"
   if [ -z "$focus" ] || [ ! -s "$GM_DB" ] || [ -z "$(gm_focus_id "$focus")" ]; then
+    rm -f "$tmp"
     gm_hook_json SessionStart "gm has no focus named '${focus:-?}' in the register at $GM_DB, so there is nothing to resume." "gm: no focus '${focus:-?}' in $GM_DB"
     return
   fi
@@ -961,13 +2095,18 @@ gm_hook_session_start() {
     text="${text:0:9400}
 (The summary was cut to fit; run gm where for the rest.)"
   fi
+  printf '%s' "$text" >"$tmp.text"
+  (gm_trace_session_start "$tmp" "$t0" "$tmp.text") >/dev/null 2>&1 || gm_span_dropped "guild.hook SessionStart"
+  rm -f "$tmp" "$tmp.text"
   gm_hook_json SessionStart "$text" "" "$focus"
 }
 
 gm_hook_charter() {
-  cat >/dev/null
-  local focus=${GM_FOCUS:-} charter playbook rules text repo
-  [ -n "$focus" ] && [ -s "$GM_DB" ] && [ -n "$(gm_focus_id "$focus")" ] || return 0
+  local focus=${GM_FOCUS:-} charter playbook rules text repo tmp t0
+  t0=$(gm_now_ms)
+  tmp=$(gm_tmp)
+  cat >"$tmp"
+  [ -n "$focus" ] && [ -s "$GM_DB" ] && [ -n "$(gm_focus_id "$focus")" ] || { rm -f "$tmp"; return 0; }
   repo=$(gm_focus_field "$focus" repo)
   charter=$(gm_charter_path)
   playbook=$(gm_playbook_path "$(gm_focus_field "$focus" kind)")
@@ -991,18 +2130,33 @@ $(cat "$f")"
 
 $(head -c 8000 "$charter")"
   fi
+  (gm_trace_charter "$tmp" "$t0" charter "$charter" playbook "$playbook" rules "$rules") >/dev/null 2>&1 || gm_span_dropped "guild.hook SessionStart"
+  rm -f "$tmp"
   gm_hook_json SessionStart "$text"
 }
 
 gm_hook_stop() {
-  local tmp focus sid bg pending blocks
+  local tmp out t0
+  t0=$(gm_now_ms)
   tmp=$(gm_tmp)
   cat >"$tmp"
+  out=$(gm_tmp)
+  GM_STOP_DECISION=allow GM_STOP_BLOCKS=0 GM_STOP_GAVEUP='' GM_STOP_REASON=''
+  gm_hook_stop_guard "$tmp" >"$out"
+  if [ -n "${GM_FOCUS:-}" ] && [ -s "$GM_DB" ]; then
+    (gm_trace_stop "$tmp" "$t0" "$GM_STOP_DECISION" "$GM_STOP_BLOCKS" "$GM_STOP_GAVEUP" "$GM_STOP_REASON") >/dev/null 2>&1 || gm_span_dropped "guild.hook Stop"
+  fi
+  cat "$out"
+  rm -f "$tmp" "$out" "${GM_STOP_REASON:-$tmp}"
+}
+
+# Decides the Stop; sets GM_STOP_DECISION, GM_STOP_BLOCKS, GM_STOP_GAVEUP and GM_STOP_REASON for its span.
+gm_hook_stop_guard() {
+  local tmp=$1 focus sid bg pending blocks
   focus=${GM_FOCUS:-}
-  [ -n "$focus" ] && [ -s "$GM_DB" ] && [ -n "$(gm_focus_id "$focus" 2>/dev/null)" ] || { rm -f "$tmp"; return 0; }
+  [ -n "$focus" ] && [ -s "$GM_DB" ] && [ -n "$(gm_focus_id "$focus" 2>/dev/null)" ] || return 0
   sid=$(gm_json_field "$tmp" session_id)
   bg=$(sqlite3 -batch :memory: "SELECT COALESCE(json_array_length(CAST(readfile($(gm_q "$tmp")) AS TEXT),'\$.background_tasks'),0);" 2>/dev/null || echo 0)
-  rm -f "$tmp"
   local fid
   fid=$(gm_focus_id "$focus")
   pending=$(gm_sql <<SQL
@@ -1020,7 +2174,9 @@ SQL
     return 0
   fi
   blocks=$(gm_sql "BEGIN IMMEDIATE; INSERT INTO guard(session_id, blocks) VALUES ($(gm_q "${sid:-none}"), 1) ON CONFLICT(session_id) DO UPDATE SET blocks=blocks+1; SELECT blocks FROM guard WHERE session_id=$(gm_q "${sid:-none}"); COMMIT;" 2>/dev/null || echo 999)
+  GM_STOP_BLOCKS=$blocks
   if [ "$blocks" -gt "$GM_STOP_BUDGET" ]; then
+    GM_STOP_GAVEUP=1
     gm_sql "BEGIN IMMEDIATE; UPDATE guard SET blocks=0 WHERE session_id=$(gm_q "${sid:-none}"); INSERT INTO event(at, actor, kind, focus_id, session_id, detail) VALUES ($GM_NOW, 'hook', 'guard.gave-up', $fid, $(gm_qn "$sid"), $(gm_q "$pending")); COMMIT;" >/dev/null 2>&1 || true
     gm_hook_stop_message "gm stop guard gave up after $GM_STOP_BUDGET blocks; still unrecorded:
 $pending"
@@ -1032,8 +2188,9 @@ Record each with gm notice <n> <queued|started|needs-you|done|failed|closed> [de
   local f
   f=$(gm_tmp)
   printf '%s' "$reason" >"$f"
+  GM_STOP_DECISION=block
+  GM_STOP_REASON=$f
   sqlite3 -batch :memory: "SELECT json_object('decision','block','reason',CAST(readfile($(gm_q "$f")) AS TEXT));"
-  rm -f "$f"
 }
 
 gm_hook_stop_message() {
@@ -1045,14 +2202,14 @@ gm_hook_stop_message() {
 }
 
 gm_hook_precompact() {
-  local tmp focus sid trigger camp snap fid
+  local tmp focus sid trigger camp snap fid t0
+  t0=$(gm_now_ms)
   tmp=$(gm_tmp)
   cat >"$tmp"
   focus=${GM_FOCUS:-}
   [ -n "$focus" ] && [ -s "$GM_DB" ] && [ -n "$(gm_focus_id "$focus" 2>/dev/null)" ] || { rm -f "$tmp"; return 0; }
   sid=$(gm_json_field "$tmp" session_id)
   trigger=$(gm_json_field "$tmp" trigger)
-  rm -f "$tmp"
   fid=$(gm_focus_id "$focus")
   camp=$(gm_focus_field "$focus" camp)
   snap="compaction ($trigger); camp git:
@@ -1061,6 +2218,8 @@ $(git -C "$camp" status --short --branch 2>/dev/null | head -n 40 || true)
 open postings:
 $(gm_sql "SELECT '#'||num||' '||slug||' '||state FROM posting WHERE focus_id=$fid AND state NOT IN ('done','closed') ORDER BY num;")"
   gm_sql "BEGIN IMMEDIATE; INSERT INTO event(at, actor, kind, focus_id, session_id, detail) VALUES ($GM_NOW, 'hook', 'session.compact', $fid, $(gm_qn "$sid"), $(gm_q "$snap")); COMMIT;" >/dev/null 2>&1 || true
+  (gm_trace_precompact "$tmp" "$t0") >/dev/null 2>&1 || gm_span_dropped "guild.hook PreCompact"
+  rm -f "$tmp"
 }
 
 gm_cmd_hook() {
@@ -1071,6 +2230,7 @@ gm_cmd_hook() {
     charter) gm_hook_charter ;;
     stop) gm_hook_stop ;;
     precompact) gm_hook_precompact ;;
+    session-end | pre-tool | post-tool | post-tool-failure | subagent-start | subagent-stop | stop-failure) gm_record_hook "$which" ;;
     *) gm_die "hook: unknown hook '$which'" ;;
   esac
 }
@@ -1078,6 +2238,18 @@ gm_cmd_hook() {
 command -v sqlite3 >/dev/null 2>&1 || gm_die "gm needs the sqlite3 command"
 cmd=${1:-help}
 [ $# -eq 0 ] || shift
+if [ -s "$GM_DB" ]; then
+  case $cmd in
+    statusline) ;;
+    hook)
+      # The hooks that only record skip the check; a span they cannot write is dropped and counted.
+      case ${1:-} in
+        session-end | pre-tool | post-tool | post-tool-failure | subagent-start | subagent-stop | stop-failure) ;;
+        *) (gm_db_ensure) >/dev/null 2>&1 && GM_DB_READY=1 || true ;;
+      esac ;;
+    *) gm_db_ensure ;;
+  esac
+fi
 case $cmd in
   open) gm_cmd_open "$@" ;;
   post) gm_cmd_post "$@" ;;
@@ -1089,6 +2261,8 @@ case $cmd in
   phase) gm_cmd_phase "$@" ;;
   where) gm_cmd_where "$@" ;;
   statusline) gm_cmd_statusline "$@" ;;
+  trace) gm_cmd_trace "$@" ;;
+  stats) gm_cmd_stats "$@" ;;
   hook) gm_cmd_hook "$@" ;;
   help | -h | --help) gm_usage ;;
   *) gm_usage >&2; exit 1 ;;
