@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Stands in for launchctl in tests/run.sh, which puts it first on PATH: records each call under $HERDR_STUB and
+# loads nothing.
+set -u
+D=${HERDR_STUB:?HERDR_STUB is not set}
+mkdir -p "$D"
+printf '%s\n' "$*" >>"$D/launchctl"
+case ${1:-} in
+  bootstrap) touch "$D/launchd-loaded" ;;
+  bootout) [ -e "$D/launchd-loaded" ] || exit 3; rm -f "$D/launchd-loaded" ;;
+  print) [ -e "$D/launchd-loaded" ] ;;
+esac
