@@ -27,8 +27,100 @@ GM_TEMPLATES=$GM_ROOT/templates
 GM_HALL=${GM_HALL:-$HOME/.guildmaster}
 case $GM_HALL in /*) ;; *) GM_HALL=$PWD/$GM_HALL ;; esac
 GM_DB=$GM_HALL/register.db
-GM_SETUP=$GM_HALL/setup.conf
+GM_CONF=$GM_HALL/guild.conf
+GM_CONF_OLD=$GM_HALL/setup.conf
 GM_OTELCOL_PINNED=0.162.0
+
+# ---- The guild's configuration: guild.conf in the Guildhall ----
+# One "key: value" a line, documented in the file itself, read once at every start. A setting with an environment
+# variable is overridden by it; gm config shows each value and where it came from, gm config set changes one.
+# Each row: key, the variable that overrides it (- for none), default (- for none), kind, what it is.
+GM_CONF_TABLE="collector	GM_COLLECTOR	off	collector	Keep the local OpenTelemetry Collector (tracing) running, in herdr tab collector. gm init's answer sets it; later: not decided yet.
+collector-port	GM_OTEL_PORT	4318	port	The port on 127.0.0.1 the collector listens on, and Party Leaders send their telemetry to.
+telemetry	GM_TELEMETRY	on	onoff	Party Leaders that gm starts send Claude Code's telemetry to the collector.
+autostart	-	on	onoff	A launchd agent (macOS) runs the muster at login and every autostart-every minutes.
+autostart-every	-	5	minutes	Minutes between the launchd agent's musters.
+muster-before-commands	GM_HERDR_AUTO	on	onoff	A gm command typed at a terminal first brings back, quietly, whatever is dead or missing.
+attach	GM_ATTACH	on	onoff	gm alone attaches herdr at the guildmaster tab.
+herdr-session	GM_HERDR_SESSION	default	name	The herdr session the guild lives in; default is the one plain herdr attaches to.
+herdr-workspace	GM_HERDR_WORKSPACE	guild	name	The herdr workspace holding the guildmaster tab and a tab per Party Leader.
+launch-grace	GM_LAUNCH_GRACE	60	seconds	Seconds after a start during which a pane holding only a shell is starting, not dead.
+start-tries	GM_START_TRIES	3	count	Starts in a row never seen alive before a Party Leader, the Guildmaster or the collector is held.
+repo-roots	-	-	text	Folders, separated by spaces, where gm repos looks for clones instead of the usual source folders."
+GM_CONF_ENV=' '
+GM_CONF_VARS=' '
+GM_CONF_VAL=''
+
+# The file gm reads: guild.conf, or setup.conf, where the settings were before, until a command moves them.
+gm_conf_file() {
+  if [ -f "$GM_CONF" ] || [ ! -f "$GM_CONF_OLD" ]; then printf '%s' "$GM_CONF"; else printf '%s' "$GM_CONF_OLD"; fi
+}
+
+# key<TAB>value for each line of the file that sets something, the first line of each key.
+gm_conf_lines() {
+  local f=${1:-}
+  [ -n "$f" ] || f=$(gm_conf_file)
+  [ -f "$f" ] || return 0
+  awk '/^[[:space:]]*#/ || index($0, ":") == 0 { next }
+    { k = $0; sub(/:.*/, "", k); v = $0; sub(/^[^:]*:[[:space:]]*/, "", v); sub(/[[:space:]]+$/, "", v)
+      if (k ~ /^[a-z0-9-]+$/ && v != "" && !(k in seen)) { seen[k] = 1; printf "%s\t%s\n", k, v } }' "$f"
+}
+
+# gm_conf_norm <kind> <value>: sets GM_CONF_VAL to the value as gm uses it, or fails for one it cannot take. The
+# collector setting also reads setup.conf's answers: installed is on, skipped is off.
+gm_conf_norm() {
+  local v=$2
+  case $1 in
+    onoff | collector)
+      case $v in
+        on | yes | true) v=on ;;
+        off | no | false) v=off ;;
+        installed) [ "$1" = collector ] || return 1; v=on ;;
+        skipped) [ "$1" = collector ] || return 1; v=off ;;
+        later) [ "$1" = collector ] || return 1 ;;
+        *) return 1 ;;
+      esac ;;
+    port) [[ $v =~ ^[0-9]{1,5}$ ]] && [ "$v" -ge 1 ] && [ "$v" -le 65535 ] || return 1 ;;
+    minutes | count) [[ $v =~ ^[0-9]{1,6}$ ]] && [ "$v" -ge 1 ] || return 1 ;;
+    seconds) [[ $v =~ ^[0-9]{1,6}$ ]] || return 1 ;;
+    name) [[ $v =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || return 1 ;;
+    text) [ -n "$v" ] || return 1 ;;
+    *) return 1 ;;
+  esac
+  GM_CONF_VAL=$v
+}
+
+# Each setting with a variable takes the file's value unless the variable is set; one the file gives a value it cannot
+# take keeps its default (gm config and gm doctor say so). Runs once, before anything reads the variables.
+gm_conf_load() {
+  local lines key env def kind desc k v val
+  lines=$(gm_conf_lines)
+  while IFS=$'\t' read -r key env def kind desc; do
+    [ "$env" != - ] || continue
+    GM_CONF_VARS="$GM_CONF_VARS$env "
+    if [ -n "${!env:-}" ]; then
+      GM_CONF_ENV="$GM_CONF_ENV$env "
+      continue
+    fi
+    val=''
+    while IFS=$'\t' read -r k v; do
+      [ "$k" != "$key" ] || { val=$v; break; }
+    done <<<"$lines"
+    if [ -n "$val" ] && gm_conf_norm "$kind" "$val"; then
+      printf -v "$env" '%s' "$GM_CONF_VAL"
+    fi
+  done <<<"$GM_CONF_TABLE"
+}
+gm_conf_load
+
+# Whether gm hands a variable on to what it starts (a pane's launch line, the launchd agent): always one it was given
+# in its environment, never one it took from guild.conf, since the gm it starts reads guild.conf itself and then sees
+# a setting changed later.
+gm_conf_carried() {
+  case $GM_CONF_ENV in *" $1 "*) return 0 ;; esac
+  case $GM_CONF_VARS in *" $1 "*) return 1 ;; esac
+  return 0
+}
 GM_SCHEMA_VERSION=4
 GM_STOP_BUDGET=${GM_STOP_BUDGET:-3}
 GM_NOW="strftime('%Y-%m-%dT%H:%M:%fZ','now')"
@@ -452,10 +544,15 @@ They are for advanced use, and for the Guildmaster.
                           it is the first ticket key in lower case (crm-1234)
   open <focus>            the same for an existing focus: a running Party Leader is left as it is, a dead or
                           missing one starts again (a fresh session resumes from records); reopens a closed focus
-  up [--quiet]            the muster, plain code with no model: start the front desk's Guildmaster and every open
-                          focus's Party Leader that is dead or missing, leave the running ones alone; one that
-                          fails to start 3 times in a row is held until gm open (gm, for the Guildmaster); any
-                          other gm command at a terminal does the same, quietly
+  up [--quiet]            the muster, plain code with no model: start the front desk's Guildmaster, every open
+                          focus's Party Leader and, while guild.conf says collector: on, the tracing collector,
+                          whichever is dead or missing, and leave the running ones alone; one that fails to start
+                          3 times in a row is held until gm open (gm, for the Guildmaster; a day, for the
+                          collector); any other gm command at a terminal does the same, quietly
+  config [get <key> | set <key> <value> | unset <key>]
+                          the settings in guild.conf in the Guildhall: every one, its value and where it came
+                          from (the environment, the file, or the default); set changes one and acts on it at
+                          once (autostart, the collector); the Guildmaster runs it when the patron asks
   install herdr           install herdr, with Homebrew when it is there or else herdr's official installer, never
                           with sudo, finish the setup and start the Guildmaster in herdr; the session where the
                           patron started claude runs it on their yes
@@ -469,7 +566,7 @@ They are for advanced use, and for the Guildmaster.
   start <focus> --pane ID what a Party Leader's herdr pane runs: claude in the camp (only in that pane);
                           start guildmaster --pane ID is what the front desk's pane runs
   repos [<word>]          repositories gm knows (from focuses) and git clones under the usual source folders
-                          (setup.conf repo-roots: overrides them) whose folder name contains the word
+                          (guild.conf repo-roots: overrides them) whose folder name contains the word
   post [--slug S] [--from REF] [--follows REF] <words|->
                           add a posting to the current focus (state received)
   resolve <ref>           print the one record a reference names: 12, #12, focus#12, focus#slug, focus, KEY-123
@@ -494,17 +591,19 @@ They are for advanced use, and for the Guildmaster.
   stats --compare <selection> [--over DURATION] [focus]
                           what sets a selection apart from the rest; selections: slow-tools (30s),
                           slow-hooks (1s), slow-replies (2m), slow-calls (30s), not-right-first-time
-  collector               run the local OpenTelemetry Collector (templates/otelcol.yaml) in the foreground
+  collector               run the local OpenTelemetry Collector (templates/otelcol.yaml) in the foreground, unless
+                          one already answers on its port; with collector: on, gm keeps one running in herdr
   init [--yes | --no | --later] [--again] [--bin-dir DIR]
                           the first-run check: what gm needs and what is missing; asks whether to install
-                          the collector, skip it or decide later, and records the answer in setup.conf.
+                          the collector, skip it or decide later, and records the answer in guild.conf.
                           --yes installs every missing optional piece, --no goes without, --later decides
                           later; --again asks about a piece you skipped. The Guildmaster runs it by itself
                           at every start, without questions, and offers the collector in chat.
   doctor                  the state of setup and dependencies; that telemetry goes only to 127.0.0.1 and
                           that the collector answers
 
-Environment: GM_HALL (default ~/.guildmaster), GM_FOCUS (focus context override),
+Environment (each one with a setting in guild.conf overrides it; gm config shows which): GM_HALL (default
+  ~/.guildmaster), GM_FOCUS (focus context override), GM_COLLECTOR=on|off (keep the collector running),
   GM_OTEL_PORT (collector port, default 4318), GM_TELEMETRY=off (gm open starts sessions without telemetry),
   GM_OTELCOL (the collector binary, default otelcol-contrib on PATH or where gm init put it),
   GM_BIN_DIR (where gm init installs it, default ~/.local/bin), GM_INTERACTIVE=1|0 (force or forbid questions
@@ -537,6 +636,7 @@ gm_cmd_open() {
   fi
   [[ $focus =~ $re_focus ]] || gm_die "open: a focus name is lowercase letters, digits and dashes, for example appt-v2"
   [ "$focus" != "$GM_FRONT_DESK" ] || gm_die "open: $GM_FRONT_DESK is the front desk's name; choose another focus name"
+  [ "$focus" != "$GM_COLLECTOR_TAB" ] || gm_die "open: $GM_COLLECTOR_TAB is the tracing collector's tab; choose another focus name"
   [ "$kind" = ticket ] || gm_die "open: step 1 knows only the ticket kind"
   gm_telemetry_refuse
   [ "$launch" = 0 ] || gm_herdr_require open
@@ -864,11 +964,11 @@ Tell the patron plainly, in a sentence or two, what to install. Once it is insta
     return
   fi
   gm_db_ensure
-  [ -n "$(gm_setup_get initialized)" ] || gm_setup_set initialized "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  [ -n "$(gm_conf_get initialized)" ] || gm_conf_set initialized "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   gm_front_desk_files
   auto=$(gm_autostart_ensure)
   case $auto in
-    installed | on) auto='on (launchd runs the muster at login and every 5 minutes)' ;;
+    installed | on) auto="on (launchd runs the muster at login and every $(gm_autostart_every) minutes)" ;;
     off) auto='off: the patron turned it off with gm autostart off; leave it off unless they ask' ;;
     unsupported) auto='not available here (launchd is macOS'"'"'s); the Guildmaster and Party Leaders come back whenever gm runs' ;;
     failed:*) tell="${tell}- autostart could not be turned on: ${auto#failed: }
@@ -911,20 +1011,23 @@ ${tell%
     gm_hook_json SessionStart "$text"
     return
   fi
-  if [ -n "$(gm_otelcol)" ]; then
-    collector='installed'
-  elif [ "$(gm_setup_get collector)" = skipped ]; then
-    collector='skipped by the patron (do not offer it)'
+  if [ "${GM_COLLECTOR:-}" = on ] && [ -n "$(gm_otelcol)" ]; then
+    collector="on: gm keeps it running in herdr tab $GM_COLLECTOR_TAB (routine; say nothing about it unless asked)"
+  elif [ "${GM_COLLECTOR:-}" = off ]; then
+    collector="off: the patron chose to go without it (do not offer it; $gmc config set collector on, only if they ask)"
+  elif [ -n "$(gm_otelcol)" ]; then
+    collector="installed, not kept running ($gmc config set collector on keeps it running, if the patron asks)"
   else
     collector='not installed, and the patron has not decided'
+    [ "${GM_COLLECTOR:-}" != on ] || collector='on, but not installed'
     local last
-    last=$(gm_setup_get collector-offered)
+    last=$(gm_conf_get collector-offered)
     if [ -z "$last" ] || [ "$(sqlite3 -batch :memory: "SELECT julianday('now')-julianday($(gm_q "$last"))>=1;" 2>/dev/null)" = 1 ]; then
-      gm_setup_set collector-offered "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      gm_conf_set collector-offered "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
       offer="Offer the tracing collector once, in one line, after your first answer to the patron, for example: \"Optional: I can install the OpenTelemetry Collector so tracing also shows each model call's tokens and cost (official release, checksum-checked, no sudo). Install, skip, or later?\" Record the answer with $gmc init --yes (install), $gmc init --no (skip) or $gmc init --later (later), and say the one line it ends with. Do not raise it again this session."
     fi
   fi
-  setup="first-run check passed; autostart $auto; tracing collector $collector."
+  setup="first-run check passed; autostart $auto; tracing collector $collector. The settings are in $GM_CONF: $gmc config shows them; when the patron asks to change one in plain words, run $gmc config set <key> <value> (never edit the file yourself) and say the line it ends with."
   case $link in
     linked | ok) [ -n "$onpath" ] || setup="$setup gm is linked at ~/.local/bin/gm, but ~/.local/bin is not on the patron's PATH (mention it only if they ask how to run gm in a terminal)." ;;
     foreign:*) setup="$setup A different gm is at ~/.local/bin/gm (${link#foreign: }), left as it is; you run this one as $gmc." ;;
@@ -2155,7 +2258,7 @@ gm_otelcol() {
     p=$(command -v otelcol-contrib 2>/dev/null || true)
     if [ -z "$p" ]; then
       # A collector that gm init installed need not be on the PATH; the Guildhall recorded where it put it.
-      p=$(gm_setup_get collector-path)
+      p=$(gm_conf_get collector-path)
       [ -x "$p" ] || p=''
     fi
     printf '%s' "$p"
@@ -2165,11 +2268,19 @@ gm_otelcol() {
 gm_collector_config() { printf '%s' "${GM_COLLECTOR_CONFIG:-$GM_TEMPLATES/otelcol.yaml}"; }
 
 gm_cmd_collector() {
-  [ $# -eq 0 ] || gm_die "collector: gm collector takes no arguments (GM_OTEL_PORT sets the port)"
+  [ $# -eq 0 ] || gm_die "collector: gm collector takes no arguments (collector-port in guild.conf, or GM_OTEL_PORT, sets the port)"
+  gm_collector_exec
+}
+
+# Runs the collector in the foreground, by hand (gm collector) or in its herdr pane (gm start collector); never as a
+# second copy beside one that already answers on the port.
+gm_collector_exec() {
   local bin port=${GM_OTEL_PORT:-4318}
   gm_is_int "$port" || gm_die "collector: GM_OTEL_PORT must be a port number"
   bin=$(gm_otelcol)
   [ -n "$bin" ] || gm_die "collector: no OpenTelemetry Collector found; install otelcol-contrib (README.md) or set GM_OTELCOL"
+  [ "$(gm_otlp_status "http://127.0.0.1:$port")" != 200 ] ||
+    gm_die "collector: a collector already answers on 127.0.0.1:$port, so gm starts no second one$([ "${GM_COLLECTOR:-}" = on ] && printf ' (while guild.conf says collector: on, gm keeps one running in herdr tab %s)' "$GM_COLLECTOR_TAB")"
   mkdir -p "$GM_HALL/telemetry"
   export GM_HALL GM_OTEL_PORT=$port
   printf 'gm: the collector takes telemetry on 127.0.0.1:%s and writes it under %s/telemetry; Ctrl-C stops it\n' "$port" "$GM_HALL" >&2
@@ -2198,28 +2309,131 @@ gm_collector_config_problems() {
 }
 
 # ---- First run: gm init -------------------------------------------------------------------------------------
-# The patron's answers live in $GM_HALL/setup.conf, one "key: value" a line, readable and editable:
+# The patron's answers live in guild.conf in the Guildhall, beside the settings, one "key: value" a line:
 #   initialized: when a first run was completed (a choice made, or nothing optional missing)
-#   collector: installed | skipped | later, the patron's answer about the OpenTelemetry Collector
+#   collector: on | off | later, the patron's answer about the OpenTelemetry Collector, which is also the setting
+#     that keeps it running (setup.conf, before, said installed or skipped)
 #   collector-path / -version / -sha256 / -installed-at: what gm init installed, and where
 # Everything gm init says goes to stderr, so it never mixes with the output of the command that triggered it.
 
-gm_setup_get() { gm_setting "$GM_SETUP" "$1"; }
+gm_conf_get() { gm_setting "$(gm_conf_file)" "$1"; }
 
-gm_setup_set() {
-  local key=$1 val=$2 tmp
+# The documentation guild.conf starts with, from GM_CONF_TABLE.
+gm_conf_header() {
+  local key env def kind desc vals
+  printf '%s\n' "# Guildmaster configuration: one \"key: value\" a line; a line starting with # is a comment." \
+    "# Ask the Guildmaster to change a setting, or run gm config set <key> <value>; gm config shows each setting, its" \
+    "# value and where it came from. A variable named below, set in the environment, overrides its setting." \
+    "#"
+  while IFS=$'\t' read -r key env def kind desc; do
+    case $kind in
+      onoff) vals='on | off' ;;
+      collector) vals='on | off | later' ;;
+      text) vals='<folder> <folder> ...' ;;
+      count) vals='<number>' ;;
+      *) vals="<$kind>" ;;
+    esac
+    printf '# %s: %s' "$key" "$vals"
+    [ "$def" = - ] || printf ', default %s' "$def"
+    [ "$env" = - ] || printf '; %s overrides it' "$env"
+    printf '\n#   %s\n' "$desc"
+  done <<<"$GM_CONF_TABLE"
+  printf '%s\n' "#" \
+    "# gm also records here what it did: initialized (the first run), and the collector- lines (what gm init installed," \
+    "# and when the Guildmaster last offered it)."
+}
+
+# One writer at a time, so two never lose each other's line. Gives up after 10 seconds and writes anyway; a lock
+# left by a gm that is gone is broken.
+gm_conf_lock() {
+  local dir=$GM_HALL/conf.lock pid i=0
   mkdir -p "$GM_HALL"
-  tmp=$GM_SETUP.$$
-  if [ -f "$GM_SETUP" ]; then
-    K=$key V=$val awk 'index($0, ENVIRON["K"] ":") == 1 { if (!d) print ENVIRON["K"] ": " ENVIRON["V"]; d = 1; next } { print } END { if (!d) print ENVIRON["K"] ": " ENVIRON["V"] }' "$GM_SETUP" >"$tmp"
+  while ! mkdir "$dir" 2>/dev/null; do
+    pid=$(cat "$dir/pid" 2>/dev/null || true)
+    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+      rm -f "$dir/pid"
+      rmdir "$dir" 2>/dev/null || true
+      continue
+    fi
+    [ "$i" -lt 100 ] || return 1
+    sleep 0.1
+    i=$((i + 1))
+  done
+  printf '%s' "$$" >"$dir/pid"
+}
+
+gm_conf_unlock() {
+  rm -f "$GM_HALL/conf.lock/pid"
+  rmdir "$GM_HALL/conf.lock" 2>/dev/null || true
+}
+
+# gm_conf_set <key> [value]: replaces the key's line, or adds one at the end; a new file starts with the
+# documentation. Without a value, the key's line goes, and the setting is back to its default.
+gm_conf_set() {
+  local key=$1 val=${2:-} tmp locked=''
+  mkdir -p "$GM_HALL"
+  ! gm_conf_lock || locked=1
+  gm_conf_migrate_locked
+  tmp=$GM_CONF.$$
+  if [ -f "$GM_CONF" ]; then
+    K=$key V=$val awk 'index($0, ENVIRON["K"] ":") == 1 { if (!d && ENVIRON["V"] != "") print ENVIRON["K"] ": " ENVIRON["V"]; d = 1; next }
+      { print } END { if (!d && ENVIRON["V"] != "") print ENVIRON["K"] ": " ENVIRON["V"] }' "$GM_CONF" >"$tmp"
   else
     {
-      printf '%s\n' "# Guildmaster first-run setup, written by gm init. Plain text: edit it, or run gm init again." \
-        "# collector: installed | skipped | later   (the OpenTelemetry Collector, for tracing slice 2)"
-      printf '%s: %s\n' "$key" "$val"
+      gm_conf_header
+      printf '\n'
+      [ -z "$val" ] || printf '%s: %s\n' "$key" "$val"
     } >"$tmp"
   fi
-  mv -f "$tmp" "$GM_SETUP"
+  mv -f "$tmp" "$GM_CONF"
+  [ -z "$locked" ] || gm_conf_unlock
+  # The rest of this command sees the new value too, unless the environment overrides it.
+  local k env def kind desc
+  while IFS=$'\t' read -r k env def kind desc; do
+    [ "$k" = "$key" ] && [ "$env" != - ] || continue
+    case $GM_CONF_ENV in *" $env "*) continue ;; esac
+    if [ -n "$val" ] && gm_conf_norm "$kind" "$val"; then
+      printf -v "$env" '%s' "$GM_CONF_VAL"
+    elif [ "$kind" = collector ]; then
+      printf -v "$env" '%s' ''
+    else
+      printf -v "$env" '%s' "$def"
+    fi
+  done <<<"$GM_CONF_TABLE"
+}
+
+# Before guild.conf, the first-run answers and the few settings there were lived in setup.conf. The first gm command
+# that needs the file moves them: every line is kept (the collector's installed and skipped become on and off) below
+# the documentation, and setup.conf becomes setup.conf.old. Should both be there, guild.conf keeps its own lines and
+# takes only the keys it lacks.
+gm_conf_migrate() {
+  [ -f "$GM_CONF_OLD" ] || return 0
+  local locked=''
+  ! gm_conf_lock || locked=1
+  gm_conf_migrate_locked
+  [ -z "$locked" ] || gm_conf_unlock
+}
+
+gm_conf_migrate_locked() {
+  [ -f "$GM_CONF_OLD" ] || return 0
+  local tmp=$GM_CONF.$$ k v
+  if [ ! -f "$GM_CONF" ]; then
+    {
+      gm_conf_header
+      printf '\n'
+      awk '/^[[:space:]]*#/ || !NF { next }
+        /^collector:[[:space:]]*installed[[:space:]]*$/ { print "collector: on"; next }
+        /^collector:[[:space:]]*skipped[[:space:]]*$/ { print "collector: off"; next } { print }' "$GM_CONF_OLD"
+    } >"$tmp"
+    mv -f "$tmp" "$GM_CONF"
+  else
+    while IFS=$'\t' read -r k v; do
+      [ -n "$k" ] && [ -z "$(gm_setting "$GM_CONF" "$k")" ] || continue
+      case $k/$v in collector/installed) v=on ;; collector/skipped) v=off ;; esac
+      printf '%s: %s\n' "$k" "$v" >>"$GM_CONF"
+    done <<<"$(gm_conf_lines "$GM_CONF_OLD")"
+  fi
+  mv -f "$GM_CONF_OLD" "$GM_CONF_OLD.old" 2>/dev/null || true
 }
 
 gm_say() { printf '%s\n' "$*" >&2; }
@@ -2412,7 +2626,7 @@ gm_init_ask() {
 # Returns 0 when settled, 1 when an install failed (recorded as "later"), 2 when left undecided (no way to ask).
 gm_init_collector() {
   local mode=$1 again=$2 dir=${3:-${GM_BIN_DIR:-$HOME/.local/bin}} cur choice='' out
-  cur=$(gm_setup_get collector)
+  cur=${GM_COLLECTOR:-}
   gm_say ""
   gm_say "otelcol-contrib (the OpenTelemetry Collector, tracing slice 2, v$GM_OTELCOL_PINNED) is not installed."
   gm_say "  Without it, $(gm_init_meaning collector)"
@@ -2421,8 +2635,8 @@ gm_init_collector() {
     no) choice=s ;;
     later) choice=l ;;
     *)
-      if [ "$cur" = skipped ] && [ "$again" != 1 ]; then
-        gm_say "  You chose to go without it on $(gm_setup_get initialized); not asking again (gm init --again changes that)."
+      if [ "$cur" = off ] && [ "$again" != 1 ]; then
+        gm_say "  You chose to go without it on $(gm_conf_get initialized); not asking again (gm init --again changes that)."
         return 0
       fi
       if ! gm_init_interactive; then
@@ -2443,11 +2657,11 @@ gm_init_collector() {
   esac
   case $choice in
     s)
-      gm_setup_set collector skipped
-      gm_say "  Skipped. Recorded in $GM_SETUP; gm will not ask again, and gm doctor keeps saying so."
+      gm_conf_set collector off
+      gm_say "  Skipped: collector: off, recorded in $GM_CONF; gm will not ask again, and gm doctor keeps saying so."
       return 0 ;;
     l)
-      gm_setup_set collector later
+      gm_conf_set collector later
       gm_say "  Later. gm init asks again, and so does the Guildmaster another day; nothing else changes."
       return 0 ;;
   esac
@@ -2464,19 +2678,19 @@ gm_init_collector() {
   gm_say "  Installing into $dir:"
   if out=$(gm_init_install_collector "$dir"); then
     local path=${out%%$'\t'*} sum=${out#*$'\t'}
-    gm_setup_set collector installed
-    gm_setup_set collector-path "$path"
-    gm_setup_set collector-version "$GM_OTELCOL_PINNED"
-    [ "$sum" = "$out" ] || gm_setup_set collector-sha256 "$sum"
-    gm_setup_set collector-installed-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    gm_conf_set collector on
+    gm_conf_set collector-path "$path"
+    gm_conf_set collector-version "$GM_OTELCOL_PINNED"
+    [ "$sum" = "$out" ] || gm_conf_set collector-sha256 "$sum"
+    gm_conf_set collector-installed-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     case ":$PATH:" in
       *":$(dirname "$path"):"*) ;;
-      *) gm_say "  $(dirname "$path") is not on your PATH. gm finds the collector through $GM_SETUP; add the directory to PATH to run it yourself." ;;
+      *) gm_say "  $(dirname "$path") is not on your PATH. gm finds the collector through $GM_CONF; add the directory to PATH to run it yourself." ;;
     esac
-    gm_say "  Done: $path. Recorded in $GM_SETUP. Start it with gm collector."
+    gm_say "  Done: $path. collector: on, recorded in $GM_CONF: gm keeps it running in herdr tab collector."
     return 0
   fi
-  gm_setup_set collector later
+  gm_conf_set collector later
   gm_say "  The install did not happen; gm init will offer it again."
   return 1
 }
@@ -2522,11 +2736,11 @@ ${problems%
     gm_say "Nothing was recorded; gm asks on the first run in a terminal."
     return 0
   fi
-  if [ -z "$(gm_setup_get initialized)" ] || [ "$mode" != ask ]; then
-    gm_setup_set initialized "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if [ -z "$(gm_conf_get initialized)" ] || [ "$mode" != ask ]; then
+    gm_conf_set initialized "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   fi
   gm_say ""
-  gm_say "Setup recorded in $GM_SETUP. gm will not ask again unprompted; gm doctor reports the state, gm init changes it."
+  gm_say "Setup recorded in $GM_CONF. gm will not ask again unprompted; gm doctor reports the state, gm init changes it."
   return "$rc"
 }
 
@@ -2551,9 +2765,139 @@ gm_cmd_init() {
 # The first run, started by the first interactive gm command that needs the Guildhall. It never runs without a
 # terminal to answer it, and never in a hook, so nothing blocks.
 gm_init_auto() {
-  [ -z "$(gm_setup_get initialized)" ] || return 0
+  [ -z "$(gm_conf_get initialized)" ] || return 0
   gm_init_interactive || return 0
   gm_init_run ask 0 '' auto || true
+}
+
+# ---- gm config: the settings in guild.conf ----
+
+# Every setting as gm uses it: key<TAB>value<TAB>source, the source being environment (VAR), the file's name,
+# default, or "ignored: ..." when the file gives a value gm cannot take (the default is used then). No value is -.
+gm_conf_effective_all() {
+  local lines key env def kind desc k v val src file
+  file=$(basename "$(gm_conf_file)")
+  lines=$(gm_conf_lines)
+  while IFS=$'\t' read -r key env def kind desc; do
+    if [ "$env" != - ] && case $GM_CONF_ENV in *" $env "*) true ;; *) false ;; esac; then
+      printf '%s\t%s\tenvironment (%s)\n' "$key" "${!env}" "$env"
+      continue
+    fi
+    val=''
+    while IFS=$'\t' read -r k v; do
+      [ "$k" != "$key" ] || { val=$v; break; }
+    done <<<"$lines"
+    [ "$def" != - ] || def=''
+    if [ -z "$val" ]; then
+      src=default
+      val=$def
+    elif gm_conf_norm "$kind" "$val"; then
+      src=$file
+      val=$GM_CONF_VAL
+    else
+      src="ignored: $file says '$val', which a $key setting cannot take"
+      val=$def
+    fi
+    printf '%s\t%s\t%s\n' "$key" "${val:--}" "$src"
+  done <<<"$GM_CONF_TABLE"
+}
+
+# gm_conf_row <key>: env<TAB>default<TAB>kind<TAB>description of one setting; nothing for an unknown key.
+gm_conf_row() {
+  local key env def kind desc
+  while IFS=$'\t' read -r key env def kind desc; do
+    [ "$key" != "$1" ] || { printf '%s\t%s\t%s\t%s' "$env" "$def" "$kind" "$desc"; return 0; }
+  done <<<"$GM_CONF_TABLE"
+}
+
+gm_conf_keys() { printf '%s\n' "$GM_CONF_TABLE" | cut -f 1 | tr '\n' ' ' | sed 's/ $//'; }
+
+# gm config shows every setting, its value and where it came from; gm config get prints one value; gm config set
+# changes one in guild.conf, as the Guildmaster does when the patron asks in plain words, and acts on it at once
+# (autostart and the collector); gm config unset puts one back to its default.
+gm_cmd_config() {
+  local action=${1:-show} key val src env def kind desc row file
+  [ $# -eq 0 ] || shift
+  gm_conf_migrate
+  file=$(gm_conf_file)
+  case $action in
+    show | list)
+      [ $# -eq 0 ] || gm_die "config: gm config takes no arguments (gm config get|set|unset <key>)"
+      printf 'Settings, from %s (gm config set <key> <value> changes one):\n' "$file"
+      while IFS=$'\t' read -r key val src; do
+        [ "$key/$val" != repo-roots/- ] || val='(the usual source folders)'
+        [ "$key/$src" != collector/default ] || src='default (not decided yet)'
+        printf '  %-23s %-9s %s\n' "$key" "$val" "$src"
+      done <<<"$(gm_conf_effective_all)"
+      ;;
+    get)
+      [ $# -eq 1 ] || gm_die "config: gm config get <key>"
+      [ -n "$(gm_conf_row "$1")" ] || gm_die "config: no setting named '$1'; the settings are: $(gm_conf_keys)"
+      while IFS=$'\t' read -r key val src; do
+        [ "$key" = "$1" ] || continue
+        [ "$val" = - ] || printf '%s\n' "$val"
+      done <<<"$(gm_conf_effective_all)"
+      ;;
+    set | unset)
+      key=${1:-}
+      [ -n "$key" ] || gm_die "config: gm config set <key> <value>, or gm config unset <key>"
+      shift
+      row=$(gm_conf_row "$key")
+      [ -n "$row" ] || gm_die "config: no setting named '$key'; the settings are: $(gm_conf_keys)"
+      IFS=$'\t' read -r env def kind desc <<<"$row"
+      val=''
+      if [ "$action" = set ]; then
+        [ $# -ge 1 ] || gm_die "config: gm config set $key <value>"
+        val="$*"
+        [ "$kind" = text ] || [ $# -eq 1 ] || gm_die "config: $key takes one value"
+        gm_conf_norm "$kind" "$val" || gm_die "config: $key cannot be '$val' ($(gm_conf_header | sed -n "s/^# $key: \\([^,;]*\\).*/\\1/p"))"
+        val=$GM_CONF_VAL
+      else
+        [ $# -eq 0 ] || gm_die "config: gm config unset <key>"
+      fi
+      gm_conf_apply "$key" "$val"
+      if [ "$env" != - ] && case $GM_CONF_ENV in *" $env "*) true ;; *) false ;; esac; then
+        printf 'Note: %s=%s is set in this environment, and overrides it for the commands run there.\n' "$env" "${!env}"
+      fi
+      ;;
+    *) gm_die "config: gm config [get <key> | set <key> <value> | unset <key>]" ;;
+  esac
+}
+
+# gm_conf_apply <key> [value]: records the setting, acts on it, and says so in one line. Autostart is turned on or
+# off; the collector is started or stopped at once; a new port restarts it; the rest takes effect at the next muster,
+# or the next session gm starts.
+gm_conf_apply() {
+  local key=$1 val=${2:-} shown
+  shown=${val:-its default}
+  case $key in
+    autostart)
+      if [ "$(uname -s)" = Darwin ]; then
+        gm_cmd_autostart "${val:-on}"
+        [ -n "$val" ] || gm_conf_set autostart
+        return
+      fi
+      gm_conf_set autostart "$val"
+      printf 'autostart is %s in guild.conf; launchd is macOS'"'"'s, so here Party Leaders come back whenever gm runs.\n' "${val:-on}"
+      return ;;
+    autostart-every)
+      gm_conf_set "$key" "$val"
+      if [ "$(uname -s)" = Darwin ] && [ "$(gm_conf_get autostart)" != off ] && command -v "$GM_HERDR" >/dev/null 2>&1; then
+        gm_autostart_install "$(gm_autostart_every)" >/dev/null || gm_die "config: recorded, but launchd would not take the new interval"
+      fi
+      printf 'autostart-every is %s: the launchd agent runs the muster every %s minutes.\n' "$shown" "$(gm_autostart_every)"
+      return ;;
+  esac
+  gm_conf_set "$key" "$val"
+  case $key in
+    collector | collector-port)
+      gm_collector_apply "$key"
+      return ;;
+    telemetry) printf 'telemetry is %s: Party Leaders started from now on %s; running ones keep what they started with.\n' "$shown" \
+      "$([ "${GM_TELEMETRY:-on}" = off ] && printf 'send no telemetry' || printf 'send telemetry to the collector')" ;;
+    repo-roots) printf 'repo-roots is %s: gm repos looks for clones %s.\n' "$shown" "$([ -n "$val" ] && printf 'there' || printf 'in the usual source folders')" ;;
+    *) printf '%s is %s; it takes effect at the next muster.\n' "$key" "$shown" ;;
+  esac
 }
 
 gm_cmd_doctor() {
@@ -2564,13 +2908,23 @@ gm_cmd_doctor() {
     [ "$1" != FAIL ] || fails=$((fails + 1))
   }
   local skipped=0 id level state detail
-  [ "$(gm_setup_get collector)" != skipped ] || skipped=1
+  [ "${GM_COLLECTOR:-}" != off ] || skipped=1
   gm_doc ok "register schema $(gm_sql 'PRAGMA user_version;') at $GM_DB"
-  if [ -n "$(gm_setup_get initialized)" ]; then
-    gm_doc ok "first-run setup done $(gm_setup_get initialized) ($GM_SETUP)"
+  if [ -n "$(gm_conf_get initialized)" ]; then
+    gm_doc ok "first-run setup done $(gm_conf_get initialized) ($GM_CONF)"
   else
     gm_doc warn "first-run setup not done: run gm init"
   fi
+  while IFS=$'\t' read -r id level state detail; do
+    case $state in ignored*) gm_doc warn "guild.conf: $id: ${state#ignored: }; using $level" ;; esac
+  done <<<"$(gm_conf_effective_all)"
+  case ${GM_COLLECTOR:-} in
+    on)
+      IFS=$'\t' read -r state detail <<<"$(gm_endpoint_state collector 2>/dev/null)"
+      if [ "$state" = alive ]; then gm_doc ok "collector: on, kept running by the muster in herdr tab collector"
+      else gm_doc warn "collector: on, but the collector gm keeps running is ${state:-not started} (${detail:-gm up starts it})"; fi ;;
+    *) gm_doc ok "collector: ${GM_COLLECTOR:-not decided}: gm keeps no collector running (gm config set collector on)" ;;
+  esac
   while IFS=$'\t' read -r id level state detail; do
     [ "$id" != collector ] || continue
     if [ "$state" = ok ]; then gm_doc ok "$detail"; else gm_doc FAIL "$detail: $(gm_init_meaning "$id")"; fi
@@ -3737,6 +4091,7 @@ GM_HERDR_RESAMPLE=${GM_HERDR_RESAMPLE:-10}
 GM_LAUNCH_GRACE=${GM_LAUNCH_GRACE:-60}
 GM_START_TRIES=${GM_START_TRIES:-3}
 GM_FRONT_DESK=guildmaster
+GM_COLLECTOR_TAB=collector
 GM_SHELLS="'sh','bash','zsh','fish','dash','ksh','tcsh','csh','nu','login'"
 
 gm_herdr_require() {
@@ -3847,8 +4202,14 @@ gm_front_desk_ensure() {
 # pane's shell), shell (only shells), other:<names>, or unreadable. Claude Code's process is named after its version
 # (2.1.288), so it is known by argv0, claude, or by GM_CLAUDE's name.
 gm_process_verdict() {
-  local out=$1 c row verdict pid names
+  local out=$1 c row verdict pid names want=claude
   c=$(basename "${GM_CLAUDE:-claude}")
+  # The collector's pane runs otelcol-contrib, or the binary GM_OTELCOL names.
+  if [ "${2:-}" = collector ]; then
+    want=otelcol-contrib
+    c=$(gm_otelcol)
+    c=$(basename "${c:-otelcol-contrib}")
+  fi
   row=$(sqlite3 -batch -separator "$(printf '\t')" :memory: "
 WITH j(j) AS (SELECT $(gm_q "$out")),
 p(name, argv0) AS (
@@ -3856,8 +4217,8 @@ p(name, argv0) AS (
   FROM j, json_each(CASE WHEN json_valid(j.j) THEN j.j ELSE '{}' END, '\$.result.process_info.foreground_processes'))
 SELECT CASE
   WHEN NOT json_valid(j) OR json_extract(j,'\$.result.type') IS NOT 'pane_process_info' THEN 'unreadable'
-  WHEN EXISTS (SELECT 1 FROM p WHERE name IN ('claude',$(gm_q "$c")) OR argv0 IN ('claude',$(gm_q "$c"))
-    OR argv0 LIKE '%/claude' OR argv0 LIKE '%/'||$(gm_q "$c")) THEN 'agent'
+  WHEN EXISTS (SELECT 1 FROM p WHERE name IN ($(gm_q "$want"),$(gm_q "$c")) OR argv0 IN ($(gm_q "$want"),$(gm_q "$c"))
+    OR argv0 LIKE '%/'||$(gm_q "$want") OR argv0 LIKE '%/'||$(gm_q "$c")) THEN 'agent'
   WHEN NOT EXISTS (SELECT 1 FROM p WHERE name NOT IN ($GM_SHELLS)) THEN 'shell'
   ELSE 'other' END,
   COALESCE(json_extract(j,'\$.result.process_info.shell_pid'),''),
@@ -3865,7 +4226,7 @@ SELECT CASE
 FROM j;" 2>/dev/null || true)
   IFS=$'\t' read -r verdict pid names <<<"$row"
   if [ "$verdict" = shell ] || [ "$verdict" = other ]; then
-    ! gm_pid_runs "$pid" claude && ! gm_pid_runs "$pid" "$c" || verdict=agent
+    ! gm_pid_runs "$pid" "$want" && ! gm_pid_runs "$pid" "$c" || verdict=agent
   fi
   case $verdict in
     other) printf 'other:%s' "$names" ;;
@@ -3892,9 +4253,9 @@ gm_pid_runs() {
 # A shell still starting runs helpers (printf, tail), so a pane running something else is looked at again
 # for a moment before that answer stands.
 gm_herdr_pane_process() {
-  local s=$1 pane=$2 i=1 verdict
+  local s=$1 pane=$2 key=${3:-} i=1 verdict
   while :; do
-    verdict=$(gm_process_verdict "$(gm_herdr "$s" pane process-info --pane "$pane")")
+    verdict=$(gm_process_verdict "$(gm_herdr "$s" pane process-info --pane "$pane")" "$key")
     case $verdict in other:*) ;; *) break ;; esac
     [ "$i" -lt "$GM_HERDR_RESAMPLE" ] || break
     i=$((i + 1))
@@ -3913,6 +4274,10 @@ gm_endpoint_state() {
     return
   fi
   IFS=$'\t' read -r s ws _ pane _ fresh <<<"$row"
+  if [ -z "$pane" ]; then
+    printf 'missing\tno pane recorded'
+    return
+  fi
   if ! gm_herdr_running "$s"; then
     printf 'unknown\therdr session %s is not running' "$s"
     return
@@ -3921,9 +4286,13 @@ gm_endpoint_state() {
     gone) printf 'missing\tpane %s is gone' "$pane"; return ;;
     unknown) printf 'unknown\therdr did not describe pane %s' "$pane"; return ;;
   esac
-  verdict=$(gm_herdr_pane_process "$s" "$pane")
+  verdict=$(gm_herdr_pane_process "$s" "$pane" "$key")
   case $verdict in
     agent)
+      if [ "$key" = collector ]; then
+        printf 'alive\trunning on 127.0.0.1:%s' "${GM_OTEL_PORT:-4318}"
+        return
+      fi
       status=$(gm_hj "$(gm_herdr "$s" agent get "$pane")" '$.result.agent.agent_status')
       printf 'alive\t%s' "${status:-running}" ;;
     shell | other:*)
@@ -3932,7 +4301,7 @@ gm_endpoint_state() {
       elif [ "$verdict" = shell ]; then
         printf 'dead\tthe pane holds only a shell'
       else
-        printf 'unknown\tthe pane runs %s, not a Party Leader' "${verdict#other:}"
+        printf 'unknown\tthe pane runs %s, not %s' "${verdict#other:}" "$([ "$key" = collector ] && printf 'the collector' || printf 'a Party Leader')"
       fi ;;
     *) printf 'unknown\therdr could not read what pane %s runs' "$pane" ;;
   esac
@@ -3942,17 +4311,25 @@ gm_endpoint_state() {
 # holds only a shell, otherwise in a new tab in the guild's workspace. The pane runs gm start, which starts claude in
 # the camp, or in the clone.
 gm_endpoint_launch() {
-  local key=$1 state=$2 cause=$3 name s ws tab pane out dir line v val fid vars
-  if [ "$key" = front-desk ]; then
-    name=$GM_FRONT_DESK
-    dir=$GM_ROOT
-    gm_front_desk_files
-    fid=NULL
-  else
-    name=${key#party-leader:}
-    dir=$(gm_focus_field "$name" camp)
-    fid="(SELECT id FROM focus WHERE name=$(gm_q "$name"))"
-  fi
+  local key=$1 state=$2 cause=$3 name s ws tab pane out dir line v val fid vars role focus=''
+  vars="GM_HALL GM_CLAUDE GM_TELEMETRY GM_OTEL_ENDPOINT GM_OTEL_PORT"
+  case $key in
+    front-desk)
+      name=$GM_FRONT_DESK
+      dir=$GM_ROOT
+      gm_front_desk_files
+      fid=NULL
+      vars=$GM_DESK_VARS ;;
+    collector)
+      name=$GM_COLLECTOR_TAB role=collector
+      dir=$GM_HALL
+      fid=NULL
+      vars="GM_HALL GM_OTELCOL GM_OTEL_PORT GM_COLLECTOR_CONFIG" ;;
+    *)
+      name=${key#party-leader:} role=party-leader focus=${key#party-leader:}
+      dir=$(gm_focus_field "$name" camp)
+      fid="(SELECT id FROM focus WHERE name=$(gm_q "$name"))" ;;
+  esac
   if [ "$state" = dead ]; then
     IFS=$'\t' read -r s ws tab pane _ _ <<<"$(gm_endpoint "$key")"
   elif [ "$key" = front-desk ]; then
@@ -3968,13 +4345,12 @@ gm_endpoint_launch() {
       printf 'herdr would not open a tab: %s' "${out:-no answer}"
       return 1
     fi
-    gm_endpoint_record "$key" party-leader "$name" "$s" "$ws" "$tab" "$pane" "$name"
+    gm_endpoint_record "$key" "$role" "$focus" "$s" "$ws" "$tab" "$pane" "$name"
   fi
   [ -n "$pane" ] || { printf 'no pane for %s' "$name"; return 1; }
   line="cd $(gm_shq "$dir") && env"
-  vars="GM_HALL GM_CLAUDE GM_TELEMETRY GM_OTEL_ENDPOINT GM_OTEL_PORT"
-  [ "$key" != front-desk ] || vars=$GM_DESK_VARS
   for v in $vars; do
+    gm_conf_carried "$v" || continue
     eval "val=\${$v:-}"
     [ -z "$val" ] || line="$line $v=$(gm_shq "$val")"
   done
@@ -4000,6 +4376,7 @@ gm_reconcile() {
   gm_herdr_server_ensure "$GM_HERDR_SESSION"
   gm_herdr_workspace >/dev/null
   gm_muster_one front-desk "$show"
+  gm_collector_muster "$show"
   for focus in $(gm_sql "SELECT name FROM focus WHERE closed_at IS NULL ORDER BY name;"); do
     gm_muster_one "party-leader:$focus" "$show"
   done
@@ -4053,6 +4430,146 @@ COMMIT;"
     *) line="$name: $st ($detail); left alone" ;;
   esac
   [ -z "$line" ] || printf '%s\n' "$line"
+}
+
+# ---- The tracing collector, kept running while guild.conf says collector: on ----
+# It lives in herdr like the Guildmaster and the Party Leaders: in a tab of its own, collector, in the guild's
+# workspace, so herdr keeps it through a closed terminal and the patron can look at what it says. The pane runs
+# gm start collector, which runs otelcol-contrib on 127.0.0.1 only, as gm collector always has. The muster, plain
+# code, starts it when it is dead or missing, never as a second copy: not while one answers on the port (the patron's
+# own gm collector, say), and only in the pane the register records. It is quiet: a check says nothing and writes
+# nothing, a start or a restart is one ledger row (collector.launched), and only a collector that failed to start
+# GM_START_TRIES times in a row says one line, held, once to each channel; it is tried again a day later. Off, nothing
+# runs and nothing is said.
+
+# The collector's endpoint row, made before its first start so failures before any pane exists are counted.
+gm_collector_row() {
+  gm_sql "BEGIN IMMEDIATE;
+INSERT OR IGNORE INTO endpoint(key, role, session, workspace_id, tab_id, pane_id, label, recorded_at)
+  VALUES ('collector', 'collector', '', '', '', '', $(gm_q "$GM_COLLECTOR_TAB"), $GM_NOW);
+COMMIT;"
+}
+
+# Why a start cannot happen now, or nothing: no collector installed, or the port taken by something that is not one.
+# Prints "answering" when a collector already answers on the port, so none is started beside it.
+gm_collector_blocker() {
+  local code port=${GM_OTEL_PORT:-4318}
+  code=$(gm_otlp_status "http://127.0.0.1:$port")
+  if [ "$code" = 200 ]; then
+    printf 'answering'
+  elif [ -z "$(gm_otelcol)" ]; then
+    printf 'no OpenTelemetry Collector is installed (gm init --yes installs it)'
+  elif [ -n "$code" ]; then
+    printf 'port %s on 127.0.0.1 is taken by something that is not a collector (HTTP %s)' "$port" "$code"
+  fi
+}
+
+# gm_collector_muster <show>: one muster's look at the collector; show as for gm_reconcile.
+gm_collector_muster() {
+  local show=$1 st detail attempts held told stale tell why line='' pane
+  if [ "${GM_COLLECTOR:-}" != on ]; then
+    [ -z "$(gm_endpoint collector)" ] || gm_collector_stop "collector is ${GM_COLLECTOR:-off}"
+    return 0
+  fi
+  gm_collector_row
+  IFS=$'\t' read -r attempts held told stale <<<"$(gm_sql "SELECT start_attempts, held_at IS NOT NULL, held_told,
+    COALESCE(held_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 day'), 0) FROM endpoint WHERE key='collector';")"
+  if [ "$held" = 1 ] && [ "$stale" = 1 ]; then
+    gm_sql "BEGIN IMMEDIATE; UPDATE endpoint SET start_attempts=0, held_at=NULL, held_told=0 WHERE key='collector'; COMMIT;"
+    attempts=0 held=0 told=0
+  fi
+  IFS=$'\t' read -r st detail <<<"$(gm_endpoint_state collector)"
+  case $st in
+    alive)
+      [ "$attempts" = 0 ] && [ "$held" = 0 ] ||
+        gm_sql "BEGIN IMMEDIATE; UPDATE endpoint SET start_attempts=0, held_at=NULL, held_told=0 WHERE key='collector'; COMMIT;"
+      [ "$show" != all ] || line="collector: already running ($detail), left as it is" ;;
+    dead | missing)
+      why=$(gm_collector_blocker)
+      if [ "$why" = answering ]; then
+        [ "$show" != all ] || line="collector: a collector already answers on 127.0.0.1:${GM_OTEL_PORT:-4318}, so gm starts no second one"
+      else
+        if [ "$held" = 0 ] && [ "$attempts" -ge "$GM_START_TRIES" ]; then
+          held=1 told=0
+          gm_sql "BEGIN IMMEDIATE;
+UPDATE endpoint SET held_at=$GM_NOW, held_told=0 WHERE key='collector';
+INSERT INTO event(at, actor, kind, detail) VALUES ($GM_NOW, 'gm', 'collector.held', $(gm_q "failed to start $attempts times in a row; ${why:-$st: $detail}"));
+COMMIT;"
+        fi
+        if [ "$held" = 1 ]; then
+          tell=2
+          [ "$show" != quiet ] || tell=1
+          if [ "$show" = all ] || [ "$told" -lt "$tell" ]; then
+            line="$GM_COLLECTOR_TAB: held: the tracing collector failed to start $attempts times in a row (${why:-$st: $detail}); gm tries again in a day, or now with gm config set collector on"
+            [ "$told" -ge "$tell" ] || gm_sql "BEGIN IMMEDIATE; UPDATE endpoint SET held_told=$tell WHERE key='collector'; COMMIT;"
+          fi
+        elif [ -n "$why" ]; then
+          gm_sql "BEGIN IMMEDIATE;
+UPDATE endpoint SET start_attempts=start_attempts+1 WHERE key='collector';
+INSERT INTO event(at, actor, kind, detail) VALUES ($GM_NOW, 'gm', 'collector.failed', $(gm_q "$why"));
+COMMIT;"
+          [ "$show" != all ] || line="collector: not started: $why"
+        else
+          gm_sql "BEGIN IMMEDIATE; UPDATE endpoint SET start_attempts=start_attempts+1 WHERE key='collector'; COMMIT;"
+          if pane=$(gm_endpoint_launch collector "$st" "$detail"); then
+            [ "$show" != all ] || line="collector: started in herdr pane $pane ($st: $detail)"
+          else
+            gm_sql "BEGIN IMMEDIATE; INSERT INTO event(at, actor, kind, detail) VALUES ($GM_NOW, 'gm', 'collector.failed', $(gm_q "$pane")); COMMIT;"
+            [ "$show" != all ] || line="collector: could not start it ($st: $detail): $pane"
+          fi
+        fi
+      fi ;;
+    *) [ "$show" != all ] || line="collector: $st ($detail); left alone" ;;
+  esac
+  [ -z "$line" ] || printf '%s\n' "$line"
+}
+
+# Stops the collector gm keeps: closes its pane when it runs the collector, holds only a shell, or is starting, and
+# forgets it. A pane running something else is only forgotten. One ledger row when there was a pane. Under the
+# herdr lock.
+gm_collector_stop() {
+  local why=$1 s pane st
+  IFS=$'\t' read -r s _ _ pane _ _ <<<"$(gm_endpoint collector)"
+  if [ -n "$pane" ]; then
+    IFS=$'\t' read -r st _ <<<"$(gm_endpoint_state collector)"
+    case $st in alive | starting | dead) gm_herdr "$s" pane close "$pane" >/dev/null ;; esac
+    gm_sql "BEGIN IMMEDIATE; INSERT INTO event(at, actor, kind, detail) VALUES ($GM_NOW, 'gm', 'collector.stopped', $(gm_q "$why; herdr session $s pane $pane, $st")); COMMIT;"
+  fi
+  gm_sql "BEGIN IMMEDIATE; DELETE FROM endpoint WHERE key='collector'; COMMIT;"
+}
+
+# After gm config set collector or collector-port: the collector started or stopped now, under the herdr lock, and
+# one line saying what holds. A new port restarts it; setting it on again clears a hold.
+gm_collector_apply() {
+  local key=$1 out='' port=${GM_OTEL_PORT:-4318}
+  gm_db_ensure
+  if ! command -v "$GM_HERDR" >/dev/null 2>&1; then
+    printf '%s is recorded in guild.conf; herdr is not installed, so nothing is started or stopped until it is.\n' "$key"
+    return 0
+  fi
+  gm_herdr_lock 30 || gm_die "config: recorded, but another gm is bringing the guild up; the next muster acts on it"
+  if [ "${GM_COLLECTOR:-}" != on ]; then
+    [ -z "$(gm_endpoint collector)" ] || gm_collector_stop "gm config set $key"
+    gm_herdr_unlock
+    if [ "$key" = collector-port ]; then
+      printf 'collector-port is %s: a collector gm starts listens there, and Party Leaders started from now on send to it.\n' "$port"
+    else
+      printf 'collector is %s: gm keeps no collector running, and says nothing about it.\n' "${GM_COLLECTOR:-off}"
+    fi
+    return 0
+  fi
+  if [ "$key" = collector-port ] && [ -n "$(gm_endpoint collector)" ]; then
+    gm_collector_stop "gm config set collector-port $port"
+  fi
+  gm_sql "BEGIN IMMEDIATE; UPDATE endpoint SET start_attempts=0, held_at=NULL, held_told=0 WHERE key='collector'; COMMIT;"
+  out=$( (gm_herdr_server_ensure "$GM_HERDR_SESSION" && gm_herdr_workspace >/dev/null && gm_collector_muster all) 2>&1) || true
+  gm_herdr_unlock
+  case $out in
+    *'already answers'*) printf 'collector is on: a collector already answers on 127.0.0.1:%s, so gm starts no second one; when it stops, gm keeps its own running in herdr tab %s.\n' "$port" "$GM_COLLECTOR_TAB" ;;
+    *'not started: '*) printf 'collector is on, but the collector could not start: %s\n' "${out#*not started: }" ;;
+    *'started in herdr pane'* | *'already running'*) printf 'collector is on: gm keeps the tracing collector running in herdr tab %s, on 127.0.0.1:%s; Party Leaders started from now on send to it.\n' "$GM_COLLECTOR_TAB" "$port" ;;
+    *) out=${out#collector: }; printf 'collector is on, but %s\n' "${out:-gm could not reach herdr; the next muster tries again}" ;;
+  esac
 }
 
 GM_HERDR_LOCKED=''
@@ -4135,7 +4652,7 @@ gm_init_muster() {
   local auto
   auto=$(gm_autostart_ensure)
   case $auto in
-    installed) gm_say "autostart is on: launchd brings the Guildmaster and the Party Leaders back at login and every 5 minutes (gm autostart off stops it)" ;;
+    installed) gm_say "autostart is on: launchd brings the Guildmaster and the Party Leaders back at login and every $(gm_autostart_every) minutes (gm autostart off stops it)" ;;
     failed:*) gm_say "autostart could not be turned on: ${auto#failed: }" ;;
   esac
 }
@@ -4201,6 +4718,24 @@ gm_cmd_roster() {
     fi
     [ "$last" = - ] || detail="${detail:+$detail · }last started $last"
     gm_roster_line "$GM_FRONT_DESK" "front desk" "$st" "$pane" "$detail"
+  fi
+  # The tracing collector, while guild.conf says collector: on, or while gm still records one.
+  row=$(gm_endpoint collector)
+  if [ -n "$row" ] || [ "${GM_COLLECTOR:-}" = on ]; then
+    IFS=$'\t' read -r _ _ _ pane _ _ <<<"$row"
+    if [ "$have" = 0 ]; then
+      st=unknown detail="herdr is not installed"
+    else
+      IFS=$'\t' read -r st detail <<<"$(gm_endpoint_state collector)"
+    fi
+    IFS=$'\t' read -r held attempts last <<<"$(gm_sql "SELECT COALESCE(held_at,'-'), start_attempts,
+      COALESCE((SELECT replace(substr(e.at,1,16),'T',' ') FROM event e WHERE e.kind='collector.launched' ORDER BY e.id DESC LIMIT 1),'-')
+      FROM endpoint WHERE key='collector';")"
+    if [ "${held:--}" != - ] && [ "$st" != alive ]; then
+      st=held detail="failed to start $attempts times in a row; gm tries again in a day"
+    fi
+    [ "${last:--}" = - ] || detail="${detail:+$detail · }last started $last"
+    gm_roster_line "$GM_COLLECTOR_TAB" "collector" "$st" "${pane:--}" "$detail"
   fi
   where="f.closed_at IS NULL"
   [ "$all" = 0 ] || where=1
@@ -4283,6 +4818,11 @@ gm_cmd_start() {
     gm_front_desk_start "$pane"
     return
   fi
+  if [ "$focus" = "$GM_COLLECTOR_TAB" ]; then
+    [ -n "$pane" ] && [ "$pane" = "$(gm_sql "SELECT pane_id FROM endpoint WHERE key='collector';")" ] ||
+      gm_die "start: gm start $GM_COLLECTOR_TAB runs only in the collector's own herdr pane; gm keeps it there while guild.conf says collector: on"
+    gm_collector_exec
+  fi
   [ -n "$(gm_focus_id "$focus")" ] || gm_die "no focus named '$focus'"
   [ -z "$(gm_focus_field "$focus" closed_at)" ] || gm_die "start: $focus is closed; gm open $focus reopens it"
   [ -n "$pane" ] && [ "$pane" = "$(gm_sql "SELECT pane_id FROM endpoint WHERE key=$(gm_q "party-leader:$focus");")" ] ||
@@ -4331,7 +4871,8 @@ gm_xml() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&g
 # find herdr or claude), at load, which is login, and every <seconds>; its output goes to the Guildhall.
 gm_autostart_plist() {
   local label=$1 every=$2 v val env=''
-  for v in GM_HALL PATH HOME GM_HERDR GM_HERDR_SESSION GM_HERDR_WORKSPACE GM_CLAUDE GM_TELEMETRY GM_OTEL_ENDPOINT GM_OTEL_PORT; do
+  for v in GM_HALL PATH HOME GM_HERDR GM_HERDR_SESSION GM_HERDR_WORKSPACE GM_CLAUDE GM_TELEMETRY GM_OTEL_ENDPOINT GM_OTEL_PORT GM_COLLECTOR GM_OTELCOL; do
+    gm_conf_carried "$v" || continue
     eval "val=\${$v:-}"
     # ~/.local/bin, where gm is linked and herdr's and Claude Code's installers put them, is always on the agent's PATH.
     if [ "$v" = PATH ]; then
@@ -4379,18 +4920,28 @@ gm_autostart_install() {
   "$GM_LAUNCHCTL" bootstrap "$domain" "$plist" >/dev/null 2>&1 || { printf 'launchctl would not load %s' "$plist"; return 1; }
 }
 
-# Autostart is always on unless the patron turned it off (setup.conf autostart: off). The agent is written and loaded
-# only when it is not loaded already, so a repeat changes nothing. Prints installed, on, off, unsupported, or
-# failed: <why>.
+# The minutes between the agent's musters: guild.conf's autostart-every, or 5.
+gm_autostart_every() {
+  local v
+  v=$(gm_conf_get autostart-every)
+  if [ -n "$v" ] && gm_conf_norm minutes "$v"; then printf '%s' "$GM_CONF_VAL"; else printf '5'; fi
+}
+
+# Autostart is always on unless the patron turned it off (guild.conf autostart: off). The agent is written and loaded
+# only when it is not loaded already, or runs at another interval than autostart-every, so a repeat changes nothing.
+# Prints installed, on, off, unsupported, or failed: <why>.
 gm_autostart_ensure() {
-  local label out
+  local label out every plist
   [ "$(uname -s)" = Darwin ] || { printf 'unsupported'; return 0; }
-  [ "$(gm_setup_get autostart)" != off ] || { printf 'off'; return 0; }
+  [ "$(gm_conf_get autostart)" != off ] || { printf 'off'; return 0; }
   command -v "$GM_HERDR" >/dev/null 2>&1 || { printf 'failed: herdr is not installed'; return 0; }
   label=$(gm_autostart_label)
-  if [ -f "$GM_LAUNCH_AGENTS/$label.plist" ] && "$GM_LAUNCHCTL" print "gui/$(id -u)/$label" >/dev/null 2>&1; then
+  plist=$GM_LAUNCH_AGENTS/$label.plist
+  every=$(gm_autostart_every)
+  if [ -f "$plist" ] && tr -d ' \n\t' <"$plist" | grep -q "<key>StartInterval</key><integer>$((every * 60))</integer>" &&
+    "$GM_LAUNCHCTL" print "gui/$(id -u)/$label" >/dev/null 2>&1; then
     printf 'on'
-  elif out=$(gm_autostart_install 5 2>&1); then
+  elif out=$(gm_autostart_install "$every" 2>&1); then
     printf 'installed'
   else
     printf 'failed: %s' "$out"
@@ -4398,7 +4949,7 @@ gm_autostart_ensure() {
 }
 
 gm_cmd_autostart() {
-  local action=${1:-status} every=5 label plist domain err
+  local action=${1:-status} every='' label plist domain err
   [ $# -eq 0 ] || shift
   while [ $# -gt 0 ]; do
     case $1 in
@@ -4406,7 +4957,7 @@ gm_cmd_autostart() {
       *) gm_die "autostart: gm autostart [on [--every MINUTES] | off | status]" ;;
     esac
   done
-  gm_is_int "$every" && [ "$every" -ge 1 ] || gm_die "autostart: --every takes whole minutes, 1 or more"
+  [ -z "$every" ] || { gm_is_int "$every" && [ "$every" -ge 1 ]; } || gm_die "autostart: --every takes whole minutes, 1 or more"
   [ "$(uname -s)" = Darwin ] || gm_die "autostart: gm installs a launchd agent, which is macOS's; elsewhere run gm up --quiet from a timer (vision/herdr-design.md)"
   label=$(gm_autostart_label)
   plist=$GM_LAUNCH_AGENTS/$label.plist
@@ -4414,13 +4965,15 @@ gm_cmd_autostart() {
   case $action in
     on)
       gm_herdr_require autostart
+      [ -z "$every" ] || gm_conf_set autostart-every "$every"
+      every=$(gm_autostart_every)
       err=$(gm_autostart_install "$every") || gm_die "autostart: $err"
-      gm_setup_set autostart on
+      gm_conf_set autostart on
       printf 'autostart is on: launchd runs gm up --quiet at login and every %s minutes (%s, log %s)\n' "$every" "$plist" "$GM_HALL/autostart.log" ;;
     off)
       "$GM_LAUNCHCTL" bootout "$domain/$label" >/dev/null 2>&1 || true
       rm -f "$plist"
-      gm_setup_set autostart off
+      gm_conf_set autostart off
       printf 'autostart is off, and stays off: the Guildmaster no longer turns it on. Party Leaders come back when you run gm, or with gm up; gm autostart on turns it back on\n' ;;
     status)
       if [ -f "$plist" ] && "$GM_LAUNCHCTL" print "$domain/$label" >/dev/null 2>&1; then
@@ -4455,7 +5008,7 @@ gm_cmd_install() {
   [ -n "$p" ] || gm_die "install: the installer finished, but herdr is neither on the PATH nor in ~/.local/bin"
   GM_HERDR=$p
   gm_db_ensure
-  [ -n "$(gm_required_problems)" ] || [ -n "$(gm_setup_get initialized)" ] || gm_setup_set initialized "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  [ -n "$(gm_required_problems)" ] || [ -n "$(gm_conf_get initialized)" ] || gm_conf_set initialized "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   gm_front_desk_files
   # The Guildmaster lives in herdr: start it there now, with every Party Leader.
   (gm_telemetry_refuse && gm_herdr_lock 30 && gm_reconcile changes) >&2 || true
@@ -4515,7 +5068,7 @@ gm_attach_ok() {
 }
 
 # Repositories the Guildmaster can open a focus on: those gm already knows from its focuses, then git clones under
-# the usual source folders (or setup.conf's repo-roots:, space-separated) whose folder name contains the word. One
+# the usual source folders (or guild.conf's repo-roots:, space-separated) whose folder name contains the word. One
 # path a line, known ones first; the Guildmaster asks the patron when it is not exactly one.
 gm_cmd_repos() {
   local word=${1:-} roots r known
@@ -4525,7 +5078,7 @@ gm_cmd_repos() {
   if [ -s "$GM_DB" ]; then
     known=$(gm_sql "SELECT DISTINCT repo FROM focus ORDER BY repo;")
   fi
-  roots=$(gm_setup_get repo-roots)
+  roots=$(gm_conf_get repo-roots)
   [ -n "$roots" ] || roots="$HOME/IdeaProjects $HOME/src $HOME/work $HOME/code $HOME/projects $HOME/dev $HOME/git $HOME/repos $HOME/Developer $HOME/workspace"
   {
     printf '%s\n' "$known"
@@ -4543,6 +5096,11 @@ gm_cmd_repos() {
 command -v sqlite3 >/dev/null 2>&1 || gm_die "gm needs the sqlite3 command"
 cmd=${1:-front-desk}
 [ $# -eq 0 ] || shift
+# Settings left in setup.conf move to guild.conf here; never from a hook or the status line, which only read them.
+case $cmd in
+  hook | statusline | help | -h | --help) ;;
+  *) gm_conf_migrate ;;
+esac
 case $cmd in
   open | post | resolve | list | ls | show | notice | park | phase | where | trace | stats | collector) gm_init_auto ;;
 esac
@@ -4560,7 +5118,7 @@ if [ -s "$GM_DB" ]; then
   esac
 fi
 case $cmd in
-  front-desk | open | up | close | start | autostart | install | hook | statusline | collector | repos | help | -h | --help) ;;
+  front-desk | open | up | close | start | autostart | install | hook | statusline | collector | config | repos | help | -h | --help) ;;
   *) gm_auto_reconcile ;;
 esac
 case $cmd in
@@ -4586,6 +5144,7 @@ case $cmd in
   stats) gm_cmd_stats "$@" ;;
   hook) gm_cmd_hook "$@" ;;
   collector) gm_cmd_collector "$@" ;;
+  config) gm_cmd_config "$@" ;;
   init) gm_cmd_init "$@" ;;
   doctor) gm_cmd_doctor "$@" ;;
   help | -h | --help) gm_usage ;;

@@ -105,10 +105,10 @@ At the front desk, the hook runs `bash "$CLAUDE_PROJECT_DIR/bin/gm" hook front-d
 
 1. **`gm` on the `PATH`.** A symlink `~/.local/bin/gm` to this clone's `bin/gm`, the folder made when it is missing, never with `sudo`. Anything already called `gm` there, a file or a link to anything else, even a broken one, is left as it is, and the Guildmaster runs `bin/gm` instead. `~/.local/bin` is where Claude Code's own and herdr's installers put them, so it is usually on the `PATH` already; when it is not, the Guildmaster knows, and mentions it only if asked. No shell startup file is edited.
 2. **herdr.** If herdr is missing (on the `PATH` or in `~/.local/bin`) and everything else is there, the session is asked to offer it once, in one line: "I need herdr, where the Guildmaster and the Party Leaders live. Shall I install it now with Homebrew (brew install herdr)?", or with herdr's official installer (`curl -fsSL https://herdr.dev/install.sh | sh`) when there is no Homebrew. Only on the patron's yes does it run `gm install herdr`, which installs it the same way, never with `sudo`, finishes the setup and starts the Guildmaster in herdr, and ends with the one line saying where. Nothing else runs until then. Any other required piece missing is told plainly.
-3. **The first-run check**, without questions, recorded in `setup.conf`, and the charter copied into the Guildhall.
+3. **The first-run check**, without questions, recorded in `guild.conf` (`setup.conf` before [the configuration file](#the-configuration-file-and-the-collector-kept-running)), and the charter copied into the Guildhall.
 4. **Autostart, always on**, unless the patron turned it off. The launchd agent's `PATH` always has `~/.local/bin`, so it finds herdr and Claude Code there even when launchd's own does not.
-5. **The Guildmaster, and the muster.** Under the Guildhall's `herdr.lock`: whether this session is the Guildmaster (above), then `gm up`, which starts herdr's server if none runs, makes the `guild` workspace if there is none, and starts the Guildmaster and every Party Leader that is dead or missing.
-6. **What the session is told**, never shown on the patron's screen. The Guildmaster gets its charter, the patron's own copy at `~/.guildmaster/front-desk/CLAUDE.md`, the setup, what was done (the link, any restart, marked routine), anything to tell the patron once, the collector offer when due, and the roster. Any other session gets only the one line to answer with, and anything gm could not do.
+5. **The Guildmaster, and the muster.** Under the Guildhall's `herdr.lock`: whether this session is the Guildmaster (above), then `gm up`, which starts herdr's server if none runs, makes the `guild` workspace if there is none, and starts the Guildmaster, every Party Leader and, with `collector: on`, the tracing collector, whichever is dead or missing.
+6. **What the session is told**, never shown on the patron's screen. The Guildmaster gets its charter, the patron's own copy at `~/.guildmaster/front-desk/CLAUDE.md`, the setup (with the collector's state, and that it changes a setting with `gm config set`), what was done (the link, any restart, marked routine), anything to tell the patron once, the collector offer when due, and the roster. Any other session gets only the one line to answer with, and anything gm could not do.
 
 A second, third or tenth start links, starts and loads nothing again, and prints nothing but its JSON.
 If `gm` itself fails, the hook still prints JSON, telling the session in one line that the start-up did not finish and why; if `gm` cannot be found, the command prints nothing and exits 0. The session always starts.
@@ -146,13 +146,34 @@ Every muster (`gm`, `gm up`, `gm open`, the launchd agent, the muster before ter
 A dead one is started again in its own pane. After 3 starts in a row never seen alive it is held, told once, until the patron runs `gm`.
 Schema 4 adds `start_attempts`, `held_at` and `held_told` to the `endpoint` table for this; an older register is migrated in place, adding only.
 The ledger gets `front-desk.launched` and `front-desk.held`, and `gm roster` shows the front desk's state and when it last started.
-A `front-desk: clone` line that [PR 24](https://github.com/MadReza/guildmaster/pull/24) wrote into `setup.conf`, when the patron's own session could be the front desk, is ignored: the Guildmaster is kept in herdr all the same.
+A `front-desk: clone` line that [PR 24](https://github.com/MadReza/guildmaster/pull/24) wrote into `setup.conf` (moved into `guild.conf` with the rest since), when the patron's own session could be the front desk, is ignored: the Guildmaster is kept in herdr all the same.
 
 ### The optional piece: offered in chat, once
 
-While the tracing collector is neither installed nor skipped, the summary asks the Guildmaster to offer it once, in one line, after its first answer, at most once a day (`collector-offered` in `setup.conf`).
-The patron answers in plain words, and the Guildmaster records the answer through `gm`: `gm init --yes` installs it (the checksum-checked install of the first-run check), `gm init --no` skips it, and never again, and `gm init --later` defers it to another day.
+While the tracing collector is neither installed nor skipped, the summary asks the Guildmaster to offer it once, in one line, after its first answer, at most once a day (`collector-offered` in `guild.conf`).
+The patron answers in plain words, and the Guildmaster records the answer through `gm`: `gm init --yes` installs it (the checksum-checked install of the first-run check) and sets `collector: on`, so the muster keeps it running from then on; `gm init --no` skips it (`collector: off`), and never again; and `gm init --later` defers it to another day (`collector: later`).
 Nothing is decided for the patron: an unanswered offer records nothing but its date.
+
+## The configuration file, and the collector kept running
+
+The patron, on 2026-10-04, as relayed: "Let's make it that there is a file with configurations. If the collector is turned on than guildmaster will take care of keeping the collector running or ensuring it is running."
+
+- **One file.** `guild.conf` in the Guildhall holds every setting, documented at its top: the collector on or off and its port, telemetry, autostart and its interval (`autostart-every`), the muster before terminal commands, attaching herdr, the herdr session and workspace, the launch grace, the start tries and `repo-roots`. The `GM_` variable beside a setting still overrides it. README.md's Configuration section lists them.
+- **`setup.conf` moved in place.** The first `gm` command that needs the file (never a hook or the status line, which only read it) writes its lines below the documentation in `guild.conf`, with the collector's `installed` and `skipped` as `on` and `off`, and keeps the old file as `setup.conf.old`. Until then gm reads `setup.conf`, so nothing changes for a Guildhall in between.
+- **The Guildmaster changes a setting by asking gm.** The charter, and the summary at every start (since a patron's charter is never overwritten), tell it to run `gm config set <key> <value>` when the patron asks in plain words, never to edit the file; its file-editing tools are switched off anyway. `gm config set` acts at once where it can: autostart is turned on or off or reloaded at its new interval, and the collector is started or stopped.
+- **What gm hands on.** A setting gm took from the file is not written into a pane's launch line or the launchd agent's property list, as a variable from gm's own environment always has been: the gm they start reads `guild.conf` itself, so a setting changed later reaches them.
+- **The collector.** With `collector: on`, every muster (the launchd agent, `gm`, `gm up`, the muster before terminal commands, every front desk start) also keeps the tracing collector running in a herdr tab of its own, `collector`, quietly, and never as a second copy; [tracing-design.md](tracing-design.md#kept-running-since-2026-10-04) has how, and why a herdr tab rather than a background process. The Guildmaster is told whether it runs, and passes on only the one line gm gives when it will not stay up.
+
+### The collector kept running, checked by hand
+
+On 2026-10-04, against real herdr in an isolated lab session (Firstmate's `fm-herdr-lab.sh`; gm's herdr a wrapper handing every call to it; never the default session), with a temporary `HOME` for gm, the launchctl stub, a throwaway Guildhall whose `setup.conf` said `collector: installed`, panes running zsh without the operator's startup files, a 5-second launch grace, a stand-in for `claude` that stays alive under that name, and, since `otelcol-contrib` is not installed on that machine, a stand-in for it: a loop of `nc` listeners on `127.0.0.1` answering every export with 200, running under the name `otelcol-contrib`:
+
+1. `gm`, with no terminal, in 4 seconds: `setup.conf` moved to `guild.conf` (`collector: on`, `setup.conf.old` kept), the Guildmaster started in `w1:p1` and the collector in its own tab, `w1:p2`; the roster showed both alive, and `gm doctor` that a collector answers on the port. herdr showed the collector's pane running `otelcol-contrib`, with the `nc` it ran.
+2. `gm up --quiet` printed nothing and wrote nothing; the ledger held one `collector.launched` row.
+3. `gm collector` by hand refused: a collector already answers, so gm starts no second one.
+4. With the stand-in killed, the roster showed the collector dead; `gm up --quiet` printed nothing and started it again in the same pane, `w1:p2`, alive; the ledger held a second `collector.launched` row.
+5. `gm config set collector off` said so in one line and closed the collector's pane (herdr: `pane_not_found`), no collector process was left, the ledger held one `collector.stopped` row, the roster no longer listed it, and `gm up` said nothing about it.
+6. The lab was torn down, and the helper confirmed the default session was unchanged.
 
 ## Opening a Party Leader from the front desk
 
@@ -160,7 +181,7 @@ The patron asks in plain words: "start a focus for CRM-1234 in the appointments 
 The charter has the Guildmaster:
 
 1. take the ticket key from the words;
-2. run `gm repos appointments`, which lists the repositories `gm` knows from its focuses, then git clones whose folder name contains the word under the usual source folders (`~/IdeaProjects`, `~/src`, `~/work`, `~/code`, `~/projects`, `~/dev`, `~/git`, `~/repos`, `~/Developer`, `~/workspace`, four levels deep, or the folders in `setup.conf`'s `repo-roots:`); exactly one is used, and otherwise it asks one short question naming at most three;
+2. run `gm repos appointments`, which lists the repositories `gm` knows from its focuses, then git clones whose folder name contains the word under the usual source folders (`~/IdeaProjects`, `~/src`, `~/work`, `~/code`, `~/projects`, `~/dev`, `~/git`, `~/repos`, `~/Developer`, `~/workspace`, four levels deep, or the folders in `guild.conf`'s `repo-roots:`); exactly one is used, and otherwise it asks one short question naming at most three;
 3. run `gm open --repo <path> --ticket CRM-1234`; with a ticket and no name, the focus is named after the ticket, `crm-1234`;
 4. tell the patron in one line which tab the Party Leader is in, from the line `gm open` now ends with: `crm-1234's Party Leader is in herdr tab crm-1234 (workspace guild, pane w1:p2); see it with: herdr`.
 
@@ -245,6 +266,7 @@ A first run of this check, with panes running the operator's own zsh, found the 
 ## Not in this change
 
 - Telemetry for the Guildmaster's own session; it runs without the collector's environment.
+- A real `otelcol-contrib` in the lab check of the collector kept running: a stand-in answered for it (above). The suite runs the real one, through `gm collector`, only where it is installed.
 - Trusting folders ahead of time: Claude Code asks once for the front desk's folder and once for each new camp, and `gm` does not edit Claude Code's own configuration to skip that.
 - Editing a shell startup file to put `~/.local/bin` on the `PATH`, or adding an alias: the README says how, for those who want it.
 - `gm tell` and any talking to a Party Leader (Q22), phase-change digests, and `gm history`: the rest of step 4.

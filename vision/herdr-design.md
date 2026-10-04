@@ -68,6 +68,7 @@ Any other `gm` command run in a terminal says once, on stderr, that no Party Lea
 herdr session  (GM_HERDR_SESSION, default "default": the one plain `herdr` attaches to)
 └─ workspace "guild"  (GM_HERDR_WORKSPACE)
    ├─ tab "guildmaster"   the front desk: the Guildmaster, claude --name guildmaster, in the Guildhall's front-desk folder
+   ├─ tab "collector"     the tracing collector, otelcol-contrib on 127.0.0.1, while guild.conf says collector: on
    ├─ tab "appt-v2"       Party Leader appt-v2: claude --name appt-v2, in its camp
    │   └─ (step 3) Adventurer and Scout panes, split below their Party Leader
    └─ tab "saved-views"   Party Leader saved-views
@@ -83,14 +84,14 @@ Schema 3 adds the `endpoint` table and four columns on `focus`. A schema 1 or 2 
 
 | Column | |
 | --- | --- |
-| `endpoint.key` | `front-desk`, `party-leader:<focus>`; later `adventurer:<focus>#<n>` |
+| `endpoint.key` | `front-desk`, `party-leader:<focus>`, `collector` (the tracing collector, kept running while `guild.conf` says `collector: on`; see [tracing-design.md](tracing-design.md#kept-running-since-2026-10-04)); later `adventurer:<focus>#<n>` |
 | `endpoint.role`, `focus_id` | what lives there, and for which focus |
 | `endpoint.session`, `workspace_id`, `tab_id`, `pane_id`, `label` | where, as herdr names it (`w1`, `w1:t2`, `w1:p2`) |
 | `endpoint.launched_ms` | when gm last typed the launch line into the pane |
 | `focus.closed_at` | a retired focus (`gm close`); `gm open` reopens it |
 | `focus.start_attempts`, `held_at`, `held_told` | starts since the Party Leader was last seen alive; the hold, and who has been told |
 
-Events go to the ledger: `party-leader.launched` (with the state and cause), `party-leader.held`, `focus.closed` and `focus.reopened`.
+Events go to the ledger: `party-leader.launched` (with the state and cause), `party-leader.held`, `focus.closed` and `focus.reopened`; for the collector, `collector.launched`, `collector.failed`, `collector.held` and `collector.stopped`.
 
 A recorded workspace is reused only while herdr still gives that id the guild's label.
 A recorded pane belongs to its Party Leader only while herdr still puts it in the recorded workspace.

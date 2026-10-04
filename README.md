@@ -113,6 +113,49 @@ gm install herdr    # with Homebrew when it is there, otherwise herdr's official
 
 This is what runs when you say yes to the offer. It then finishes the setup and starts the Guildmaster in herdr. By hand, herdr's official install is `curl -fsSL https://herdr.dev/install.sh | sh`, or `brew install herdr` (<https://herdr.dev/docs/install/>).
 
+### Configuration
+
+The guild's settings are in one plain file, `guild.conf` in the Guildhall (`~/.guildmaster/guild.conf`), which documents each setting at its top.
+Ask the Guildmaster in plain words ("keep the tracing collector running", "check every 10 minutes") and it runs `gm config set` for you; by hand:
+
+```sh
+gm config                          # every setting, its value, and where it came from
+gm config set collector on         # keep the tracing collector running
+gm config set autostart-every 10   # the launchd agent's muster every 10 minutes
+gm config unset collector-port     # back to the default
+```
+
+```
+Settings, from /Users/you/.guildmaster/guild.conf (gm config set <key> <value> changes one):
+  collector               on        guild.conf
+  collector-port          4318      default
+  telemetry               on        default
+  autostart               on        default
+  autostart-every         10        guild.conf
+  herdr-session           default   default
+  ...
+```
+
+| Setting | Values | Default | Overridden by |
+| --- | --- | --- | --- |
+| `collector` | `on`, `off`, `later` (not decided) | off | `GM_COLLECTOR` |
+| `collector-port` | a port on 127.0.0.1 | 4318 | `GM_OTEL_PORT` |
+| `telemetry` | `on`, `off` | on | `GM_TELEMETRY` |
+| `autostart` | `on`, `off` | on | |
+| `autostart-every` | minutes | 5 | |
+| `muster-before-commands` | `on`, `off` | on | `GM_HERDR_AUTO` |
+| `attach` | `on`, `off` (`gm` alone attaches herdr) | on | `GM_ATTACH` |
+| `herdr-session`, `herdr-workspace` | names | `default`, `guild` | `GM_HERDR_SESSION`, `GM_HERDR_WORKSPACE` |
+| `launch-grace` | seconds a fresh start may hold only a shell | 60 | `GM_LAUNCH_GRACE` |
+| `start-tries` | starts in a row before something is held | 3 | `GM_START_TRIES` |
+| `repo-roots` | folders where `gm repos` looks | the usual source folders | |
+
+An environment variable overrides its setting for the command it is set on, and `gm config` says so; a value gm cannot take is ignored, and `gm config` and `gm doctor` say that too.
+`gm config set` acts at once where it can: autostart is turned on or off, or reloaded at its new interval, and the collector is started or stopped.
+The rest takes effect at the next muster, or the next session gm starts.
+The file also keeps what gm recorded: the first run (`initialized`), and where `gm init` put the collector.
+A Guildhall from before this file had `setup.conf`; the first `gm` command moves its lines into `guild.conf` (the collector's `installed` and `skipped` become `on` and `off`) and keeps the old file as `setup.conf.old`.
+
 ### The front desk from any terminal: `gm`
 
 Instead of `claude` in the clone, in any terminal:
@@ -162,7 +205,7 @@ This records the focus `appt-v2` with ticket `CRM-8965`, makes its camp, and sta
 With `--ticket`, the name may be left out: `gm open --repo ~/work/appointments --ticket CRM-8965` names the focus `crm-8965`.
 `--branch` names another branch; `gm open` on an existing focus leaves a running Party Leader as it is, and reopens a closed one.
 It ends with one line saying which tab the Party Leader is in.
-`gm repos appointments` lists the clones the Guildmaster would consider; a `repo-roots:` line in `setup.conf` (folders separated by spaces) replaces the usual source folders it searches.
+`gm repos appointments` lists the clones the Guildmaster would consider; the `repo-roots` setting (folders separated by spaces, see Configuration) replaces the usual source folders it searches.
 
 #### The tabs, and keeping them running
 
@@ -181,10 +224,11 @@ saved-views              party leader  dead     w1:p3    the pane holds only a s
 ```
 
 States are `alive`, `starting` (just launched), `dead` (its pane holds only a shell), `missing` (no pane), `held` and `unknown`.
+With the `collector` setting on, the roster also lists the tracing collector, in its own `collector` tab.
 The muster also runs before any other `gm` command you type in a terminal, quietly.
 A held Party Leader starts again with `gm open <focus>`, a held Guildmaster with `gm`.
 The design, and how it follows and differs from Firstmate, is [vision/herdr-design.md](vision/herdr-design.md).
-`GM_HERDR_SESSION` and `GM_HERDR_WORKSPACE` choose another herdr session and workspace; `GM_HERDR_AUTO=off` stops the muster before other commands; `GM_ATTACH=off` keeps `gm` from attaching herdr.
+The `herdr-session` and `herdr-workspace` settings (or `GM_HERDR_SESSION` and `GM_HERDR_WORKSPACE`) choose another herdr session and workspace; `muster-before-commands: off` (`GM_HERDR_AUTO=off`) stops the muster before other commands; `attach: off` (`GM_ATTACH=off`) keeps `gm` from attaching herdr.
 
 #### Autostart
 
@@ -196,11 +240,11 @@ gm autostart off    # stop it; it stays off until you turn it back on
 gm autostart on     # turn it back on (--every MINUTES changes the interval)
 ```
 
-`gm autostart off` is recorded in `setup.conf` (`autostart: off`), so the Guildmaster leaves it off. On Linux there is no launchd; Party Leaders come back whenever `gm` runs.
+`gm autostart off` is recorded in `guild.conf` (`autostart: off`), so the Guildmaster leaves it off, and `--every` as `autostart-every`; `gm config set autostart off` and `gm config set autostart-every 10` do the same. On Linux there is no launchd; Party Leaders come back whenever `gm` runs.
 
 #### First run by hand
 
-The Guildmaster runs the first-run check at every start, without questions, and records it in `setup.conf` in the Guildhall.
+The Guildmaster runs the first-run check at every start, without questions, and records it in `guild.conf` in the Guildhall.
 The same check runs in a terminal the first time a `gm` command that needs the Guildhall (`open`, `post`, `list`, `trace`, and the rest) runs there before the Guildmaster ever has, and says what is there and what is not:
 
 ```
@@ -223,7 +267,7 @@ otelcol-contrib (the OpenTelemetry Collector, tracing slice 2, v0.162.0) is not 
 
 - **Required** pieces (bash, sqlite3 3.38+ with its JSON functions, git, Claude Code, herdr, `sed` and the other standard tools) are never asked about: if one is missing, `gm` stops with what to install and nothing is recorded.
 - **Optional** pieces (today, the collector) are asked about. *Install* downloads the pinned release for your OS and CPU from the official GitHub releases, checks its SHA-256 against the published checksum, and puts `otelcol-contrib` in `~/.local/bin` (or the directory you type, or `--bin-dir`), never with `sudo`; it reports each step, and on any failure, including a checksum that does not match, removes everything it fetched and installs nothing. *Skip* means you are fine without it. *Later* asks again at the next `gm init`, and the Guildmaster offers it again another day.
-- Your answer is recorded in `setup.conf` in the Guildhall, a plain `key: value` file you can read and edit (`collector: installed | skipped | later`, where `gm` put the collector, when the Guildmaster last offered it, and `autostart: on | off` once you set it). Later commands respect it and never nag; `gm doctor` keeps reporting the state, and `gm init` (with `--again` to revisit a skip) changes it.
+- Your answer is recorded in `guild.conf` in the Guildhall (see Configuration) as the `collector` setting: *install* sets `collector: on`, so gm keeps it running from then on; *skip* sets `off`; *later* sets `later`. Beside it are where `gm` put the collector and when the Guildmaster last offered it. Later commands respect it and never nag; `gm doctor` keeps reporting the state, and `gm init` (with `--again` to revisit a skip) or `gm config set collector` changes it.
 - It never asks without a terminal, and never in a hook or the status line, so nothing blocks. The Guildmaster records your answer with `gm init --yes` (install what is missing), `gm init --no` (go without) or `gm init --later`, and `--bin-dir DIR` chooses where; without an answer, `gm init` only reports.
 
 ### Tracing: slice 1
@@ -289,13 +333,20 @@ It was built and tested with 0.162.0. No binary is kept in this repository.
 
 #### Run it
 
+With the `collector` setting on (your yes to the install sets it, or `gm config set collector on`), the guild keeps it running: the muster (`gm up`, run by the launchd agent at login and every few minutes, before your terminal commands, and at every start of the Guildmaster) starts it in a herdr tab of its own, `collector`, in the `guild` workspace, and starts it again if it stops.
+It never starts a second copy: not while a collector already answers on the port, and only in the pane the register records for it.
+It is quiet: checks say nothing, and a start or restart is one row in the ledger (`collector.launched`). A collector that fails to start 3 times in a row is held, and you hear it once, in one line (from the Guildmaster, or the next command you type); gm tries again a day later, or at once with `gm config set collector on`.
+With the setting off, nothing runs and nothing is said; turning it off stops the one gm started.
+
+By hand instead:
+
 ```sh
-gm collector     # in a terminal tab of its own; Ctrl-C stops it
+gm collector     # in a terminal tab of its own; Ctrl-C stops it (it refuses while one already answers)
 gm doctor        # checks the endpoint is loopback, the configuration sends nothing out, and the collector answers
 gm open appt-v2  # the Party Leader now exports telemetry to it
 ```
 
-`gm collector` runs `templates/otelcol.yaml` in the foreground: it listens on `127.0.0.1:4318` only (`GM_OTEL_PORT` moves it), deletes `user.email`, `user.id`, `user.account_uuid`, `user.account_id` and `organization.id` from everything, masks the same secret patterns as `gm`'s own redaction in prompts, responses and commands, and writes `traces.jsonl`, `logs.jsonl` and `metrics.jsonl` under `~/.guildmaster/telemetry/`, rotated at 20 MB and kept 14 days.
+`gm collector`, and the collector's tab, run `templates/otelcol.yaml` in the foreground: it listens on `127.0.0.1:4318` only (the `collector-port` setting or `GM_OTEL_PORT` moves it), deletes `user.email`, `user.id`, `user.account_uuid`, `user.account_id` and `organization.id` from everything, masks the same secret patterns as `gm`'s own redaction in prompts, responses and commands, and writes `traces.jsonl`, `logs.jsonl` and `metrics.jsonl` under `~/.guildmaster/telemetry/`, rotated at 20 MB and kept 14 days.
 It has no exporter except those files, and serves no telemetry of its own.
 
 `gm open` sets, on the `claude` process it starts and nowhere else, `CLAUDE_CODE_ENABLE_TELEMETRY`, the OTLP exporter pointed at `http://127.0.0.1:4318` (every signal's own endpoint too, and any inherited headers cleared), `OTEL_RESOURCE_ATTRIBUTES=guild.focus=<focus>,guild.role=party-leader`, and `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_ASSISTANT_RESPONSES` and `OTEL_LOG_TOOL_DETAILS`, so prompts and responses are captured to find which prompt works best.

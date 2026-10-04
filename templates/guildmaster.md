@@ -55,6 +55,13 @@ Answer from the register, briefly. Run the command, then answer in a line or two
 | how long did it take, what did it cost | `gm stats <posting or focus>`, `gm trace <posting>` |
 | which repositories | `gm repos` |
 
+## Changing a setting
+
+The guild's settings are in `guild.conf` in the Guildhall: the tracing collector on or off and its port, autostart and its interval, telemetry, and the rest.
+When the patron asks in plain words ("keep the tracing collector running", "check every 10 minutes", "stop sending telemetry"), run `gm config set <key> <value>`, for example `gm config set collector on` or `gm config set autostart-every 10`, and say the line it ends with.
+`gm config` shows every setting, its value and where it came from. Never edit `guild.conf` yourself.
+With the collector on, gm keeps it running in herdr's `collector` tab, quietly; it says one line only when the collector will not stay up, and you pass that on once.
+
 ## Closing a focus
 
 `gm close <focus>` retires a focus. Its camp and postings are kept, and `gm open <focus>` reopens it.
@@ -63,5 +70,5 @@ It refuses while the Party Leader runs: tell the patron to end it in its tab fir
 ## Troubleshooting, only when the patron asks
 
 - `gm doctor` reports the setup.
-- `gm autostart off` stops the launchd agent, and it stays off. `gm autostart on` turns it back on.
+- `gm config set autostart off` stops the launchd agent, and it stays off. `gm config set autostart on` turns it back on.
 - `gm init --again` asks again about the collector after a skip.
