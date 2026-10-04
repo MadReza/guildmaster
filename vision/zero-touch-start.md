@@ -224,6 +224,15 @@ And for the clone's front desk as [PR 24](https://github.com/MadReza/guildmaster
 3. With the Party Leader's process killed, the launchd agent's `gm up --quiet` started it again in the same pane; the ledger held two `party-leader.launched` rows and no `front-desk.launched`: no Guildmaster was ever started in herdr, and the `guildmaster` tab held a shell.
 4. The lab was torn down, and the helper confirmed the default session was unchanged.
 
+And for the front desk at the clone's root, by hand on 2026-10-03, against real herdr 0.9.1 in another isolated lab session (every herdr call through the helper, with gm's herdr a wrapper that hands each call to it), with a temporary `HOME` for gm, the launchctl stub, a throwaway repository and Guildhall, the same stand-in for `claude`, and this branch cloned plainly with `git clone`, plus a linked worktree of that clone:
+
+1. In the linked worktree, the hook run exactly as `.claude/settings.json` gives it: exit 0 at once, nothing on stdout or stderr, the temporary `HOME` still empty, no Guildhall, no launchctl call, and the lab session still without a pane. The guard printed nothing for Edit, nor for `bin/gm roster`.
+2. A focus recorded with `--no-launch`, then the hook in the plain clone: exit 0 in 11 seconds, nothing on stderr; `gm` linked to the clone's `bin/gm`; `front-desk: clone` and the first run recorded; the stub launchd agent loaded once; the Party Leader started in a new tab (`w1:p2`), listed as routine with the link; the roster with the front desk as `clone`, and `appt` alive.
+3. The hook again: exit 0 in 5 seconds, nothing on stderr, the link untouched (same inode), nothing done, nothing loaded, one Party Leader launch in the ledger.
+4. The guard in the plain clone denied Edit with its reason, allowed `bin/gm roster`, and left `ls` alone.
+5. The hook in the linked worktree again, with the guild now set up: nothing printed, `setup.conf` and the register byte for byte the same, still one launchd load.
+6. The lab was torn down, and the helper confirmed the default session was unchanged.
+
 ## Not in this change
 
 - Telemetry for the Guildmaster's own session; it runs without the collector's environment.
