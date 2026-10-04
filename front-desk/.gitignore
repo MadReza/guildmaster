@@ -1,0 +1,2 @@
+# What Claude Code writes here when the patron answers "always allow" stays on this machine.
+.claude/settings.local.json

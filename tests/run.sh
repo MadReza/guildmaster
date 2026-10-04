@@ -17,6 +17,8 @@ export GM_INTERACTIVE=0 GM_CLAUDE=$ROOT/tests/fixtures/fake-claude GM_HERDR=$ROO
 export PATH="$ROOT/tests/fixtures:$PATH" GM_HERDR_SESSION=gm-test HERDR_STUB_SESSION=gm-test GM_HERDR_RESAMPLE=1 GM_LAUNCH_GRACE=0
 # Nor a real launchd agent: whatever turns autostart on writes its property list here and loads it with the stub.
 export GM_LAUNCH_AGENTS=$WORK/LaunchAgents GM_LAUNCHCTL=$ROOT/tests/fixtures/launchctl
+# Nor a real Homebrew or herdr's real installer, from gm install herdr.
+export GM_BREW=$WORK/no-brew GM_HERDR_INSTALLER=file://$WORK/no-installer.sh
 unset HERDR_ENV GM_ATTACH
 FAKE=$ROOT/tests/fixtures/fake-claude
 pass=0
@@ -1851,6 +1853,217 @@ t_repos_finds_the_clone_the_patron_names() {
   gm open billing-v2 --repo "$WORK/repos/src/billing" --no-launch >/dev/null 2>&1
   assert_eq "$(gm repos | head -n 1)" "$WORK/repos/src/billing" "repositories gm knows come first" &&
     assert_eq "$(gm repos | grep -c billing)" 1 "once"
+}
+
+# ---- the clone's front desk: claude, started in the repository's front-desk folder, is the Guildmaster ----
+
+# The hook command the committed front-desk/.claude/settings.json gives Claude Code.
+clone_hook_command() {
+  json "SELECT json_extract(CAST(readfile($(sqlq "$ROOT/front-desk/.claude/settings.json")) AS TEXT),'\$.hooks.SessionStart[0].hooks[0].command');"
+}
+
+# clone_hook [session id]: that hook exactly as Claude Code runs it, in the clone's front-desk folder with
+# CLAUDE_PROJECT_DIR set; prints its JSON, its stderr into $WORK/hook-err, and its exit status into $WORK/hook-rc.
+clone_hook() {
+  local rc=0
+  printf '{"session_id":"%s","source":"startup","hook_event_name":"SessionStart"}' "${1:-c1}" |
+    (cd "$ROOT/front-desk" && CLAUDECODE=1 CLAUDE_PROJECT_DIR=$ROOT/front-desk sh -c "$(clone_hook_command)" 2>"$WORK/hook-err") || rc=$?
+  printf '%s' "$rc" >"$WORK/hook-rc"
+}
+
+# clone_hook_bare [session id]: gm's side of it alone, without the command's own 2>/dev/null, to see that gm itself
+# says nothing on stderr.
+clone_hook_bare() {
+  printf '{"session_id":"%s","source":"startup","hook_event_name":"SessionStart"}' "${1:-c1}" |
+    (cd "$ROOT/front-desk" && CLAUDECODE=1 CLAUDE_PROJECT_DIR=$ROOT/front-desk bash "$GM" hook front-desk --clone 2>"$WORK/hook-err")
+}
+
+# A home of the test's own, so nothing reaches the real ~/.local/bin.
+own_home() {
+  export HOME=$WORK/$1/home
+  mkdir -p "$HOME"
+}
+
+t_clone_front_desk_settings_are_committed_and_scoped() {
+  local f=$ROOT/front-desk/.claude/settings.json
+  assert_eq "$(json "SELECT json_extract(CAST(readfile($(sqlq "$f")) AS TEXT),'\$.permissions.deny');")" '["Edit","Write","NotebookEdit"]' "no file edits at the front desk" &&
+    assert_contains "$(json "SELECT json_extract(CAST(readfile($(sqlq "$f")) AS TEXT),'\$.permissions.allow');")" '"Bash(gm *)"' "gm allowed" &&
+    assert_contains "$(clone_hook_command)" 'bin/gm" hook front-desk --clone' "the hook runs gm" &&
+    assert_contains "$(clone_hook_command)" '|| true' "and never fails the session" &&
+    assert_eq "$(json "SELECT json_extract(CAST(readfile($(sqlq "$f")) AS TEXT),'\$.hooks.SessionStart[0].hooks[0].timeout');")" 120 "with a timeout"
+  [ -s "$ROOT/front-desk/CLAUDE.md" ] || fail "no CLAUDE.md for the Guildmaster"
+  # Claude Code reads .claude/settings.json only from the folder it starts in, so a session at the repository's root
+  # (an agent changing Guildmaster) gets no hook.
+  [ ! -e "$ROOT/.claude/settings.json" ] || fail "settings at the repository's root would reach every contributor"
+}
+
+t_clone_front_desk_links_gm_once_and_is_silent_on_repeat() {
+  own_home clone
+  setup clone
+  rm -f "$GM_HALL/setup.conf"
+  export GM_OTELCOL=$WORK/none
+  local out ctx link=$HOME/.local/bin/gm before after
+  [ ! -e "$HOME/.local" ] || return 1
+  clone_hook c1 >"$WORK/clone/out"
+  out=$(cat "$WORK/clone/out")
+  assert_eq "$(cat "$WORK/hook-rc")" 0 "the hook succeeds" &&
+    assert_eq "$(json "SELECT json_valid($(sqlq "$out"));")" 1 "the hook prints JSON" &&
+    assert_eq "$(json "SELECT json_extract($(sqlq "$out"),'\$.systemMessage') IS NULL;")" 1 "and nothing for the patron's screen"
+  [ -L "$link" ] || fail "gm was not linked into ~/.local/bin" || return 1
+  assert_eq "$(readlink "$link")" "$GM" "the link points at this clone's gm"
+  ctx=$(hook_context "$out")
+  assert_contains "$ctx" "You are the Guildmaster, at the front desk: this Claude Code session" "the session is the front desk" &&
+    assert_contains "$ctx" "<charter>
+# Guildmaster charter" "with the patron's charter" &&
+    assert_contains "$ctx" "- linked gm into ~/.local/bin" "the link is routine" &&
+    assert_contains "$ctx" "/.local/bin is not on the patron's PATH" "and where it is not on the PATH, the Guildmaster knows" &&
+    assert_contains "$ctx" "Run gm as: ../bin/gm" "and runs the clone's gm" &&
+    assert_contains "$ctx" "first-run check passed" "the first-run check" &&
+    assert_contains "$ctx" "appt-v2                  party leader  alive" "the Party Leader brought up" &&
+    assert_contains "$ctx" "guildmaster              front desk    clone    -        the patron's own Claude Code session" "the roster's front desk" &&
+    assert_eq "$(sed -n 's/^front-desk: //p' "$GM_HALL/setup.conf")" clone "the front desk recorded as the patron's session" &&
+    assert_eq "$(desk_runs)" 0 "no Guildmaster started in herdr" &&
+    assert_eq "$(pl_runs)" 1 "the Party Leader started once"
+  [ -n "$(sed -n 's/^initialized: //p' "$GM_HALL/setup.conf")" ] || fail "the first run was not recorded"
+  if [ "$(uname -s)" = Darwin ]; then
+    assert_eq "$(bootstraps)" 1 "autostart loaded once" &&
+      assert_contains "$(cat "$GM_LAUNCH_AGENTS"/com.guildmaster.up.*.plist)" "<key>PATH</key><string>$HOME/.local/bin:" "the agent's PATH has ~/.local/bin"
+  fi
+  # Again, three at once and then once more: nothing linked, started or loaded again, and gm says nothing on stderr.
+  before=$(ls -li "$link")
+  clone_hook c2 >/dev/null &
+  clone_hook c3 >/dev/null &
+  clone_hook c4 >/dev/null &
+  wait
+  out=$(clone_hook_bare c5)
+  ctx=$(hook_context "$out")
+  after=$(ls -li "$link")
+  assert_eq "$after" "$before" "the link is left as it is" &&
+    assert_eq "$(cat "$WORK/hook-err")" "" "silent on repeat" &&
+    assert_not_contains "$ctx" "linked gm" "nothing linked again" &&
+    assert_not_contains "$ctx" "Done just now by gm (routine; do not mention it unless asked):" "nothing done when all is running" &&
+    assert_eq "$(desk_runs)" 0 "still no Guildmaster in herdr" &&
+    assert_eq "$(pl_runs)" 1 "one Party Leader, ever"
+  [ "$(uname -s)" != Darwin ] || assert_eq "$(bootstraps)" 1 "autostart loaded once"
+  # With ~/.local/bin on the PATH, the Guildmaster runs plain gm.
+  ctx=$(PATH="$HOME/.local/bin:$PATH" hook_context "$(PATH="$HOME/.local/bin:$PATH" clone_hook_bare c6)")
+  assert_contains "$ctx" "Run gm as: gm
+" "gm on the PATH" &&
+    assert_not_contains "$ctx" "not on the patron's PATH" "and nothing said about the PATH"
+}
+
+t_clone_front_desk_never_clobbers_a_foreign_gm() {
+  own_home foreign
+  export GM_HALL=$WORK/foreign/hall
+  mkdir -p "$HOME/.local/bin" "$WORK/foreign/other"
+  local link=$HOME/.local/bin/gm ctx
+  printf '#!/bin/sh\necho mine\n' >"$link"
+  ctx=$(hook_context "$(clone_hook)")
+  assert_eq "$(cat "$link")" "#!/bin/sh
+echo mine" "a gm of the patron's own is kept" &&
+    assert_contains "$ctx" "A different gm is at ~/.local/bin/gm (a file of its own), left as it is; you run this one as ../bin/gm" "and the Guildmaster knows"
+  rm -f "$link"
+  ln -s "$WORK/foreign/other/gm" "$link"
+  printf 'x\n' >"$WORK/foreign/other/gm"
+  ctx=$(hook_context "$(clone_hook)")
+  assert_eq "$(readlink "$link")" "$WORK/foreign/other/gm" "a link to another gm is kept" &&
+    assert_contains "$ctx" "a link to $WORK/foreign/other/gm" "and named"
+  rm -f "$WORK/foreign/other/gm"
+  ctx=$(hook_context "$(clone_hook)")
+  assert_eq "$(readlink "$link")" "$WORK/foreign/other/gm" "so is a broken one" &&
+    assert_eq "$(cat "$WORK/hook-rc")" 0 "the hook succeeds"
+}
+
+t_clone_front_desk_never_blocks_the_session() {
+  own_home noblock
+  export GM_HALL=$WORK/noblock/hall
+  local out ctx
+  # ~/.local/bin cannot be made: said, and the rest goes on.
+  printf 'not a folder\n' >"$HOME/.local"
+  out=$(clone_hook)
+  ctx=$(hook_context "$out")
+  assert_eq "$(cat "$WORK/hook-rc")" 0 "a link that cannot be made fails nothing" &&
+    assert_contains "$ctx" "gm could not be linked into ~/.local/bin" "and the Guildmaster knows" &&
+    assert_contains "$ctx" "first-run check passed" "the rest still ran"
+  # gm itself fails (a Guildhall it cannot write): the session still starts, told in one line.
+  out=$(GM_HALL=/dev/null/hall clone_hook)
+  assert_eq "$(cat "$WORK/hook-rc")" 0 "a failing gm fails nothing" &&
+    assert_eq "$(json "SELECT json_valid($(sqlq "$out"));")" 1 "still JSON" &&
+    assert_contains "$(hook_context "$out")" "the guild's start-up did not finish" "saying it did not finish" &&
+    assert_eq "$(cat "$WORK/hook-err")" "" "nothing on the patron's screen"
+  out=$(GM_HALL=/dev/null/hall clone_hook_bare)
+  assert_contains "$(hook_context "$out")" "did not finish" "gm alone, too" &&
+    assert_eq "$(cat "$WORK/hook-err")" "" "and silently"
+  # No gm at all where the settings look for it.
+  out=$(printf '{}' | (cd "$WORK" && CLAUDE_PROJECT_DIR=$WORK/nowhere sh -c "$(clone_hook_command)" 2>&1)) || fail "a missing gm failed the hook"
+  assert_eq "$out" "" "and printed nothing"
+}
+
+t_clone_front_desk_offers_to_install_herdr() {
+  own_home offer
+  export GM_HALL=$WORK/offer/hall GM_HERDR=$WORK/no-herdr
+  local ctx
+  ctx=$(GM_BREW=$ROOT/tests/fixtures/launchctl hook_context "$(GM_BREW=$ROOT/tests/fixtures/launchctl clone_hook)")
+  assert_contains "$ctx" "herdr is not installed" "the Guildmaster is told" &&
+    assert_contains "$ctx" "Shall I install it now with Homebrew (brew install herdr)?" "to offer it in one line" &&
+    assert_contains "$ctx" "Only on the patron's yes, run ../bin/gm install herdr" "only on a yes" &&
+    assert_not_contains "$ctx" "required pieces are missing" "herdr is offered, not demanded"
+  [ -L "$HOME/.local/bin/gm" ] || fail "gm was not linked first"
+  [ ! -e "$GM_HALL/setup.conf" ] || fail "the setup was recorded without herdr"
+  ctx=$(GM_BREW=$WORK/no-brew hook_context "$(GM_BREW=$WORK/no-brew clone_hook)")
+  assert_contains "$ctx" "with herdr's official installer (curl -fsSL https://herdr.dev/install.sh | sh)" "without Homebrew, the official installer"
+}
+
+t_install_herdr_with_homebrew_or_the_official_installer() {
+  own_home install
+  export GM_HALL=$WORK/install/hall
+  mkdir -p "$WORK/install"
+  local out brew=$WORK/install/brew installer=$WORK/install/install.sh
+  # A copy keeps the stub's executable mode; its text is then replaced.
+  cp "$ROOT/tests/fixtures/launchctl" "$brew"
+  printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>"%s/brew-calls"\n' "$WORK/install" >"$brew"
+  printf 'printf "ran\\n" >>"%s/installer-ran"\n' "$WORK/install" >"$installer"
+  out=$(GM_BREW=$brew gm install herdr 2>&1) || fail "already installed failed"
+  assert_contains "$out" "herdr is already installed" "nothing to do when herdr is there"
+  [ ! -e "$WORK/install/brew-calls" ] || fail "brew ran for an installed herdr"
+  # The stub stands in for the herdr the installer would put on the PATH.
+  out=$(GM_HERDR=herdr-not-yet GM_BREW=$brew gm install herdr 2>&1) || fail "install with Homebrew failed: $out"
+  assert_eq "$(cat "$WORK/install/brew-calls" 2>/dev/null)" "install herdr" "brew install herdr" &&
+    assert_contains "$out" "herdr is installed with Homebrew, at $ROOT/tests/fixtures/herdr; the guild is set up" "says so in one line"
+  [ -n "$(sed -n 's/^initialized: //p' "$GM_HALL/setup.conf")" ] || fail "the setup was not finished"
+  [ "$(uname -s)" != Darwin ] || assert_eq "$(bootstraps)" 1 "and autostart turned on"
+  out=$(GM_HERDR=herdr-not-yet GM_BREW=$WORK/no-brew GM_HERDR_INSTALLER="file://$installer" gm install herdr 2>&1) || fail "the official installer failed: $out"
+  assert_eq "$(cat "$WORK/install/installer-ran" 2>/dev/null)" ran "without Homebrew, herdr's official installer ran" &&
+    assert_contains "$out" "herdr is installed with herdr's official installer" "and says so"
+  out=$(GM_HERDR=herdr-not-yet GM_BREW=$WORK/no-brew GM_HERDR_INSTALLER="file://$WORK/install/missing.sh" gm install herdr 2>&1) && fail "a failed download succeeded"
+  assert_contains "$out" "failed; nothing else was changed" "a failure says so"
+}
+
+t_clone_front_desk_needs_no_guildmaster_in_herdr() {
+  own_home nodesk
+  setup nodesk
+  initialized
+  clone_hook >/dev/null
+  assert_eq "$(desk_runs)" 0 "no Guildmaster in herdr" &&
+    assert_eq "$(pl_runs)" 1 "the Party Leader up"
+  # The launchd agent's muster brings a dead Party Leader back, and starts no Guildmaster.
+  stub_proc "$(pl_pane appt-v2)" shell
+  gm up --quiet >/dev/null 2>&1 || fail "gm up --quiet failed"
+  assert_eq "$(pl_runs)" 2 "the Party Leader came back" &&
+    assert_eq "$(desk_runs)" 0 "without the front desk in herdr" &&
+    assert_eq "$(roster_state guildmaster)" clone "the roster says where the front desk is"
+  # gm alone makes herdr the front desk again, and a later claude in the clone takes it back, leaving that
+  # Guildmaster running.
+  gm >/dev/null 2>&1 || fail "gm alone failed"
+  assert_eq "$(sed -n 's/^front-desk: //p' "$GM_HALL/setup.conf")" herdr "gm alone: the front desk in herdr" &&
+    assert_eq "$(desk_runs)" 1 "and its Guildmaster started"
+  clone_hook >/dev/null
+  assert_eq "$(sed -n 's/^front-desk: //p' "$GM_HALL/setup.conf")" clone "claude in the clone takes it back" &&
+    assert_eq "$(desk_runs)" 1 "nothing started" &&
+    assert_contains "$(gm roster)" "a Guildmaster still runs in herdr pane" "the one in herdr is left running, and shown"
+  stub_proc "$(db "SELECT pane_id FROM endpoint WHERE key='front-desk';")" shell
+  gm up --quiet >/dev/null 2>&1
+  assert_eq "$(desk_runs)" 1 "and not started again once it ends"
 }
 
 t_shellcheck() {

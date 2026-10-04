@@ -11,38 +11,39 @@ This repository is at its beginning. The vocabulary comes first, because every l
 - [TERMINOLOGY.md](TERMINOLOGY.md) is the single owner of the project's vocabulary. Read it before writing anything else here.
 - `firstmate/` holds the research into the prior system this one succeeds, kept separate from Guildmaster's own design.
 - `honeycomb/` is a research site on Honeycomb, the hosted observability service: its C4 model, data model, sampling, engineering decisions, and lessons for Guildmaster's tracing. Open `honeycomb/index.html` from disk.
-- `vision/` holds Guildmaster's own design material: the patron's notes, the requirements drawn from them, a Firstmate-informed consultation, the [step 1 design](vision/step-1-design.md), the [herdr design](vision/herdr-design.md) (Party Leaders kept running and brought back), the [zero-touch start](vision/zero-touch-start.md) (the patron runs `gm` and talks), and the [tracing design](vision/tracing-design.md) with its [research](vision/tracing-research.md).
+- `vision/` holds Guildmaster's own design material: the patron's notes, the requirements drawn from them, a Firstmate-informed consultation, the [step 1 design](vision/step-1-design.md), the [herdr design](vision/herdr-design.md) (Party Leaders kept running and brought back), the [zero-touch start](vision/zero-touch-start.md) (the patron starts `claude` in the front desk and talks), and the [tracing design](vision/tracing-design.md) with its [research](vision/tracing-research.md).
 - [vision/roadmap.md](vision/roadmap.md) is the tracked build plan: each step's goal, scope, done-when criteria, status and links.
-- `bin/gm` is the `gm` command; `templates/` holds the Guildmaster's charter (`guildmaster.md`), the Party Leader's charter, the ticket playbook and the repository rules it copies into the Guildhall, and the local OpenTelemetry Collector's configuration (`otelcol.yaml`); `tests/` holds its test suite (with the redaction cases, a schema-1 register to migrate, and recorded Claude Code telemetry under `tests/fixtures/telemetry/`, and stand-ins for herdr and launchctl so no test touches the real ones) and an end-to-end demonstration.
+- `front-desk/` is where the patron starts the Guildmaster: `claude`, run there, with the folder's committed Claude Code settings and `CLAUDE.md`.
+- `bin/gm` is the `gm` command; `templates/` holds the Guildmaster's charter (`guildmaster.md`), the Party Leader's charter, the ticket playbook and the repository rules it copies into the Guildhall, and the local OpenTelemetry Collector's configuration (`otelcol.yaml`); `tests/` holds its test suite (with the redaction cases, a schema-1 register to migrate, and recorded Claude Code telemetry under `tests/fixtures/telemetry/`, and stand-ins for herdr and launchctl so no test touches the real ones, nor your `~/.local/bin`) and an end-to-end demonstration.
 
 ## Getting started
 
 ### Install, once
 
-`gm` needs bash, `sqlite3` 3.38 or later (for its JSON functions), git, Claude Code, and herdr (the terminal workspace manager, `herdr` on your `PATH`; its official install is `curl -fsSL https://herdr.dev/install.sh | sh`, or `brew install herdr`, see <https://herdr.dev/docs/install/>).
-If one is missing, `gm` says what to install and stops.
+You need git, Claude Code, bash and `sqlite3` 3.38 or later (for its JSON functions); macOS comes with all but Claude Code.
 
 ```sh
-git clone <this repository> ~/src/guildmaster
-ln -s ~/src/guildmaster/bin/gm ~/.local/bin/gm   # any directory on your PATH
+git clone <this repository> guildmaster
+cd guildmaster/front-desk
+claude
 ```
 
-### Start: `gm`
+That is all there is to type. The first time, Claude Code asks once whether to trust the folder; say yes.
 
-This is the one thing to know. In any terminal, run:
+### Start: `claude` in the front desk
 
-```sh
-gm
-```
+The Claude Code session you just started is the Guildmaster, at the front desk.
+Everything else happens by itself as it starts, with nothing for you to type:
 
-It opens herdr at the `guildmaster` tab, where the Guildmaster sits: a Claude Code session at the front desk.
-The first time, Claude Code asks once whether to trust the front desk's folder.
+- `gm`, the command behind the guild, is linked into `~/.local/bin` (never with `sudo`, and never over another `gm`).
+- If herdr, the terminal workspace manager that keeps each Party Leader running in a tab of its own, is missing, the Guildmaster offers to install it, in one line; answer in plain words.
+- The first-run check, autostart (always on, so every Party Leader comes back at login and every 5 minutes, whether or not the front desk is open), and bringing every Party Leader up.
 
-Everything else happens by itself, with nothing for you to type: the first-run check, autostart (always on, so the Guildmaster and every Party Leader come back at login and every 5 minutes), and bringing every Party Leader up.
 The Guildmaster offers one optional piece, the tracing collector, once, in one line; answer it in plain words.
 If something required is missing, it says so plainly.
 
-Come back the same way: run `gm` again, or attach with `herdr`. Closing the terminal or detaching (`ctrl+b q`) leaves everything running.
+Come back the same way: `cd guildmaster/front-desk` and `claude`, in any terminal, inside herdr or not.
+Closing the front desk leaves every Party Leader running.
 
 ### Then talk
 
@@ -58,21 +59,10 @@ It opens the Party Leader in a herdr tab of its own and never in its own termina
 Switch to that tab to work on the ticket with its Party Leader.
 
 The Guildmaster is a quiet front desk: it knows what every Party Leader is doing and answers when asked ("what is open on crm-1234?", "what did appt-v2#12 cost?"), but it never reports routine restarts or checks, and it never does a Party Leader's work itself.
-Its charter is `~/.guildmaster/front-desk/CLAUDE.md`, yours to edit; `gm` copies it once and never overwrites it.
+Its charter is `~/.guildmaster/front-desk/CLAUDE.md`, yours to edit; `gm` copies it once, never overwrites it, and hands it to the front desk at every start.
 The design is [vision/zero-touch-start.md](vision/zero-touch-start.md).
 
-## Step 1: one ticket that never forgets
-
-Step 1 is one Party Leader for one ticket: a Claude Code session in the ticket's camp whose every patron message, posting, state and phase lives in a register behind `gm`, so a new session picks up where the last one stopped with nothing re-explained.
-The design, and the Claude Code contracts it rests on, are in [vision/step-1-design.md](vision/step-1-design.md).
-
-A focus's camp is a `git worktree` of the clone the Guildmaster found, at `~/.guildmaster/camps/<focus>`, on the ticket's feature branch (`feature/CRM-1234` by default; an existing branch is reused).
-Your clone is never cloned, moved or switched.
-The camp gets its own `.claude/settings.local.json` (hooks and status line, nothing global).
-
-The first time, `gm` copies the charter, the ticket playbook and the repository's rules into the Guildhall (`charter.md`, `playbooks/ticket.md`, `rules/appointments.md`). They are yours to edit; `gm` never overwrites them. The rules file's `feature-branch:` line sets the branch pattern for later focuses on that repository.
-
-### Work in the tab
+### Working with a Party Leader
 
 Talk to the Party Leader as usual. Each message is recorded word for word before Claude sees it, and becomes a posting:
 
@@ -87,7 +77,7 @@ Start a message with an id (`#1 also the edit form`) to add to that posting inst
 The status line shows the focus, phase, and posting counts.
 A Stop guard keeps the turn going until every posting has a recorded state.
 
-### Kill it and come back
+#### Kill it and come back
 
 Exit Claude Code (`/exit`), kill the process, close its pane, restart the machine, or let it compact.
 The Party Leader comes back on its own: the launchd agent brings it back within 5 minutes, and so does the next start of the Guildmaster.
@@ -97,7 +87,51 @@ The checking and restarting is plain code, never a model, and tells no one when 
 A Party Leader that fails to start 3 times in a row is held: the Guildmaster tells you once, in one line, the next time it starts, and shows it whenever you ask what is running.
 A running Party Leader is never ended or replaced, and one whose state herdr cannot make out is reported, not restarted.
 
-### Try it end to end, safely
+## Advanced: the `gm` command
+
+You never need any of this to use the guild: the Guildmaster runs these commands for you. They are here for advanced use, and for when something needs a closer look.
+
+The front desk links `gm` into `~/.local/bin`. If that folder is not on your `PATH`, add `export PATH="$HOME/.local/bin:$PATH"` to your shell's startup file yourself (the guild never edits it), or run `bin/gm` from the clone.
+`gm help` lists every command.
+
+### Install herdr
+
+```sh
+gm install herdr    # with Homebrew when it is there, otherwise herdr's official installer; never sudo
+```
+
+This is what the Guildmaster runs when you say yes to its offer. It then finishes the setup. By hand, herdr's official install is `curl -fsSL https://herdr.dev/install.sh | sh`, or `brew install herdr` (<https://herdr.dev/docs/install/>).
+
+### The front desk in herdr: `gm`
+
+Instead of `claude` in the front desk, in any terminal:
+
+```sh
+gm
+```
+
+It opens herdr at the `guildmaster` tab and starts the Guildmaster there, a Claude Code session in `~/.guildmaster/front-desk`, which gm then keeps running like a Party Leader (`front-desk: herdr` in `setup.conf`).
+Starting `claude` in the clone's front desk again makes that session the front desk (`front-desk: clone`): gm then keeps no Guildmaster in herdr, and leaves a running one as it is.
+The first time, Claude Code asks once whether to trust the front desk's folder.
+
+Everything else happens by itself, with nothing for you to type: the first-run check, autostart (always on, so the Guildmaster and every Party Leader come back at login and every 5 minutes), and bringing every Party Leader up.
+The Guildmaster offers one optional piece, the tracing collector, once, in one line; answer it in plain words.
+If something required is missing, it says so plainly.
+
+Come back with `gm` again, or attach with `herdr`. Closing the terminal or detaching (`ctrl+b q`) leaves everything running.
+
+### Step 1: one ticket that never forgets
+
+Step 1 is one Party Leader for one ticket: a Claude Code session in the ticket's camp whose every patron message, posting, state and phase lives in a register behind `gm`, so a new session picks up where the last one stopped with nothing re-explained.
+The design, and the Claude Code contracts it rests on, are in [vision/step-1-design.md](vision/step-1-design.md).
+
+A focus's camp is a `git worktree` of the clone the Guildmaster found, at `~/.guildmaster/camps/<focus>`, on the ticket's feature branch (`feature/CRM-1234` by default; an existing branch is reused).
+Your clone is never cloned, moved or switched.
+The camp gets its own `.claude/settings.local.json` (hooks and status line, nothing global).
+
+The first time, `gm` copies the charter, the ticket playbook and the repository's rules into the Guildhall (`charter.md`, `playbooks/ticket.md`, `rules/appointments.md`). They are yours to edit; `gm` never overwrites them. The rules file's `feature-branch:` line sets the branch pattern for later focuses on that repository.
+
+#### Try it end to end, safely
 
 ```sh
 bash tests/run.sh    # the test suite; no model calls
@@ -106,11 +140,9 @@ bash tests/demo.sh   # a real Claude Code session in a throwaway repository; use
 
 The demo makes a throwaway repository and Guildhall under a temporary directory, sends ten patron messages in a row and checks that all ten are recorded with their words and states, then kills a session mid-posting and shows a fresh session resuming from the register when told only `continue`.
 
-## Troubleshooting: the commands behind it
+### The commands behind the front desk
 
-You never need these to use the guild; the Guildmaster runs them. They are here for when something needs a closer look.
-
-### Open a focus by hand
+#### Open a focus by hand
 
 ```sh
 gm open appt-v2 --repo ~/work/appointments --ticket CRM-8965
@@ -122,9 +154,9 @@ With `--ticket`, the name may be left out: `gm open --repo ~/work/appointments -
 It ends with one line saying which tab the Party Leader is in.
 `gm repos appointments` lists the clones the Guildmaster would consider; a `repo-roots:` line in `setup.conf` (folders separated by spaces) replaces the usual source folders it searches.
 
-### The tabs, and keeping them running
+#### The tabs, and keeping them running
 
-The tabs live in one herdr workspace, `guild`, in herdr's default session: the `guildmaster` tab (the front desk, where the Guildmaster runs) and one tab per focus, named after it.
+The tabs live in one herdr workspace, `guild`, in herdr's default session: the `guildmaster` tab (the front desk when it is in herdr; otherwise a shell) and one tab per focus, named after it.
 
 ```sh
 gm roster           # the front desk's Guildmaster and each Party Leader: pane and state
@@ -140,13 +172,13 @@ saved-views              party leader  dead     w1:p3    the pane holds only a s
 
 States are `alive`, `starting` (just launched), `dead` (its pane holds only a shell), `missing` (no pane), `held` and `unknown`.
 The muster also runs before any other `gm` command you type in a terminal, quietly.
-A held Party Leader starts again with `gm open <focus>`, a held Guildmaster with `gm`.
+A held Party Leader starts again with `gm open <focus>`, a held Guildmaster in herdr with `gm`. With the front desk in your own session, the roster's front desk line says `clone`.
 The design, and how it follows and differs from Firstmate, is [vision/herdr-design.md](vision/herdr-design.md).
 `GM_HERDR_SESSION` and `GM_HERDR_WORKSPACE` choose another herdr session and workspace; `GM_HERDR_AUTO=off` stops the muster before other commands; `GM_ATTACH=off` keeps `gm` from attaching herdr.
 
-### Autostart
+#### Autostart
 
-The Guildmaster turns autostart on by itself: on macOS, a launchd agent runs `gm up --quiet` at login and every 5 minutes, and writes to `autostart.log` in the Guildhall.
+The Guildmaster turns autostart on by itself: on macOS, a launchd agent runs `gm up --quiet` at login and every 5 minutes, and writes to `autostart.log` in the Guildhall. Its `PATH` always includes `~/.local/bin`.
 
 ```sh
 gm autostart        # is it on?
@@ -156,7 +188,7 @@ gm autostart on     # turn it back on (--every MINUTES changes the interval)
 
 `gm autostart off` is recorded in `setup.conf` (`autostart: off`), so the Guildmaster leaves it off. On Linux there is no launchd; Party Leaders come back whenever `gm` runs.
 
-### First run by hand
+#### First run by hand
 
 The Guildmaster runs the first-run check at every start, without questions, and records it in `setup.conf` in the Guildhall.
 The same check runs in a terminal the first time a `gm` command that needs the Guildhall (`open`, `post`, `list`, `trace`, and the rest) runs there before the Guildmaster ever has, and says what is there and what is not:
@@ -184,7 +216,7 @@ otelcol-contrib (the OpenTelemetry Collector, tracing slice 2, v0.162.0) is not 
 - Your answer is recorded in `setup.conf` in the Guildhall, a plain `key: value` file you can read and edit (`collector: installed | skipped | later`, where `gm` put the collector, when the Guildmaster last offered it, and `autostart: on | off` once you set it). Later commands respect it and never nag; `gm doctor` keeps reporting the state, and `gm init` (with `--again` to revisit a skip) changes it.
 - It never asks without a terminal, and never in a hook or the status line, so nothing blocks. The Guildmaster records your answer with `gm init --yes` (install what is missing), `gm init --no` (go without) or `gm init --later`, and `--bin-dir DIR` chooses where; without an answer, `gm init` only reports.
 
-## Tracing: slice 1
+### Tracing: slice 1
 
 Each posting is one trace, kept as span rows in the register beside its ledger, so nothing new is installed and nothing leaves the machine.
 The design is [vision/tracing-design.md](vision/tracing-design.md); this is its build slice 1.
@@ -223,13 +255,13 @@ Every measure is computed from the spans when asked; none is stored.
 Per-call model, token and cost figures come from Claude Code's own telemetry (slice 2, below); without it, cost is the status line's estimate per turn.
 Postings made before this step have their ledgers (`gm show`) and no spans.
 
-## Tracing: slice 2, Claude Code's telemetry
+### Tracing: slice 2, Claude Code's telemetry
 
 Claude Code reports every model call (model, effort, tokens, cost), tool call and prompt as OpenTelemetry traces, logs and metrics.
 `gm open` sends them to a local OpenTelemetry Collector on `127.0.0.1` and nowhere else; the collector deletes who you are, masks secrets and writes files under the Guildhall; `gm trace import` folds those files into the register beside the spans of slice 1.
 The design is build slice 2 of [vision/tracing-design.md](vision/tracing-design.md#as-built-in-slice-2).
 
-### Install the collector
+#### Install the collector
 
 `gm init` does this for you (see First run above); by hand, it goes like this. The collector is the official OpenTelemetry Collector, contrib distribution (it has the file exporter and the transform processor), one binary from its GitHub releases; there is no Homebrew formula for it.
 On an Apple-silicon Mac (pick the `darwin_amd64` or `linux_*` file otherwise):
@@ -245,7 +277,7 @@ tar xzf $f otelcol-contrib && mv otelcol-contrib ~/.local/bin/   # any directory
 `gm` looks for `otelcol-contrib` on your `PATH`; `GM_OTELCOL` names another path.
 It was built and tested with 0.162.0. No binary is kept in this repository.
 
-### Run it
+#### Run it
 
 ```sh
 gm collector     # in a terminal tab of its own; Ctrl-C stops it
@@ -262,7 +294,7 @@ It refuses to start a session when `GM_OTEL_ENDPOINT` is anything but `127.0.0.1
 `GM_TELEMETRY=off gm open appt-v2` starts a session without telemetry.
 Your other Claude Code sessions are untouched.
 
-### Read it
+#### Read it
 
 `gm trace` and `gm stats` import whatever the collector has written since last time before they answer; `gm trace import` does it by hand and says what it did:
 
