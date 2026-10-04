@@ -16,7 +16,15 @@ The patron asked, on 2026-10-03, whether they or the AI have to run `gm init`, `
 
 <!-- relayed: end -->
 
-This document says how the patron now starts the guild by starting Claude Code in the clone, and does everything else by talking, as built in `bin/gm` and the clone's `.claude/settings.json`.
+The patron then asked for the front desk to move to the clone's root ("switch it"), and, the same evening, as relayed:
+
+<!-- relayed: begin -->
+
+"Also, the guildmaster should also be in the herdr. It shouldn't run outside of it."
+
+<!-- relayed: end -->
+
+This document says how the patron now starts the guild by starting Claude Code in the clone, finds the Guildmaster in herdr, and does everything else by talking, as built in `bin/gm` and the clone's `.claude/settings.json`.
 Vocabulary is [TERMINOLOGY.md](../TERMINOLOGY.md)'s. The step this pulls forward is step 4 of [roadmap.md](roadmap.md), the Guildmaster at the front desk.
 
 ## The one thing the patron does: `claude` in the clone
@@ -27,7 +35,7 @@ cd guildmaster
 claude
 ```
 
-That Claude Code session is the Guildmaster. Claude Code asks once whether to trust the folder; from then on the patron talks, and comes back the same way.
+Claude Code asks once whether to trust the folder. That session sets the guild up and starts the Guildmaster in herdr, in the `guild` workspace's `guildmaster` tab, where it always lives; the patron goes there (`herdr`) and talks. Started inside that tab, `claude` is the Guildmaster itself.
 
 The repository's own Claude Code configuration does the rest, at the clone's root:
 
@@ -77,80 +85,68 @@ And the root is where the patron lands after `git clone`: one `cd` fewer, `cd gu
 
 The other entries weighed in PR 24 stand: `gm` alone stays the advanced entry (below), and a global `SessionStart` hook in `~/.claude/settings.json` would touch every Claude Code session the patron runs.
 
+## The Guildmaster lives in herdr
+
+The Guildmaster is one Claude Code session, `claude --name guildmaster` started in the clone, in the `guildmaster` tab of herdr's `guild` workspace, and nowhere else. herdr keeps it reachable from any terminal (`herdr`), and the muster keeps it running like a Party Leader.
+
+Whether a session is the Guildmaster is decided by its start-up hook, under the Guildhall's `herdr.lock` (`gm_front_desk_claim`). herdr gives every pane it runs `HERDR_ENV=1` and its session, workspace, tab and pane ids (`HERDR_SESSION`, `HERDR_WORKSPACE_ID`, `HERDR_TAB_ID`, `HERDR_PANE_ID`; `herdr --skill` documents them, and herdr 0.9.1 sets them, checked in a lab session), so:
+
+- **In the front desk's own pane** (the guild's herdr session, the pane the register records for the front desk): this session is the Guildmaster. That is where gm starts it, and where the patron restarts it by hand.
+- **In another tab of the guild's workspace, while no Guildmaster runs** (none recorded, or its pane dead or gone): this session becomes the Guildmaster. Its pane is recorded as the front desk's endpoint and its tab renamed `guildmaster`.
+- **Anywhere else**: a terminal outside herdr, another herdr session, a tab in another workspace, or any tab while a Guildmaster runs or herdr cannot tell what its pane runs. The guild is set up and the Guildmaster started in herdr if it is not running (a running one is reused), and this session is told it is not the Guildmaster: whatever the patron says, it answers in one line, "The Guildmaster is in herdr tab guildmaster; open it with: herdr" (or "switch to it in herdr" from another tab, or `herdr --session <s>` for another session), and does nothing for the guild.
+
+So there is never a second Guildmaster: only one pane is recorded, a session in any other pane steps aside while that one runs, and gm only ever starts the Guildmaster in the recorded pane.
+
+A session in another workspace is pointed to the guild rather than adopted, because the Party Leaders' tabs and the front desk share the `guild` workspace, which gm finds by its label.
+
 ## What the front desk's start does
 
-At the front desk, the hook runs `bash "$CLAUDE_PROJECT_DIR/bin/gm" hook front-desk --clone 2>/dev/null || true` at every session start (startup, resume, clear, compaction), with a 120-second timeout:
+At the front desk, the hook runs `bash "$CLAUDE_PROJECT_DIR/bin/gm" hook front-desk --clone 2>/dev/null || true` at every session start (startup, resume, clear, compaction), with a 120-second timeout, in whichever session the patron started:
 
 1. **`gm` on the `PATH`.** A symlink `~/.local/bin/gm` to this clone's `bin/gm`, the folder made when it is missing, never with `sudo`. Anything already called `gm` there, a file or a link to anything else, even a broken one, is left as it is, and the Guildmaster runs `bin/gm` instead. `~/.local/bin` is where Claude Code's own and herdr's installers put them, so it is usually on the `PATH` already; when it is not, the Guildmaster knows, and mentions it only if asked. No shell startup file is edited.
-2. **herdr.** If herdr is missing (on the `PATH` or in `~/.local/bin`) and everything else is there, the Guildmaster is asked to offer it once, in one line: "I need herdr to keep Party Leaders running. Shall I install it now with Homebrew (brew install herdr)?", or with herdr's official installer (`curl -fsSL https://herdr.dev/install.sh | sh`) when there is no Homebrew. Only on the patron's yes does it run `gm install herdr`, which installs it the same way, never with `sudo`, and then finishes the setup below. Nothing else runs until then. Any other required piece missing is told plainly, as before.
-3. **The first-run check**, without questions, recorded in `setup.conf`.
-4. **The front desk is this session.** `setup.conf` records `front-desk: clone`, and the hook gives the Guildmaster its charter: the patron's own copy, `~/.guildmaster/front-desk/CLAUDE.md`, copied once from `templates/guildmaster.md` and never overwritten, as for the front desk in herdr.
-5. **Autostart, always on**, unless the patron turned it off. The launchd agent's `PATH` always has `~/.local/bin`, so it finds herdr and Claude Code there even when launchd's own does not.
-6. **The muster**, `gm up`, when there is an open focus: every Party Leader that is dead or missing is started again in its tab.
-7. **A short summary for the Guildmaster**, never shown on the patron's screen: the setup, what was done (the link, any restart, marked routine), anything to tell the patron once, the collector offer when due, and the roster.
+2. **herdr.** If herdr is missing (on the `PATH` or in `~/.local/bin`) and everything else is there, the session is asked to offer it once, in one line: "I need herdr, where the Guildmaster and the Party Leaders live. Shall I install it now with Homebrew (brew install herdr)?", or with herdr's official installer (`curl -fsSL https://herdr.dev/install.sh | sh`) when there is no Homebrew. Only on the patron's yes does it run `gm install herdr`, which installs it the same way, never with `sudo`, finishes the setup and starts the Guildmaster in herdr, and ends with the one line saying where. Nothing else runs until then. Any other required piece missing is told plainly.
+3. **The first-run check**, without questions, recorded in `setup.conf`, and the charter copied into the Guildhall.
+4. **Autostart, always on**, unless the patron turned it off. The launchd agent's `PATH` always has `~/.local/bin`, so it finds herdr and Claude Code there even when launchd's own does not.
+5. **The Guildmaster, and the muster.** Under the Guildhall's `herdr.lock`: whether this session is the Guildmaster (above), then `gm up`, which starts herdr's server if none runs, makes the `guild` workspace if there is none, and starts the Guildmaster and every Party Leader that is dead or missing.
+6. **What the session is told**, never shown on the patron's screen. The Guildmaster gets its charter, the patron's own copy at `~/.guildmaster/front-desk/CLAUDE.md`, the setup, what was done (the link, any restart, marked routine), anything to tell the patron once, the collector offer when due, and the roster. Any other session gets only the one line to answer with, and anything gm could not do.
 
 A second, third or tenth start links, starts and loads nothing again, and prints nothing but its JSON.
-If `gm` itself fails, the hook still prints JSON, telling the Guildmaster in one line that the start-up did not finish and why; if `gm` cannot be found, the command prints nothing and exits 0. The session always starts.
-
-## The front desk need not be in herdr
-
-The patron may start `claude` in any terminal, inside herdr or not. That session stays the front desk; nothing moves it into herdr, because moving a running Claude Code session is not possible and starting a second Guildmaster in herdr would leave two.
-
-The muster never needed the front desk: it is plain code, run by the launchd agent at login and every 5 minutes, by `gm` commands and by the front desk's start. So with `front-desk: clone`:
-
-- the muster keeps no Guildmaster in herdr, and brings every Party Leader back whether the front desk is open or not;
-- the `guild` workspace's first tab, the `guildmaster` tab, is a shell;
-- a Guildmaster still running in that tab from before is left as it is (gm never ends a live session) and not started again once it ends; `gm roster` shows it;
-- `gm roster` shows the front desk as `clone`.
-
-`gm` alone, below, sets `front-desk: herdr` again, and the next `claude` in the clone sets `clone`. The last one the patron used is the front desk.
+If `gm` itself fails, the hook still prints JSON, telling the session in one line that the start-up did not finish and why; if `gm` cannot be found, the command prints nothing and exits 0. The session always starts.
 
 ## `gm`, for advanced users
 
-The patron's README now has three lines to type: clone, `cd guildmaster`, `claude`. Every `gm` command is in its "Advanced" section.
+The patron's README now has three lines to type: clone, `cd guildmaster`, `claude`, and then `herdr` to reach the Guildmaster. Every `gm` command is in its "Advanced" section.
 `gm` stays the short command for advanced users, and is the Guildmaster's tool. No alias is added, and no shell startup file is edited: the front desk's link is enough wherever `~/.local/bin` is on the `PATH`, and the README says how to add it for those who want to.
 
-## The front desk in herdr: `gm`
+## `gm` alone
 
-`gm`, with nothing after it, opens the front desk in herdr instead, as [PR 23](https://github.com/MadReza/guildmaster/pull/23) built it, and records `front-desk: herdr`:
+`gm`, with nothing after it, does the same from any terminal, as [PR 23](https://github.com/MadReza/guildmaster/pull/23) built it, and then takes the patron there:
 
 1. **Required pieces.** If bash, sqlite3 3.38+, git, Claude Code, herdr or the standard tools are missing, it says plainly what to install (with the official install for herdr) and stops.
-2. **The front desk's folder.** It writes `~/.guildmaster/front-desk/` (below).
+2. **The charter.** It copies `templates/guildmaster.md` to `~/.guildmaster/front-desk/CLAUDE.md` once.
 3. **The muster.** Under the Guildhall's `herdr.lock`, it starts herdr's server if none runs and finds or makes the `guild` workspace. It starts the Guildmaster in the workspace's first tab when that tab holds only a shell, and brings every Party Leader up ([herdr-design.md](herdr-design.md)). A Guildmaster already running is left as it is; a held one's hold is cleared first, as `gm open` clears a Party Leader's.
 4. **Autostart.** It turns the launchd agent on if it is not loaded, unless the patron turned it off (below).
 5. **herdr.** At a terminal it focuses the guild workspace and the `guildmaster` tab and replaces itself with `herdr` (`herdr --session <s>` for another session). Inside herdr (`HERDR_ENV` set) it only switches tabs. Without a terminal, or with `GM_ATTACH=off`, it prints one line saying where the Guildmaster is and returns.
-
-The first time, Claude Code asks whether to trust the front desk's folder; the patron answers once, in the tab.
 
 ## The front desk's folder in the Guildhall
 
 | Path | Whose | What |
 | --- | --- | --- |
 | `front-desk/CLAUDE.md` | the patron's | The Guildmaster's charter, copied once from `templates/guildmaster.md` and never overwritten. |
-| `front-desk/.claude/settings.local.json` | gm's | Kept current by `gm` and by `gm start guildmaster`: the `SessionStart` hook, `gm` allowed without a prompt, the Edit, Write and NotebookEdit tools denied, and the environment that points the Guildmaster's `gm` at the same Guildhall, herdr session and launchd folder. |
 
 The folder is a sibling of `camps/`, never above it. Claude Code reads `CLAUDE.md` from a session's folder and from every folder above it (<https://code.claude.com/docs/en/memory>), so a charter at the Guildhall's root would load into every Party Leader under `camps/`.
+Before the front desk moved into the clone, this folder was also where the Guildmaster ran, with `.claude/settings.local.json` written by gm. gm no longer writes it; one left from before is not read, because no session starts there.
 
 ## The Guildmaster in herdr is kept running like a Party Leader
 
-With `front-desk: herdr`, the `guildmaster` tab, the front desk since [herdr-design.md](herdr-design.md), now runs the Guildmaster instead of a shell.
-Its pane runs `gm start guildmaster --pane <pane>`, which refreshes the folder's files, clears the Claude Code variables a herdr server may have inherited, and `exec`s `claude --name guildmaster` in the folder. Like `gm start <focus>`, it runs only in the pane the register records for it.
+The `guildmaster` tab, the front desk since [herdr-design.md](herdr-design.md), runs the Guildmaster.
+Its pane runs `gm start guildmaster --pane <pane>`, which copies the charter if it is missing, clears the Claude Code variables a herdr server may have inherited, and `exec`s `claude --name guildmaster` in the clone, whose committed hook then makes it the Guildmaster. The pane's line carries the Guildhall, herdr session and launchd settings gm runs with, so the Guildmaster's own `gm` reaches the same ones. Like `gm start <focus>`, it runs only in the pane the register records for it.
 
-Every muster (`gm`, `gm up`, `gm open`, the launchd agent, the muster before terminal commands, and the Guildmaster's own start) checks the front desk first, unless it is `clone`, with the same classifier and states as a Party Leader (alive, starting, dead, missing, unknown, held).
+Every muster (`gm`, `gm up`, `gm open`, the launchd agent, the muster before terminal commands, and every front desk start) checks the front desk first, with the same classifier and states as a Party Leader (alive, starting, dead, missing, unknown, held).
 A dead one is started again in its own pane. After 3 starts in a row never seen alive it is held, told once, until the patron runs `gm`.
 Schema 4 adds `start_attempts`, `held_at` and `held_told` to the `endpoint` table for this; an older register is migrated in place, adding only.
 The ledger gets `front-desk.launched` and `front-desk.held`, and `gm roster` shows the front desk's state and when it last started.
-
-## The Guildmaster's start, with no patron action
-
-In herdr, the Guildhall folder's `SessionStart` hook runs `gm hook front-desk` at every session start (startup, resume, clear, compaction); it is the clone's hook above without steps 1, 2 and 4:
-
-1. **The first-run check, without questions.** If a required piece is missing, the Guildmaster is told what and asked to say it plainly; nothing else runs. Otherwise `initialized` is recorded in `setup.conf`, if it was not already.
-2. **Autostart, always on.** The launchd agent is written and loaded only when it is not already loaded, so a repeat changes nothing. `gm autostart off` records `autostart: off` in `setup.conf`, and from then on nothing turns it back on until `gm autostart on`. On a system without launchd it says so and does nothing.
-3. **The muster**, as above, printing only what it changed.
-4. **A short summary for the Guildmaster**, injected as the hook's context and never shown on the patron's screen: the setup in one line, what the muster did (marked routine, not to be mentioned unless asked), anything to tell the patron once (a held Party Leader or Guildmaster, a start that failed, autostart that could not be turned on), the collector offer when due, and the roster.
-
-The hook prints only its JSON. A second, third or tenth start prints the same summary, without the offer, and starts and loads nothing again.
+A `front-desk: clone` line that [PR 24](https://github.com/MadReza/guildmaster/pull/24) wrote into `setup.conf`, when the patron's own session could be the front desk, is ignored: the Guildmaster is kept in herdr all the same.
 
 ### The optional piece: offered in chat, once
 
@@ -190,15 +186,15 @@ The denied file-editing tools enforce part of this, in keeping with the patron's
 - The front desk's check, `gm_front_desk_home`, on its own: a plain clone is the front desk; a linked worktree, a folder inside the clone or inside another repository, and a folder that is no repository are not; a marked folder or worktree is (with or without a final newline), but not with an empty marker, one that is not one plain word, a link, a folder, or no `gm`.
 - In a linked worktree, the hook run exactly as the committed settings give it prints nothing and exits 0, and `gm` alone says nothing on stderr either; the guard leaves edits and commands, `gm` too, to Claude Code; and nothing happened: nothing in the test's `HOME`, no Guildhall, no launchd, no herdr call, and an existing schema-1 register not even migrated. A marked worktree is the front desk, `gm` linked from it.
 - The guard at the front desk: Edit, Write, NotebookEdit and MultiEdit denied with the reason; `bin/gm`, `./bin/gm`, this `gm`'s path with or without `bash`, and `gm` linked to this one allowed; a second command, `&&`, a pipe, a redirection, `$(…)`, backticks, a newline, `bash gm`, plain `gm` that is not this one, another path, `bin/gm` from another folder, and other commands and tools left alone.
-- The clone's front desk, in a plain clone of the suite's own (a copy of the working tree committed in a new repository, since the suite itself usually runs in a worktree), its hook run exactly as the committed settings give it, at its root with `CLAUDE_PROJECT_DIR` set: the link made once, pointing at the clone's `gm`, with `~/.local/bin` made; valid JSON with nothing for the patron's screen; the charter, the first run, `front-desk: clone`, autostart loaded once with `~/.local/bin` on the agent's `PATH`, the Party Leader brought up and no Guildmaster started in herdr. Four more starts, three of them at once, link, start and load nothing, and `gm` says nothing on stderr. With `~/.local/bin` on the `PATH` the Guildmaster runs plain `gm`.
+- The clone's front desk, in a plain clone of the suite's own (a copy of the working tree committed in a new repository, since the suite itself usually runs in a worktree), its hook run exactly as the committed settings give it, at its root with `CLAUDE_PROJECT_DIR` set. Outside herdr: the link made once, pointing at the clone's `gm`, with `~/.local/bin` made; valid JSON with nothing for the patron's screen; the first run, autostart loaded once with `~/.local/bin` on the agent's `PATH`; the Guildmaster started in herdr, its claude in the clone, and the Party Leader brought up; the session told it is not the Guildmaster, with the one line naming the tab and how to open herdr, no charter and no collector offer. Four more starts, three of them at once, link, start and load nothing, and `gm` says nothing on stderr. Then the hook in the front desk's herdr pane (with herdr's `HERDR_*` ids): the Guildmaster, with its charter, the setup, the collector offer and the roster, starting nothing; with `~/.local/bin` on the `PATH` it runs plain `gm`.
 - A `gm` already in `~/.local/bin`, a file, a link elsewhere or a broken link, is never replaced.
 - The hook never fails the session: a `~/.local/bin` that cannot be made, a Guildhall `gm` cannot write (still JSON, saying the start-up did not finish), and no `gm` at all.
-- A missing herdr is offered, with Homebrew or herdr's official installer, after `gm` is linked and before anything is recorded; `gm install herdr` runs `brew install herdr`, or the official installer, says so in one line and finishes the setup, and a failed download says so.
-- The launchd agent's muster with `front-desk: clone` brings a dead Party Leader back and starts no Guildmaster; `gm` alone moves the front desk to herdr and starts it; `claude` in the clone takes it back and leaves that Guildmaster running, and does not start it again once it ends.
+- A missing herdr is offered, with Homebrew or herdr's official installer, after `gm` is linked and before anything is recorded; `gm install herdr` runs `brew install herdr`, or the official installer, finishes the setup, starts the Guildmaster in herdr (once), says so in one line with where it is, and a failed download says so.
+- The Guildmaster lives in herdr: started from outside it; the launchd agent's muster brings a dead Guildmaster and a dead Party Leader back, each in its own pane; never two: `claude` again outside herdr, in another tab of the guild's workspace or in another herdr session, while the Guildmaster runs, starts nothing and is pointed to it ("switch to it in herdr", or `herdr --session`); with the Guildmaster gone, `claude` in another tab of the guild's workspace becomes the front desk, recorded as its endpoint with its tab renamed, and the muster starts no second one; a `front-desk: clone` line from before is ignored.
 - The committed settings run the hook and the guard with `|| true` and hold no permissions; the root `CLAUDE.md` says it is not the charter; `front-desk/` is gone; `.gitignore` keeps the marker and the patron's local settings out.
 
-- `gm` alone: the front desk recorded, the Guildmaster started once in its pane with `claude --name guildmaster` in its folder and without the server's Claude Code variables, the charter copied once and never overwritten, the settings (hook, denied edits, herdr session), and no `CLAUDE.md` above the camps. Run again, it starts nothing. At a terminal it attaches herdr at the front desk's tab; inside herdr it only switches to it; without a terminal it prints one line. A missing herdr stops it with the install instructions.
-- The hook: valid JSON with no message for the patron and nothing on stderr; the first run recorded without a question and without inventing an answer; autostart loaded once; the roster. Four more starts, three of them at once, start nothing, load nothing and offer nothing again. A Party Leader that died is started again and reported as routine.
+- `gm` alone: the front desk recorded, the Guildmaster started once in its pane with `claude --name guildmaster` in the clone, with the Guildhall and herdr session and without the server's Claude Code variables, the charter copied once and never overwritten, no settings in the Guildhall's folder, and no `CLAUDE.md` above the camps. Run again, it starts nothing. At a terminal it attaches herdr at the front desk's tab; inside herdr it only switches to it; without a terminal it prints one line. A missing herdr stops it with the install instructions.
+- The hook in the front desk's pane: valid JSON with no message for the patron and nothing on stderr; the first run recorded without a question and without inventing an answer; autostart loaded once; the roster. Four more starts, three of them at once, start nothing, load nothing and offer nothing again. A Party Leader that died is started again and reported as routine.
 - A missing required piece is explained to the Guildmaster, and nothing is recorded.
 - The collector's answer recorded through `gm init --later` and `--no`: later is offered again another day, a skip never.
 - `gm autostart off` stays off through the Guildmaster's starts, and `on` turns it back on.
@@ -224,7 +220,7 @@ And for the clone's front desk as [PR 24](https://github.com/MadReza/guildmaster
 3. With the Party Leader's process killed, the launchd agent's `gm up --quiet` started it again in the same pane; the ledger held two `party-leader.launched` rows and no `front-desk.launched`: no Guildmaster was ever started in herdr, and the `guildmaster` tab held a shell.
 4. The lab was torn down, and the helper confirmed the default session was unchanged.
 
-And for the front desk at the clone's root, by hand on 2026-10-03, against real herdr 0.9.1 in another isolated lab session (every herdr call through the helper, with gm's herdr a wrapper that hands each call to it), with a temporary `HOME` for gm, the launchctl stub, a throwaway repository and Guildhall, the same stand-in for `claude`, and this branch cloned plainly with `git clone`, plus a linked worktree of that clone:
+And for the front desk at the clone's root as this change first built it, with the patron's own session as the Guildmaster, by hand on 2026-10-03, against real herdr 0.9.1 in another isolated lab session (every herdr call through the helper, with gm's herdr a wrapper that hands each call to it), with a temporary `HOME` for gm, the launchctl stub, a throwaway repository and Guildhall, the same stand-in for `claude`, and this branch cloned plainly with `git clone`, plus a linked worktree of that clone:
 
 1. In the linked worktree, the hook run exactly as `.claude/settings.json` gives it: exit 0 at once, nothing on stdout or stderr, the temporary `HOME` still empty, no Guildhall, no launchctl call, and the lab session still without a pane. The guard printed nothing for Edit, nor for `bin/gm roster`.
 2. A focus recorded with `--no-launch`, then the hook in the plain clone: exit 0 in 11 seconds, nothing on stderr; `gm` linked to the clone's `bin/gm`; `front-desk: clone` and the first run recorded; the stub launchd agent loaded once; the Party Leader started in a new tab (`w1:p2`), listed as routine with the link; the roster with the front desk as `clone`, and `appt` alive.
