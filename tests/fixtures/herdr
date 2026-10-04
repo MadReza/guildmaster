@@ -8,6 +8,7 @@
 #   calls        every call, one a line
 #   runs         pane<TAB>the line typed into it by pane run
 #   run-proc     what a pane runs after pane run (default claude)
+#   run-proc-collector  what the collector's pane runs after pane run (default otelcol-contrib)
 #   focused      each workspace or tab focused, one a line
 #   attached     present once a client attached (herdr with no command)
 # Every call must carry --session $HERDR_STUB_SESSION; any other session is refused and recorded in violations.
@@ -119,6 +120,7 @@ case "${1:-} ${2:-}" in
     [ -n "$(field panes "$3" 1)" ] || err pane_not_found "pane $3 not found"
     printf '%s\t%s\n' "$3" "$4" >>"$D/runs"
     proc=$(cat "$D/run-proc" 2>/dev/null || echo claude)
+    case $4 in *" start 'collector' "*) proc=$(cat "$D/run-proc-collector" 2>/dev/null || echo otelcol-contrib) ;; esac
     awk -F '\t' -v OFS='\t' -v k="$3" -v v="$proc" '$1 == k { $4 = v } { print }' "$D/panes" >"$D/panes.new" && mv "$D/panes.new" "$D/panes" ;;
   "pane close")
     up

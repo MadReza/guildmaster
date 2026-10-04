@@ -7,7 +7,16 @@ GM=$ROOT/bin/gm
 FILTER=${1:-}
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/gm-tests.XXXXXX")
 WORK=$(cd "$WORK" && pwd -P)
-trap 'rm -rf "$WORK"' EXIT
+# shellcheck disable=SC2329 # run by the EXIT trap
+suite_cleanup() {
+  local pid port
+  [ ! -f "$WORK/listeners" ] || while read -r pid port; do
+    kill "$pid" 2>/dev/null
+    pkill -f "nc -l 127.0.0.1 $port" 2>/dev/null
+  done <"$WORK/listeners"
+  rm -rf "$WORK"
+}
+trap suite_cleanup EXIT
 # A home of the suite's own: the front desk's hook links gm into ~/.local/bin, and nothing may reach the real one.
 export HOME=$WORK/home
 mkdir -p "$HOME"
@@ -82,7 +91,7 @@ setup() {
 
 # ---- herdr, through the stub ----
 # A Guildhall past its first run, so GM_INTERACTIVE=1 brings the muster and not gm init's questions.
-initialized() { printf 'initialized: 2026-01-01T00:00:00Z\ncollector: skipped\n' >"$GM_HALL/setup.conf"; }
+initialized() { printf 'initialized: 2026-01-01T00:00:00Z\ncollector: off\n' >"$GM_HALL/guild.conf"; }
 
 pl_pane() { db "SELECT pane_id FROM endpoint WHERE key='party-leader:$1';"; }
 
@@ -1202,8 +1211,8 @@ t_first_run_is_detected_asks_once_and_records_the_choice() {
     assert_contains "$out" "missing  otelcol-contrib" "what is missing" &&
     assert_contains "$out" "per-call model, tokens and cost" "what the missing piece means" &&
     assert_contains "$out" "Skipped" "the choice taken"
-  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/setup.conf")" skipped "the choice recorded" &&
-    [ -n "$(sed -n 's/^initialized: //p' "$GM_HALL/setup.conf")" ] || fail "initialized not recorded"
+  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/guild.conf")" off "the choice recorded" &&
+    [ -n "$(sed -n 's/^initialized: //p' "$GM_HALL/guild.conf")" ] || fail "initialized not recorded"
   [ -s "$GM_HALL/register.db" ] || fail "the command did not run after the first run"
   out=$(GM_INTERACTIVE=1 GM_OTELCOL=$WORK/none gm list </dev/null 2>&1)
   assert_not_contains "$out" "first run" "it never nags afterwards"
@@ -1213,7 +1222,7 @@ t_first_run_is_detected_asks_once_and_records_the_choice() {
 t_first_run_respects_a_hand_written_setup_file() {
   export GM_HALL=$WORK/fr-hand/hall
   mkdir -p "$GM_HALL"
-  printf 'initialized: 2026-01-01T00:00:00Z\ncollector: skipped\n' >"$GM_HALL/setup.conf"
+  printf 'initialized: 2026-01-01T00:00:00Z\ncollector: skipped\n' >"$GM_HALL/guild.conf"
   local out
   out=$(GM_INTERACTIVE=1 GM_OTELCOL=$WORK/none gm list </dev/null 2>&1)
   assert_not_contains "$out" "first run" "a written setup file means the first run is over"
@@ -1224,12 +1233,12 @@ t_first_run_never_blocks_without_a_terminal() {
   local out
   out=$(gm list </dev/null 2>&1) || fail "a command failed for want of a terminal"
   assert_not_contains "$out" "first run" "no questions without a terminal"
-  [ ! -e "$GM_HALL/setup.conf" ] || fail "setup recorded though nobody answered"
+  [ ! -e "$GM_HALL/guild.conf" ] || fail "setup recorded though nobody answered"
   out=$(GM_OTELCOL=$WORK/none gm init </dev/null 2>&1) || fail "gm init without a terminal failed"
   assert_contains "$out" "missing  otelcol-contrib" "it still reports" &&
     assert_contains "$out" "Not asking: this is not a terminal" "and says why it did not ask" &&
     assert_contains "$out" "gm init --yes" "and how to answer"
-  [ ! -e "$GM_HALL/setup.conf" ] || fail "gm init recorded a choice nobody made"
+  [ ! -e "$GM_HALL/guild.conf" ] || fail "gm init recorded a choice nobody made"
 }
 
 t_first_run_never_runs_in_a_hook_or_the_status_line() {
@@ -1238,19 +1247,19 @@ t_first_run_never_runs_in_a_hook_or_the_status_line() {
   out=$(printf '{}' | GM_INTERACTIVE=1 GM_OTELCOL=$WORK/none gm hook session-end 2>&1 </dev/null)
   out="$out$(printf '{}' | GM_INTERACTIVE=1 GM_OTELCOL=$WORK/none gm statusline 2>&1)"
   assert_not_contains "$out" "first run" "hooks and the status line never ask"
-  [ ! -e "$GM_HALL/setup.conf" ] || fail "a hook ran the first run"
+  [ ! -e "$GM_HALL/guild.conf" ] || fail "a hook ran the first run"
 }
 
 t_init_yes_and_no_answer_for_scripts() {
   export GM_HALL=$WORK/fr-flags/hall
   GM_OTELCOL=$WORK/none gm init --no >/dev/null 2>&1 || fail "gm init --no failed"
-  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/setup.conf")" skipped "--no skips" &&
-    [ -n "$(sed -n 's/^initialized: //p' "$GM_HALL/setup.conf")" ] || fail "--no leaves it uninitialized"
+  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/guild.conf")" off "--no skips" &&
+    [ -n "$(sed -n 's/^initialized: //p' "$GM_HALL/guild.conf")" ] || fail "--no leaves it uninitialized"
   export GM_HALL=$WORK/fr-flags2/hall SCENARIO=fr-flags2
   otel_release fr-flags2
   local bin=$WORK/fr-flags2/bin out
   out=$(ginit init --yes --bin-dir "$bin" 2>&1) || fail "gm init --yes failed: $out"
-  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/setup.conf")" installed "--yes installs" &&
+  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/guild.conf")" on "--yes installs" &&
     [ -x "$bin/otelcol-contrib" ] || fail "nothing installed at $bin/otelcol-contrib"
 }
 
@@ -1258,12 +1267,12 @@ t_choosing_later_asks_again_only_in_gm_init() {
   export GM_HALL=$WORK/fr-later/hall
   local out
   out=$(printf 'l\n' | GM_INTERACTIVE=1 GM_OTELCOL=$WORK/none gm list 2>&1)
-  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/setup.conf")" later "later recorded"
+  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/guild.conf")" later "later recorded"
   out=$(GM_INTERACTIVE=1 GM_OTELCOL=$WORK/none gm list </dev/null 2>&1)
   assert_not_contains "$out" "first run" "later does not nag in other commands"
   out=$(printf 's\n' | GM_INTERACTIVE=1 GM_OTELCOL=$WORK/none gm init 2>&1)
   assert_contains "$out" "Install, skip, or later?" "gm init asks again" &&
-    assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/setup.conf")" skipped "and the new answer replaces the old"
+    assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/guild.conf")" off "and the new answer replaces the old"
   out=$(GM_INTERACTIVE=1 GM_OTELCOL=$WORK/none gm init </dev/null 2>&1)
   assert_contains "$out" "not asking again" "a skip is respected by gm init" &&
     assert_not_contains "$out" "Install, skip" "and not asked"
@@ -1280,10 +1289,10 @@ t_init_installs_the_collector_after_checking_its_checksum() {
     assert_contains "$out" "installed $bin/otelcol-contrib" "it says exactly where" &&
     assert_contains "$out" "is not on your PATH" "and what the patron must do about the PATH"
   [ -x "$bin/otelcol-contrib" ] || fail "no executable at $bin/otelcol-contrib"
-  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/setup.conf")" installed "recorded as installed" &&
-    assert_eq "$(sed -n 's/^collector-path: //p' "$GM_HALL/setup.conf")" "$bin/otelcol-contrib" "with its path" &&
-    assert_eq "$(sed -n 's/^collector-sha256: //p' "$GM_HALL/setup.conf")" "$SUM" "and its checksum" &&
-    assert_eq "$(sed -n 's/^collector-version: //p' "$GM_HALL/setup.conf")" 0.162.0 "and the pinned version"
+  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/guild.conf")" on "recorded as on" &&
+    assert_eq "$(sed -n 's/^collector-path: //p' "$GM_HALL/guild.conf")" "$bin/otelcol-contrib" "with its path" &&
+    assert_eq "$(sed -n 's/^collector-sha256: //p' "$GM_HALL/guild.conf")" "$SUM" "and its checksum" &&
+    assert_eq "$(sed -n 's/^collector-version: //p' "$GM_HALL/guild.conf")" 0.162.0 "and the pinned version"
   leftovers=$(find "$WORK/fr-install/tmpd" "$bin" -mindepth 1 | sed "s|^$WORK/fr-install/||")
   assert_eq "$leftovers" "newdir/bin/otelcol-contrib" "no temporary file or staged copy left"
   if command -v otelcol-contrib >/dev/null 2>&1; then
@@ -1309,8 +1318,8 @@ t_init_refuses_a_collector_whose_checksum_does_not_match() {
     assert_contains "$out" "nothing was installed" "and that nothing happened"
   [ ! -e "$bin" ] && [ ! -e "$WORK/fr-badsum/newdir" ] || fail "a refused install left a directory behind"
   assert_eq "$(find "$WORK/fr-badsum/tmpd" -mindepth 1 | wc -l | tr -d ' ')" 0 "no temporary file left"
-  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/setup.conf")" later "recorded so gm init offers it again" &&
-    assert_not_contains "$(cat "$GM_HALL/setup.conf")" collector-path "no path recorded"
+  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/guild.conf")" later "recorded so gm init offers it again" &&
+    assert_not_contains "$(cat "$GM_HALL/guild.conf")" collector-path "no path recorded"
 }
 
 t_init_leaves_nothing_when_the_download_fails() {
@@ -1345,7 +1354,7 @@ t_init_stops_with_instructions_when_something_required_is_missing() {
     assert_contains "$out" "MISSING  Claude Code" "the missing piece is marked" &&
     assert_contains "$out" "Install Claude Code" "with a plain instruction" &&
     assert_not_contains "$out" "Install, skip" "and no question"
-  [ ! -e "$GM_HALL/setup.conf" ] || fail "a failed first run recorded something"
+  [ ! -e "$GM_HALL/guild.conf" ] || fail "a failed first run recorded something"
   rc=0
   out=$(GM_INTERACTIVE=1 GM_CLAUDE=$WORK/no-claude gm list </dev/null 2>&1) || rc=$?
   assert_eq "$rc" 1 "the command that triggered the first run stops" &&
@@ -1361,7 +1370,7 @@ t_init_requires_herdr() {
     assert_contains "$out" "https://herdr.dev/docs/install/" "with the official install page" &&
     assert_contains "$out" "curl -fsSL https://herdr.dev/install.sh | sh" "and the official command" &&
     assert_not_contains "$out" "Install, skip" "and no question"
-  [ ! -e "$GM_HALL/setup.conf" ] || fail "a failed first run recorded something"
+  [ ! -e "$GM_HALL/guild.conf" ] || fail "a failed first run recorded something"
   # A herdr that reports its version is listed with it.
   mkdir -p "$fakebin"
   cp "$ROOT/tests/fixtures/fake-claude" "$fakebin/herdr-run"
@@ -1733,7 +1742,7 @@ t_gm_alone_explains_what_is_missing() {
 
 t_front_desk_hook_sets_up_and_is_silent_on_repeat() {
   setup hook
-  rm -f "$GM_HALL/setup.conf"
+  rm -f "$GM_HALL/guild.conf"
   export GM_OTELCOL=$WORK/none
   local out ctx
   gm >/dev/null 2>&1 || fail "gm alone failed"
@@ -1748,9 +1757,9 @@ t_front_desk_hook_sets_up_and_is_silent_on_repeat() {
     assert_contains "$ctx" "guildmaster              front desk    alive" "with the front desk" &&
     assert_contains "$ctx" "init --yes" "the collector offer, with how to record the answer" &&
     assert_contains "$ctx" "init --later" "including later"
-  [ -n "$(sed -n 's/^initialized: //p' "$GM_HALL/setup.conf")" ] || fail "the first run was not recorded"
-  [ -n "$(sed -n 's/^collector-offered: //p' "$GM_HALL/setup.conf")" ] || fail "the offer was not recorded"
-  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/setup.conf")" "" "and no answer invented for the patron"
+  [ -n "$(sed -n 's/^initialized: //p' "$GM_HALL/guild.conf")" ] || fail "the first run was not recorded"
+  [ -n "$(sed -n 's/^collector-offered: //p' "$GM_HALL/guild.conf")" ] || fail "the offer was not recorded"
+  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/guild.conf")" "" "and no answer invented for the patron"
   if [ "$(uname -s)" = Darwin ]; then
     assert_contains "$ctx" "autostart on" "autostart is on" &&
       assert_eq "$(bootstraps)" 1 "loaded once" &&
@@ -1788,7 +1797,7 @@ t_front_desk_hook_explains_a_missing_required_piece() {
   assert_contains "$ctx" "required pieces are missing" "the Guildmaster is told" &&
     assert_contains "$ctx" "Claude Code: $WORK/no-claude not found" "what is missing" &&
     assert_contains "$ctx" "Tell the patron plainly" "and to say it plainly"
-  [ ! -e "$GM_HALL/setup.conf" ] || fail "a failed first run recorded something"
+  [ ! -e "$GM_HALL/guild.conf" ] || fail "a failed first run recorded something"
 }
 
 t_collector_answer_is_recorded_through_gm() {
@@ -1799,15 +1808,15 @@ t_collector_answer_is_recorded_through_gm() {
   ctx=$(hook_context "$(front_desk_hook)")
   assert_contains "$ctx" "Offer the tracing collector once" "offered"
   gm init --later >/dev/null 2>&1 || fail "gm init --later failed"
-  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/setup.conf")" later "later recorded"
+  assert_eq "$(sed -n 's/^collector: //p' "$GM_HALL/guild.conf")" later "later recorded"
   assert_not_contains "$(hook_context "$(front_desk_hook)")" "Offer the tracing collector" "not offered again the same day"
-  sed -i.bak 's/^collector-offered: .*/collector-offered: 2026-01-01T00:00:00Z/' "$GM_HALL/setup.conf"
+  sed -i.bak 's/^collector-offered: .*/collector-offered: 2026-01-01T00:00:00Z/' "$GM_HALL/guild.conf"
   assert_contains "$(hook_context "$(front_desk_hook)")" "Offer the tracing collector" "offered again another day"
   gm init --no >/dev/null 2>&1
-  sed -i.bak 's/^collector-offered: .*/collector-offered: 2026-01-01T00:00:00Z/' "$GM_HALL/setup.conf"
+  sed -i.bak 's/^collector-offered: .*/collector-offered: 2026-01-01T00:00:00Z/' "$GM_HALL/guild.conf"
   ctx=$(hook_context "$(front_desk_hook)")
   assert_not_contains "$ctx" "Offer the tracing collector" "a skip is never offered again" &&
-    assert_contains "$ctx" "collector skipped by the patron" "and the Guildmaster knows it"
+    assert_contains "$ctx" "tracing collector off: the patron chose to go without it" "and the Guildmaster knows it"
 }
 
 t_autostart_stays_off_once_turned_off() {
@@ -1819,13 +1828,13 @@ t_autostart_stays_off_once_turned_off() {
   front_desk_hook >/dev/null
   assert_eq "$(bootstraps)" 1 "on by itself"
   assert_contains "$(gm autostart off)" "stays off" "off says it stays off"
-  assert_eq "$(sed -n 's/^autostart: //p' "$GM_HALL/setup.conf")" off "recorded"
+  assert_eq "$(sed -n 's/^autostart: //p' "$GM_HALL/guild.conf")" off "recorded"
   ctx=$(hook_context "$(front_desk_hook)")
   assert_eq "$(bootstraps)" 1 "the Guildmaster does not turn it back on" &&
     assert_contains "$ctx" "autostart off: the patron turned it off" "and knows why"
   [ -z "$(ls "$GM_LAUNCH_AGENTS" 2>/dev/null)" ] || fail "the property list came back"
   gm autostart on >/dev/null || fail "on failed"
-  assert_eq "$(sed -n 's/^autostart: //p' "$GM_HALL/setup.conf")" on "on again" &&
+  assert_eq "$(sed -n 's/^autostart: //p' "$GM_HALL/guild.conf")" on "on again" &&
     assert_eq "$(bootstraps)" 2 "and loaded"
 }
 
@@ -1862,7 +1871,7 @@ t_repos_finds_the_clone_the_patron_names() {
   new_repo repos/src/team/appointments-legacy >/dev/null
   new_repo repos/src/billing >/dev/null
   mkdir -p "$WORK/repos/src/node_modules/appointments-x/.git"
-  printf 'repo-roots: %s\n' "$WORK/repos/src" >"$GM_HALL/setup.conf"
+  printf 'repo-roots: %s\n' "$WORK/repos/src" >"$GM_HALL/guild.conf"
   assert_eq "$(gm repos billing)" "$WORK/repos/src/billing" "one clone for one word" &&
     assert_eq "$(gm repos Appoint | sort | tr '\n' ' ')" "$WORK/repos/src/appointments $WORK/repos/src/team/appointments-legacy " "every candidate, ignoring case and node_modules" &&
     assert_eq "$(gm repos nothing-like-it)" "" "none"
@@ -2012,7 +2021,7 @@ t_clone_hooks_stand_down_in_a_worktree() {
   cp "$GM_HALL/register.db" "$WORK/standdown/before.db"
   clone_hook w2 "$DESK_WT" >/dev/null
   cmp -s "$GM_HALL/register.db" "$WORK/standdown/before.db" || fail "the register changed"
-  [ ! -e "$GM_HALL/setup.conf" ] || fail "the setup was recorded"
+  [ ! -e "$GM_HALL/guild.conf" ] || fail "the setup was recorded"
 }
 
 t_marked_folder_is_the_front_desk() {
@@ -2059,7 +2068,7 @@ ls' 'bash gm list' 'gm roster' 'ls' 'bash x/bin/gm roster' 'bin/gmx roster'; do
 t_clone_front_desk_links_gm_once_and_is_silent_on_repeat() {
   own_home clone
   setup clone
-  rm -f "$GM_HALL/setup.conf"
+  rm -f "$GM_HALL/guild.conf"
   export GM_OTELCOL=$WORK/none
   local out ctx link=$HOME/.local/bin/gm before after
   [ ! -e "$HOME/.local" ] || return 1
@@ -2079,8 +2088,8 @@ t_clone_front_desk_links_gm_once_and_is_silent_on_repeat() {
     assert_eq "$(desk_runs)" 1 "the Guildmaster started in herdr" &&
     assert_eq "$(pl_runs)" 1 "and the Party Leader" &&
     assert_contains "$(cat "$HERDR_STUB/runs")" "cd '$DESK' && env" "the Guildmaster's claude runs in the clone"
-  [ -n "$(sed -n 's/^initialized: //p' "$GM_HALL/setup.conf")" ] || fail "the first run was not recorded"
-  [ -z "$(sed -n 's/^collector-offered: //p' "$GM_HALL/setup.conf")" ] || fail "the collector was offered outside the front desk"
+  [ -n "$(sed -n 's/^initialized: //p' "$GM_HALL/guild.conf")" ] || fail "the first run was not recorded"
+  [ -z "$(sed -n 's/^collector-offered: //p' "$GM_HALL/guild.conf")" ] || fail "the collector was offered outside the front desk"
   if [ "$(uname -s)" = Darwin ]; then
     assert_eq "$(bootstraps)" 1 "autostart loaded once" &&
       assert_contains "$(cat "$GM_LAUNCH_AGENTS"/com.guildmaster.up.*.plist)" "<key>PATH</key><string>$HOME/.local/bin:" "the agent's PATH has ~/.local/bin"
@@ -2179,7 +2188,7 @@ t_clone_front_desk_offers_to_install_herdr() {
     assert_contains "$ctx" "Only on the patron's yes, run bin/gm install herdr" "only on a yes" &&
     assert_not_contains "$ctx" "required pieces are missing" "herdr is offered, not demanded"
   [ -L "$HOME/.local/bin/gm" ] || fail "gm was not linked first"
-  [ ! -e "$GM_HALL/setup.conf" ] || fail "the setup was recorded without herdr"
+  [ ! -e "$GM_HALL/guild.conf" ] || fail "the setup was recorded without herdr"
   ctx=$(GM_BREW=$WORK/no-brew hook_context "$(GM_BREW=$WORK/no-brew clone_hook)")
   assert_contains "$ctx" "with herdr's official installer (curl -fsSL https://herdr.dev/install.sh | sh)" "without Homebrew, the official installer"
 }
@@ -2201,7 +2210,7 @@ t_install_herdr_with_homebrew_or_the_official_installer() {
   assert_eq "$(cat "$WORK/install/brew-calls" 2>/dev/null)" "install herdr" "brew install herdr" &&
     assert_contains "$out" "herdr is installed with Homebrew, at $ROOT/tests/fixtures/herdr; the guild is set up, and the Guildmaster is in herdr tab guildmaster: open it with: herdr --session gm-test." "says so in one line" &&
     assert_eq "$(desk_runs)" 1 "and the Guildmaster started in herdr"
-  [ -n "$(sed -n 's/^initialized: //p' "$GM_HALL/setup.conf")" ] || fail "the setup was not finished"
+  [ -n "$(sed -n 's/^initialized: //p' "$GM_HALL/guild.conf")" ] || fail "the setup was not finished"
   [ "$(uname -s)" != Darwin ] || assert_eq "$(bootstraps)" 1 "and autostart turned on"
   out=$(GM_HERDR=herdr-not-yet GM_BREW=$WORK/no-brew GM_HERDR_INSTALLER="file://$installer" gm install herdr 2>&1) || fail "the official installer failed: $out"
   assert_eq "$(cat "$WORK/install/installer-ran" 2>/dev/null)" ran "without Homebrew, herdr's official installer ran" &&
@@ -2261,11 +2270,324 @@ t_clone_front_desk_lives_in_herdr() {
   gm up --quiet >/dev/null 2>&1
   assert_eq "$(desk_runs)" 2 "the muster keeps that one" &&
     assert_eq "$(roster_state guildmaster)" alive "alive"
-  # A setup.conf from when the front desk could be the patron's own session is ignored: it is in herdr.
-  printf 'front-desk: clone\n' >>"$GM_HALL/setup.conf"
+  # A guild.conf from when the front desk could be the patron's own session is ignored: it is in herdr.
+  printf 'front-desk: clone\n' >>"$GM_HALL/guild.conf"
   stub_proc "$pane" shell
   gm up --quiet >/dev/null 2>&1
   assert_eq "$(desk_runs)" 3 "the Guildmaster is started again in herdr"
+}
+
+# ---- guild.conf, and the tracing collector the muster keeps running ----
+
+conf() { sed -n "s/^$1: //p" "$GM_HALL/guild.conf"; }
+
+# Launch lines typed for the collector, and the collector's recorded pane.
+coll_runs() { grep -c "start 'collector'" "$HERDR_STUB/runs" 2>/dev/null || true; }
+coll_pane() { db "SELECT pane_id FROM endpoint WHERE key='collector';"; }
+
+# otlp_listener <port>: something on 127.0.0.1:<port> that answers every OTLP export with 200, as a running collector
+# would. stop_listeners stops it; the suite stops any left at its end.
+otlp_listener() {
+  local i=0
+  (while :; do printf 'HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n' | nc -l 127.0.0.1 "$1" >/dev/null 2>&1 || sleep 0.1; done) &
+  printf '%s %s\n' "$!" "$1" >>"$WORK/listeners"
+  printf '{"resourceLogs":[]}' >"$WORK/empty-logs.json"
+  while [ "$i" -lt 50 ] && [ "$(post_otlp "$1" /v1/logs "$WORK/empty-logs.json")" != 200 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+}
+
+stop_listeners() {
+  local pid port
+  while read -r pid port; do
+    kill "$pid" 2>/dev/null
+    pkill -f "nc -l 127.0.0.1 $port" 2>/dev/null
+  done <"$WORK/listeners"
+  : >"$WORK/listeners"
+}
+: >"$WORK/listeners"
+
+t_config_file_is_documented_and_read() {
+  export GM_HALL=$WORK/conf/hall
+  local out k
+  out=$(gm config set collector-port 4999) || fail "set failed: $out"
+  assert_contains "$out" "collector-port is 4999" "it says what it set"
+  [ -f "$GM_HALL/guild.conf" ] || fail "no guild.conf" || return 1
+  for k in collector collector-port telemetry autostart autostart-every muster-before-commands attach herdr-session \
+    herdr-workspace launch-grace start-tries repo-roots; do
+    grep -q "^# $k: " "$GM_HALL/guild.conf" || fail "guild.conf does not document $k"
+  done
+  assert_eq "$(conf collector-port)" 4999 "the line written"
+  out=$(gm config)
+  assert_contains "$out" "Settings, from $GM_HALL/guild.conf" "where they are" &&
+    assert_contains "$out" "  collector-port          4999      guild.conf" "a setting from the file, with its source" &&
+    assert_contains "$out" "  telemetry               on        default" "a default" &&
+    assert_contains "$out" "  collector               off       default (not decided yet)" "the collector, undecided" &&
+    assert_contains "$out" "  repo-roots              (the usual source folders) default" "a setting with no default value"
+  assert_eq "$(gm config get collector-port)" 4999 "get prints the value"
+  assert_contains "$(GM_OTELCOL=$WORK/none gm doctor 2>&1 || true)" "telemetry endpoint http://127.0.0.1:4999 is loopback" "gm uses it"
+  # A value gm cannot take keeps the default, and both gm config and gm doctor say so.
+  printf 'start-tries: soon\n' >>"$GM_HALL/guild.conf"
+  assert_contains "$(gm config)" "  start-tries             3         ignored: guild.conf says 'soon'" "a bad value is ignored" &&
+    assert_contains "$(GM_OTELCOL=$WORK/none gm doctor 2>&1 || true)" "warn  guild.conf: start-tries" "and doctor warns"
+  out=$(gm config set collector-port 99999 2>&1) && fail "a port out of range was taken"
+  assert_contains "$out" "collector-port cannot be '99999' (<port>)" "refused, with what it takes"
+  out=$(gm config set autostart maybe 2>&1) && fail "an on/off setting took maybe"
+  assert_contains "$out" "autostart cannot be 'maybe' (on | off)" "refused"
+  out=$(gm config set colour blue 2>&1) && fail "an unknown setting was taken"
+  assert_contains "$out" "no setting named 'colour'; the settings are: collector collector-port" "refused, naming the settings"
+  gm config set telemetry no >/dev/null
+  assert_eq "$(conf telemetry)" off "plain words are taken: no is off"
+  gm config unset collector-port >/dev/null
+  assert_eq "$(conf collector-port)" "" "unset removes the line" &&
+    assert_eq "$(gm config get collector-port)" 4318 "and the default holds"
+  gm config set repo-roots "$WORK/a" "$WORK/b" >/dev/null
+  assert_eq "$(conf repo-roots)" "$WORK/a $WORK/b" "several folders"
+  grep -q '^# collector: on | off | later, default off; GM_COLLECTOR overrides it' "$GM_HALL/guild.conf" ||
+    fail "the documentation is kept through every write"
+}
+
+t_config_environment_overrides_the_file() {
+  setup conf-env
+  initialized
+  local out f=$WORK/conf-env/env.txt
+  gm config set telemetry off >/dev/null
+  assert_contains "$(gm config)" "  telemetry               off       guild.conf" "from the file"
+  assert_contains "$(GM_TELEMETRY=on gm config)" "  telemetry               on        environment (GM_TELEMETRY)" "the environment overrides it"
+  out=$(GM_TELEMETRY=on gm config set telemetry off)
+  assert_contains "$out" "GM_TELEMETRY=on is set in this environment, and overrides it" "set says so"
+  # A setting from the file reaches gm and what it starts: the herdr session from guild.conf alone, and telemetry off.
+  gm config set herdr-session gm-test >/dev/null
+  (
+    unset GM_HERDR_SESSION
+    GM_CLAUDE=$FAKE gm open appt-v2 >/dev/null 2>&1 || fail "open failed"
+    assert_eq "$(roster_state appt-v2)" alive "the Party Leader runs, in the session guild.conf names"
+    assert_not_contains "$(grep "start 'guildmaster'" "$HERDR_STUB/runs" | tail -n 1)" "GM_HERDR_SESSION" \
+      "a setting from the file is not pinned on the Guildmaster's line"
+    line=$(grep "start 'appt-v2'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)
+    assert_not_contains "$line" "GM_TELEMETRY" "nor on a Party Leader's"
+    env GM_FAKE_CLAUDE_ENV="$f" sh -c "$line" </dev/null >/dev/null 2>&1
+    assert_not_contains "$(cat "$f")" "CLAUDE_CODE_ENABLE_TELEMETRY" "the pane's gm reads telemetry: off from guild.conf"
+  ) || return 1
+  # One given in the environment is pinned, as before.
+  stub_proc "$(pl_pane appt-v2)" shell
+  stub_proc "$(db "SELECT pane_id FROM endpoint WHERE key='front-desk';")" shell
+  GM_TELEMETRY=on GM_CLAUDE=$FAKE gm up >/dev/null 2>&1
+  assert_contains "$(grep "start 'guildmaster'" "$HERDR_STUB/runs" | tail -n 1)" "GM_HERDR_SESSION='gm-test'" "the environment's session is" &&
+    assert_contains "$(grep "start 'appt-v2'" "$HERDR_STUB/runs" | tail -n 1)" "GM_TELEMETRY='on'" "and its telemetry"
+}
+
+t_config_moves_setup_conf_into_guild_conf() {
+  export GM_HALL=$WORK/conf-migrate/hall
+  mkdir -p "$GM_HALL"
+  printf '%s\n' "# Guildmaster first-run setup, written by gm init. Plain text: edit it, or run gm init again." \
+    "initialized: 2026-01-01T00:00:00Z" "collector: installed" "collector-path: /opt/otel/otelcol-contrib" "autostart: off" \
+    "repo-roots: /src /work" >"$GM_HALL/setup.conf"
+  printf '{}' | gm hook session-end >/dev/null 2>&1
+  [ -f "$GM_HALL/setup.conf" ] && [ ! -e "$GM_HALL/guild.conf" ] || fail "a hook moved the settings"
+  assert_eq "$(gm config get collector)" on "read from setup.conf until then: installed is on"
+  [ ! -e "$GM_HALL/setup.conf" ] && [ -f "$GM_HALL/setup.conf.old" ] || fail "setup.conf was not moved aside" || return 1
+  assert_eq "$(conf collector)" on "installed became on" &&
+    assert_eq "$(conf initialized)" 2026-01-01T00:00:00Z "the first run kept" &&
+    assert_eq "$(conf collector-path)" /opt/otel/otelcol-contrib "where gm put the collector kept" &&
+    assert_eq "$(conf autostart)" off "autostart kept" &&
+    assert_eq "$(conf repo-roots)" "/src /work" "repo-roots kept"
+  grep -q '^# collector-port: <port>, default 4318; GM_OTEL_PORT overrides it' "$GM_HALL/guild.conf" || fail "no documentation"
+  assert_not_contains "$(cat "$GM_HALL/guild.conf")" "first-run setup, written by gm init" "the old header is gone"
+  assert_contains "$(gm config)" "  autostart               off       guild.conf" "gm config reads it"
+  # Should setup.conf come back beside it, guild.conf keeps its own lines and takes only what it lacks.
+  printf 'autostart: on\nstart-tries: 5\n' >"$GM_HALL/setup.conf"
+  gm list >/dev/null 2>&1
+  assert_eq "$(conf autostart)" off "guild.conf's own line kept" &&
+    assert_eq "$(conf start-tries)" 5 "a key it lacked taken"
+  [ ! -e "$GM_HALL/setup.conf" ] || fail "setup.conf left beside guild.conf"
+  # The old answers still read in guild.conf, written by hand.
+  sed -i.bak 's/^collector: on$/collector: skipped/' "$GM_HALL/guild.conf"
+  assert_eq "$(gm config get collector)" off "skipped is off"
+}
+
+t_collector_is_kept_running_by_the_muster() {
+  setup coll
+  initialized
+  export GM_OTELCOL=$FAKE GM_OTEL_PORT=1
+  local out pane pane2 ctx line f=$WORK/coll/env.txt
+  gm up >/dev/null 2>&1
+  out=$(gm config set collector on) || fail "set failed: $out"
+  pane=$(coll_pane)
+  [ -n "$pane" ] || fail "no collector pane recorded" || return 1
+  assert_eq "$out" "collector is on: gm keeps the tracing collector running in herdr tab collector, on 127.0.0.1:1; Party Leaders started from now on send to it." "one line says so" &&
+    assert_eq "$(awk -F '\t' -v t="$(db "SELECT tab_id FROM endpoint WHERE key='collector';")" '$1 == t { print $2"/"$3 }' "$HERDR_STUB/tabs")" \
+      "$(db "SELECT workspace_id FROM endpoint WHERE key='front-desk';")/collector" "in a tab of its own in the guild's workspace" &&
+    assert_eq "$(coll_runs)" 1 "started once" &&
+    assert_contains "$(cat "$HERDR_STUB/runs")" "start 'collector' --pane '$pane'" "its pane runs gm start collector" &&
+    assert_eq "$(db "SELECT count(*) FROM event WHERE kind='collector.launched';")" 1 "one ledger row"
+  # The pane's line runs the collector with its configuration, on loopback.
+  line=$(grep "start 'collector'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)
+  env GM_FAKE_CLAUDE_ENV="$f" sh -c "$line" </dev/null >/dev/null 2>&1
+  assert_eq "$(cat "$f.args")" "--config
+$ROOT/templates/otelcol.yaml" "otelcol-contrib --config templates/otelcol.yaml" &&
+    assert_contains "$(cat "$f")" "GM_OTEL_PORT=1" "on the port" &&
+    assert_contains "$(cat "$f")" "GM_HALL=$GM_HALL" "writing under the Guildhall"
+  out=$(gm start collector --pane w9:p9 2>&1) && fail "gm start collector ran in another pane"
+  assert_contains "$out" "runs only in the collector's own herdr pane" "and says why"
+  # Alive: a check says nothing, writes nothing and starts nothing.
+  assert_eq "$(gm up --quiet 2>&1)" "" "the agent's muster is silent" &&
+    assert_eq "$(GM_INTERACTIVE=1 gm list 2>&1 >/dev/null)" "" "so is the one before a command" &&
+    assert_eq "$(coll_runs)" 1 "and starts no second copy" &&
+    assert_eq "$(db "SELECT count(*) FROM event WHERE kind LIKE 'collector.%';")" 1 "a check writes no row"
+  assert_contains "$(gm roster)" "collector                collector     alive    $pane    running on 127.0.0.1:1" "the roster shows it" &&
+    assert_contains "$(gm up 2>&1)" "collector: already running (running on 127.0.0.1:1), left as it is" "gm up by hand says it"
+  # Dead: started again once, in its own pane, with nothing said.
+  stub_proc "$pane" shell
+  assert_eq "$(gm up --quiet 2>&1)" "" "a restart is silent" &&
+    assert_eq "$(runs_in "$pane")" 2 "in its own pane" &&
+    assert_eq "$(db "SELECT count(*) FROM event WHERE kind='collector.launched';")" 2 "one more ledger row"
+  gm up --quiet >/dev/null 2>&1
+  stub_proc "$pane" shell
+  assert_eq "$(GM_INTERACTIVE=1 gm list 2>&1 >/dev/null)" "" "before a command too" &&
+    assert_eq "$(runs_in "$pane")" 3 "started again"
+  gm up --quiet >/dev/null 2>&1
+  # Missing: a new tab.
+  stub_close "$pane"
+  gm up --quiet >/dev/null 2>&1
+  gm up --quiet >/dev/null 2>&1
+  pane2=$(coll_pane)
+  [ "$pane2" != "$pane" ] && [ "$(runs_in "$pane2")" = 1 ] || fail "a gone pane was not replaced ($pane2)"
+  # Three musters at once start it once.
+  stub_proc "$pane2" shell
+  db "UPDATE endpoint SET launched_ms=0;"
+  : >"$HERDR_STUB/runs"
+  export GM_LAUNCH_GRACE=600
+  gm up --quiet >/dev/null 2>&1 &
+  gm up --quiet >/dev/null 2>&1 &
+  GM_INTERACTIVE=1 gm list >/dev/null 2>&1 &
+  wait
+  assert_eq "$(coll_runs)" 1 "three musters at once start it once"
+  export GM_LAUNCH_GRACE=0
+  # The Guildmaster knows, and is told nothing routine about it.
+  ctx=$(hook_context "$(front_desk_hook)")
+  assert_contains "$ctx" "tracing collector on: gm keeps it running in herdr tab collector (routine" "the Guildmaster's setup line" &&
+    assert_contains "$ctx" "config set <key> <value> (never edit the file yourself)" "and how it changes a setting" &&
+    assert_not_contains "$ctx" "Tell the patron, once" "nothing to tell"
+  out=$(gm open collector --repo "$REPO" --no-launch 2>&1) && fail "a focus took the collector's name"
+  assert_contains "$out" "collector is the tracing collector's tab" "refused"
+}
+
+t_collector_failure_says_one_line_a_day() {
+  setup coll-fail
+  initialized
+  export GM_OTELCOL=$FAKE GM_OTEL_PORT=1
+  local out
+  gm up >/dev/null 2>&1
+  printf 'shell' >"$HERDR_STUB/run-proc-collector"
+  gm config set collector on >/dev/null
+  assert_eq "$(gm up --quiet 2>&1)$(gm up --quiet 2>&1)" "" "a failed start is tried again, silently"
+  assert_eq "$(coll_runs)" 3 "three tries"
+  out=$(gm up --quiet 2>&1)
+  assert_eq "$out" "collector: held: the tracing collector failed to start 3 times in a row (dead: the pane holds only a shell); gm tries again in a day, or now with gm config set collector on" "then one line" &&
+    assert_eq "$(gm up --quiet 2>&1)" "" "once in the agent's log" &&
+    assert_eq "$(coll_runs)" 3 "and no fourth try"
+  out=$(GM_INTERACTIVE=1 gm list 2>&1 >/dev/null)
+  assert_contains "$out" "collector: held: the tracing collector failed to start 3 times" "once at a terminal" &&
+    assert_eq "$(GM_INTERACTIVE=1 gm list 2>&1 >/dev/null)" "" "and only once"
+  assert_eq "$(db "SELECT count(*) FROM event WHERE kind='collector.held';")" 1 "one ledger row for the hold" &&
+    assert_eq "$(gm roster | awk '$1 == "collector" { print $3 }')" held "the roster shows it"
+  # A day later it is tried again, from the start, and says nothing until it has failed three times more.
+  db "UPDATE endpoint SET held_at='2020-01-01T00:00:00.000Z' WHERE key='collector';"
+  assert_eq "$(gm up --quiet 2>&1)" "" "tried again a day later, silently" &&
+    assert_eq "$(coll_runs)" 4 "once"
+  # gm config set collector on tries again at once; started, it runs.
+  rm -f "$HERDR_STUB/run-proc-collector"
+  gm config set collector on >/dev/null
+  assert_eq "$(gm roster | awk '$1 == "collector" { print $3 }')" alive "running"
+  gm up --quiet >/dev/null 2>&1
+  assert_eq "$(db "SELECT start_attempts||held_told||COALESCE(held_at,'-') FROM endpoint WHERE key='collector';")" "00-" "seen alive, the count starts over"
+  # No collector installed is a failure too: silent three times, then one line.
+  gm config set collector off >/dev/null
+  export GM_OTELCOL=$WORK/none
+  : >"$HERDR_STUB/runs"
+  gm config set collector on >/dev/null
+  assert_eq "$(gm up --quiet 2>&1)$(gm up --quiet 2>&1)" "" "silent while it counts"
+  out=$(gm up --quiet 2>&1)
+  assert_contains "$out" "collector: held: the tracing collector failed to start 3 times in a row (no OpenTelemetry Collector is installed (gm init --yes installs it))" "then one line saying why" &&
+    assert_eq "$(coll_runs)" 0 "nothing was typed into a pane"
+}
+
+t_collector_off_runs_nothing() {
+  setup coll-off
+  initialized
+  export GM_OTELCOL=$FAKE GM_OTEL_PORT=1
+  local out pane
+  gm up >/dev/null 2>&1
+  out=$(gm up 2>&1)
+  assert_not_contains "$out" "collector" "nothing said, even by gm up"
+  assert_eq "$(coll_runs)" 0 "nothing started" &&
+    assert_eq "$(db "SELECT count(*) FROM endpoint WHERE key='collector';")" 0 "nothing recorded" &&
+    assert_not_contains "$(gm roster)" "collector" "nor listed"
+  if awk -F '\t' '$3 == "collector"' "$HERDR_STUB/tabs" | grep -q .; then fail "a collector tab was made"; fi
+  # On, then off: stopped, its pane closed, one ledger row; then nothing again.
+  gm config set collector on >/dev/null
+  pane=$(coll_pane)
+  out=$(gm config set collector off)
+  assert_eq "$out" "collector is off: gm keeps no collector running, and says nothing about it." "one line says so"
+  grep -q "pane close $pane --session gm-test" "$HERDR_STUB/calls" || fail "its pane was not closed"
+  assert_eq "$(db "SELECT count(*) FROM endpoint WHERE key='collector';")" 0 "forgotten" &&
+    assert_eq "$(db "SELECT count(*) FROM event WHERE kind='collector.stopped';")" 1 "one ledger row"
+  : >"$HERDR_STUB/runs"
+  assert_eq "$(gm up --quiet 2>&1)" "" "silent" &&
+    assert_eq "$(coll_runs)" 0 "and nothing started"
+  # Turned off by hand in guild.conf, or by GM_COLLECTOR=off: the next muster stops it, silently.
+  gm config set collector on >/dev/null
+  pane=$(coll_pane)
+  sed -i.bak 's/^collector: on$/collector: off/' "$GM_HALL/guild.conf"
+  assert_eq "$(gm up --quiet 2>&1)" "" "silent"
+  grep -q "pane close $pane --session gm-test" "$HERDR_STUB/calls" || fail "a hand edit did not stop it"
+  gm config set collector on >/dev/null
+  GM_COLLECTOR=off gm up --quiet >/dev/null 2>&1
+  assert_eq "$(db "SELECT count(*) FROM endpoint WHERE key='collector';")" 0 "the environment turns it off too"
+}
+
+t_collector_is_never_a_second_copy() {
+  command -v nc >/dev/null 2>&1 || { printf '    (nc not installed; skipped)\n'; return 0; }
+  setup coll-two
+  initialized
+  local port=$((40000 + RANDOM % 20000)) out
+  export GM_OTELCOL=$FAKE GM_OTEL_PORT=$port
+  gm up >/dev/null 2>&1
+  otlp_listener "$port"
+  out=$(gm config set collector on)
+  assert_contains "$out" "a collector already answers on 127.0.0.1:$port, so gm starts no second one" "a collector answering already" &&
+    assert_eq "$(coll_runs)" 0 "is left to serve"
+  assert_eq "$(gm up --quiet 2>&1)" "" "silently" &&
+    assert_eq "$(coll_runs)" 0 "with none started beside it" &&
+    assert_eq "$(db "SELECT start_attempts FROM endpoint WHERE key='collector';")" 0 "and no failure counted"
+  out=$(gm collector 2>&1) && fail "gm collector started a second one"
+  assert_contains "$out" "a collector already answers on 127.0.0.1:$port, so gm starts no second one (while guild.conf says collector: on" "gm collector by hand refuses too"
+  stop_listeners
+  gm up --quiet >/dev/null 2>&1
+  assert_eq "$(coll_runs)" 1 "once it is gone, gm starts its own"
+}
+
+t_autostart_interval_from_the_config() {
+  [ "$(uname -s)" = Darwin ] || { printf '    (not macOS; skipped)\n'; return 0; }
+  setup autostart-every
+  export GM_LAUNCH_AGENTS=$WORK/autostart-every/LaunchAgents
+  interval() { tr -d ' \n' <"$(ls "$GM_LAUNCH_AGENTS"/com.guildmaster.up.*.plist)" | sed -n 's/.*<key>StartInterval<\/key><integer>\([0-9]*\)<.*/\1/p'; }
+  assert_contains "$(gm config set autostart-every 10)" "the launchd agent runs the muster every 10 minutes" "says so"
+  assert_eq "$(interval)" 600 "the agent runs every 10 minutes"
+  gm autostart on >/dev/null
+  assert_eq "$(interval)" 600 "gm autostart on keeps the interval"
+  gm autostart on --every 7 >/dev/null
+  assert_eq "$(conf autostart-every)" 7 "--every records it" && assert_eq "$(interval)" 420 "and uses it"
+  sed -i.bak 's/^autostart-every: 7$/autostart-every: 3/' "$GM_HALL/guild.conf"
+  GM_OTELCOL=$WORK/none gm init --no >/dev/null 2>&1
+  assert_eq "$(interval)" 180 "a hand edit is picked up at the next start"
+  gm config set autostart off >/dev/null
+  assert_eq "$(conf autostart)" off "off recorded"
+  [ -z "$(ls "$GM_LAUNCH_AGENTS"/com.guildmaster.up.*.plist 2>/dev/null)" ] || fail "the agent was left"
+  gm config set autostart on >/dev/null
+  assert_eq "$(interval)" 180 "on again, at the configured interval"
 }
 
 t_shellcheck() {
