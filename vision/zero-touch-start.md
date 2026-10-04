@@ -229,6 +229,19 @@ And for the front desk at the clone's root as this change first built it, with t
 5. The hook in the linked worktree again, with the guild now set up: nothing printed, `setup.conf` and the register byte for byte the same, still one launchd load.
 6. The lab was torn down, and the helper confirmed the default session was unchanged.
 
+And for the Guildmaster living in herdr, by hand on 2026-10-04, against real herdr 0.9.1 in another isolated lab session, set up as above, with the lab server's panes running zsh without the operator's startup files and a 5-second launch grace:
+
+1. In the linked worktree, the hook did nothing: exit 0 at once, nothing printed, the temporary `HOME` empty, no Guildhall, and the lab session without a workspace.
+2. A focus recorded with `--no-launch`, then the hook in the plain clone outside herdr: exit 0 in 4 seconds, nothing on stderr; `gm` linked; the session told it is not the Guildmaster, with the one line "The Guildmaster is in herdr tab guildmaster; open it with: herdr --session <lab>". herdr then showed the `guildmaster` and `appt` tabs, the front desk's pane (`w1:p1`) running `claude` in the clone, and the roster both alive.
+3. The hook again outside herdr: nothing started; one launch each in the ledger.
+4. The hook with the front desk's own herdr ids: the Guildmaster, with its setup and the roster.
+5. The hook with the ids of a new tab in the guild's workspace (`w1:p3`): not the Guildmaster, told "switch to it in herdr"; the front desk still `w1:p1`, nothing started.
+6. With both processes killed, the launchd agent's `gm up --quiet` started the Guildmaster again in `w1:p1` and the Party Leader in `w1:p2`; both alive.
+7. The hook in the linked worktree again: nothing printed, the register byte for byte the same.
+8. The lab was torn down, and the helper confirmed the default session was unchanged.
+
+A first run of this check, with panes running the operator's own zsh, found the line gm types into a pane it has just made sitting unrun at the shell's prompt, for the Guildmaster and the Party Leader alike: a shell still starting up can swallow the Enter. That is how every pane has been started since [herdr-design.md](herdr-design.md), and is not changed here.
+
 ## Not in this change
 
 - Telemetry for the Guildmaster's own session; it runs without the collector's environment.
@@ -236,3 +249,4 @@ And for the front desk at the clone's root as this change first built it, with t
 - Editing a shell startup file to put `~/.local/bin` on the `PATH`, or adding an alias: the README says how, for those who want it.
 - `gm tell` and any talking to a Party Leader (Q22), phase-change digests, and `gm history`: the rest of step 4.
 - A systemd timer on Linux, where autostart is reported as not available.
+- Making sure the line gm types into a pane it has just made is run, when the shell there is still starting up (above).
