@@ -1,0 +1,4 @@
+# What Claude Code writes when the patron answers "always allow" stays on this machine.
+/.claude/settings.local.json
+# The marker that makes a checkout the patron's front desk (bin/gm-front-desk-lib.sh) never travels in a commit.
+/.gm-front-desk
