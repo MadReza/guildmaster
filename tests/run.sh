@@ -1855,28 +1855,63 @@ t_repos_finds_the_clone_the_patron_names() {
     assert_eq "$(gm repos | grep -c billing)" 1 "once"
 }
 
-# ---- the clone's front desk: claude, started in the repository's front-desk folder, is the Guildmaster ----
+# ---- the clone's front desk: claude, started at the clone's root, is the Guildmaster ----
 
-# The hook command the committed front-desk/.claude/settings.json gives Claude Code.
-clone_hook_command() {
-  json "SELECT json_extract(CAST(readfile($(sqlq "$ROOT/front-desk/.claude/settings.json")) AS TEXT),'\$.hooks.SessionStart[0].hooks[0].command');"
+# The suite runs from wherever it was checked out, often a linked worktree, where the clone's hooks stand down. So
+# the front desk's tests run in a plain clone of their own: a copy of what the hooks need, committed in a new
+# repository. desk_ready also makes a linked worktree of it, and a folder that is no repository at all.
+DESK=$WORK/desk/guildmaster
+DESK_GM=$DESK/bin/gm
+DESK_WT=$WORK/desk/worktree
+desk_ready() {
+  [ -d "$DESK" ] && return 0
+  mkdir -p "$DESK/.claude"
+  cp -Rp "$ROOT/bin" "$ROOT/templates" "$ROOT/CLAUDE.md" "$ROOT/.gitignore" "$DESK/"
+  cp -p "$ROOT/.claude/settings.json" "$DESK/.claude/"
+  git -C "$DESK" init -q -b main
+  git -C "$DESK" add -A
+  git -C "$DESK" -c user.name=t -c user.email=t@t commit -q -m guildmaster
+  git -C "$DESK" worktree add -q --detach "$DESK_WT"
 }
 
-# clone_hook [session id]: that hook exactly as Claude Code runs it, in the clone's front-desk folder with
+# What the committed .claude/settings.json gives Claude Code: settings_field <path>.
+settings_field() {
+  json "SELECT json_extract(CAST(readfile($(sqlq "$ROOT/.claude/settings.json")) AS TEXT),'\$.$1');"
+}
+
+# The hook command the committed settings give Claude Code at session start.
+clone_hook_command() { settings_field 'hooks.SessionStart[0].hooks[0].command'; }
+
+# clone_hook [session id] [folder]: that hook exactly as Claude Code runs it, in the plain clone (or the folder) with
 # CLAUDE_PROJECT_DIR set; prints its JSON, its stderr into $WORK/hook-err, and its exit status into $WORK/hook-rc.
 clone_hook() {
-  local rc=0
+  local rc=0 dir=${2:-$DESK}
+  desk_ready
   printf '{"session_id":"%s","source":"startup","hook_event_name":"SessionStart"}' "${1:-c1}" |
-    (cd "$ROOT/front-desk" && CLAUDECODE=1 CLAUDE_PROJECT_DIR=$ROOT/front-desk sh -c "$(clone_hook_command)" 2>"$WORK/hook-err") || rc=$?
+    (cd "$dir" && CLAUDECODE=1 CLAUDE_PROJECT_DIR=$dir sh -c "$(clone_hook_command)" 2>"$WORK/hook-err") || rc=$?
   printf '%s' "$rc" >"$WORK/hook-rc"
 }
 
 # clone_hook_bare [session id]: gm's side of it alone, without the command's own 2>/dev/null, to see that gm itself
 # says nothing on stderr.
 clone_hook_bare() {
+  desk_ready
   printf '{"session_id":"%s","source":"startup","hook_event_name":"SessionStart"}' "${1:-c1}" |
-    (cd "$ROOT/front-desk" && CLAUDECODE=1 CLAUDE_PROJECT_DIR=$ROOT/front-desk bash "$GM" hook front-desk --clone 2>"$WORK/hook-err")
+    (cd "$DESK" && CLAUDECODE=1 CLAUDE_PROJECT_DIR=$DESK bash "$DESK_GM" hook front-desk --clone 2>"$WORK/hook-err")
 }
+
+# guard <tool> <command or ''> [folder]: the PreToolUse guard exactly as Claude Code runs it before a tool call, in
+# the plain clone (or the folder); prints its JSON.
+guard() {
+  local dir=${3:-$DESK} input
+  desk_ready
+  input=$(json "SELECT json_object('session_id','g1','hook_event_name','PreToolUse','cwd',$(sqlq "$dir"),'tool_name',$(sqlq "$1"),
+    'tool_input', json_object('command',$(sqlq "$2"),'file_path',$(sqlq "$dir/x.md"),'content','x'));")
+  printf '%s' "$input" |
+    (cd "$dir" && CLAUDECODE=1 CLAUDE_PROJECT_DIR=$dir sh -c "$(settings_field 'hooks.PreToolUse[0].hooks[0].command')")
+}
+
+decision() { json "SELECT json_extract($(sqlq "$1"),'\$.hookSpecificOutput.permissionDecision');"; }
 
 # A home of the test's own, so nothing reaches the real ~/.local/bin.
 own_home() {
@@ -1885,16 +1920,124 @@ own_home() {
 }
 
 t_clone_front_desk_settings_are_committed_and_scoped() {
-  local f=$ROOT/front-desk/.claude/settings.json
-  assert_eq "$(json "SELECT json_extract(CAST(readfile($(sqlq "$f")) AS TEXT),'\$.permissions.deny');")" '["Edit","Write","NotebookEdit"]' "no file edits at the front desk" &&
-    assert_contains "$(json "SELECT json_extract(CAST(readfile($(sqlq "$f")) AS TEXT),'\$.permissions.allow');")" '"Bash(gm *)"' "gm allowed" &&
-    assert_contains "$(clone_hook_command)" 'bin/gm" hook front-desk --clone' "the hook runs gm" &&
+  # shellcheck disable=SC2016 # the command as written, variable and all
+  assert_contains "$(clone_hook_command)" 'bash "$CLAUDE_PROJECT_DIR/bin/gm" hook front-desk --clone' "the start-up hook runs gm" &&
     assert_contains "$(clone_hook_command)" '|| true' "and never fails the session" &&
-    assert_eq "$(json "SELECT json_extract(CAST(readfile($(sqlq "$f")) AS TEXT),'\$.hooks.SessionStart[0].hooks[0].timeout');")" 120 "with a timeout"
-  [ -s "$ROOT/front-desk/CLAUDE.md" ] || fail "no CLAUDE.md for the Guildmaster"
-  # Claude Code reads .claude/settings.json only from the folder it starts in, so a session at the repository's root
-  # (an agent changing Guildmaster) gets no hook.
-  [ ! -e "$ROOT/.claude/settings.json" ] || fail "settings at the repository's root would reach every contributor"
+    assert_eq "$(settings_field 'hooks.SessionStart[0].hooks[0].timeout')" 120 "with a timeout" &&
+    assert_eq "$(settings_field 'hooks.PreToolUse[0].matcher')" "Edit|Write|NotebookEdit|MultiEdit|Bash" "the guard sees edits and commands" &&
+    assert_contains "$(settings_field 'hooks.PreToolUse[0].hooks[0].command')" 'bin/gm" hook front-desk-guard 2>/dev/null || true' "and never fails a tool call"
+  # Permissions in committed settings would bind every contributor's session at the root; the guard holds them.
+  assert_eq "$(settings_field permissions)" "" "no permissions in the committed settings" &&
+    assert_contains "$(sed -n 3p "$ROOT/CLAUDE.md")" "This file is guidance for agents that change Guildmaster, not the Guildmaster's charter" "the root CLAUDE.md says it is no charter"
+  [ ! -e "$ROOT/front-desk" ] || fail "the front desk moved to the clone's root; front-desk/ is gone"
+  grep -qx '/.gm-front-desk' "$ROOT/.gitignore" || fail "the marker could be committed"
+  grep -qx '/.claude/settings.local.json' "$ROOT/.gitignore" || fail "the patron's always-allow answers could be committed"
+}
+
+t_front_desk_home_is_a_plain_clone_or_a_marked_folder() {
+  desk_ready
+  # shellcheck source=bin/gm-front-desk-lib.sh
+  . "$ROOT/bin/gm-front-desk-lib.sh"
+  local bare=$WORK/desk/bare
+  gm_front_desk_home "$DESK" || fail "a plain clone is the front desk"
+  ! gm_front_desk_home "$DESK_WT" || fail "a linked worktree is not"
+  ! gm_front_desk_home "$DESK/bin" || fail "nor a folder inside the clone"
+  mkdir -p "$bare"
+  cp -Rp "$ROOT/bin" "$bare/"
+  ! gm_front_desk_home "$bare" || fail "nor a folder that is no repository"
+  mkdir -p "$WORK/desk/outer/inner"
+  git -C "$WORK/desk/outer" init -q
+  cp -Rp "$ROOT/bin" "$WORK/desk/outer/inner/"
+  ! gm_front_desk_home "$WORK/desk/outer/inner" || fail "nor a folder inside another repository"
+  # The marker: a regular file holding one plain word, in a worktree or anywhere.
+  printf 'patron\n' >"$bare/.gm-front-desk"
+  gm_front_desk_home "$bare" || fail "a marked folder is the front desk"
+  printf 'patron' >"$DESK_WT/.gm-front-desk"
+  gm_front_desk_home "$DESK_WT" || fail "so is a marked worktree, without a newline"
+  rm -f "$DESK_WT/.gm-front-desk"
+  : >"$bare/.gm-front-desk"
+  ! gm_front_desk_home "$bare" || fail "an empty marker is not genuine"
+  printf 'pa tron;rm\n' >"$bare/.gm-front-desk"
+  ! gm_front_desk_home "$bare" || fail "nor one that is not one plain word"
+  printf 'patron\n' >"$WORK/desk/real-marker"
+  rm -f "$bare/.gm-front-desk"
+  ln -s "$WORK/desk/real-marker" "$bare/.gm-front-desk"
+  ! gm_front_desk_home "$bare" || fail "nor a link"
+  rm -f "$bare/.gm-front-desk"
+  mkdir "$bare/.gm-front-desk"
+  ! gm_front_desk_home "$bare" || fail "nor a folder"
+  mkdir -p "$WORK/desk/no-gm"
+  printf 'patron\n' >"$WORK/desk/no-gm/.gm-front-desk"
+  ! gm_front_desk_home "$WORK/desk/no-gm" || fail "and never a folder without gm"
+}
+
+t_clone_hooks_stand_down_in_a_worktree() {
+  own_home standdown
+  export GM_HALL=$WORK/standdown/hall GM_LAUNCH_AGENTS=$WORK/standdown/LaunchAgents
+  desk_ready
+  local out
+  out=$(clone_hook w1 "$DESK_WT")
+  assert_eq "$out" "" "the start-up hook prints nothing" &&
+    assert_eq "$(cat "$WORK/hook-rc")" 0 "and exits 0"
+  out=$(printf '{}' | (cd "$DESK_WT" && CLAUDE_PROJECT_DIR=$DESK_WT bash "$DESK_WT/bin/gm" hook front-desk --clone 2>&1)) ||
+    fail "gm itself failed"
+  assert_eq "$out" "" "gm alone says nothing, on stderr either" &&
+    assert_eq "$(guard Edit '' "$DESK_WT")" "" "edits are left to Claude Code" &&
+    assert_eq "$(guard Write '' "$DESK_WT")" "" "and writes" &&
+    assert_eq "$(guard Bash 'bin/gm roster' "$DESK_WT")" "" "and commands, gm too"
+  # Nothing at all happened: no link, no Guildhall, no launchd agent, no herdr.
+  assert_eq "$(find "$HOME" -mindepth 1 | head -n 3)" "" "nothing in the home"
+  [ ! -e "$GM_HALL" ] || fail "a Guildhall was made"
+  [ ! -e "$GM_LAUNCH_AGENTS" ] && [ ! -e "$HERDR_STUB/launchctl" ] || fail "launchd was touched"
+  [ ! -e "$HERDR_STUB/calls" ] || fail "herdr was called"
+  # An existing Guildhall is not touched either, not even migrated.
+  mkdir -p "$GM_HALL"
+  sqlite3 "$GM_HALL/register.db" <"$ROOT/tests/fixtures/register-schema1.sql"
+  cp "$GM_HALL/register.db" "$WORK/standdown/before.db"
+  clone_hook w2 "$DESK_WT" >/dev/null
+  cmp -s "$GM_HALL/register.db" "$WORK/standdown/before.db" || fail "the register changed"
+  [ ! -e "$GM_HALL/setup.conf" ] || fail "the setup was recorded"
+}
+
+t_marked_folder_is_the_front_desk() {
+  own_home marked
+  export GM_HALL=$WORK/marked/hall GM_OTELCOL=$WORK/none
+  desk_ready
+  local ctx
+  printf 'patron\n' >"$DESK_WT/.gm-front-desk"
+  ctx=$(hook_context "$(clone_hook m1 "$DESK_WT")")
+  rm -f "$DESK_WT/.gm-front-desk"
+  assert_contains "$ctx" "You are the Guildmaster, at the front desk" "a marked worktree is the front desk" &&
+    assert_eq "$(readlink "$HOME/.local/bin/gm")" "$DESK_WT/bin/gm" "gm linked from it" &&
+    assert_eq "$(sed -n 's/^front-desk: //p' "$GM_HALL/setup.conf")" clone "and recorded"
+}
+
+t_front_desk_guard_binds_only_the_front_desk() {
+  own_home guard
+  desk_ready
+  local out
+  for tool in Edit Write NotebookEdit MultiEdit; do
+    out=$(guard "$tool" '')
+    assert_eq "$(decision "$out")" deny "$tool denied at the front desk" &&
+      assert_contains "$out" "a Party Leader's work" "with the reason"
+  done
+  assert_eq "$(decision "$(guard Bash 'bin/gm roster')")" allow "bin/gm runs without a prompt" &&
+    assert_eq "$(decision "$(guard Bash './bin/gm open --repo ~/work/x --ticket CRM-1')")" allow "./bin/gm too" &&
+    assert_eq "$(decision "$(guard Bash "bash $DESK_GM list")")" allow "and this gm by its path" &&
+    assert_eq "$(decision "$(guard Bash "  $DESK_GM init --later")")" allow "with or without bash"
+  # shellcheck disable=SC2016 # commands as the Guildmaster might write them, never expanded here
+  for cmd in 'bin/gm roster; rm -rf x' 'bin/gm roster && ls' 'bin/gm roster | sh' 'bin/gm roster > x' \
+    'bin/gm $(id)' 'bin/gm `id`' 'bin/gm list
+ls' 'bash gm list' 'gm roster' 'ls' 'bash x/bin/gm roster' 'bin/gmx roster'; do
+    assert_eq "$(guard Bash "$cmd")" "" "left to Claude Code: $cmd"
+  done
+  # bin/gm is this gm only in the clone's own folder; plain gm only where it resolves to this one.
+  assert_eq "$(printf '%s' "$(json "SELECT json_object('cwd','$WORK','tool_name','Bash','tool_input',json_object('command','bin/gm roster'));")" |
+      (cd "$DESK" && CLAUDE_PROJECT_DIR=$DESK bash "$DESK_GM" hook front-desk-guard))" "" "bin/gm elsewhere is another program"
+  mkdir -p "$HOME/.local/bin"
+  ln -s "$DESK_GM" "$HOME/.local/bin/gm"
+  assert_eq "$(decision "$(PATH="$HOME/.local/bin:$PATH" guard Bash 'gm roster')")" allow "gm, linked to this one" &&
+    assert_eq "$(guard Read '')" "" "other tools are left alone"
 }
 
 t_clone_front_desk_links_gm_once_and_is_silent_on_repeat() {
@@ -1910,14 +2053,14 @@ t_clone_front_desk_links_gm_once_and_is_silent_on_repeat() {
     assert_eq "$(json "SELECT json_valid($(sqlq "$out"));")" 1 "the hook prints JSON" &&
     assert_eq "$(json "SELECT json_extract($(sqlq "$out"),'\$.systemMessage') IS NULL;")" 1 "and nothing for the patron's screen"
   [ -L "$link" ] || fail "gm was not linked into ~/.local/bin" || return 1
-  assert_eq "$(readlink "$link")" "$GM" "the link points at this clone's gm"
+  assert_eq "$(readlink "$link")" "$DESK_GM" "the link points at this clone's gm"
   ctx=$(hook_context "$out")
   assert_contains "$ctx" "You are the Guildmaster, at the front desk: this Claude Code session" "the session is the front desk" &&
     assert_contains "$ctx" "<charter>
 # Guildmaster charter" "with the patron's charter" &&
     assert_contains "$ctx" "- linked gm into ~/.local/bin" "the link is routine" &&
     assert_contains "$ctx" "/.local/bin is not on the patron's PATH" "and where it is not on the PATH, the Guildmaster knows" &&
-    assert_contains "$ctx" "Run gm as: ../bin/gm" "and runs the clone's gm" &&
+    assert_contains "$ctx" "Run gm as: bin/gm" "and runs the clone's gm" &&
     assert_contains "$ctx" "first-run check passed" "the first-run check" &&
     assert_contains "$ctx" "appt-v2                  party leader  alive" "the Party Leader brought up" &&
     assert_contains "$ctx" "guildmaster              front desk    clone    -        the patron's own Claude Code session" "the roster's front desk" &&
@@ -1961,7 +2104,7 @@ t_clone_front_desk_never_clobbers_a_foreign_gm() {
   ctx=$(hook_context "$(clone_hook)")
   assert_eq "$(cat "$link")" "#!/bin/sh
 echo mine" "a gm of the patron's own is kept" &&
-    assert_contains "$ctx" "A different gm is at ~/.local/bin/gm (a file of its own), left as it is; you run this one as ../bin/gm" "and the Guildmaster knows"
+    assert_contains "$ctx" "A different gm is at ~/.local/bin/gm (a file of its own), left as it is; you run this one as bin/gm" "and the Guildmaster knows"
   rm -f "$link"
   ln -s "$WORK/foreign/other/gm" "$link"
   printf 'x\n' >"$WORK/foreign/other/gm"
@@ -2006,7 +2149,7 @@ t_clone_front_desk_offers_to_install_herdr() {
   ctx=$(GM_BREW=$ROOT/tests/fixtures/launchctl hook_context "$(GM_BREW=$ROOT/tests/fixtures/launchctl clone_hook)")
   assert_contains "$ctx" "herdr is not installed" "the Guildmaster is told" &&
     assert_contains "$ctx" "Shall I install it now with Homebrew (brew install herdr)?" "to offer it in one line" &&
-    assert_contains "$ctx" "Only on the patron's yes, run ../bin/gm install herdr" "only on a yes" &&
+    assert_contains "$ctx" "Only on the patron's yes, run bin/gm install herdr" "only on a yes" &&
     assert_not_contains "$ctx" "required pieces are missing" "herdr is offered, not demanded"
   [ -L "$HOME/.local/bin/gm" ] || fail "gm was not linked first"
   [ ! -e "$GM_HALL/setup.conf" ] || fail "the setup was recorded without herdr"
@@ -2068,7 +2211,7 @@ t_clone_front_desk_needs_no_guildmaster_in_herdr() {
 
 t_shellcheck() {
   command -v shellcheck >/dev/null 2>&1 || { printf '    (shellcheck not installed; skipped)\n'; return 0; }
-  shellcheck "$GM" "$ROOT/tests/run.sh" "$ROOT/tests/demo.sh" "$ROOT/tests/fixtures/herdr" "$ROOT/tests/fixtures/launchctl"
+  shellcheck -x "$GM" "$ROOT/bin/gm-front-desk-lib.sh" "$ROOT/tests/run.sh" "$ROOT/tests/demo.sh" "$ROOT/tests/fixtures/herdr" "$ROOT/tests/fixtures/launchctl"
 }
 
 for t in $(declare -F | awk '{print $3}' | grep '^t_'); do

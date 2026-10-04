@@ -11,9 +11,9 @@ This repository is at its beginning. The vocabulary comes first, because every l
 - [TERMINOLOGY.md](TERMINOLOGY.md) is the single owner of the project's vocabulary. Read it before writing anything else here.
 - `firstmate/` holds the research into the prior system this one succeeds, kept separate from Guildmaster's own design.
 - `honeycomb/` is a research site on Honeycomb, the hosted observability service: its C4 model, data model, sampling, engineering decisions, and lessons for Guildmaster's tracing. Open `honeycomb/index.html` from disk.
-- `vision/` holds Guildmaster's own design material: the patron's notes, the requirements drawn from them, a Firstmate-informed consultation, the [step 1 design](vision/step-1-design.md), the [herdr design](vision/herdr-design.md) (Party Leaders kept running and brought back), the [zero-touch start](vision/zero-touch-start.md) (the patron starts `claude` in the front desk and talks), and the [tracing design](vision/tracing-design.md) with its [research](vision/tracing-research.md).
+- `vision/` holds Guildmaster's own design material: the patron's notes, the requirements drawn from them, a Firstmate-informed consultation, the [step 1 design](vision/step-1-design.md), the [herdr design](vision/herdr-design.md) (Party Leaders kept running and brought back), the [zero-touch start](vision/zero-touch-start.md) (the patron starts `claude` in the clone and talks), and the [tracing design](vision/tracing-design.md) with its [research](vision/tracing-research.md).
 - [vision/roadmap.md](vision/roadmap.md) is the tracked build plan: each step's goal, scope, done-when criteria, status and links.
-- `front-desk/` is where the patron starts the Guildmaster: `claude`, run there, with the folder's committed Claude Code settings and `CLAUDE.md`.
+- `.claude/settings.json` makes `claude`, started at the clone's root, the Guildmaster: its start-up hook and tool guard act only in the patron's plain clone (or a folder marked `.gm-front-desk`) and do nothing in a linked worktree, where agents that change Guildmaster work. `CLAUDE.md` is their guidance, not the Guildmaster's charter.
 - `bin/gm` is the `gm` command; `templates/` holds the Guildmaster's charter (`guildmaster.md`), the Party Leader's charter, the ticket playbook and the repository rules it copies into the Guildhall, and the local OpenTelemetry Collector's configuration (`otelcol.yaml`); `tests/` holds its test suite (with the redaction cases, a schema-1 register to migrate, and recorded Claude Code telemetry under `tests/fixtures/telemetry/`, and stand-ins for herdr and launchctl so no test touches the real ones, nor your `~/.local/bin`) and an end-to-end demonstration.
 
 ## Getting started
@@ -24,13 +24,15 @@ You need git, Claude Code, bash and `sqlite3` 3.38 or later (for its JSON functi
 
 ```sh
 git clone <this repository> guildmaster
-cd guildmaster/front-desk
+cd guildmaster
 claude
 ```
 
 That is all there is to type. The first time, Claude Code asks once whether to trust the folder; say yes.
 
-### Start: `claude` in the front desk
+To change Guildmaster itself, work in a linked worktree of the clone (`git worktree add`): there, `claude` is an ordinary session, and nothing of the guild runs.
+
+### Start: `claude` in the clone
 
 The Claude Code session you just started is the Guildmaster, at the front desk.
 Everything else happens by itself as it starts, with nothing for you to type:
@@ -42,7 +44,7 @@ Everything else happens by itself as it starts, with nothing for you to type:
 The Guildmaster offers one optional piece, the tracing collector, once, in one line; answer it in plain words.
 If something required is missing, it says so plainly.
 
-Come back the same way: `cd guildmaster/front-desk` and `claude`, in any terminal, inside herdr or not.
+Come back the same way: `cd guildmaster` and `claude`, in any terminal, inside herdr or not.
 Closing the front desk leaves every Party Leader running.
 
 ### Then talk
@@ -104,14 +106,14 @@ This is what the Guildmaster runs when you say yes to its offer. It then finishe
 
 ### The front desk in herdr: `gm`
 
-Instead of `claude` in the front desk, in any terminal:
+Instead of `claude` in the clone, in any terminal:
 
 ```sh
 gm
 ```
 
 It opens herdr at the `guildmaster` tab and starts the Guildmaster there, a Claude Code session in `~/.guildmaster/front-desk`, which gm then keeps running like a Party Leader (`front-desk: herdr` in `setup.conf`).
-Starting `claude` in the clone's front desk again makes that session the front desk (`front-desk: clone`): gm then keeps no Guildmaster in herdr, and leaves a running one as it is.
+Starting `claude` in the clone again makes that session the front desk (`front-desk: clone`): gm then keeps no Guildmaster in herdr, and leaves a running one as it is.
 The first time, Claude Code asks once whether to trust the front desk's folder.
 
 Everything else happens by itself, with nothing for you to type: the first-run check, autostart (always on, so the Guildmaster and every Party Leader come back at login and every 5 minutes), and bringing every Party Leader up.
