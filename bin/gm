@@ -429,10 +429,14 @@ gm_usage() {
   cat <<'EOF'
 usage: gm [<command> [arguments]]
 
-  (no command)            the one thing to know: opens herdr at the guildmaster tab, where the Guildmaster, a
-                          Claude Code session, sits at the front desk; it checks the setup, keeps autostart on,
-                          brings every Party Leader up and opens new ones in their own tabs when asked. Without a
-                          terminal it only starts the Guildmaster and says where it is
+The patron needs none of these: claude, started in the clone's front-desk folder, is the Guildmaster, and its
+start-up hook links gm into ~/.local/bin, checks the setup, keeps autostart on and brings every Party Leader up.
+They are for advanced use, and for the Guildmaster.
+
+  (no command)            the front desk in herdr instead: opens herdr at the guildmaster tab, where gm starts the
+                          Guildmaster and keeps it running (setup.conf front-desk: herdr); it checks the setup,
+                          keeps autostart on and brings every Party Leader up. Without a terminal it only starts
+                          the Guildmaster and says where it is
   open <focus> --repo <path> [--ticket KEY]... [--branch NAME] [--base REF] [--kind ticket] [--no-launch]
                           record a focus, make its camp, install its Claude Code hooks, and start its Party
                           Leader in its own herdr tab (workspace guild), where it stays; never takes over the
@@ -440,10 +444,12 @@ usage: gm [<command> [arguments]]
                           it is the first ticket key in lower case (crm-1234)
   open <focus>            the same for an existing focus: a running Party Leader is left as it is, a dead or
                           missing one starts again (a fresh session resumes from records); reopens a closed focus
-  up [--quiet]            the muster, plain code with no model: start the front desk's Guildmaster and every open
-                          focus's Party Leader that is dead or missing, leave the running ones alone; one that
-                          fails to start 3 times in a row is held until gm open (gm, for the Guildmaster); any
-                          other gm command at a terminal does the same, quietly
+  up [--quiet]            the muster, plain code with no model: start the front desk's Guildmaster (when it is in
+                          herdr) and every open focus's Party Leader that is dead or missing, leave the running
+                          ones alone; one that fails to start 3 times in a row is held until gm open (gm, for the
+                          Guildmaster); any other gm command at a terminal does the same, quietly
+  install herdr           install herdr, with Homebrew when it is there or else herdr's official installer, never
+                          with sudo, and finish the setup; the Guildmaster runs it on the patron's yes
   autostart [on [--every MINUTES] | off | status]
                           a launchd agent (macOS) that runs gm up --quiet at login and every 5 minutes. The
                           Guildmaster turns it on by itself; off is the switch to stop it, and it stays off
@@ -726,32 +732,113 @@ SQL
 }
 
 # The required pieces that are missing, one "what: what to do" line each; nothing when gm can run.
+# gm_required_problems [id]: leaves that piece out.
 gm_required_problems() {
   local id level state detail
   while IFS=$'\t' read -r id level state detail; do
-    [ -n "$id" ] && [ "$level" = required ] && [ "$state" != ok ] || continue
+    [ -n "$id" ] && [ "$level" = required ] && [ "$state" != ok ] && [ "$id" != "${1:-}" ] || continue
     printf -- '- %s: %s\n' "$detail" "$(gm_init_meaning "$id")"
   done <<<"$(gm_init_probe)"
+}
+
+# Where the front desk is, from setup.conf's front-desk: clone, the patron's own Claude Code session started with
+# claude in the clone's front-desk folder, where gm keeps no Guildmaster in herdr; or herdr (the default, and what gm
+# alone sets), the Guildmaster in herdr's guildmaster tab, kept running by the muster like a Party Leader.
+gm_front_desk_mode() {
+  if [ "$(gm_setup_get front-desk)" = clone ]; then printf 'clone'; else printf 'herdr'; fi
+}
+
+# The clone's own front desk, where the patron runs claude: a folder of the repository with committed settings.
+GM_CLONE_DESK=$GM_ROOT/front-desk
+
+# Puts gm on the PATH of later shells and of the launchd agent: a symlink to this gm in ~/.local/bin, the folder made
+# if needed, never with sudo, and never over another gm. Prints ok (already there), linked, foreign: <what is
+# there>, or failed: <why>.
+gm_link_ensure() {
+  local dir=$HOME/.local/bin link
+  link=$dir/gm
+  if [ ! -L "$link" ] && [ ! -e "$link" ]; then
+    mkdir -p "$dir" 2>/dev/null && ln -s "$GM_SELF" "$link" 2>/dev/null && { printf 'linked'; return 0; }
+  fi
+  if [ -L "$link" ] && [ -e "$link" ] && [ "$(gm_realpath "$link")" = "$GM_SELF" ]; then
+    printf 'ok'
+  elif [ -L "$link" ]; then
+    printf 'foreign: a link to %s' "$(readlink "$link")"
+  elif [ -e "$link" ]; then
+    printf 'foreign: a file of its own'
+  else
+    printf 'failed: could not write %s' "$link"
+  fi
+}
+
+# The clone's SessionStart hook, as the committed front-desk/.claude/settings.json runs it. It never fails the
+# session: whatever goes wrong becomes one line for the Guildmaster to pass on.
+gm_hook_clone() {
+  local out err rc=0 why
+  err=$(mktemp "${TMPDIR:-/tmp}/gm-hook.XXXXXX" 2>/dev/null) || err=''
+  out=$(gm_hook_front_desk clone 2>"${err:-/dev/null}") || rc=$?
+  if [ "$rc" = 0 ] && [ -n "$out" ]; then
+    printf '%s\n' "$out"
+  else
+    why=''
+    [ -z "$err" ] || why=$(tail -n 3 "$err" | tr '\n' ' ')
+    sqlite3 -batch :memory: "SELECT json_object('hookSpecificOutput', json_object('hookEventName', 'SessionStart', 'additionalContext',
+      $(gm_q "gm front desk: the guild's start-up did not finish (exit $rc${why:+: $why}). Tell the patron so in one line, with that error, and that a restart of claude in this folder tries again. Until then you can answer only from what gm says when run.")));" 2>/dev/null || true
+  fi
+  [ -z "$err" ] || rm -f "$err"
+  return 0
 }
 
 # The Guildmaster's SessionStart hook, with no patron action: the first-run check without questions, autostart on
 # (unless the patron turned it off), the muster, and a short summary for the Guildmaster alone: the setup, the
 # roster, and only what needs the patron (a required piece missing, a held Party Leader, the collector offer at most
 # once a day). It prints only the hook's JSON, so nothing reaches the patron's screen.
+# gm_hook_front_desk clone is the clone's front desk (gm_hook_clone): it also links gm into ~/.local/bin, offers to
+# install a missing herdr, records the front desk as the patron's own session, and gives the Guildmaster its charter.
 gm_hook_front_desk() {
-  local problems text gmc collector auto up line routine='' tell='' offer='' setup roster
+  local where=${1:-herdr} problems text gmc collector auto up line routine='' tell='' offer='' setup roster
+  local link='' onpath='' herdr_offer='' how restart='they start you again with gm' charter
   cat >/dev/null
   gmc=$(gm_gm_command)
-  problems=$(gm_required_problems)
+  if [ "$where" = clone ]; then
+    restart='they start claude again in this folder'
+    link=$(gm_link_ensure)
+    case ":$PATH:" in *":$HOME/.local/bin:"*) onpath=1 ;; esac
+    [ "$gmc" = gm ] || gmc='../bin/gm'
+    problems=$(gm_required_problems herdr)
+    if [ -z "$problems" ] && ! command -v "$GM_HERDR" >/dev/null 2>&1; then
+      if command -v "${GM_BREW:-brew}" >/dev/null 2>&1; then
+        how='with Homebrew (brew install herdr)'
+      else
+        how="with herdr's official installer (curl -fsSL https://herdr.dev/install.sh | sh)"
+      fi
+      herdr_offer="gm front desk: herdr is not installed. It is the terminal workspace manager that keeps each Party Leader running in a tab of its own, and nothing can be opened without it.
+Offer to install it, in one line, in your first answer, for example: \"I need herdr to keep Party Leaders running. Shall I install it now $how?\"
+Only on the patron's yes, run $gmc install herdr and say the line it ends with; it finishes the setup too. On a no, say in one line that no focus can be opened until herdr is installed, and drop it.
+Run nothing else until then."
+    else
+      problems=$(gm_required_problems)
+    fi
+  else
+    problems=$(gm_required_problems)
+  fi
   if [ -n "$problems" ]; then
     text="gm front desk: gm cannot run yet, because these required pieces are missing:
 $problems
-Tell the patron plainly, in a sentence or two, what to install. Once it is installed, they start you again with gm and the rest happens by itself. Run nothing else until then."
+Tell the patron plainly, in a sentence or two, what to install. Once it is installed, $restart and the rest happens by itself. Run nothing else until then."
     gm_hook_json SessionStart "$text"
+    return
+  fi
+  if [ -n "$herdr_offer" ]; then
+    gm_hook_json SessionStart "$herdr_offer"
     return
   fi
   gm_db_ensure
   [ -n "$(gm_setup_get initialized)" ] || gm_setup_set initialized "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if [ "$where" = clone ]; then
+    [ "$(gm_setup_get front-desk)" = clone ] || gm_setup_set front-desk clone
+    gm_front_desk_files
+  fi
   if [ -n "$(gm_otelcol)" ]; then
     collector='installed'
   elif [ "$(gm_setup_get collector)" = skipped ]; then
@@ -773,7 +860,14 @@ Tell the patron plainly, in a sentence or two, what to install. Once it is insta
     failed:*) tell="${tell}- autostart could not be turned on: ${auto#failed: }
 "; auto='could not be turned on' ;;
   esac
-  up=$( (gm_telemetry_refuse && gm_herdr_lock 30 && gm_reconcile changes) 2>&1) || true
+  up=''
+  if [ "$where" != clone ] || [ -n "$(gm_sql "SELECT 1 FROM focus WHERE closed_at IS NULL LIMIT 1;")" ]; then
+    up=$( (gm_telemetry_refuse && gm_herdr_lock 30 && gm_reconcile changes) 2>&1) || true
+  fi
+  case $link in
+    linked) routine="- linked gm into ~/.local/bin, for later shells and the launchd agent
+" ;;
+  esac
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     case $line in
@@ -784,9 +878,24 @@ Tell the patron plainly, in a sentence or two, what to install. Once it is insta
     esac
   done <<<"$up"
   setup="first-run check passed; autostart $auto; tracing collector $collector."
+  case $link in
+    linked | ok) [ -n "$onpath" ] || setup="$setup gm is linked at ~/.local/bin/gm, but ~/.local/bin is not on the patron's PATH (mention it only if they ask how to run gm in a terminal)." ;;
+    foreign:*) setup="$setup A different gm is at ~/.local/bin/gm (${link#foreign: }), left as it is; you run this one as $gmc." ;;
+    failed:*) setup="$setup gm could not be linked into ~/.local/bin (${link#failed: }); you run it as $gmc." ;;
+  esac
   roster=$(gm_cmd_roster 2>&1 || true)
-  text="gm front desk, $(date -u +%Y-%m-%dT%H:%MZ). You are the Guildmaster: your charter is CLAUDE.md in this folder. Run gm as: $gmc
+  if [ "$where" = clone ]; then
+    charter=$(gm_front_desk_dir)/CLAUDE.md
+    text="gm front desk, $(date -u +%Y-%m-%dT%H:%MZ). You are the Guildmaster, at the front desk: this Claude Code session, which the patron started in the guild's front-desk folder. Run gm as: $gmc
+Your charter, the patron's own copy at $charter, binds you:
+<charter>
+$(cat "$charter")
+</charter>
 Setup: $setup"
+  else
+    text="gm front desk, $(date -u +%Y-%m-%dT%H:%MZ). You are the Guildmaster: your charter is CLAUDE.md in this folder. Run gm as: $gmc
+Setup: $setup"
+  fi
   [ -z "$routine" ] || text="$text
 Done just now by gm (routine; do not mention it unless asked):
 ${routine%
@@ -3508,7 +3617,7 @@ gm_cmd_hook() {
     charter) gm_hook_charter ;;
     stop) gm_hook_stop ;;
     precompact) gm_hook_precompact ;;
-    front-desk) gm_hook_front_desk ;;
+    front-desk) if [ "${2:-}" = --clone ]; then gm_hook_clone; else gm_hook_front_desk; fi ;;
     session-end | pre-tool | post-tool | post-tool-failure | subagent-start | subagent-stop | stop-failure) gm_record_hook "$which" ;;
     *) gm_die "hook: unknown hook '$which'" ;;
   esac
@@ -3519,6 +3628,10 @@ gm_cmd_hook() {
 # pane_not_found come back as JSON with a non-zero exit, so answers are read from the JSON, not the exit status.
 
 GM_HERDR=${GM_HERDR:-herdr}
+# herdr's official installer puts it in ~/.local/bin, which a shell, Claude Code or launchd may not have on its PATH.
+if [ "$GM_HERDR" = herdr ] && ! command -v herdr >/dev/null 2>&1 && [ -x "$HOME/.local/bin/herdr" ]; then
+  GM_HERDR=$HOME/.local/bin/herdr
+fi
 GM_HERDR_SESSION=${GM_HERDR_SESSION:-default}
 GM_HERDR_WORKSPACE=${GM_HERDR_WORKSPACE:-guild}
 GM_HERDR_RESAMPLE=${GM_HERDR_RESAMPLE:-10}
@@ -3789,7 +3902,9 @@ gm_reconcile() {
   local show=$1 focus
   gm_herdr_server_ensure "$GM_HERDR_SESSION"
   gm_herdr_workspace >/dev/null
-  gm_muster_one front-desk "$show"
+  # With the front desk in the patron's own session (claude in the clone), no Guildmaster is kept in herdr, so the
+  # Party Leaders come back whether or not the front desk is open, or in herdr at all.
+  [ "$(gm_front_desk_mode)" = clone ] || gm_muster_one front-desk "$show"
   for focus in $(gm_sql "SELECT name FROM focus WHERE closed_at IS NULL ORDER BY name;"); do
     gm_muster_one "party-leader:$focus" "$show"
   done
@@ -3942,7 +4057,7 @@ gm_cmd_up() {
   gm_db_ensure
   gm_herdr_lock 30 || gm_die "up: another gm is bringing Party Leaders up; try again in a moment"
   if ! gm_guild_exists; then
-    [ "$show" = quiet ] || printf 'Nothing to bring up yet: run gm to open the front desk, or gm open <focus> --repo <path>.\n'
+    [ "$show" = quiet ] || printf 'Nothing to bring up yet: start claude in %s, or run gm, to open the front desk; or gm open <focus> --repo <path>.\n' "$GM_CLONE_DESK"
     return 0
   fi
   gm_reconcile "$show"
@@ -3976,7 +4091,15 @@ gm_cmd_roster() {
   command -v "$GM_HERDR" >/dev/null 2>&1 || have=0
   gm_roster_line() { printf '%-24s %-13s %-8s %-8s %s\n' "$@"; }
   row=$(gm_endpoint front-desk)
-  if [ -n "$row" ]; then
+  if [ "$(gm_front_desk_mode)" = clone ]; then
+    detail="the patron's own Claude Code session, claude in $GM_CLONE_DESK; gm keeps no Guildmaster in herdr"
+    if [ -n "$row" ] && [ "$have" = 1 ]; then
+      IFS=$'\t' read -r _ _ _ pane _ _ <<<"$row"
+      IFS=$'\t' read -r st _ <<<"$(gm_endpoint_state front-desk)"
+      [ "$st" != alive ] || detail="$detail · a Guildmaster still runs in herdr pane $pane, not kept running"
+    fi
+    gm_roster_line "$GM_FRONT_DESK" "front desk" clone - "$detail"
+  elif [ -n "$row" ]; then
     IFS=$'\t' read -r _ _ _ pane _ _ <<<"$row"
     if [ "$have" = 0 ]; then
       st=unknown detail="herdr is not installed"
@@ -4123,6 +4246,10 @@ gm_autostart_plist() {
   local label=$1 every=$2 v val env=''
   for v in GM_HALL PATH HOME GM_HERDR GM_HERDR_SESSION GM_HERDR_WORKSPACE GM_CLAUDE GM_TELEMETRY GM_OTEL_ENDPOINT GM_OTEL_PORT; do
     eval "val=\${$v:-}"
+    # ~/.local/bin, where gm is linked and herdr's and Claude Code's installers put them, is always on the agent's PATH.
+    if [ "$v" = PATH ]; then
+      case ":$val:" in *":$HOME/.local/bin:"*) ;; *) val=$HOME/.local/bin${val:+:$val} ;; esac
+    fi
     [ -z "$val" ] || env="$env    <key>$v</key><string>$(gm_xml "$val")</string>
 "
   done
@@ -4220,6 +4347,32 @@ gm_cmd_autostart() {
   esac
 }
 
+# Installs herdr when the patron said yes to the Guildmaster's offer: with Homebrew when it is there, otherwise with
+# herdr's official installer, never with sudo; then finishes the setup the front desk's hook could not do without it.
+gm_cmd_install() {
+  local brew=${GM_BREW:-brew} url=${GM_HERDR_INSTALLER:-https://herdr.dev/install.sh} how p
+  [ "${1:-}" = herdr ] && [ $# -eq 1 ] || gm_die "install: gm install herdr"
+  if command -v "$GM_HERDR" >/dev/null 2>&1; then
+    printf 'herdr is already installed, at %s\n' "$(command -v "$GM_HERDR")"
+    return 0
+  fi
+  if command -v "$brew" >/dev/null 2>&1; then
+    how='with Homebrew'
+    "$brew" install herdr </dev/null >&2 || gm_die "install: brew install herdr failed; nothing else was changed"
+  else
+    how="with herdr's official installer"
+    curl -fsSL "$url" </dev/null | sh >&2 || gm_die "install: herdr's official installer ($url) failed; nothing else was changed"
+  fi
+  p=$(command -v herdr 2>/dev/null || true)
+  [ -n "$p" ] || { [ ! -x "$HOME/.local/bin/herdr" ] || p=$HOME/.local/bin/herdr; }
+  [ -n "$p" ] || gm_die "install: the installer finished, but herdr is neither on the PATH nor in ~/.local/bin"
+  GM_HERDR=$p
+  gm_db_ensure
+  [ -n "$(gm_required_problems)" ] || [ -n "$(gm_setup_get initialized)" ] || gm_setup_set initialized "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  gm_init_muster
+  printf 'herdr is installed %s, at %s; the guild is set up, and Party Leaders open in its tabs.\n' "$how" "$p"
+}
+
 # ---- gm alone: the one thing the patron runs (vision/zero-touch-start.md) ----
 
 # Opens the front desk: the Guildmaster's files, the muster (which starts the Guildmaster in the guild workspace's
@@ -4235,6 +4388,7 @@ ${problems%
   gm_telemetry_refuse
   gm_db_ensure
   gm_front_desk_files
+  [ "$(gm_setup_get front-desk)" != clone ] || gm_setup_set front-desk herdr
   gm_herdr_lock 30 || gm_die "another gm is bringing the guild up; try again in a moment"
   gm_sql "BEGIN IMMEDIATE; UPDATE endpoint SET start_attempts=0, held_at=NULL, held_told=0 WHERE key='front-desk'; COMMIT;"
   out=$(gm_reconcile changes)
@@ -4316,7 +4470,7 @@ if [ -s "$GM_DB" ]; then
   esac
 fi
 case $cmd in
-  front-desk | open | up | close | start | autostart | hook | statusline | collector | repos | help | -h | --help) ;;
+  front-desk | open | up | close | start | autostart | install | hook | statusline | collector | repos | help | -h | --help) ;;
   *) gm_auto_reconcile ;;
 esac
 case $cmd in
@@ -4328,6 +4482,7 @@ case $cmd in
   close) gm_cmd_close "$@" ;;
   start) gm_cmd_start "$@" ;;
   autostart) gm_cmd_autostart "$@" ;;
+  install) gm_cmd_install "$@" ;;
   post) gm_cmd_post "$@" ;;
   resolve) gm_cmd_resolve "$@" ;;
   list | ls) gm_cmd_list "$@" ;;

@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": ["Bash(gm *)", "Bash(../bin/gm *)", "Bash(bash ../bin/gm *)"],
+    "deny": ["Edit", "Write", "NotebookEdit"]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/../bin/gm\" hook front-desk --clone 2>/dev/null || true",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}
