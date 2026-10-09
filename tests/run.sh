@@ -2070,7 +2070,7 @@ DESK_WT=$WORK/desk/worktree
 desk_ready() {
   [ -d "$DESK" ] && return 0
   mkdir -p "$DESK/.claude"
-  cp -Rp "$ROOT/bin" "$ROOT/templates" "$ROOT/mods" "$ROOT/.claude-plugin" "$ROOT/CLAUDE.md" "$ROOT/.gitignore" "$DESK/"
+  cp -Rp "$ROOT/bin" "$ROOT/templates" "$ROOT/CLAUDE.md" "$ROOT/.gitignore" "$DESK/"
   cp -p "$ROOT/.claude/settings.json" "$DESK/.claude/"
   git -C "$DESK" init -q -b main
   git -C "$DESK" add -A
@@ -2202,41 +2202,6 @@ t_clone_hooks_stand_down_in_a_worktree() {
   cmp -s "$GM_HALL/register.db" "$WORK/standdown/before.db" || fail "the register changed"
   [ ! -e "$GM_HALL/guild.conf" ] || fail "the setup was recorded"
 }
-
-# A claude the patron starts in the clone without gm has the chat too: the clone's local settings enable guild-chat
-# from the clone's own marketplace, as chat: says, and claude is asked only when they say otherwise.
-t_clone_front_desk_enables_the_chat_in_its_local_settings() {
-  own_home chatlocal
-  export GM_HALL=$WORK/chatlocal/hall GM_LAUNCH_AGENTS=$WORK/chatlocal/LaunchAgents GM_OTELCOL=$WORK/none
-  export GM_CLAUDE=$ROOT/tests/fixtures/fake-claude-plugins GM_FAKE_CLAUDE_CALLS=$WORK/chatlocal/calls
-  desk_ready
-  local f=$DESK/.claude/settings.local.json
-  rm -f "$f"
-  clone_hook c1 >/dev/null
-  assert_eq "$(cat "$GM_FAKE_CLAUDE_CALLS")" "plugin marketplace add $DESK --scope local
-plugin install guild-chat@guildmaster --scope local" "the clone is the marketplace, and guild-chat is installed in its local scope" &&
-    assert_eq "$(chat_enabled "$f")" 1 "enabled"
-  clone_hook c2 >/dev/null
-  assert_eq "$(wc -l <"$GM_FAKE_CLAUDE_CALLS" | tr -d ' ')" 2 "nothing asked again while the settings hold"
-  git -C "$DESK" check-ignore -q .claude/settings.local.json || fail "the local settings could be committed"
-  # chat: off turns it off there too, at once, for the next claude started in the clone.
-  (cd "$DESK" && bash "$DESK_GM" config set chat off) >/dev/null || fail "config set chat off failed"
-  assert_eq "$(tail -n 1 "$GM_FAKE_CLAUDE_CALLS")" "plugin disable guild-chat@guildmaster --scope local" "disabled in the local scope" &&
-    assert_eq "$(chat_enabled "$f")" 0 "and off"
-  clone_hook c3 >/dev/null
-  assert_eq "$(wc -l <"$GM_FAKE_CLAUDE_CALLS" | tr -d ' ')" 3 "and left off"
-  (cd "$DESK" && bash "$DESK_GM" config set chat banners) >/dev/null || fail "config set chat banners failed"
-  assert_eq "$(tail -n 2 "$GM_FAKE_CLAUDE_CALLS")" "plugin disable guild-chat@guildmaster --scope local
-plugin install guild-chat@guildmaster --scope local" "and back on, the marketplace already declared"
-  # Never in a worktree: a camp's chat is the one gm starts it with.
-  clone_hook w1 "$DESK_WT" >/dev/null
-  (cd "$DESK_WT" && bash "$DESK_WT/bin/gm" config set chat off) >/dev/null 2>&1 || true
-  assert_eq "$(wc -l <"$GM_FAKE_CLAUDE_CALLS" | tr -d ' ')" 4 "nothing asked from a worktree" &&
-    [ ! -e "$DESK_WT/.claude/settings.local.json" ] || fail "settings written into a worktree"
-}
-
-# chat_enabled <settings file>: what it says of guild-chat@guildmaster.
-chat_enabled() { json "SELECT json_extract(CAST(readfile($(sqlq "$1")) AS TEXT),'\$.enabledPlugins.\"guild-chat@guildmaster\"');"; }
 
 t_marked_folder_is_the_front_desk() {
   own_home marked

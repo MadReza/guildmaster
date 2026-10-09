@@ -1005,7 +1005,6 @@ Tell the patron plainly, in a sentence or two, what to install. Once it is insta
   gm_db_ensure
   [ -n "$(gm_conf_get initialized)" ] || gm_conf_set initialized "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   gm_front_desk_files
-  gm_chat_clone_sync || true
   auto=$(gm_autostart_ensure)
   case $auto in
     installed | on) auto="on (launchd runs the muster at login and every $(gm_autostart_every) minutes)" ;;
@@ -2936,9 +2935,7 @@ gm_conf_apply() {
       return ;;
     telemetry) printf 'telemetry is %s: Party Leaders started from now on %s; running ones keep what they started with.\n' "$shown" \
       "$([ "${GM_TELEMETRY:-on}" = off ] && printf 'send no telemetry' || printf 'send telemetry to the collector')" ;;
-    chat)
-      gm_chat_clone_sync || true
-      printf 'chat is %s: the Guildmaster and Party Leaders started from now on %s; running ones keep what they started with.\n' "$shown" \
+    chat) printf 'chat is %s: the Guildmaster and Party Leaders started from now on %s; running ones keep what they started with.\n' "$shown" \
       "$([ "${GM_CHAT:-banners}" = off ] && printf "draw Claude Code's own chat" || printf 'draw their chat under heraldic banners')" ;;
     repo-roots) printf 'repo-roots is %s: gm repos looks for clones %s.\n' "$shown" "$([ -n "$val" ] && printf 'there' || printf 'in the usual source folders')" ;;
     *) printf '%s is %s; it takes effect at the next muster.\n' "$key" "$shown" ;;
@@ -5156,43 +5153,6 @@ gm_chat_args() {
   [ -z "${1:-}" ] || GM_CHAT_ENV+=("GM_CHAT_FOCUS=$1")
 }
 
-# The chat of a claude the patron starts in the clone without gm: the clone is a plugin marketplace
-# (.claude-plugin/marketplace.json), and Claude Code's local scope, the clone's .claude/settings.local.json that never
-# leaves this machine, enables guild-chat there as chat: says. Only at the patron's front desk, never in a camp or a
-# contributor's checkout; quiet, and claude is asked only when the settings say otherwise. 0 when they load the mod.
-GM_CHAT_PLUGIN='guild-chat@guildmaster'
-gm_chat_clone_sync() {
-  local want=0 have path claude=${GM_CLAUDE:-claude}
-  gm_front_desk_home "$GM_ROOT" && [ -f "$GM_ROOT/.claude-plugin/marketplace.json" ] || return 1
-  ! gm_conf_norm chat "${GM_CHAT:-banners}" || [ "$GM_CONF_VAL" = off ] || want=1
-  IFS=$'\t' read -r have path <<<"$(gm_chat_clone_state)"
-  if [ "$have" != "$want" ] || { [ "$want" = 1 ] && [ "$path" != "$GM_ROOT" ]; }; then
-    (
-      cd "$GM_ROOT" || exit 1
-      unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_SESSION_ID TRACEPARENT
-      if [ "$want" = 1 ]; then
-        { [ "$path" = "$GM_ROOT" ] || "$claude" plugin marketplace add "$GM_ROOT" --scope local; } &&
-          "$claude" plugin install "$GM_CHAT_PLUGIN" --scope local
-      else
-        "$claude" plugin disable "$GM_CHAT_PLUGIN" --scope local
-      fi
-    ) </dev/null >/dev/null 2>&1 || true
-    IFS=$'\t' read -r have path <<<"$(gm_chat_clone_state)"
-  fi
-  [ "$have" = 1 ] && [ "$path" = "$GM_ROOT" ]
-}
-
-# What the clone's local settings say of the mod: enabled (1, or 0 for no), a tab, and the marketplace's folder.
-gm_chat_clone_state() {
-  local f=$GM_ROOT/.claude/settings.local.json
-  [ -f "$f" ] || { printf '0\t'; return 0; }
-  sqlite3 -batch :memory: 2>/dev/null <<SQL || printf '0\t'
-SELECT COALESCE(json_extract(j, '\$.enabledPlugins."$GM_CHAT_PLUGIN"'), 0)||char(9)||
-       COALESCE(json_extract(j, '\$.extraKnownMarketplaces.guildmaster.source.path'), '')
-  FROM (SELECT CASE WHEN json_valid(CAST(readfile($(gm_q "$f")) AS TEXT)) THEN CAST(readfile($(gm_q "$f")) AS TEXT) ELSE '{}' END AS j);
-SQL
-}
-
 # What the front desk's pane runs: the Guildmaster, claude in the clone, whose committed SessionStart hook does the
 # rest. Only in the pane gm recorded for the front desk, so there is never a second one beside it.
 gm_front_desk_start() {
@@ -5201,8 +5161,6 @@ gm_front_desk_start() {
     gm_die "start: gm start $GM_FRONT_DESK runs only in the front desk's own herdr pane; gm opens it there"
   gm_front_desk_files
   gm_chat_args
-  # Where the clone's own settings load the mod, a second copy from --plugin-dir would draw every banner twice.
-  ! gm_chat_clone_sync || GM_CHAT_ARGS=()
   cd "$GM_ROOT"
   exec env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_SESSION_ID -u TRACEPARENT -u GM_FOCUS \
     -u GM_CHAT_FOCUS ${GM_CHAT_ENV[@]+"${GM_CHAT_ENV[@]}"} "$claude" --name "$GM_FRONT_DESK" \
