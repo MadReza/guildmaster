@@ -250,6 +250,7 @@ A Party Leader started before this layout stays in its tab of `guild` while it r
 gm roster           # the front desk's Guildmaster and each Party Leader: pane and state
 gm up               # the muster: start again whatever is dead or missing; leave the running ones alone
 gm close appt-v2    # retire a focus: not started again (end its Party Leader first); camp and postings kept
+                    # (its Party Leader may run it itself once every posting is finished: gm ends it after its turn)
 ```
 
 ```

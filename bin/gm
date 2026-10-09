@@ -128,7 +128,7 @@ gm_conf_carried() {
   case $GM_CONF_VARS in *" $1 "*) return 1 ;; esac
   return 0
 }
-GM_SCHEMA_VERSION=4
+GM_SCHEMA_VERSION=5
 GM_STOP_BUDGET=${GM_STOP_BUDGET:-3}
 GM_NOW="strftime('%Y-%m-%dT%H:%M:%fZ','now')"
 GM_NOW_MS="CAST(ROUND((julianday('now')-2440587.5)*86400000) AS INTEGER)"
@@ -322,6 +322,14 @@ PRAGMA user_version=4;
 SQL
 }
 
+# Schema 4 to 5: a Party Leader that asks to close its own focus, which gm finishes once it has ended. Only adds.
+gm_schema5_sql() {
+  cat <<'SQL'
+ALTER TABLE focus ADD COLUMN close_requested_at TEXT;
+PRAGMA user_version=5;
+SQL
+}
+
 gm_db_init() {
   mkdir -p "$GM_HALL"
   local tmp=$GM_DB.init.$$
@@ -333,6 +341,7 @@ $(gm_schema1_sql)
 $(gm_schema2_sql)
 $(gm_schema3_sql)
 $(gm_schema4_sql)
+$(gm_schema5_sql)
 COMMIT;
 SQL
   # ln refuses an existing target, so exactly one concurrent first caller installs its register.
@@ -345,9 +354,10 @@ SQL
 gm_db_migrate() {
   local from=$1 sql err
   case $from in
-    1) sql="$(gm_schema2_sql) $(gm_schema3_sql) $(gm_schema4_sql)" ;;
-    2) sql="$(gm_schema3_sql) $(gm_schema4_sql)" ;;
-    3) sql=$(gm_schema4_sql) ;;
+    1) sql="$(gm_schema2_sql) $(gm_schema3_sql) $(gm_schema4_sql) $(gm_schema5_sql)" ;;
+    2) sql="$(gm_schema3_sql) $(gm_schema4_sql) $(gm_schema5_sql)" ;;
+    3) sql="$(gm_schema4_sql) $(gm_schema5_sql)" ;;
+    4) sql=$(gm_schema5_sql) ;;
   esac
   if ! err=$(sqlite3 -bail -batch -cmd '.timeout 15000' "$GM_DB" "BEGIN IMMEDIATE; $sql COMMIT;" 2>&1 >/dev/null); then
     [ "$(gm_sql 'PRAGMA user_version;')" = "$GM_SCHEMA_VERSION" ] || gm_die "could not migrate the register at $GM_DB to schema $GM_SCHEMA_VERSION: $err"
@@ -360,8 +370,8 @@ gm_db_ensure() {
   local v
   v=$(gm_sql 'PRAGMA user_version;')
   case $v in
-    4) ;;
-    1 | 2 | 3) gm_db_migrate "$v" ;;
+    5) ;;
+    1 | 2 | 3 | 4) gm_db_migrate "$v" ;;
     *) gm_die "the register at $GM_DB is schema $v; this gm knows schema $GM_SCHEMA_VERSION" ;;
   esac
   GM_DB_READY=1
@@ -589,7 +599,8 @@ They are for advanced use, and for the Guildmaster.
   roster [--all]          the front desk's Guildmaster and each Party Leader with its herdr pane and state
                           (alive, starting, dead, missing, held, unknown; --all adds closed focuses)
   close <focus>           retire a focus: its Party Leader is not started again (end a running one first);
-                          its camp and postings are kept
+                          its camp and postings are kept. Run by that Party Leader itself, with every posting
+                          finished, it asks to close: gm types /exit once its turn ends, then closes the focus
   start <focus> --pane ID what a Party Leader's herdr pane runs: claude in the camp (only in that pane);
                           start guildmaster --pane ID is what the front desk's pane runs
   repos [<word>]          repositories gm knows (from focuses) and git clones under the usual source folders
@@ -3878,7 +3889,7 @@ gm_hook_prompt() {
 
 # Runs without errexit (called from a condition); its status is the register write's.
 gm_hook_prompt_record() {
-  local tmp=$1 focus words sid pid first reftarget='' kind id canon disposition
+  local tmp=$1 focus words sid pid first reftarget='' kind id canon disposition notification=''
   focus=${GM_FOCUS:-}
   words=$(gm_json_field "$tmp" prompt)
   sid=$(gm_json_field "$tmp" session_id)
@@ -3893,9 +3904,13 @@ gm_hook_prompt_record() {
   if [ -n "$reftarget" ]; then
     IFS=$'\t' read -r kind id canon <<<"$reftarget"
   fi
+  # A background task's notification arrives through this hook as if typed, but it is the harness's, not the
+  # patron's: it is recorded, never made a posting. Its row keeps the command disposition, the schema's word for
+  # what is not the patron's message.
+  [[ ! $first =~ ^[[:space:]]*'<task-notification>' ]] || notification=1
   case $first in
     /*) disposition='command' ;;
-    *) if [ -n "$reftarget" ]; then disposition=addition; else disposition=posting; fi ;;
+    *) if [ -n "$notification" ]; then disposition='command'; elif [ -n "$reftarget" ]; then disposition=addition; else disposition=posting; fi ;;
   esac
   [ -n "$focus" ] && [ -s "$GM_DB" ] && [ -n "$(gm_focus_id "$focus" 2>/dev/null)" ] || disposition=unplaced
   local sql
@@ -3913,11 +3928,24 @@ INSERT INTO event(at, actor, kind, focus_id, posting_id, session_id, line)
   FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.id=$id;
 SELECT 'gm recorded this patron message verbatim as an addition to posting '||f.name||'#'||p.num||' '||p.slug||' (state '||p.state||'). The posting''s words: \"'||$(gm_summary_sql p.words)||'\"'
 FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.id=$id;" ;;
-    command) sql="SELECT 'gm recorded this slash command verbatim; it is not a posting.';" ;;
+    command)
+      if [ -n "$notification" ]; then
+        sql="SELECT 'gm recorded this background task notification verbatim; it is not a message from the patron, so it is not a posting.';"
+      else
+        sql="SELECT 'gm recorded this slash command verbatim; it is not a posting.';"
+      fi ;;
     unplaced) sql="SELECT 'gm recorded this message verbatim, but no focus named '||$(gm_q "${focus:-?}")||' is in the register, so it is not a posting.';" ;;
   esac
   local focus_sql=NULL
   [ "$disposition" = unplaced ] || focus_sql="(SELECT id FROM focus WHERE name=$(gm_q "$focus"))"
+  # The patron's message to a focus whose Party Leader asked to close keeps it open.
+  case $disposition in
+    posting | addition)
+      sql="$sql
+SELECT 'This message cancels the close that the Party Leader of '||name||' asked for: the focus stays open.' FROM focus
+  WHERE name=$(gm_q "$focus") AND close_requested_at IS NOT NULL AND closed_at IS NULL;
+$(gm_close_cancel_sql "name=$(gm_q "$focus")" patron)" ;;
+  esac
   gm_db_ensure
   gm_sql <<SQL
 CREATE TEMP TABLE v(k TEXT PRIMARY KEY, id INTEGER);
@@ -4490,7 +4518,7 @@ gm_reconcile() {
 
 # gm_muster_one <endpoint key> <show>: one Guildmaster or Party Leader, checked and acted on.
 gm_muster_one() {
-  local key=$1 show=$2 name table where who its retry st detail line pane attempts held told tell fid
+  local key=$1 show=$2 name table where who its retry st detail line='' pane attempts held told tell fid
   if [ "$key" = front-desk ]; then
     name=$GM_FRONT_DESK table=endpoint where="key='front-desk'" who=Guildmaster its='the Guildmaster' retry='gm tries again'
     fid=NULL
@@ -4500,6 +4528,20 @@ gm_muster_one() {
     fid="(SELECT id FROM focus WHERE $where)"
   fi
   IFS=$'\t' read -r st detail <<<"$(gm_endpoint_state "$key")"
+  # A Party Leader that asked to close its focus is not started again: its close is finished here when it has
+  # ended; while it still runs, a finisher is started again unless one is at work.
+  if [ "$key" != front-desk ] && [ -n "$(gm_focus_field "$name" close_requested_at)" ]; then
+    case $st in
+      dead | missing)
+        gm_close_done "$name" "$st" gm
+        line="$name: closed, as its Party Leader asked" ;;
+      alive)
+        gm_close_spawn "$name"
+        line="$name: asked to close; gm ends it once its turn is over" ;;
+    esac
+    [ -z "$line" ] || printf '%s\n' "$line"
+    return 0
+  fi
   IFS=$'\t' read -r attempts held told <<<"$(gm_sql "SELECT start_attempts, held_at IS NOT NULL, held_told FROM $table WHERE $where;")"
   attempts=${attempts:-0} told=${told:-0}
   [ "$held" = 1 ] || held=''
@@ -4744,12 +4786,25 @@ gm_guild_exists() {
   [ -s "$GM_DB" ] && [ -n "$(gm_sql "SELECT 1 FROM focus WHERE closed_at IS NULL UNION ALL SELECT 1 FROM endpoint WHERE key='front-desk' LIMIT 1;" 2>/dev/null)" ]
 }
 
+# A closed focus is reopened; one whose Party Leader asked to close and has not yet is kept open instead.
 gm_reopen_focus() {
-  [ -n "$(gm_focus_field "$1" closed_at)" ] || return 0
+  if [ -z "$(gm_focus_field "$1" closed_at)" ]; then
+    [ -n "$(gm_focus_field "$1" close_requested_at)" ] || return 0
+    gm_sql "BEGIN IMMEDIATE;
+$(gm_close_cancel_sql "name=$(gm_q "$1")" patron)
+COMMIT;"
+    return 0
+  fi
   gm_sql "BEGIN IMMEDIATE;
-UPDATE focus SET closed_at=NULL WHERE name=$(gm_q "$1");
+UPDATE focus SET closed_at=NULL, close_requested_at=NULL WHERE name=$(gm_q "$1");
 INSERT INTO event(at, actor, kind, focus_id, line) SELECT $GM_NOW, 'patron', 'focus.reopened', id, name||' reopened' FROM focus WHERE name=$(gm_q "$1");
 COMMIT;"
+}
+
+# gm_close_cancel_sql <focus condition> <actor>: a pending close request is dropped, with one ledger row.
+gm_close_cancel_sql() {
+  printf "INSERT INTO event(at, actor, kind, focus_id, line) SELECT %s, %s, 'focus.close-cancelled', id, name||' stays open' FROM focus WHERE %s AND close_requested_at IS NOT NULL AND closed_at IS NULL;
+UPDATE focus SET close_requested_at=NULL WHERE %s AND closed_at IS NULL;" "$GM_NOW" "$(gm_q "$2")" "$1" "$1"
 }
 
 # After gm init: the muster once, and autostart on, since it is always on unless the patron turned it off.
@@ -4864,6 +4919,7 @@ gm_cmd_roster() {
         st=held detail="failed to start $attempts times in a row; gm open $focus tries again"
       fi
     fi
+    [ -n "$closed" ] || [ -z "$(gm_focus_field "$focus" close_requested_at)" ] || detail="${detail:+$detail · }closing, as its Party Leader asked"
     [ -z "$last" ] || detail="${detail:+$detail · }last started $last"
     gm_roster_line "$focus" "party leader" "$st" "${pane:--}" "$detail"
   done <<<"$(gm_sql "SELECT f.name, COALESCE(f.closed_at,'-'), COALESCE(f.held_at,'-'), f.start_attempts,
@@ -4872,11 +4928,16 @@ gm_cmd_roster() {
 }
 
 # Retires a focus: its Party Leader is no longer started, and its pane is closed once it holds only a shell. A
-# live Party Leader is never ended by gm; the patron ends it in its workspace first. The camp and postings stay.
+# live Party Leader is never killed by gm. From a terminal or the front desk, the patron ends it in its workspace first.
+# From inside that Party Leader (GM_FOCUS is the focus), with every posting finished, close is a request instead:
+# it is recorded, and a gm of its own, detached from the session, waits for the Party Leader's turn to end, types
+# /exit in its pane, and closes the focus once the pane holds only a shell. The muster finishes a request the
+# finisher could not. A new message from the patron to that focus cancels it. The camp and postings stay.
 gm_cmd_close() {
-  local focus='' row s ws pane st detail camp
+  local focus='' finish='' row s pane st='' detail open
   while [ $# -gt 0 ]; do
     case $1 in
+      --finish) finish=1; shift ;;
       -*) gm_die "close: unknown option $1" ;;
       *) [ -z "$focus" ] || gm_die "close: one focus at a time"; focus=$1; shift ;;
     esac
@@ -4888,26 +4949,154 @@ gm_cmd_close() {
     printf '%s is already closed\n' "$focus"
     return 0
   fi
+  if [ -n "$finish" ]; then
+    gm_close_finish "$focus"
+    return
+  fi
+  if gm_close_self "$focus"; then
+    open=$(gm_sql "SELECT group_concat('#'||num||' '||slug||' '||state, ', ') FROM (SELECT num, slug, state FROM posting
+      WHERE focus_id=(SELECT id FROM focus WHERE name=$(gm_q "$focus")) AND state NOT IN ('done','failed','closed') ORDER BY num);")
+    [ -z "$open" ] || gm_die "close: $focus still has postings that are not finished: $open; record each one's outcome first (gm notice <n> done|failed|closed), then gm close $focus"
+  fi
   gm_herdr_lock 30 || gm_die "close: another gm is bringing Party Leaders up; try again in a moment"
   row=$(gm_endpoint "party-leader:$focus")
   if [ -n "$row" ]; then
     gm_herdr_require close
-    IFS=$'\t' read -r s ws _ pane _ _ <<<"$row"
+    IFS=$'\t' read -r s _ _ pane _ _ <<<"$row"
     IFS=$'\t' read -r st detail <<<"$(gm_endpoint_state "party-leader:$focus")"
     case $st in
-      dead) gm_herdr "$s" pane close "$pane" >/dev/null ;;
-      missing) ;;
-      *) gm_die "close: $focus's Party Leader is $st ($detail) in herdr pane $pane; end it there first (/exit), then gm close $focus" ;;
+      dead | missing) ;;
+      *)
+        if gm_close_self "$focus"; then
+          gm_close_request "$focus"
+          return
+        fi
+        gm_die "close: $focus's Party Leader is $st ($detail) in herdr pane $pane; end it there first (/exit), then gm close $focus" ;;
     esac
   fi
-  camp=$(gm_focus_field "$focus" camp)
+  gm_close_done "$focus" "$st" patron
+  gm_herdr_unlock
+  printf '%s is closed: its Party Leader is not started again. Its camp %s and its postings are kept; gm open %s reopens it.\n' "$focus" "$(gm_focus_field "$focus" camp)" "$focus"
+}
+
+# gm_close_self <focus>: this is that focus's Party Leader: GM_FOCUS names it, and herdr's own variables put this
+# session in its recorded pane. Any other claude in the camp has GM_FOCUS too, and is not it.
+gm_close_self() {
+  local rs pane
+  [ "${GM_FOCUS:-}" = "$1" ] && [ "${HERDR_ENV:-}" = 1 ] && [ -n "${HERDR_PANE_ID:-}" ] || return 1
+  IFS=$'\t' read -r rs _ _ pane _ _ <<<"$(gm_endpoint "party-leader:$1")"
+  [ "$pane" = "$HERDR_PANE_ID" ] && [ "$rs" = "${HERDR_SESSION:-default}" ]
+}
+
+# gm_close_done <focus> <state> <actor>: under the herdr lock, with the Party Leader dead or missing (or no pane
+# recorded), the husk pane is closed and the focus is retired in the register.
+gm_close_done() {
+  local focus=$1 st=$2 s pane
+  if [ "$st" = dead ]; then
+    IFS=$'\t' read -r s _ _ pane _ _ <<<"$(gm_endpoint "party-leader:$focus")"
+    gm_herdr "$s" pane close "$pane" >/dev/null
+  fi
   gm_sql "BEGIN IMMEDIATE;
-UPDATE focus SET closed_at=$GM_NOW WHERE name=$(gm_q "$focus");
+UPDATE focus SET closed_at=$GM_NOW, close_requested_at=NULL WHERE name=$(gm_q "$focus");
 DELETE FROM endpoint WHERE key=$(gm_q "party-leader:$focus");
-INSERT INTO event(at, actor, kind, focus_id, line) SELECT $GM_NOW, 'patron', 'focus.closed', id, name||' closed' FROM focus WHERE name=$(gm_q "$focus");
+INSERT INTO event(at, actor, kind, focus_id, line) SELECT $GM_NOW, $(gm_q "$3"), 'focus.closed', id, name||' closed' FROM focus WHERE name=$(gm_q "$focus");
+COMMIT;"
+}
+
+# The Party Leader asked to close its own focus: recorded, then the finisher is started in its own process group,
+# away from the session's pipes, so it outlives the claude it ends. Runs under the herdr lock, and releases it.
+gm_close_request() {
+  local focus=$1
+  gm_sql "BEGIN IMMEDIATE;
+UPDATE focus SET close_requested_at=$GM_NOW WHERE name=$(gm_q "$focus");
+INSERT INTO event(at, actor, kind, focus_id, line) SELECT $GM_NOW, 'party-leader', 'focus.close-requested', id, name||' asked to close' FROM focus WHERE name=$(gm_q "$focus");
 COMMIT;"
   gm_herdr_unlock
-  printf '%s is closed: its Party Leader is not started again. Its camp %s and its postings are kept; gm open %s reopens it.\n' "$focus" "$camp" "$focus"
+  gm_close_spawn "$focus"
+  printf '%s closes when this turn ends: gm types /exit in its pane once its Party Leader is idle, then closes the focus. Its camp and postings are kept; gm open %s reopens it. A new message from the patron here before then cancels the close.\n' "$focus" "$focus"
+}
+
+# The finisher of one focus's close request, at most one at a time: its pid is kept in close.<focus>.pid in the
+# Guildhall, and a finisher whose pid is no longer there stops. Only the finisher runs in the background, with none
+# of this command's output open, so neither the Party Leader's tool call nor a $(...) waits for it.
+gm_close_spawn() {
+  local pid
+  pid=$(cat "$GM_HALL/close.$1.pid" 2>/dev/null || true)
+  [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null || return 0
+  mkdir -p "$GM_HALL"
+  (
+    set -m
+    cd /
+    env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_SESSION_ID -u TRACEPARENT -u GM_FOCUS \
+      nohup bash "$GM_SELF" close "$1" --finish </dev/null >>"$GM_HALL/close.log" 2>&1 &
+    printf '%s' "$!" >"$GM_HALL/close.$1.pid"
+  )
+}
+
+# The close is still asked for and not yet done.
+gm_close_pending() {
+  [ -n "$(gm_sql "SELECT 1 FROM focus WHERE name=$(gm_q "$1") AND close_requested_at IS NOT NULL AND closed_at IS NULL;")" ]
+}
+
+# gm_close_exit <focus>: types /exit into the Party Leader's pane, as the patron would; the text, then Enter. Only
+# while the close is still asked for: the patron's message may have cancelled it a moment ago.
+gm_close_exit() {
+  local s pane
+  gm_close_pending "$1" || return 0
+  IFS=$'\t' read -r s _ _ pane _ _ <<<"$(gm_endpoint "party-leader:$1")"
+  [ -n "$pane" ] || return 0
+  gm_herdr "$s" pane send-text "$pane" /exit >/dev/null
+  gm_herdr "$s" pane send-keys "$pane" enter >/dev/null
+  gm_sql "BEGIN IMMEDIATE;
+INSERT INTO event(at, actor, kind, focus_id, detail) SELECT $GM_NOW, 'gm', 'party-leader.exit', id, $(gm_q "typed /exit in herdr pane $pane, as it asked to close") FROM focus WHERE name=$(gm_q "$1");
+COMMIT;"
+}
+
+# gm close <focus> --finish, started by gm_close_request: waits up to GM_CLOSE_WAIT seconds for the Party Leader to
+# finish its turn (herdr says idle or done, twice in a row, so a moment between tool calls is not taken for the
+# end of the turn), types /exit (again every GM_CLOSE_RESEND seconds while it stays idle),
+# and closes the focus once its pane holds only a shell. A cancelled request ends it; the muster finishes one it
+# gave up on.
+gm_close_finish() {
+  local focus=$1 waited=0 sent=-1 idle=0 st detail pidf=$GM_HALL/close.$1.pid
+  local wait=${GM_CLOSE_WAIT:-900} poll=${GM_CLOSE_POLL:-2} resend=${GM_CLOSE_RESEND:-30}
+  # The spawner writes the pid file just after starting this; a moment's wait for it.
+  while [ ! -s "$pidf" ] && [ "$waited" -lt 5 ]; do sleep 1; waited=$((waited + 1)); done
+  waited=0
+  while [ "$waited" -lt "$wait" ]; do
+    [ "$(cat "$pidf" 2>/dev/null || true)" = "$$" ] || return 0
+    if ! gm_close_pending "$focus"; then
+      rm -f "$pidf"
+      return 0
+    fi
+    IFS=$'\t' read -r st detail <<<"$(gm_endpoint_state "party-leader:$focus")"
+    case $st in
+      dead | missing)
+        gm_herdr_lock 30 || { sleep "$poll"; waited=$((waited + poll)); continue; }
+        st=''
+        if gm_close_pending "$focus"; then
+          IFS=$'\t' read -r st detail <<<"$(gm_endpoint_state "party-leader:$focus")"
+          case $st in dead | missing) gm_close_done "$focus" "$st" gm ;; esac
+        fi
+        gm_herdr_unlock
+        case $st in dead | missing) rm -f "$pidf"; printf '%s closed, as its Party Leader asked\n' "$focus"; return 0 ;; esac ;;
+      alive)
+        case $detail in
+          idle | done)
+            idle=$((idle + 1))
+            if [ "$idle" -ge 2 ] && { [ "$sent" -lt 0 ] || [ $((waited - sent)) -ge "$resend" ]; }; then
+              gm_close_exit "$focus"
+              sent=$waited
+            fi ;;
+          *) idle=0 ;;
+        esac ;;
+      *) idle=0 ;;
+    esac
+    sleep "$poll"
+    waited=$((waited + poll))
+  done
+  rm -f "$pidf"
+  printf '%s: its Party Leader did not end within %s seconds; the muster finishes the close\n' "$focus" "$wait"
 }
 
 # What a Party Leader's pane runs: claude in the camp, with the telemetry environment gm open has always set.

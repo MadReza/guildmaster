@@ -102,9 +102,10 @@ Schema 3 adds the `endpoint` table and four columns on `focus`. A schema 1 or 2 
 | `endpoint.session`, `workspace_id`, `tab_id`, `pane_id`, `label` | where, as herdr names it (`w1`, `w1:t2`, `w1:p2`) |
 | `endpoint.launched_ms` | when gm last typed the launch line into the pane |
 | `focus.closed_at` | a retired focus (`gm close`); `gm open` reopens it |
+| `focus.close_requested_at` | its Party Leader asked to close the focus (`gm close` from inside it); cleared when the focus closes, or by the patron's next message to it, or by `gm open` |
 | `focus.start_attempts`, `held_at`, `held_told` | starts since the Party Leader was last seen alive; the hold, and who has been told |
 
-Events go to the ledger: `party-leader.launched` (with the state and cause), `party-leader.held`, `focus.closed` and `focus.reopened`; for the collector, `collector.launched`, `collector.failed`, `collector.held` and `collector.stopped`.
+Events go to the ledger: `party-leader.launched` (with the state and cause), `party-leader.held`, `focus.closed` and `focus.reopened`; for a Party Leader closing its own focus, `focus.close-requested`, `party-leader.exit` and `focus.close-cancelled`; for the collector, `collector.launched`, `collector.failed`, `collector.held` and `collector.stopped`.
 
 A recorded workspace is reused only while herdr still gives that id the guild's label.
 A recorded pane belongs to its Party Leader only while herdr still puts it in the recorded workspace.
@@ -178,6 +179,20 @@ Nothing is ever sent to the Guildmaster session or to a Party Leader's chat.
 - A dead one still in a tab of `guild`, from before each had a workspace of its own, has its husk (only a shell) closed and starts in a new workspace.
 - `gm close <focus>` retires a focus: its Party Leader is no longer started, and its husk pane is closed. Closing a workspace's last pane closes the workspace. It refuses while the Party Leader is alive, starting or unknown, and says to end it in its workspace first (`/exit`). It has no `--force`.
 - The camp, the branch and the postings stay; `gm open <focus>` reopens the focus.
+
+### A Party Leader closing its own focus (since 2026-10-09)
+
+A Party Leader asked to close when everything is done cannot end the session it runs in, and `gm close` from inside it would find itself alive.
+Firstmate never lets an agent end itself: a finished worker appends `done` and stops, and its supervisor ends it from another pane, with `fm-control.sh <id> exit` (types `/exit`) or `fm-teardown.sh` (closes the window).
+gm does the same from outside the session, with plain code and no model:
+
+- `gm close <focus>` run by that focus's Party Leader refuses while any posting is not done, failed or closed, and names them. The Party Leader is the session with `GM_FOCUS` set to the focus *and* herdr's `HERDR_PANE_ID` and session matching its recorded pane; another claude in the camp gets the usual refusal.
+- Otherwise it records `focus.close_requested_at` and a `focus.close-requested` row, starts a finisher (`gm close <focus> --finish`) in its own process group, with none of the tool call's output open, and returns at once.
+- The finisher waits for herdr to say the Party Leader is idle or done twice in a row, so its turn and the Stop guard are over. It then types `/exit` into its pane as the patron would, with `pane send-text` and Enter, and types it again every 30 s while the Party Leader stays idle. Once the pane holds only a shell, it closes the focus as `gm close` from a terminal would: the husk pane closed, `focus.closed` by `gm`.
+- One finisher at a time: its pid is kept in `close.<focus>.pid` in the Guildhall, and its output goes to `close.log`. Just before typing, it checks again that the close is still asked for.
+- It gives up after 15 minutes. The muster finishes what it left: it never starts a Party Leader that asked to close. A dead or missing one has its focus closed; a running one gets a new finisher, unless one is at work.
+- Unlike `fm-control.sh exit`, gm does not check that the input box is empty first. Text the patron left half-typed in the pane would be sent with `/exit`, as a message, and that message cancels the close.
+- The patron's next message to that focus, or `gm open <focus>`, cancels the request (`focus.close-cancelled`). The finisher then stops without typing anything.
 
 ### How this differs from Firstmate
 
