@@ -5133,24 +5133,26 @@ gm_cmd_start() {
     printf 'gm: no collector answers at %s, so this session'\''s telemetry will be lost; start one with gm collector\n' "$(gm_otel_endpoint)" >&2
   fi
   camp=$(gm_focus_field "$focus" camp)
-  gm_chat_args "$focus"
+  gm_chat_args "$camp" "$focus"
   cd "$camp"
   exec env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_SESSION_ID -u TRACEPARENT -u GM_FOCUS \
     -u GM_CHAT_FOCUS ${envargs[@]+"${envargs[@]}"} ${GM_CHAT_ENV[@]+"${GM_CHAT_ENV[@]}"} "$claude" --name "$focus" \
     ${GM_CHAT_ARGS[@]+"${GM_CHAT_ARGS[@]}"}
 }
 
-# The chat setting, for a session gm starts: with chat: banners, claude loads the guild-chat mod from the clone
-# (--plugin-dir), told by GM_CHAT_FOCUS which Party Leader it draws for (none at the front desk).
+# The chat setting, for a session gm starts in <dir>: gm_chat_args <dir> [focus]. With chat: banners, claude loads
+# the guild-chat mod from the clone (--plugin-dir), told by GM_CHAT_FOCUS which Party Leader it draws for (none at
+# the front desk). A checkout of Guildmaster loads the mod itself, from .claude/skills/guild-chat, so there gm passes
+# only the variables: a second copy by --plugin-dir would leave Claude Code reporting the first as not loaded.
 GM_CHAT_ARGS=()
 GM_CHAT_ENV=()
 gm_chat_args() {
   GM_CHAT_ARGS=()
   GM_CHAT_ENV=()
   gm_conf_norm chat "${GM_CHAT:-banners}" && [ "$GM_CONF_VAL" != off ] || return 0
-  GM_CHAT_ARGS=(--plugin-dir "$GM_ROOT/mods/guild-chat")
+  [ -f "$1/.claude/skills/guild-chat/.claude-plugin/plugin.json" ] || GM_CHAT_ARGS=(--plugin-dir "$GM_ROOT/mods/guild-chat")
   GM_CHAT_ENV=("GM_CHAT=$GM_CONF_VAL")
-  [ -z "${1:-}" ] || GM_CHAT_ENV+=("GM_CHAT_FOCUS=$1")
+  [ -z "${2:-}" ] || GM_CHAT_ENV+=("GM_CHAT_FOCUS=$2")
 }
 
 # What the front desk's pane runs: the Guildmaster, claude in the clone, whose committed SessionStart hook does the
@@ -5160,7 +5162,7 @@ gm_front_desk_start() {
   [ -n "$pane" ] && [ "$pane" = "$(gm_sql "SELECT pane_id FROM endpoint WHERE key='front-desk';")" ] ||
     gm_die "start: gm start $GM_FRONT_DESK runs only in the front desk's own herdr pane; gm opens it there"
   gm_front_desk_files
-  gm_chat_args
+  gm_chat_args "$GM_ROOT"
   cd "$GM_ROOT"
   exec env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_SESSION_ID -u TRACEPARENT -u GM_FOCUS \
     -u GM_CHAT_FOCUS ${GM_CHAT_ENV[@]+"${GM_CHAT_ENV[@]}"} "$claude" --name "$GM_FRONT_DESK" \

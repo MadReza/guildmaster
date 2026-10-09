@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { bannerLine } from '../hooks/register'
+import { bannerLine, chatIsOn } from '../hooks/register'
 
 // What stands for Claude Code beneath the mod: the environment gm starts a session with, and the engine's own row.
 function engine(on: Parameters<Parameters<typeof test>[1]>[1], env: Record<string, string> = { GM_CHAT: 'banners' }) {
@@ -72,5 +72,63 @@ describe('heraldic banners', () => {
     const left = bannerLine({ sigil: '⚒', name: 'DEEDS', color: '', heavy: false }, 40)
     expect(left.before).toBe('──')
     expect(left.before + left.label + left.after).toHaveLength(40)
+  })
+})
+
+// A claude started by hand in a checkout of Guildmaster: no GM_CHAT, so the mod reads guild.conf from the Guildhall.
+function byHand(on: Parameters<Parameters<typeof test>[1]>[1], conf: string | undefined, env: Record<string, string> = { HOME: '/home/p' }) {
+  const read: string[] = []
+  mock.env(on, env)
+  on('fs.read', ($, e) => {
+    read.push(e.path)
+    if (conf === undefined) throw new Error(`ENOENT: ${e.path}`)
+    return { value: conf }
+  })
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine row'] }))
+  return read
+}
+
+describe('a claude started by hand', () => {
+  test('draws the banners when the Guildhall leaves the chat on', async ($, on) => {
+    const read = byHand(on, 'initialized: 2026-10-04T14:57:05Z\nfront-desk: clone\n')
+    const ui = await $.ui.mount({ plugin: 'guild-chat', surface: 'terminal', viewport, ...reply })
+    expect(await ui.find({ type: 'Text', text: / ⚔ GUILDMASTER $/ })).toBeDefined()
+    expect(read).toEqual(['/home/p/.guildmaster/guild.conf'])
+  })
+
+  test('in a camp answers as the Party Leader its settings name', async ($, on) => {
+    byHand(on, 'chat: banners\n', { HOME: '/home/p', GM_FOCUS: 'appt-v2' })
+    const ui = await $.ui.mount({ plugin: 'guild-chat', surface: 'terminal', viewport, ...reply })
+    expect(await ui.find({ type: 'Text', text: / ⚔ PARTY LEADER · appt-v2 $/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /GUILDMASTER/ })).toBeUndefined()
+  })
+
+  test('keeps Claude Code\'s own chat when guild.conf says chat: off', async ($, on) => {
+    byHand(on, '# chat: off | banners\nchat: off\n')
+    const ui = await $.ui.mount({ plugin: 'guild-chat', surface: 'terminal', viewport, ...reply })
+    expect(await ui.find({ type: 'Text', text: /GUILDMASTER/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: 'the engine row' })).toBeDefined()
+  })
+
+  test('keeps it for someone with no Guildhall', async ($, on) => {
+    byHand(on, undefined)
+    const ui = await $.ui.mount({ plugin: 'guild-chat', surface: 'terminal', viewport, ...prompt })
+    expect(await ui.find({ type: 'Text', text: /PATRON/ })).toBeUndefined()
+  })
+
+  test('reads the Guildhall GM_HALL names', async ($, on) => {
+    const read = byHand(on, 'chat: banners\n', { HOME: '/home/p', GM_HALL: '/srv/hall' })
+    const ui = await $.ui.mount({ plugin: 'guild-chat', surface: 'terminal', viewport, ...prompt })
+    expect(await ui.find({ type: 'Text', text: / ⚜ PATRON $/ })).toBeDefined()
+    expect(read).toEqual(['/srv/hall/guild.conf'])
+  })
+
+  test('chat: reads as gm reads it', () => {
+    expect(chatIsOn('')).toBe(true)
+    expect(chatIsOn('chat: banners')).toBe(true)
+    expect(chatIsOn('chat: on')).toBe(true)
+    for (const off of ['chat: off', 'chat: no', 'chat:false', '# x\nchat:  off  \n']) expect(chatIsOn(off)).toBe(false)
+    expect(chatIsOn('# chat: off')).toBe(true)
+    expect(chatIsOn('chat:\nchat: off')).toBe(false)
   })
 })

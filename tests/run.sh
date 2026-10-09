@@ -21,7 +21,7 @@ trap suite_cleanup EXIT
 export HOME=$WORK/home
 mkdir -p "$HOME"
 # The suite may itself run inside Claude Code, whose session variables would join gm's spans to it.
-unset CLAUDE_CODE_SESSION_ID CLAUDE_EFFORT TRACEPARENT GM_FOCUS CLAUDECODE GM_HERDR_WORKSPACE GM_HERDR_AUTO
+unset CLAUDE_CODE_SESSION_ID CLAUDE_EFFORT TRACEPARENT GM_FOCUS CLAUDECODE GM_HERDR_WORKSPACE GM_HERDR_AUTO GM_CHAT GM_CHAT_FOCUS
 # gm never asks a question or looks for the real Claude Code unless a test says so.
 export GM_INTERACTIVE=0 GM_CLAUDE=$ROOT/tests/fixtures/fake-claude GM_HERDR=$ROOT/tests/fixtures/herdr GM_HERDR_SOCKET_CMD=$ROOT/tests/fixtures/herdr-socket
 # No test reaches a real herdr or launchd: the stubs in tests/fixtures come first on PATH; the herdr stub keeps its
@@ -1882,9 +1882,8 @@ t_gm_alone_opens_the_front_desk() {
   line=$(awk -F '\t' -v p="$pane" '$1 == p { print $2 }' "$HERDR_STUB/runs")
   env CLAUDECODE=1 GM_FOCUS=elsewhere GM_FAKE_CLAUDE_ENV="$f" sh -c "$line" </dev/null >/dev/null 2>&1
   assert_eq "$(cat "$f.args")" "--name
-guildmaster
---plugin-dir
-$ROOT/mods/guild-chat" "claude --name guildmaster, with the chat's mod" &&
+guildmaster" "claude --name guildmaster: the clone loads the chat's mod itself, from .claude/skills" &&
+    assert_contains "$(cat "$f")" "GM_CHAT=banners" "told the chat's style" &&
     assert_eq "$(cat "$f.pwd")" "$ROOT" "in the clone" &&
     assert_contains "$(cat "$f")" "GM_HERDR_SESSION=gm-test" "in the herdr session it was opened in" &&
     assert_contains "$(cat "$f")" "GM_HALL=$GM_HALL" "and the Guildhall" &&
@@ -2577,9 +2576,8 @@ $ROOT/mods/guild-chat" "claude --name <focus> --plugin-dir <the mod>" &&
   line=$(grep "start 'guildmaster'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)
   env GM_CHAT_FOCUS=stray GM_FAKE_CLAUDE_ENV="$f.desk" sh -c "$line" </dev/null >/dev/null 2>&1
   assert_eq "$(cat "$f.desk.args")" "--name
-guildmaster
---plugin-dir
-$ROOT/mods/guild-chat" "the Guildmaster loads it too" &&
+guildmaster" "the Guildmaster loads it too, from the clone's .claude/skills, with no second copy" &&
+    assert_contains "$(cat "$f.desk")" "GM_CHAT=banners" "and is told the style" &&
     assert_not_contains "$(cat "$f.desk")" "GM_CHAT_FOCUS=" "as the front desk, with no focus"
   env GM_CHAT=no GM_FAKE_CLAUDE_ENV="$f.no" sh -c "$(grep "start 'appt-v2'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)" </dev/null >/dev/null 2>&1
   assert_eq "$(cat "$f.no.args")" "--name
