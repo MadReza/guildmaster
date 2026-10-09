@@ -4860,9 +4860,9 @@ GM_CHAT_ENV=()
 gm_chat_args() {
   GM_CHAT_ARGS=()
   GM_CHAT_ENV=()
-  [ "${GM_CHAT:-off}" != off ] || return 0
+  gm_conf_norm chat "${GM_CHAT:-off}" && [ "$GM_CONF_VAL" != off ] || return 0
   GM_CHAT_ARGS=(--plugin-dir "$GM_ROOT/mods/guild-chat")
-  GM_CHAT_ENV=("GM_CHAT=$GM_CHAT")
+  GM_CHAT_ENV=("GM_CHAT=$GM_CONF_VAL")
   [ -z "${1:-}" ] || GM_CHAT_ENV+=("GM_CHAT_FOCUS=$1")
 }
 

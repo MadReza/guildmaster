@@ -2406,6 +2406,9 @@ guildmaster
 --plugin-dir
 $ROOT/mods/guild-chat" "the Guildmaster loads it too" &&
     assert_not_contains "$(cat "$f.desk")" "GM_CHAT_FOCUS=" "as the front desk, with no focus"
+  env GM_CHAT=no GM_FAKE_CLAUDE_ENV="$f.no" sh -c "$(grep "start 'appt-v2'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)" </dev/null >/dev/null 2>&1
+  assert_eq "$(cat "$f.no.args")" "--name
+appt-v2" "GM_CHAT=no in the environment is off too"
   gm config set chat off >/dev/null
   env GM_FAKE_CLAUDE_ENV="$f.off" sh -c "$(grep "start 'appt-v2'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)" </dev/null >/dev/null 2>&1
   assert_eq "$(cat "$f.off.args")" "--name
