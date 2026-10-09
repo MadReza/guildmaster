@@ -360,14 +360,33 @@ gm_db_ensure() {
   GM_DB_READY=1
 }
 
-# Event and notice summaries quote the start of the patron's own words.
+# The words a posting is named from: the patron's words without what only wraps them. Peeled from the start, one
+# layer at a time: a leading tag such as <pasted_content id="3">, then (once a leading tag was peeled) a closing tag
+# the words end in; a stray leading closing tag; the front desk's "From the patron, relayed by the front desk:"
+# lead-in. Tags inside the words are the patron's and stay. The words in the register are never changed.
+# Kept small: it is spliced into large queries, and SQLite's parser has a depth limit.
+gm_naming_sql() {
+  local ws="' '||char(9,10,13)" lead="'from the patron, relayed by the front desk:'"
+  local closer="rtrim(t,'>abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-:.')"
+  printf "(WITH RECURSIVE s(t,n,w) AS (SELECT trim(%s,%s),0,0 UNION ALL SELECT CASE
+  WHEN t GLOB '<[A-Za-z]*>*' OR t GLOB '</[A-Za-z]*>*' THEN trim(substr(t,instr(t,'>')+1),%s)
+  WHEN lower(t) GLOB %s||'*' THEN trim(substr(t,length(%s)+1),%s)
+  ELSE trim(substr(%s,1,length(%s)-2),%s) END, n+1, w OR t GLOB '<[A-Za-z]*>*'
+  FROM s WHERE n<8 AND (t GLOB '<[A-Za-z]*>*' OR t GLOB '</[A-Za-z]*>*' OR lower(t) GLOB %s||'*'
+    OR (w AND t GLOB '*</[A-Za-z]*>' AND substr(%s,-2)='</')))
+SELECT t FROM s ORDER BY n DESC LIMIT 1)" \
+    "$1" "$ws" "$ws" "$lead" "$lead" "$ws" "$closer" "$closer" "$ws" "$lead" "$closer"
+}
+
+# Event and notice summaries quote the start of the words the posting is named from.
 gm_summary_sql() {
-  printf "substr(replace(replace(trim(%s),char(10),' '),char(13),' '),1,60)||CASE WHEN length(trim(%s))>60 THEN '…' ELSE '' END" "$1" "$1"
+  printf "(SELECT substr(replace(replace(x,char(10),' '),char(13),' '),1,60)||CASE WHEN length(x)>60 THEN '…' ELSE '' END FROM (SELECT %s AS x))" "$(gm_naming_sql "$1")"
 }
 
 gm_slugify() {
   local text w out='' n=0
-  text=$(printf '%s' "$1" | head -c 400 | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C tr -c 'a-z0-9' ' ')
+  text=$(sqlite3 -batch -noheader :memory: "SELECT $(gm_naming_sql "$(gm_q "$1")");" 2>/dev/null) || text=$1
+  text=$(printf '%s' "$text" | head -c 400 | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C tr -c 'a-z0-9' ' ')
   set -f
   for w in $text; do
     case " $GM_STOPWORDS " in *" $w "*) continue ;; esac
