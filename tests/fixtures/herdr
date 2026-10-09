@@ -2,7 +2,7 @@
 # Stands in for herdr in tests/run.sh, which puts it first on PATH: no real herdr is ever called.
 # State lives in plain files under $HERDR_STUB:
 #   running      present while the server runs
-#   workspaces   id<TAB>label
+#   workspaces   id<TAB>label, in the sidebar's order (herdr-socket moves them)
 #   tabs         id<TAB>workspace<TAB>label
 #   panes        id<TAB>tab<TAB>workspace<TAB>what runs: shell, claude, or any other command name
 #   calls        every call, one a line
@@ -74,7 +74,7 @@ case "${1:-} ${2:-}" in
     printf '{"result":{"type":"ok"}}\n' ;;
   "status --json")
     if [ -e "$D/running" ]; then r=true; else r=false; fi
-    printf '{"client":{"version":"0.9.1"},"server":{"running":%s}}\n' "$r" ;;
+    printf '{"client":{"version":"0.9.1"},"server":{"running":%s,"socket":"%s/herdr.sock"}}\n' "$r" "$D" ;;
   "server "*)
     touch "$D/running" ;;
   "workspace create")
@@ -85,6 +85,10 @@ case "${1:-} ${2:-}" in
     IFS=$'\t' read -r t p <<<"$(new_tab "$w" 1)"
     printf '{"result":{"type":"workspace_created","workspace":{"workspace_id":"%s","label":"%s"},"tab":%s,"root_pane":%s}}\n' \
       "$w" "$label" "$(tab_json "$t")" "$(pane_json "$p")" ;;
+  "workspace list")
+    up
+    list=$(awk -F '\t' '{ printf "%s{\"workspace_id\":\"%s\",\"label\":\"%s\"}", (NR > 1 ? "," : ""), $1, $2 }' "$D/workspaces")
+    printf '{"result":{"type":"workspace_list","workspaces":[%s]}}\n' "$list" ;;
   "workspace get")
     up
     label=$(field workspaces "$3" 2)
@@ -124,7 +128,13 @@ case "${1:-} ${2:-}" in
     awk -F '\t' -v OFS='\t' -v k="$3" -v v="$proc" '$1 == k { $4 = v } { print }' "$D/panes" >"$D/panes.new" && mv "$D/panes.new" "$D/panes" ;;
   "pane close")
     up
+    w=$(field panes "$3" 3)
     awk -F '\t' -v k="$3" '$1 != k' "$D/panes" >"$D/panes.new" && mv "$D/panes.new" "$D/panes"
+    # As herdr does, closing a workspace's last pane closes the workspace.
+    if [ -n "$w" ] && ! awk -F '\t' -v w="$w" '$3 == w { found = 1 } END { exit !found }' "$D/panes"; then
+      awk -F '\t' -v w="$w" '$1 != w' "$D/workspaces" >"$D/workspaces.new" && mv "$D/workspaces.new" "$D/workspaces"
+      awk -F '\t' -v w="$w" '$2 != w' "$D/tabs" >"$D/tabs.new" && mv "$D/tabs.new" "$D/tabs"
+    fi
     printf '{"result":{"type":"ok"}}\n' ;;
   "agent get")
     up
