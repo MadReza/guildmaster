@@ -235,6 +235,25 @@ t_words_are_kept_verbatim() {
     assert_eq "$(db "SELECT words = CAST(readfile('$f') AS TEXT) FROM posting;")" 1 "posting words byte for byte"
 }
 
+t_pasted_content_is_named_from_its_words() {
+  setup pasted
+  export GM_FOCUS=appt-v2
+  local words
+  words=$(printf '<pasted_content id="3232">\nFrom the patron, relayed by the front desk: save the research below as a Markdown file.\n\n# Claude Code mods\n</pasted_content>')
+  payload s1 "$words" | gm hook prompt >/dev/null || fail "hook failed"
+  assert_eq "$(db "SELECT line FROM event WHERE verb='received';")" \
+    'appt-v2#1 save-research-below-markdown received ("save the research below as a Markdown file.  # Claude Code m…")' "slug and title from the words" &&
+    assert_eq "$(db "SELECT words FROM posting;")" "$words" "words kept with their wrapper" &&
+    assert_contains "$(gm list)" "save the research below" "list title"
+  gm post '<pasted_content id="7">the owner is empty</pasted_content>' >/dev/null
+  gm post 'colour the <button> grey' >/dev/null
+  gm post '<pasted_content id="8"></pasted_content>' >/dev/null
+  assert_eq "$(db "SELECT group_concat(slug, ' ') FROM (SELECT slug FROM posting ORDER BY num);")" \
+    "save-research-below-markdown owner-empty colour-button-grey posting" "slugs" &&
+    assert_contains "$(gm list)" '"the owner is empty"' "a short wrapped posting loses its closing tag" &&
+    assert_contains "$(gm list)" '"colour the <button> grey"' "a tag inside the words stays"
+}
+
 t_resolve_short_and_qualified_ids() {
   setup resolve
   gm open other --repo "$REPO" --ticket CRM-2 --no-launch >/dev/null 2>&1
