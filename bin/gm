@@ -38,7 +38,7 @@ GM_OTELCOL_PINNED=0.162.0
 GM_CONF_TABLE="collector	GM_COLLECTOR	off	collector	Keep the local OpenTelemetry Collector (tracing) running, in herdr tab collector. gm init's answer sets it; later: not decided yet.
 collector-port	GM_OTEL_PORT	4318	port	The port on 127.0.0.1 the collector listens on, and Party Leaders send their telemetry to.
 telemetry	GM_TELEMETRY	on	onoff	Party Leaders that gm starts send Claude Code's telemetry to the collector.
-chat	GM_CHAT	off	chat	How the chat of the Guildmaster and the Party Leaders gm starts looks: off is Claude Code's own, banners sets each message under a heraldic banner (mods/guild-chat). A running session keeps what it started with.
+chat	GM_CHAT	banners	chat	How the chat of the Guildmaster and the Party Leaders gm starts looks: off is Claude Code's own, banners sets each message under a heraldic banner (mods/guild-chat). A running session keeps what it started with.
 autostart	-	on	onoff	A launchd agent (macOS) runs the muster at login and every autostart-every minutes.
 autostart-every	-	5	minutes	Minutes between the launchd agent's musters.
 muster-before-commands	GM_HERDR_AUTO	on	onoff	A gm command typed at a terminal first brings back, quietly, whatever is dead or missing.
@@ -2925,7 +2925,7 @@ gm_conf_apply() {
     telemetry) printf 'telemetry is %s: Party Leaders started from now on %s; running ones keep what they started with.\n' "$shown" \
       "$([ "${GM_TELEMETRY:-on}" = off ] && printf 'send no telemetry' || printf 'send telemetry to the collector')" ;;
     chat) printf 'chat is %s: the Guildmaster and Party Leaders started from now on %s; running ones keep what they started with.\n' "$shown" \
-      "$([ "${GM_CHAT:-off}" = off ] && printf "draw Claude Code's own chat" || printf 'draw their chat under heraldic banners')" ;;
+      "$([ "${GM_CHAT:-banners}" = off ] && printf "draw Claude Code's own chat" || printf 'draw their chat under heraldic banners')" ;;
     repo-roots) printf 'repo-roots is %s: gm repos looks for clones %s.\n' "$shown" "$([ -n "$val" ] && printf 'there' || printf 'in the usual source folders')" ;;
     *) printf '%s is %s; it takes effect at the next muster.\n' "$key" "$shown" ;;
   esac
@@ -4958,7 +4958,7 @@ GM_CHAT_ENV=()
 gm_chat_args() {
   GM_CHAT_ARGS=()
   GM_CHAT_ENV=()
-  gm_conf_norm chat "${GM_CHAT:-off}" && [ "$GM_CONF_VAL" != off ] || return 0
+  gm_conf_norm chat "${GM_CHAT:-banners}" && [ "$GM_CONF_VAL" != off ] || return 0
   GM_CHAT_ARGS=(--plugin-dir "$GM_ROOT/mods/guild-chat")
   GM_CHAT_ENV=("GM_CHAT=$GM_CONF_VAL")
   [ -z "${1:-}" ] || GM_CHAT_ENV+=("GM_CHAT_FOCUS=$1")
