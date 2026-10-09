@@ -44,7 +44,7 @@ autostart-every	-	5	minutes	Minutes between the launchd agent's musters.
 muster-before-commands	GM_HERDR_AUTO	on	onoff	A gm command typed at a terminal first brings back, quietly, whatever is dead or missing.
 attach	GM_ATTACH	on	onoff	gm alone attaches herdr at the guildmaster tab.
 herdr-session	GM_HERDR_SESSION	default	name	The herdr session the guild lives in; default is the one plain herdr attaches to.
-herdr-workspace	GM_HERDR_WORKSPACE	guild	name	The herdr workspace holding the guildmaster tab and a tab per Party Leader.
+herdr-workspace	GM_HERDR_WORKSPACE	guild	name	The herdr workspace holding the guildmaster tab; each Party Leader has a workspace of its own shown under it.
 launch-grace	GM_LAUNCH_GRACE	60	seconds	Seconds after a start during which a pane holding only a shell is starting, not dead.
 start-tries	GM_START_TRIES	3	count	Starts in a row never seen alive before a Party Leader, the Guildmaster or the collector is held.
 repo-roots	-	-	text	Folders, separated by spaces, where gm repos looks for clones instead of the usual source folders."
@@ -565,9 +565,10 @@ They are for advanced use, and for the Guildmaster.
                           every Party Leader up. Without a terminal it only starts the Guildmaster and says where
   open <focus> --repo <path> [--ticket KEY]... [--branch NAME] [--base REF] [--kind ticket] [--no-launch]
                           record a focus, make its camp, install its Claude Code hooks, and start its Party
-                          Leader in its own herdr tab (workspace guild), where it stays; never takes over the
-                          terminal it runs in, and needs none. With --ticket, the focus name may be left out:
-                          it is the first ticket key in lower case (crm-1234)
+                          Leader in a herdr workspace of its own on the camp (└ <focus>, shown under workspace
+                          guild), where it stays; never takes over the terminal it runs in, and needs none.
+                          With --ticket, the focus name may be left out: it is the first ticket key in lower case
+                          (crm-1234)
   open <focus>            the same for an existing focus: a running Party Leader is left as it is, a dead or
                           missing one starts again (a fresh session resumes from records); reopens a closed focus
   up [--quiet]            the muster, plain code with no model: start the front desk's Guildmaster, every open
@@ -972,7 +973,7 @@ gm_hook_front_desk() {
     else
       how="with herdr's official installer (curl -fsSL https://herdr.dev/install.sh | sh)"
     fi
-    herdr_offer="gm front desk: herdr is not installed. It is the terminal workspace manager the Guildmaster and each Party Leader live in, each in a tab of its own, and nothing can start without it.
+    herdr_offer="gm front desk: herdr is not installed. It is the terminal workspace manager the Guildmaster and each Party Leader live in, the Guildmaster in a tab and each Party Leader in a workspace of its own, and nothing can start without it.
 Offer to install it, in one line, in your first answer, for example: \"I need herdr, where the Guildmaster and the Party Leaders live. Shall I install it now $how?\"
 Only on the patron's yes, run $gmc install herdr and say the line it ends with; it finishes the setup and starts the Guildmaster in herdr. On a no, say in one line that nothing can start until herdr is installed, and drop it.
 Run nothing else until then."
@@ -4148,6 +4149,39 @@ gm_herdr_running() {
   [ "$(gm_hj "$(gm_herdr "$1" status --json)" '$.server.running')" = 1 ]
 }
 
+# gm_herdr_request <session> <method> <params JSON>: one request on herdr's socket, for what its CLI does not offer
+# (workspace.move); herdr's one JSON answer, or nothing. GM_HERDR_SOCKET_CMD, given the socket and the request,
+# stands in for nc in the tests.
+gm_herdr_request() {
+  local s=$1 sock req
+  sock=$(gm_hj "$(gm_herdr "$s" status --json)" '$.server.socket')
+  [ -n "$sock" ] || return 0
+  req=$(sqlite3 -batch :memory: "SELECT json_object('id','gm','method',$(gm_q "$2"),'params',json($(gm_q "$3")));" 2>/dev/null) || return 0
+  if [ -n "${GM_HERDR_SOCKET_CMD:-}" ]; then
+    "$GM_HERDR_SOCKET_CMD" "$sock" "$req" 2>/dev/null | grep '^{' | head -n 1 || true
+  else
+    printf '%s\n' "$req" | nc -U -w 5 "$sock" 2>/dev/null | grep '^{' | head -n 1 || true
+  fi
+}
+
+# gm_herdr_place <session> <guild workspace> <workspace>: herdr's sidebar is one flat list, so a Party Leader's
+# workspace is shown under the guild by its label (└ <focus>) and its place: moved to the end of the block of the
+# guild's own workspaces right after the guild's. Only the order changes; a failure leaves it where herdr put it.
+gm_herdr_place() {
+  local s=$1 guild=$2 ws=$3 list params
+  list=$(gm_herdr "$s" workspace list)
+  params=$(gm_sql "WITH w AS (
+  SELECT CAST(key AS INTEGER) AS i, json_extract(value,'\$.workspace_id') AS id
+  FROM json_each(CASE WHEN json_valid($(gm_q "$list")) THEN $(gm_q "$list") ELSE '{}' END, '\$.result.workspaces')),
+o AS (SELECT id, row_number() OVER (ORDER BY i) - 1 AS j FROM w WHERE id IS NOT $(gm_q "$ws")),
+mine AS (SELECT workspace_id AS id FROM endpoint WHERE session=$(gm_q "$s") AND workspace_id NOT IN ($(gm_q "$guild"), $(gm_q "$ws"))),
+g AS (SELECT j FROM o WHERE id=$(gm_q "$guild"))
+SELECT json_object('workspace_id', $(gm_q "$ws"), 'insert_index', d) FROM (
+  SELECT COALESCE((SELECT min(j) FROM o WHERE j > (SELECT j FROM g) AND id NOT IN (SELECT id FROM mine)), (SELECT count(*) FROM o)) AS d)
+WHERE EXISTS (SELECT 1 FROM g) AND d IS NOT (SELECT i FROM w WHERE id=$(gm_q "$ws"));")
+  [ -z "$params" ] || gm_herdr_request "$s" workspace.move "$params" >/dev/null
+}
+
 # Starts the session's server headless when none runs; it outlives gm. The server hands its own environment to
 # every pane it opens, so it starts without the variables of whatever session started it.
 gm_herdr_server_ensure() {
@@ -4200,7 +4234,7 @@ gm_herdr_pane_presence() {
 # one whose first tab becomes the front desk. A workspace is never adopted by its label alone.
 gm_herdr_workspace() {
   local s=$GM_HERDR_SESSION ws out tab pane
-  for ws in $(gm_sql "SELECT workspace_id FROM endpoint WHERE session=$(gm_q "$s") GROUP BY workspace_id ORDER BY max(key='front-desk') DESC, max(recorded_at) DESC;"); do
+  for ws in $(gm_sql "SELECT workspace_id FROM endpoint WHERE session=$(gm_q "$s") AND label NOT LIKE '└ %' GROUP BY workspace_id ORDER BY max(key='front-desk') DESC, max(recorded_at) DESC;"); do
     [ "$(gm_hj "$(gm_herdr "$s" workspace get "$ws")" '$.result.workspace.label')" = "$GM_HERDR_WORKSPACE" ] || continue
     gm_front_desk_ensure "$ws"
     printf '%s' "$ws"
@@ -4337,11 +4371,40 @@ gm_endpoint_state() {
   esac
 }
 
-# Starts a focus's Party Leader, or the front desk's Guildmaster (key front-desk): in its recorded pane when that
-# holds only a shell, otherwise in a new tab in the guild's workspace. The pane runs gm start, which starts claude in
-# the camp, or in the clone.
+# A Party Leader's workspace label: shown under the guild's workspace in herdr's sidebar.
+gm_party_leader_label() { printf '└ %s' "$1"; }
+
+# gm_party_leader_workspace <focus> <camp>: a pane for a missing Party Leader, recorded as its endpoint. It is a new
+# tab in its own workspace when herdr still has that one, under the recorded id and with its label (the patron may
+# have opened another tab there); otherwise a new workspace on the camp, placed under the guild's, as Firstmate does
+# for its crew. Never one adopted by its label alone.
+gm_party_leader_workspace() {
+  local focus=$1 dir=$2 s=$GM_HERDR_SESSION key="party-leader:$1" label guild rs rws out ws tab pane
+  label=$(gm_party_leader_label "$focus")
+  guild=$(gm_herdr_workspace) || return 1
+  IFS=$'\t' read -r rs rws _ _ _ _ <<<"$(gm_endpoint "$key")"
+  if [ "$rs" = "$s" ] && [ -n "$rws" ] && [ "$rws" != "$guild" ] &&
+    [ "$(gm_hj "$(gm_herdr "$s" workspace get "$rws")" '$.result.workspace.label')" = "$label" ]; then
+    out=$(gm_herdr "$s" tab create --workspace "$rws" --cwd "$dir" --label "$focus" --no-focus)
+    IFS=$'\t' read -r tab pane <<<"$(gm_hj "$out" '$.result.tab.tab_id' '$.result.root_pane.pane_id')"
+    ws=$rws
+  else
+    out=$(gm_herdr "$s" workspace create --cwd "$dir" --label "$label" --no-focus)
+    IFS=$'\t' read -r ws tab pane <<<"$(gm_hj "$out" '$.result.workspace.workspace_id' '$.result.tab.tab_id' '$.result.root_pane.pane_id')"
+  fi
+  if [ -z "$ws" ] || [ -z "$pane" ]; then
+    printf 'herdr would not open a workspace: %s' "${out:-no answer}"
+    return 1
+  fi
+  gm_endpoint_record "$key" party-leader "$focus" "$s" "$ws" "$tab" "$pane" "$label"
+  [ "$ws" = "$rws" ] || gm_herdr_place "$s" "$guild" "$ws"
+}
+
+# Starts a focus's Party Leader, the front desk's Guildmaster (key front-desk) or the collector: in its recorded pane
+# when that holds only a shell, otherwise in a new workspace of its own under the guild's (a Party Leader) or a new
+# tab in the guild's workspace. The pane runs gm start, which starts claude in the camp, or in the clone.
 gm_endpoint_launch() {
-  local key=$1 state=$2 cause=$3 name s ws tab pane out dir line v val fid vars role focus=''
+  local key=$1 state=$2 cause=$3 name s ws tab pane out dir line v val fid vars role label focus=''
   vars="GM_HALL GM_CLAUDE GM_TELEMETRY GM_CHAT GM_OTEL_ENDPOINT GM_OTEL_PORT"
   case $key in
     front-desk)
@@ -4360,12 +4423,25 @@ gm_endpoint_launch() {
       dir=$(gm_focus_field "$name" camp)
       fid="(SELECT id FROM focus WHERE name=$(gm_q "$name"))" ;;
   esac
+  # A Party Leader left dead in a tab of the guild's workspace, from before each had a workspace of its own, moves
+  # out: its husk, only a shell, is closed, and it starts as a missing one does.
+  if [ "$state" = dead ] && [ -n "$focus" ]; then
+    IFS=$'\t' read -r s _ _ pane label _ <<<"$(gm_endpoint "$key")"
+    if [ "$label" != "$(gm_party_leader_label "$focus")" ]; then
+      gm_herdr "$s" pane close "$pane" >/dev/null
+      state=missing
+    fi
+  fi
   if [ "$state" = dead ]; then
     IFS=$'\t' read -r s ws tab pane _ _ <<<"$(gm_endpoint "$key")"
   elif [ "$key" = front-desk ]; then
     s=$GM_HERDR_SESSION
     ws=$(gm_herdr_workspace) || return 1
     IFS=$'\t' read -r _ _ tab pane _ _ <<<"$(gm_endpoint front-desk)"
+  elif [ -n "$focus" ]; then
+    s=$GM_HERDR_SESSION
+    gm_party_leader_workspace "$focus" "$dir" || return 1
+    IFS=$'\t' read -r _ ws tab pane _ _ <<<"$(gm_endpoint "$key")"
   else
     s=$GM_HERDR_SESSION
     ws=$(gm_herdr_workspace) || return 1
@@ -4648,16 +4724,19 @@ gm_party_leader_up() {
   gm_herdr_unlock
 }
 
-# One line saying which herdr tab a focus's Party Leader is in: what the Guildmaster tells the patron.
+# One line saying where a focus's Party Leader is in herdr: what the Guildmaster tells the patron. Its own workspace,
+# or a tab of the guild's for one started before each had a workspace of its own.
 gm_party_leader_where() {
-  local focus=$1 s pane label
+  local focus=$1 s pane label where see=herdr
   IFS=$'\t' read -r s _ _ pane label _ <<<"$(gm_endpoint "party-leader:$focus")"
   [ -n "$pane" ] || return 0
-  if [ "$s" = default ]; then
-    printf "%s's Party Leader is in herdr tab %s (workspace %s, pane %s); see it with: herdr\n" "$focus" "$label" "$GM_HERDR_WORKSPACE" "$pane"
+  if [ "$label" = "$(gm_party_leader_label "$focus")" ]; then
+    where="workspace $label, under $GM_HERDR_WORKSPACE (pane $pane)"
   else
-    printf "%s's Party Leader is in herdr tab %s (workspace %s, pane %s); see it with: herdr --session %s\n" "$focus" "$label" "$GM_HERDR_WORKSPACE" "$pane" "$s"
+    where="tab $label (workspace $GM_HERDR_WORKSPACE, pane $pane)"
   fi
+  [ "$s" = default ] || see="herdr --session $s"
+  printf "%s's Party Leader is in herdr %s; see it with: %s\n" "$focus" "$where" "$see"
 }
 
 # Whether there is anything for the muster to keep running: an open focus, or the front desk.
@@ -4793,7 +4872,7 @@ gm_cmd_roster() {
 }
 
 # Retires a focus: its Party Leader is no longer started, and its pane is closed once it holds only a shell. A
-# live Party Leader is never ended by gm; the patron ends it in its tab first. The camp and postings stay.
+# live Party Leader is never ended by gm; the patron ends it in its workspace first. The camp and postings stay.
 gm_cmd_close() {
   local focus='' row s ws pane st detail camp
   while [ $# -gt 0 ]; do

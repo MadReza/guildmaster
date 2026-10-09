@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Stands in for nc on herdr's socket in tests/run.sh (GM_HERDR_SOCKET_CMD): herdr-socket <socket> <request JSON>.
+# It answers only workspace.move, on the herdr stub's state, and records each request in $HERDR_STUB/socket-calls.
+set -u
+D=${HERDR_STUB:?HERDR_STUB is not set}
+[ "$1" = "$D/herdr.sock" ] || { printf '{"error":{"code":"stub_wrong_socket","message":"%s"}}\n' "$1"; exit 1; }
+printf '%s\n' "$2" >>"$D/socket-calls"
+IFS=$'\t' read -r method ws at <<<"$(sqlite3 -batch -separator "$(printf '\t')" :memory: \
+  "SELECT json_extract(j,'\$.method'), json_extract(j,'\$.params.workspace_id'), json_extract(j,'\$.params.insert_index') FROM (SELECT '${2//\'/\'\'}' AS j);")"
+[ "$method" = workspace.move ] || { printf '{"error":{"code":"stub_unknown","message":"%s"}}\n' "$method"; exit 1; }
+awk -F '\t' -v w="$ws" -v at="$at" '
+  $1 == w { moved = $0; next }
+  { rest[n++] = $0 }
+  END {
+    if (moved == "") exit 1
+    for (i = 0; i <= n; i++) { if (i == at) print moved; if (i < n) print rest[i] }
+  }' "$D/workspaces" >"$D/workspaces.new" || { printf '{"error":{"code":"workspace_not_found","message":"%s"}}\n' "$ws"; exit 1; }
+mv "$D/workspaces.new" "$D/workspaces"
+printf '{"id":"gm","result":{"type":"workspace_list"}}\n'

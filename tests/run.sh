@@ -23,7 +23,7 @@ mkdir -p "$HOME"
 # The suite may itself run inside Claude Code, whose session variables would join gm's spans to it.
 unset CLAUDE_CODE_SESSION_ID CLAUDE_EFFORT TRACEPARENT GM_FOCUS CLAUDECODE GM_HERDR_WORKSPACE GM_HERDR_AUTO
 # gm never asks a question or looks for the real Claude Code unless a test says so.
-export GM_INTERACTIVE=0 GM_CLAUDE=$ROOT/tests/fixtures/fake-claude GM_HERDR=$ROOT/tests/fixtures/herdr
+export GM_INTERACTIVE=0 GM_CLAUDE=$ROOT/tests/fixtures/fake-claude GM_HERDR=$ROOT/tests/fixtures/herdr GM_HERDR_SOCKET_CMD=$ROOT/tests/fixtures/herdr-socket
 # No test reaches a real herdr or launchd: the stubs in tests/fixtures come first on PATH; the herdr stub keeps its
 # state under $HERDR_STUB (one directory a test) and refuses any session but this one.
 export PATH="$ROOT/tests/fixtures:$PATH" GM_HERDR_SESSION=gm-test HERDR_STUB_SESSION=gm-test GM_HERDR_RESAMPLE=1 GM_LAUNCH_GRACE=0
@@ -1090,9 +1090,9 @@ t_open_starts_the_party_leader_in_herdr_with_the_telemetry_env() {
   out=$(GM_CLAUDE=$FAKE GM_OTEL_PORT=1 gm open appt-v2 2>&1) || fail "open failed: $out"
   pane=$(pl_pane appt-v2)
   assert_contains "$out" "appt-v2: Party Leader started in herdr pane $pane (missing: no pane recorded)" "says where it started" &&
-    assert_contains "$out" "appt-v2's Party Leader is in herdr tab appt-v2 (workspace guild, pane $pane); see it with: herdr --session gm-test" "which tab, and how to see it" &&
+    assert_contains "$out" "appt-v2's Party Leader is in herdr workspace └ appt-v2, under guild (pane $pane); see it with: herdr --session gm-test" "which workspace, and how to see it" &&
     assert_eq "$(awk -F '\t' -v p="$pane" '$1 == p { print $2 }' "$HERDR_STUB/panes")" "$(db "SELECT tab_id FROM endpoint WHERE key='party-leader:appt-v2';")" "the recorded tab" &&
-    assert_eq "$(awk -F '\t' -v t="$(db "SELECT tab_id FROM endpoint WHERE key='party-leader:appt-v2';")" '$1 == t { print $3 }' "$HERDR_STUB/tabs")" appt-v2 "a tab named after the focus"
+    assert_eq "$(awk -F '\t' -v w="$(db "SELECT workspace_id FROM endpoint WHERE key='party-leader:appt-v2';")" '$1 == w { print $2 }' "$HERDR_STUB/workspaces")" "└ appt-v2" "a workspace of its own, named after the focus"
   assert_contains "$(cat "$HERDR_STUB/runs")" "start 'appt-v2' --pane '$pane'" "the pane runs gm start"
   pane_start "$f" OTEL_EXPORTER_OTLP_HEADERS=x-api-key=sekrit OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://otel.example.com/v1/traces \
     OTEL_LOG_RAW_API_BODIES=1 CLAUDECODE=1 GM_FOCUS=elsewhere
@@ -1537,6 +1537,43 @@ t_init_musters_and_offers_autostart() {
   fi
 }
 
+# The sidebar's labels, in herdr's order, one a line.
+sidebar() { cut -f 2 "$HERDR_STUB/workspaces"; }
+
+t_party_leaders_have_workspaces_under_the_guild() {
+  setup pl-ws
+  local guild ws pane old_tab old_pane
+  gm open appt-v2 >/dev/null 2>&1 || fail "open failed"
+  guild=$(db "SELECT workspace_id FROM endpoint WHERE key='front-desk';")
+  ws=$(db "SELECT workspace_id FROM endpoint WHERE key='party-leader:appt-v2';")
+  [ "$ws" != "$guild" ] || fail "the Party Leader is in the guild's workspace" || return 1
+  # A workspace the patron opened lands after the guild's; the next Party Leader still goes under the guild.
+  "$ROOT/tests/fixtures/herdr" workspace create --cwd "$WORK" --label other --no-focus --session gm-test >/dev/null
+  gm open bravo --repo "$REPO" >/dev/null 2>&1 || fail "open bravo failed"
+  assert_eq "$(sidebar | tr '\n' '|')" "guild|└ appt-v2|└ bravo|other|" "each Party Leader nested under the guild, in herdr's order" &&
+    assert_contains "$(cat "$HERDR_STUB/socket-calls")" '"method":"workspace.move"' "moved with workspace.move"
+  # Its pane gone but its workspace still there (another tab open in it): a new tab there, not a second workspace.
+  stub_close "$(pl_pane appt-v2)"
+  gm up >/dev/null 2>&1 || fail "gm up failed"
+  assert_eq "$(db "SELECT workspace_id FROM endpoint WHERE key='party-leader:appt-v2';")" "$ws" "the same workspace" &&
+    assert_eq "$(sidebar | grep -c 'appt-v2')" 1 "and no second one" &&
+    assert_eq "$(roster_state appt-v2)" alive "running again"
+  # A Party Leader from before, in a tab of the guild's workspace: left there while it runs, moved out once it is dead.
+  IFS=$'\t' read -r _ old_tab old_pane <<<"$(herdr_tab bravo)"
+  stub_proc "$old_pane" claude
+  db "UPDATE endpoint SET workspace_id='$guild', tab_id='$old_tab', pane_id='$old_pane', label='bravo' WHERE key='party-leader:bravo';"
+  gm up >/dev/null 2>&1 || fail "gm up failed"
+  assert_eq "$(pl_pane bravo)" "$old_pane" "a running one stays in its tab"
+  assert_contains "$(gm open bravo 2>&1 | tail -n 1)" "bravo's Party Leader is in herdr tab bravo (workspace guild, pane $old_pane)" "and is said to be there"
+  stub_proc "$old_pane" shell
+  gm up >/dev/null 2>&1 || fail "gm up failed"
+  pane=$(pl_pane bravo)
+  [ "$pane" != "$old_pane" ] || fail "a dead one was started again in the guild's tab"
+  grep -q "pane close $old_pane --session gm-test" "$HERDR_STUB/calls" || fail "its husk was not closed"
+  assert_eq "$(db "SELECT label FROM endpoint WHERE key='party-leader:bravo';")" "└ bravo" "it has a workspace of its own" &&
+    assert_eq "$(roster_state bravo)" alive "and runs there"
+}
+
 t_close_retires_a_focus() {
   setup close
   local out pane
@@ -1550,6 +1587,7 @@ t_close_retires_a_focus() {
   out=$(gm close appt-v2) || fail "close failed"
   assert_contains "$out" "appt-v2 is closed: its Party Leader is not started again. Its camp $CAMP and its postings are kept" "says what stays"
   grep -q "pane close $pane --session gm-test" "$HERDR_STUB/calls" || fail "its husk pane was not closed"
+  if grep -q "└ appt-v2" "$HERDR_STUB/workspaces"; then fail "its workspace was left behind"; fi
   assert_eq "$(db "SELECT count(*) FROM endpoint WHERE key='party-leader:appt-v2';")" 0 "endpoint forgotten"
   [ -d "$CAMP" ] || fail "the camp was removed"
   : >"$HERDR_STUB/runs"
@@ -1867,18 +1905,18 @@ t_open_from_an_agent_without_a_terminal() {
   t1=$(date +%s)
   pane=$(pl_pane crm-1234)
   [ -n "$pane" ] || fail "no focus crm-1234, named after its ticket" || return 1
-  assert_eq "$(printf '%s\n' "$out" | tail -n 1)" "crm-1234's Party Leader is in herdr tab crm-1234 (workspace guild, pane $pane); see it with: herdr --session gm-test" "one line names the tab" &&
+  assert_eq "$(printf '%s\n' "$out" | tail -n 1)" "crm-1234's Party Leader is in herdr workspace └ crm-1234, under guild (pane $pane); see it with: herdr --session gm-test" "one line names the workspace" &&
     assert_eq "$(db "SELECT key FROM ticket;")" CRM-1234 "the ticket attached" &&
-    assert_contains "$(cat "$HERDR_STUB/calls")" "tab create --workspace $(db "SELECT workspace_id FROM endpoint WHERE key='party-leader:crm-1234';") --cwd $GM_HALL/camps/crm-1234 --label crm-1234 --no-focus" "a tab of its own, not focused"
+    assert_contains "$(cat "$HERDR_STUB/calls")" "workspace create --cwd $GM_HALL/camps/crm-1234 --label └ crm-1234 --no-focus" "a workspace of its own, not focused"
   [ ! -e "$WORK/agent-open/env" ] || fail "claude ran in the agent's own terminal"
   [ ! -e "$HERDR_STUB/attached" ] || fail "herdr was attached"
   [ ! -e "$HERDR_STUB/focused" ] || fail "the Guildmaster's terminal lost its tab"
   [ $((t1 - t0)) -lt 30 ] || fail "gm open took $((t1 - t0))s"
   out=$(CLAUDECODE=1 gm open crm-1234 </dev/null 2>/dev/null) || fail "reopening failed"
-  assert_eq "$(pl_pane crm-1234)" "$pane" "the same tab is reused" &&
+  assert_eq "$(pl_pane crm-1234)" "$pane" "the same pane is reused" &&
     assert_eq "$(pl_runs)" 1 "and nothing launched twice" &&
     assert_contains "$out" "crm-1234: Party Leader already running" "a running Party Leader is left as it is" &&
-    assert_contains "$out" "crm-1234's Party Leader is in herdr tab crm-1234" "and the tab is named again"
+    assert_contains "$out" "crm-1234's Party Leader is in herdr workspace └ crm-1234" "and the workspace is named again"
   out=$(CLAUDECODE=1 gm open guildmaster --repo "$REPO" </dev/null 2>&1) && fail "a focus took the front desk's name"
   assert_contains "$out" "the front desk's name" "and says why"
 }
@@ -2651,7 +2689,7 @@ t_autostart_interval_from_the_config() {
 
 t_shellcheck() {
   command -v shellcheck >/dev/null 2>&1 || { printf '    (shellcheck not installed; skipped)\n'; return 0; }
-  shellcheck -x "$GM" "$ROOT/bin/gm-front-desk-lib.sh" "$ROOT/tests/run.sh" "$ROOT/tests/demo.sh" "$ROOT/tests/fixtures/herdr" "$ROOT/tests/fixtures/launchctl"
+  shellcheck -x "$GM" "$ROOT/bin/gm-front-desk-lib.sh" "$ROOT/tests/run.sh" "$ROOT/tests/demo.sh" "$ROOT/tests/fixtures/herdr" "$ROOT/tests/fixtures/herdr-socket" "$ROOT/tests/fixtures/launchctl"
 }
 
 for t in $(declare -F | awk '{print $3}' | grep '^t_'); do
