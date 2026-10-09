@@ -11,10 +11,10 @@ This repository is at its beginning. The vocabulary comes first, because every l
 - [TERMINOLOGY.md](TERMINOLOGY.md) is the single owner of the project's vocabulary. Read it before writing anything else here.
 - `firstmate/` holds the research into the prior system this one succeeds, kept separate from Guildmaster's own design.
 - `honeycomb/` is a research site on Honeycomb, the hosted observability service: its C4 model, data model, sampling, engineering decisions, and lessons for Guildmaster's tracing. Open `honeycomb/index.html` from disk.
-- `vision/` holds Guildmaster's own design material: the patron's notes, the requirements drawn from them, a Firstmate-informed consultation, the [step 1 design](vision/step-1-design.md), the [herdr design](vision/herdr-design.md) (Party Leaders kept running and brought back), the [zero-touch start](vision/zero-touch-start.md) (the patron starts `claude` in the clone, and talks to the Guildmaster in herdr), and the [tracing design](vision/tracing-design.md) with its [research](vision/tracing-research.md).
+- `vision/` holds Guildmaster's own design material: the patron's notes, the requirements drawn from them, a Firstmate-informed consultation, the [step 1 design](vision/step-1-design.md), the [herdr design](vision/herdr-design.md) (Party Leaders kept running and brought back), the [zero-touch start](vision/zero-touch-start.md) (the patron starts `claude` in the clone, and talks to the Guildmaster in herdr), the [tracing design](vision/tracing-design.md) with its [research](vision/tracing-research.md), and the [veil design](vision/veil-design.md) (the deeds drawn out of the chat, and back in).
 - [vision/roadmap.md](vision/roadmap.md) is the tracked build plan: each step's goal, scope, done-when criteria, status and links.
 - `.claude/settings.json` makes `claude`, started at the clone's root, start the guild and the Guildmaster in herdr: its start-up hook and tool guard act only in the patron's plain clone (or a folder marked `.gm-front-desk`) and do nothing in a linked worktree, where agents that change Guildmaster work. `CLAUDE.md` is their guidance, not the Guildmaster's charter.
-- `mods/guild-chat/` is the Claude Code mod that draws the chat under heraldic banners while `guild.conf` says `chat: banners`.
+- `mods/guild-chat/` is the Claude Code mod that draws the chat under heraldic banners while `guild.conf` says `chat: banners`, and draws the veil over the deeds while it says `veil: on`.
 - `bin/gm` is the `gm` command; `templates/` holds the Guildmaster's charter (`guildmaster.md`), the Party Leader's charter, the ticket playbook and the repository rules it copies into the Guildhall, and the local OpenTelemetry Collector's configuration (`otelcol.yaml`); `tests/` holds its test suite (with the redaction cases, a schema-1 register to migrate, and recorded Claude Code telemetry under `tests/fixtures/telemetry/`, and stand-ins for herdr and launchctl so no test touches the real ones, nor your `~/.local/bin`) and an end-to-end demonstration.
 
 ## Getting started
@@ -143,6 +143,8 @@ Settings, from /Users/you/.guildmaster/guild.conf (gm config set <key> <value> c
 | `collector-port` | a port on 127.0.0.1 | 4318 | `GM_OTEL_PORT` |
 | `telemetry` | `on`, `off` | on | `GM_TELEMETRY` |
 | `chat` | `banners`, `off` (see The chat, below) | banners | `GM_CHAT` |
+| `veil` | `on`, `off` (see The veil, below) | off | |
+| `veil-hides` | any of `deeds`, `adventurers`, `notes`, `progress` | all four | |
 | `autostart` | `on`, `off` | on | |
 | `autostart-every` | minutes | 5 | |
 | `muster-before-commands` | `on`, `off` | on | `GM_HERDR_AUTO` |
@@ -160,7 +162,7 @@ A Guildhall from before this file had `setup.conf`; the first `gm` command moves
 
 ### The chat: heraldic banners
 
-By default (`chat: banners`), the Guildmaster and every Party Leader that gm starts load the mod in `mods/guild-chat/` (a Claude Code plugin of function hooks), which sets each message of the chat under a coloured rule naming who speaks:
+The Guildmaster and every Party Leader that gm starts load the mod in `mods/guild-chat/` (a Claude Code plugin of function hooks), whatever the chat setting, since it also carries the veil (below). By default (`chat: banners`) it sets each message of the chat under a coloured rule naming who speaks:
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚜ PATRON ━━
@@ -176,8 +178,37 @@ The patron's banner is gold and hangs on the right; the Guildmaster's is crimson
 Only the drawing changes: what the model reads, and the stored conversation, stay as they were.
 A `claude` started by hand at the clone's root gets the same chat from its first message: the clone's `.claude/skills/guild-chat` entry (a link to `mods/guild-chat`) makes Claude Code load the mod in a trusted checkout, as Firstmate does with its Calm mod, and the mod reads `chat:` from `guild.conf` itself.
 Nothing is installed and no settings file is written; a session gm starts is told the chat's style by gm instead (`GM_CHAT`), and gets the mod by `--plugin-dir` only where its folder does not load it already. Someone without a Guildhall keeps Claude Code's own chat.
-For Claude Code's own chat, `gm config set chat off` (or ask the Guildmaster); a session keeps the chat it started with, so the change takes effect at its next start.
+For Claude Code's own chat, `gm config set chat off` (or ask the Guildmaster): the mod still loads, and draws no banners. A session keeps the chat it started with, so the change takes effect at its next start.
 The mod's own tests run with `claude plugin test mods/guild-chat`.
+
+### The veil
+
+The veil is the chat's quiet view, Guildmaster's take on Firstmate's Calm: while it is drawn, the deeds and the rest of the work done on the patron's behalf are drawn out of the chat, and the patron sees who asked and who answered.
+It is off until the patron draws it, in any session at the front desk or a Party Leader's:
+
+| Command | Does |
+| --- | --- |
+| `/veil` | Turns the veil the other way, saves it, and redraws this session. |
+| `/veil on`, `/veil off` | Sets it outright. |
+| `/veil refresh` | Reads `guild.conf` again and redraws this session at once. |
+
+It answers with a toast under the prompt (`The veil is drawn`, `The veil is lifted`), never a row in the chat.
+It is one choice for the whole guild, `veil` in `guild.conf`, saved through the guild's own `gm` (`~/.local/bin/gm config set veil on|off`); when that `gm` cannot save it, the veil stays as it was and the toast says why.
+Every other session follows at its next turn (a message in or out), at the cost of one look at the file's time, or at once with `/veil refresh`; an idle one does nothing until then.
+
+What it hides is `veil-hides` (`gm config set veil-hides deeds notes`, or ask the Guildmaster), any of:
+
+| Kind | Rows |
+| --- | --- |
+| `deeds` | tool calls, their results and their folded groups |
+| `adventurers` | an adventurer's call (`⛨ ADVENTURER · …`) and its return |
+| `notes` | short narration between deeds: one line under 240 characters from a step that went on to call tools |
+| `progress` | the dim hint under a running deed, `(ctrl+b to run in background)` |
+
+A hidden row goes with its banner. A deed that failed or was interrupted hides like any other: the Guildmaster or the Party Leader tells the patron afterwards.
+The veil never hides the patron's messages, a message routed from another session, the reply that ends a turn, longer narration, or anything from a step that ran out of tokens or out of room (`max_tokens`, `model_context_window_exceeded`): that one the patron must see, since the session is stuck there.
+Nor can it hide what Claude Code draws outside the chat: permission and question dialogs, and the working row, which still says a session is busy.
+It hides from the screen only: the model, the stored conversation, `--continue` and exports are unchanged.
 
 ### The front desk from any terminal: `gm`
 

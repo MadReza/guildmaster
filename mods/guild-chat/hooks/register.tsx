@@ -2,10 +2,14 @@ import type { EngineInterface, Register, RenderChildren, RenderInput } from 'cla
 
 // Heraldic banners: every message of a Guildmaster session is set under a rule naming who speaks. The patron's banner
 // hangs on the right, everyone else's on the left; the heavy rule is for the patron and the one who answers them, the
-// light one for what is done on their behalf. gm starts a session with this mod while guild.conf says chat: banners,
-// and names in GM_CHAT_FOCUS the Party Leader's focus (none at the front desk). A claude started by hand in a checkout
-// of Guildmaster loads it too, from .claude/skills/guild-chat, and asks guild.conf itself; in a camp, the GM_FOCUS its
-// settings set names the Party Leader.
+// light one for what is done on their behalf. gm starts every session with this mod, tells it in GM_CHAT what
+// guild.conf says of chat: (off keeps Claude Code's own drawing), and names in GM_CHAT_FOCUS the Party Leader's focus
+// (none at the front desk). A claude started by hand in a checkout of Guildmaster loads it too, from
+// .claude/skills/guild-chat, and asks guild.conf itself; in a camp, the GM_FOCUS its settings set names the Party Leader.
+//
+// The veil (vision/veil-design.md): while guild.conf says veil: on, the kinds of row veil-hides names draw at zero
+// height, banner and all, and come back when it is lifted. It hides from the screen only: nothing stored changes.
+// /veil sets it through the guild's one gm; every other session follows at its next turn, or at /veil refresh.
 
 const GOLD = '#d4a017'
 const CRIMSON = '#c0392b'
@@ -32,30 +36,121 @@ function adventurerName(input: unknown): string {
   return n ? `ADVENTURER · ${String(n).trim()}` : 'ADVENTURER'
 }
 
-// chat: in guild.conf, as gm reads it: the first chat: line with a value; off, no or false is off; anything else,
-// or no such line, is banners.
-export function chatIsOn(conf: string): boolean {
-  const value = conf.split('\n').filter(l => l.startsWith('chat:')).map(l => l.slice('chat:'.length).trim()).find(v => v)
-  return !['off', 'no', 'false'].includes(value ?? '')
+// A setting in guild.conf, as gm reads it: the first line naming the key with a value, comments skipped.
+export function confValue(conf: string, key: string): string | undefined {
+  for (const line of conf.split('\n')) {
+    if (/^\s*#/.test(line) || !line.startsWith(`${key}:`)) continue
+    const value = line.slice(key.length + 1).trim()
+    if (value) return value
+  }
+  return undefined
 }
+
+// chat: in guild.conf: off, no or false is off; anything else, or no such line, is banners.
+export function chatIsOn(conf: string): boolean {
+  return !['off', 'no', 'false'].includes(confValue(conf, 'chat') ?? '')
+}
+
+// What the veil can hide, and what it hides when veil-hides says nothing gm can take.
+export const KINDS = ['deeds', 'adventurers', 'notes', 'progress'] as const
+export type Kind = (typeof KINDS)[number]
+export type Veil = { on: boolean; hides: ReadonlySet<Kind> }
+
+// veil and veil-hides in guild.conf, as gm takes them: veil is on for on, yes or true, and off for anything else;
+// veil-hides is the kinds it names, or all four when it names none or anything that is not one.
+export function veilOf(conf: string): Veil {
+  const on = ['on', 'yes', 'true'].includes(confValue(conf, 'veil') ?? '')
+  const words = (confValue(conf, 'veil-hides') ?? '').split(/\s+/).filter(Boolean)
+  const valid = words.length > 0 && words.every(w => (KINDS as readonly string[]).includes(w))
+  return { on, hides: new Set(valid ? (words as Kind[]) : KINDS) }
+}
+
+const sameVeil = (a: Veil, b: Veil) => a.on === b.on && a.hides.size === b.hides.size && [...a.hides].every(k => b.hides.has(k))
+
+// Short narration between deeds, Firstmate's rule: a text block from a model step that stopped to call tools, with
+// no newline and under 240 characters trimmed. A step that hit a limit is never a note: the patron must see it.
+export const NOTE_MAX = 240
+const STUCK = ['max_tokens', 'model_context_window_exceeded']
+export const isNote = (stopReason: string | null, text: string) =>
+  stopReason === 'tool_use' && !text.includes('\n') && text.trim().length < NOTE_MAX
+const noteKey = (text: string) => (text.includes('\n') ? `${text.trim()}\n` : text.trim())
 
 // Whether this session draws banners, decided once: it keeps what it started with. A session gm starts is told by
 // GM_CHAT. Any other session draws them only for a patron whose Guildhall (GM_HALL, else ~/.guildmaster) has a
 // guild.conf that does not turn the chat off: someone without a Guildhall keeps Claude Code's own chat.
 let decided: Promise<boolean> | undefined
 
+async function hallConf($: EngineInterface): Promise<string> {
+  return `${(await $.env.get('GM_HALL')) || `${await $.env.get('HOME')}/.guildmaster`}/guild.conf`
+}
+
 function bannersOn($: EngineInterface): Promise<boolean> {
   decided ??= (async () => {
     const told = await $.env.get('GM_CHAT')
     if (told) return chatIsOn(`chat: ${told}`)
-    const hall = (await $.env.get('GM_HALL')) || `${await $.env.get('HOME')}/.guildmaster`
     try {
-      return chatIsOn(await $.fs.read(`${hall}/guild.conf`))
+      return chatIsOn(await $.fs.read(await hallConf($)))
     } catch {
       return false
     }
   })()
   return decided
+}
+
+// The veil as this session holds it: guild.conf's path (none without a Guildhall), what it last read there, and the
+// file's modification time then. Read once, before the first row draws; afterwards only when the file changed.
+type Held = { conf?: string; veil: Veil; mtimeMs?: number }
+const LIFTED: Veil = { on: false, hides: new Set() }
+let held: Promise<Held> | undefined
+
+// Reads guild.conf; a file it cannot read leaves the veil lifted.
+async function readVeil($: EngineInterface, conf: string): Promise<{ veil: Veil; mtimeMs?: number }> {
+  try {
+    const { mtimeMs } = await $.fs.stat(conf)
+    return { veil: veilOf(await $.fs.read(conf)), mtimeMs }
+  } catch {
+    return { veil: LIFTED }
+  }
+}
+
+function veil($: EngineInterface): Promise<Held> {
+  held ??= (async () => {
+    const conf = await hallConf($)
+    try {
+      if (!(await $.fs.exists(conf))) return { veil: LIFTED }
+    } catch {
+      return { veil: LIFTED }
+    }
+    return { conf, ...(await readVeil($, conf)) }
+  })()
+  return held
+}
+
+// Takes what guild.conf says now; redraws when it changed the veil, or always when asked.
+async function follow($: EngineInterface, h: Held, always = false): Promise<void> {
+  if (!h.conf) return
+  const now = await readVeil($, h.conf)
+  const changed = !sameVeil(now.veil, h.veil)
+  h.veil = now.veil
+  h.mtimeMs = now.mtimeMs
+  if (changed || always) $.ui.invalidate('ui.render')
+}
+
+// What the turns of this session taught: which text blocks are notes, which are not, and the text and deeds of a step
+// that hit a limit. Matched to the rows by the block's text and the call's id.
+const notes = new Set<string>()
+const replies = new Set<string>()
+const stuckTool = new Set<string>()
+
+async function hides($: EngineInterface, kind: Kind): Promise<boolean> {
+  const { veil: v } = await veil($)
+  return v.on && v.hides.has(kind)
+}
+
+// A row drawn out of the chat: it takes no room, and no banner is drawn for it.
+function hidden($: EngineInterface, e: RenderInput) {
+  const { Box } = $.ui.resolve(e)
+  return <Box display="none" />
 }
 
 // The engine's own drawing of the row, under the banner; with the chat off, the row as it is.
@@ -80,9 +175,127 @@ async function draw<E extends RenderInput<Row>, R extends RenderChildren>($: Eng
 
 const deeds: Banner = { sigil: '⚒', name: 'DEEDS', color: STEEL, heavy: false }
 
+// The guild's one gm, linked at ~/.local/bin/gm. Never the gm beside this mod, which in a camp of Guildmaster is the
+// branch's draft: the mod runs it only when it is a link to a gm.
+async function guildGm($: EngineInterface): Promise<{ gm: string } | { why: string }> {
+  const gm = `${await $.env.get('HOME')}/.local/bin/gm`
+  try {
+    const s = await $.fs.stat(gm, { resolve: true })
+    if (!s.isLink) return { why: '~/.local/bin/gm is not a link to the guild\'s gm' }
+    if (s.kind !== 'file' || !s.realPath?.endsWith('/gm')) return { why: '~/.local/bin/gm does not lead to a gm' }
+    return { gm }
+  } catch {
+    return { why: '~/.local/bin/gm is missing' }
+  }
+}
+
+const said = (v: Veil) => (v.on ? 'The veil is drawn' : 'The veil is lifted')
+
 export const register: Register = on => {
-  on('ui.render', { component: 'UserMessage' }, ($, e, next) => {
+  on('session.start', async ($, e, next) => {
+    notes.clear()
+    replies.clear()
+    stuckTool.clear()
+    if ((await veil($)).conf) {
+      await $.command.register({
+        name: 'veil',
+        description: 'Draw the deeds out of the chat, or back in: /veil turns it, /veil on|off sets it, /veil refresh reads guild.conf again',
+        argumentHint: '[on | off | refresh]',
+        immediate: true,
+      })
+    }
+    return next(e)
+  })
+
+  // Answers with a toast under the prompt and leaves no row in the transcript.
+  on('command.run', { command: 'veil' }, async ($, e) => {
+    const h = await veil($)
+    if (!h.conf) return {}
+    const arg = e.args.trim()
+    if (arg === 'refresh') {
+      await follow($, h, true)
+      $.ui.toast(said(h.veil))
+      return {}
+    }
+    if (!['', 'on', 'off'].includes(arg)) {
+      $.ui.toast('/veil takes on, off or refresh')
+      return {}
+    }
+    const want = arg || (h.veil.on ? 'off' : 'on')
+    // Saved before the screen changes: a save that fails leaves the veil as it was.
+    const found = await guildGm($)
+    if ('why' in found) {
+      $.ui.toast(`The veil is unchanged: ${found.why}`)
+      return {}
+    }
+    let why: string | undefined
+    try {
+      const run = await $.process.run([found.gm, 'config', 'set', 'veil', want])
+      if (run.exitCode !== 0) why = (run.stderr.trim() || run.stdout.trim()).split('\n')[0] || `gm exited ${run.exitCode}`
+    } catch (err) {
+      why = err instanceof Error ? err.message : String(err)
+    }
+    if (why) {
+      $.ui.toast(`The veil is unchanged: ${why}`)
+      return {}
+    }
+    // Keeps the file's new time, so this session's own save does not redraw it a second time at its next turn.
+    await follow($, h, true)
+    $.ui.toast(said(h.veil))
+    return {}
+  })
+
+  // Another session's change reaches this one at its next turn: one stat, and a read only when the file changed.
+  on('turn.start', async ($, e, next) => {
+    const h = await veil($)
+    if (h.conf) {
+      try {
+        if ((await $.fs.stat(h.conf)).mtimeMs !== h.mtimeMs) await follow($, h)
+      } catch {
+        // A guild.conf that cannot be read now leaves the veil as this session holds it.
+      }
+    }
+    return next(e)
+  })
+
+  // Learns which text blocks are notes, and what a step that hit a limit carried. Subagents' steps never draw here.
+  on('turn.step', async function* ($, e, next) {
+    const stream = next(e)
+    const blocks = new Map<number, string>()
+    const tools: string[] = []
+    for await (const chunk of stream) {
+      if (chunk.kind === 'text') blocks.set(chunk.index, (blocks.get(chunk.index) ?? '') + chunk.text)
+      if (chunk.kind === 'tool') tools.push(chunk.id)
+      yield chunk
+    }
+    const result = await stream.result
+    if (e.agentId !== undefined) return result
+    const stuck = STUCK.includes(result.stopReason ?? '')
+    let changed = false
+    for (const text of blocks.size ? blocks.values() : [result.answer]) {
+      const key = noteKey(text)
+      if (!key) continue
+      if (isNote(result.stopReason, text) && !replies.has(key)) {
+        if (notes.has(key)) continue
+        notes.add(key)
+        changed = true
+      } else {
+        if (!replies.has(key)) changed = true
+        replies.add(key)
+        if (notes.delete(key)) changed = true
+      }
+    }
+    if (stuck && tools.length) {
+      for (const id of tools) stuckTool.add(id)
+      changed = true
+    }
+    if (changed && (await veil($)).veil.on) $.ui.invalidate('ui.render')
+    return result
+  })
+
+  on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
     const p = e.props
+    if (p.origin.kind === 'task-notification' && (await hides($, 'adventurers'))) return hidden($, e)
     const banner: Banner =
       p.origin.kind === 'task-notification' ? { sigil: '⛨', name: 'ADVENTURER · returns', color: GREEN, heavy: false }
       : p.from ? { sigil: '⛨', name: p.from.name.toUpperCase(), color: GREEN, heavy: false }
@@ -91,6 +304,8 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
+    const key = noteKey(e.props.text)
+    if (notes.has(key) && !replies.has(key) && (await hides($, 'notes'))) return hidden($, e)
     if (!e.props.isFirstOfReply) return next(e)
     const focus = (await $.env.get('GM_CHAT_FOCUS')) || (await $.env.get('GM_FOCUS'))
     return draw($, e, next, focus
@@ -98,10 +313,22 @@ export const register: Register = on => {
       : { sigil: '⚔', name: 'GUILDMASTER', color: CRIMSON, heavy: true })
   })
 
-  on('ui.render', { component: 'ToolUse' }, ($, e, next) =>
-    draw($, e, next, isAdventurer(e.props.tool)
+  on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
+    const adventurer = isAdventurer(e.props.tool)
+    if (!stuckTool.has(e.props.tool_use_id) && (await hides($, adventurer ? 'adventurers' : 'deeds'))) return hidden($, e)
+    return draw($, e, next, adventurer
       ? { sigil: '⛨', name: adventurerName(e.props.input), color: GREEN, heavy: false }
-      : deeds))
+      : deeds)
+  })
 
-  on('ui.render', { component: 'ToolGroup' }, ($, e, next) => draw($, e, next, deeds))
+  on('ui.render', { component: 'ToolResult' }, async ($, e, next) =>
+    !stuckTool.has(e.props.tool_use_id) && (await hides($, 'deeds')) ? hidden($, e) : next(e))
+
+  on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
+    const stuck = e.props.calls.some(c => c.tool_use_id !== undefined && stuckTool.has(c.tool_use_id))
+    if (!stuck && (await hides($, 'deeds'))) return hidden($, e)
+    return draw($, e, next, deeds)
+  })
+
+  on('ui.render', { component: 'ToolProgress' }, async ($, e, next) => ((await hides($, 'progress')) ? hidden($, e) : next(e)))
 }
