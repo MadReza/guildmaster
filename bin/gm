@@ -39,6 +39,8 @@ GM_CONF_TABLE="collector	GM_COLLECTOR	off	collector	Keep the local OpenTelemetry
 collector-port	GM_OTEL_PORT	4318	port	The port on 127.0.0.1 the collector listens on, and Party Leaders send their telemetry to.
 telemetry	GM_TELEMETRY	on	onoff	Party Leaders that gm starts send Claude Code's telemetry to the collector.
 chat	GM_CHAT	banners	chat	How the chat of the Guildmaster and the Party Leaders gm starts looks: off is Claude Code's own, banners sets each message under a heraldic banner (mods/guild-chat). A running session keeps what it started with.
+veil	-	off	onoff	The veil: while on, every session's chat draws what veil-hides names out of sight, the record unchanged; /veil in any session turns it. A running session follows a change at its next turn, or at /veil refresh.
+veil-hides	-	deeds adventurers notes progress	veilhides	What the veil hides, any of: deeds (tool calls and their results), adventurers (their calls and returns), notes (short narration between deeds), progress (the hint under a running deed).
 autostart	-	on	onoff	A launchd agent (macOS) runs the muster at login and every autostart-every minutes.
 autostart-every	-	5	minutes	Minutes between the launchd agent's musters.
 muster-before-commands	GM_HERDR_AUTO	on	onoff	A gm command typed at a terminal first brings back, quietly, whatever is dead or missing.
@@ -87,6 +89,16 @@ gm_conf_norm() {
         off | no | false) v=off ;;
         *) return 1 ;;
       esac ;;
+    veilhides)
+      local w seen=' '
+      [[ $v =~ ^[a-z[:space:]]+$ ]] || return 1
+      for w in $v; do
+        case $w in deeds | adventurers | notes | progress) ;; *) return 1 ;; esac
+        case $seen in *" $w "*) ;; *) seen="$seen$w " ;; esac
+      done
+      v=${seen# }
+      v=${v% }
+      [ -n "$v" ] || return 1 ;;
     port) [[ $v =~ ^[0-9]{1,5}$ ]] && [ "$v" -ge 1 ] && [ "$v" -le 65535 ] || return 1 ;;
     minutes | count) [[ $v =~ ^[0-9]{1,6}$ ]] && [ "$v" -ge 1 ] || return 1 ;;
     seconds) [[ $v =~ ^[0-9]{1,6}$ ]] || return 1 ;;
@@ -2369,6 +2381,7 @@ gm_conf_header() {
       onoff) vals='on | off' ;;
       collector) vals='on | off | later' ;;
       chat) vals='off | banners' ;;
+      veilhides) vals='deeds adventurers notes progress, any of them' ;;
       text) vals='<folder> <folder> ...' ;;
       count) vals='<number>' ;;
       *) vals="<$kind>" ;;
@@ -2889,7 +2902,7 @@ gm_cmd_config() {
       if [ "$action" = set ]; then
         [ $# -ge 1 ] || gm_die "config: gm config set $key <value>"
         val="$*"
-        [ "$kind" = text ] || [ $# -eq 1 ] || gm_die "config: $key takes one value"
+        [ "$kind" = text ] || [ "$kind" = veilhides ] || [ $# -eq 1 ] || gm_die "config: $key takes one value"
         gm_conf_norm "$kind" "$val" || gm_die "config: $key cannot be '$val' ($(gm_conf_header | sed -n "s/^# $key: \\([^,;]*\\).*/\\1/p"))"
         val=$GM_CONF_VAL
       else
@@ -2937,6 +2950,9 @@ gm_conf_apply() {
       "$([ "${GM_TELEMETRY:-on}" = off ] && printf 'send no telemetry' || printf 'send telemetry to the collector')" ;;
     chat) printf 'chat is %s: the Guildmaster and Party Leaders started from now on %s; running ones keep what they started with.\n' "$shown" \
       "$([ "${GM_CHAT:-banners}" = off ] && printf "draw Claude Code's own chat" || printf 'draw their chat under heraldic banners')" ;;
+    veil) printf 'veil is %s: the veil is %s; running sessions follow at their next turn, or at once with /veil refresh.\n' "$shown" \
+      "$([ "$val" = on ] && printf 'drawn over %s' "$(gm_conf_effective_all | awk -F '\t' '$1 == "veil-hides" { print $2 }')" || printf 'lifted')" ;;
+    veil-hides) printf 'veil-hides is %s: running sessions follow at their next turn, or at once with /veil refresh.\n' "$shown" ;;
     repo-roots) printf 'repo-roots is %s: gm repos looks for clones %s.\n' "$shown" "$([ -n "$val" ] && printf 'there' || printf 'in the usual source folders')" ;;
     *) printf '%s is %s; it takes effect at the next muster.\n' "$key" "$shown" ;;
   esac
@@ -5140,16 +5156,18 @@ gm_cmd_start() {
     ${GM_CHAT_ARGS[@]+"${GM_CHAT_ARGS[@]}"}
 }
 
-# The chat setting, for a session gm starts in <dir>: gm_chat_args <dir> [focus]. With chat: banners, claude loads
-# the guild-chat mod from the clone (--plugin-dir), told by GM_CHAT_FOCUS which Party Leader it draws for (none at
-# the front desk). A checkout of Guildmaster loads the mod itself, from .claude/skills/guild-chat, so there gm passes
-# only the variables: a second copy by --plugin-dir would leave Claude Code reporting the first as not loaded.
+# The guild-chat mod, for a session gm starts in <dir>: gm_chat_args <dir> [focus]. Every session gets it, whatever
+# the chat setting, since it also carries the veil and /veil: claude loads it from the clone (--plugin-dir), told by
+# GM_CHAT whether to draw the banners (chat: off keeps Claude Code's own drawing) and by GM_CHAT_FOCUS which Party
+# Leader it draws for (none at the front desk). A checkout of Guildmaster loads the mod itself, from
+# .claude/skills/guild-chat, so there gm passes only the variables: a second copy by --plugin-dir would leave Claude
+# Code reporting the first as not loaded.
 GM_CHAT_ARGS=()
 GM_CHAT_ENV=()
 gm_chat_args() {
   GM_CHAT_ARGS=()
   GM_CHAT_ENV=()
-  gm_conf_norm chat "${GM_CHAT:-banners}" && [ "$GM_CONF_VAL" != off ] || return 0
+  gm_conf_norm chat "${GM_CHAT:-banners}" || GM_CONF_VAL=banners
   [ -f "$1/.claude/skills/guild-chat/.claude-plugin/plugin.json" ] || GM_CHAT_ARGS=(--plugin-dir "$GM_ROOT/mods/guild-chat")
   GM_CHAT_ENV=("GM_CHAT=$GM_CONF_VAL")
   [ -z "${2:-}" ] || GM_CHAT_ENV+=("GM_CHAT_FOCUS=$2")

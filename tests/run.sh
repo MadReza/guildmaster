@@ -2492,7 +2492,7 @@ t_config_file_is_documented_and_read() {
   out=$(gm config set collector-port 4999) || fail "set failed: $out"
   assert_contains "$out" "collector-port is 4999" "it says what it set"
   [ -f "$GM_HALL/guild.conf" ] || fail "no guild.conf" || return 1
-  for k in collector collector-port telemetry chat autostart autostart-every muster-before-commands attach herdr-session \
+  for k in collector collector-port telemetry chat veil veil-hides autostart autostart-every muster-before-commands attach herdr-session \
     herdr-workspace launch-grace start-tries repo-roots; do
     grep -q "^# $k: " "$GM_HALL/guild.conf" || fail "guild.conf does not document $k"
   done
@@ -2580,19 +2580,58 @@ guildmaster" "the Guildmaster loads it too, from the clone's .claude/skills, wit
     assert_contains "$(cat "$f.desk")" "GM_CHAT=banners" "and is told the style" &&
     assert_not_contains "$(cat "$f.desk")" "GM_CHAT_FOCUS=" "as the front desk, with no focus"
   env GM_CHAT=no GM_FAKE_CLAUDE_ENV="$f.no" sh -c "$(grep "start 'appt-v2'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)" </dev/null >/dev/null 2>&1
-  assert_eq "$(cat "$f.no.args")" "--name
-appt-v2" "GM_CHAT=no in the environment is off too"
+  assert_contains "$(cat "$f.no")" "GM_CHAT=off" "GM_CHAT=no in the environment is off too"
   out=$(gm config set chat off)
   assert_contains "$out" "chat is off: the Guildmaster and Party Leaders started from now on draw Claude Code's own chat" "says what it does"
+  # chat: off still gives every session the mod, which carries the veil and /veil, and tells it to draw no banners.
   env GM_FAKE_CLAUDE_ENV="$f.off" sh -c "$(grep "start 'appt-v2'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)" </dev/null >/dev/null 2>&1
   assert_eq "$(cat "$f.off.args")" "--name
-appt-v2" "chat: off starts claude without it" &&
-    assert_not_contains "$(cat "$f.off")" "GM_CHAT" "with nothing of the mod"
+appt-v2
+--plugin-dir
+$ROOT/mods/guild-chat" "chat: off starts a Party Leader with the mod too" &&
+    assert_contains "$(cat "$f.off")" "GM_CHAT=off" "told to draw Claude Code's own chat" &&
+    assert_contains "$(cat "$f.off")" "GM_CHAT_FOCUS=appt-v2" "with its focus"
+  env GM_FAKE_CLAUDE_ENV="$f.desk-off" sh -c "$(grep "start 'guildmaster'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)" </dev/null >/dev/null 2>&1
+  assert_contains "$(cat "$f.desk-off")" "GM_CHAT=off" "and the Guildmaster, from its own .claude/skills"
   out=$(gm config set chat on)
   assert_eq "$(conf chat)" banners "on is the one style there is: banners" &&
     assert_contains "$out" "chat is banners: the Guildmaster and Party Leaders started from now on draw their chat under heraldic banners" "and back"
   [ -f "$ROOT/mods/guild-chat/.claude-plugin/plugin.json" ] && [ -f "$ROOT/mods/guild-chat/hooks/register.tsx" ] ||
     fail "the mod gm loads is not in the clone"
+}
+
+t_config_veil_and_what_it_hides() {
+  export GM_HALL=$WORK/conf-veil/hall
+  local out
+  out=$(gm config)
+  assert_contains "$out" "  veil                    off       default" "the veil is lifted unless the patron draws it" &&
+    assert_contains "$out" "  veil-hides              deeds adventurers notes progress default" "and hides all four kinds"
+  out=$(gm config set veil on)
+  assert_eq "$(conf veil)" on "veil: on written" &&
+    assert_contains "$out" "veil is on: the veil is drawn over deeds adventurers notes progress; running sessions follow at their next turn, or at once with /veil refresh" "says what it does"
+  grep -q '^# veil: on | off, default off$' "$GM_HALL/guild.conf" ||
+    fail "guild.conf documents veil, with no variable for it"
+  grep -q '^# veil-hides: deeds adventurers notes progress, any of them, default deeds adventurers notes progress$' "$GM_HALL/guild.conf" ||
+    fail "guild.conf documents veil-hides, with no variable for it"
+  out=$(gm config set veil maybe 2>&1) && fail "veil took maybe"
+  assert_contains "$out" "veil cannot be 'maybe' (on | off)" "refused, with what it takes"
+  out=$(gm config set veil-hides deeds notes)
+  assert_eq "$(conf veil-hides)" "deeds notes" "several kinds, as words" &&
+    assert_contains "$out" "veil-hides is deeds notes" "says so"
+  gm config set veil-hides "progress  progress" >/dev/null
+  assert_eq "$(conf veil-hides)" progress "a kind named twice is kept once"
+  out=$(gm config set veil-hides deeds everything 2>&1) && fail "veil-hides took everything"
+  assert_contains "$out" "veil-hides cannot be 'deeds everything' (deeds adventurers notes progress)" "refused, naming the kinds" &&
+    assert_eq "$(conf veil-hides)" progress "and the setting kept"
+  out=$(gm config set veil-hides '*' 2>&1) && fail "veil-hides took a pattern"
+  gm config set veil off >/dev/null
+  assert_contains "$(gm config set veil off)" "veil is off: the veil is lifted" "lifted"
+  # A value gm cannot take is ignored: the veil reads as off, veil-hides as all four.
+  printf 'veil: perhaps\n' >"$GM_HALL/guild.conf"
+  printf 'veil-hides: rubbish\n' >>"$GM_HALL/guild.conf"
+  out=$(gm config)
+  assert_contains "$out" "  veil                    off       ignored: guild.conf says 'perhaps'" "a bad veil is off" &&
+    assert_contains "$out" "  veil-hides              deeds adventurers notes progress ignored: guild.conf says 'rubbish'" "a bad veil-hides is all four"
 }
 
 t_config_moves_setup_conf_into_guild_conf() {

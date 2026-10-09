@@ -1,9 +1,10 @@
+import type { On } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { bannerLine, chatIsOn } from '../hooks/register'
 
 // What stands for Claude Code beneath the mod: the environment gm starts a session with, and the engine's own row.
-function engine(on: Parameters<Parameters<typeof test>[1]>[1], env: Record<string, string> = { GM_CHAT: 'banners' }) {
+function engine(on: On, env: Record<string, string> = { GM_CHAT: 'banners' }) {
   mock.env(on, env)
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine row'] }))
 }
@@ -76,7 +77,7 @@ describe('heraldic banners', () => {
 })
 
 // A claude started by hand in a checkout of Guildmaster: no GM_CHAT, so the mod reads guild.conf from the Guildhall.
-function byHand(on: Parameters<Parameters<typeof test>[1]>[1], conf: string | undefined, env: Record<string, string> = { HOME: '/home/p' }) {
+function byHand(on: On, conf: string | undefined, env: Record<string, string> = { HOME: '/home/p' }) {
   const read: string[] = []
   mock.env(on, env)
   on('fs.read', ($, e) => {

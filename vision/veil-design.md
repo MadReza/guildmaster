@@ -32,7 +32,7 @@ And on what stays in sight:
 The name, `/veil`, and the default, off, were recommended to them and taken; they are easy to change before anything is built.
 This document says what the veil is, what it hides, where the choice is kept, and how a change reaches every session, for the guild-chat mod in `mods/guild-chat/`.
 Vocabulary is [TERMINOLOGY.md](../TERMINOLOGY.md)'s; this change adds **Deed** and **Veil** to it.
-Nothing here is built yet.
+It is built in `mods/guild-chat/` and `bin/gm`.
 
 ## How Firstmate does it
 
