@@ -96,6 +96,13 @@ Where a term replaces one from Firstmate, the Firstmate column records the origi
 | **Riding Out** | The posture while the patron is away and unreachable. | away mode |
 | **Mandate** | The patron's own words, recorded verbatim, governing what the guild may do while they ride out. | away contract |
 
+## The chat
+
+| Term | Definition | Firstmate |
+| --- | --- | --- |
+| **Deed** | A tool call as the chat shows it: the call, its result, or a group of them. | tool call |
+| **Veil** | The chat's quiet view: deeds, adventurers and short notes drawn out of the chat while it is on, and back when it is lifted. Hides from the screen only, never from the record. | Calm |
+
 ## Words kept as they are
 
 Git, branch, commit, pull request, repository, remote, and clone keep their ordinary meanings.
