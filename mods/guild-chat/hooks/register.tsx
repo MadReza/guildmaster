@@ -31,10 +31,11 @@ function adventurerName(input: unknown): string {
   return n ? `ADVENTURER · ${String(n).trim()}` : 'ADVENTURER'
 }
 
-// chat: in guild.conf, as gm reads it: off, no or false is off; anything else, or no line, is banners.
+// chat: in guild.conf, as gm reads it: the first chat: line with a value; off, no or false is off; anything else,
+// or no such line, is banners.
 export function chatIsOn(conf: string): boolean {
-  const line = conf.split('\n').find(l => l.startsWith('chat:'))
-  return !['off', 'no', 'false'].includes((line ?? '').slice('chat:'.length).trim())
+  const value = conf.split('\n').filter(l => l.startsWith('chat:')).map(l => l.slice('chat:'.length).trim()).find(v => v)
+  return !['off', 'no', 'false'].includes(value ?? '')
 }
 
 // Whether this session draws banners, decided once: it keeps what it started with. A session gm starts is told by

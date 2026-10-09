@@ -122,5 +122,6 @@ describe('a claude started by hand', () => {
     expect(chatIsOn('chat: on')).toBe(true)
     for (const off of ['chat: off', 'chat: no', 'chat:false', '# x\nchat:  off  \n']) expect(chatIsOn(off)).toBe(false)
     expect(chatIsOn('# chat: off')).toBe(true)
+    expect(chatIsOn('chat:\nchat: off')).toBe(false)
   })
 })
