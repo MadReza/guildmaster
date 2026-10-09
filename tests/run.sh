@@ -120,7 +120,7 @@ t_schema_created_on_first_use() {
   [ ! -e "$GM_HALL" ] || return 1
   gm list >/dev/null || fail "first gm call failed"
   assert_eq "$(db 'PRAGMA journal_mode;')" wal "journal mode" &&
-    assert_eq "$(db 'PRAGMA user_version;')" 4 "schema version" &&
+    assert_eq "$(db 'PRAGMA user_version;')" 5 "schema version" &&
     assert_eq "$(db "SELECT group_concat(name, ' ') FROM (SELECT name FROM sqlite_master WHERE type='table' ORDER BY name);")" \
       "endpoint event focus guard message model_sample open_span posting prompt_version span span_link ticket" "tables"
 }
@@ -337,6 +337,13 @@ t_additions_and_commands() {
   assert_contains "$out" "slash command" "slash command" &&
     assert_eq "$(db "SELECT count(*) FROM message WHERE disposition='command';")" 1 "command recorded" &&
     assert_eq "$(db 'SELECT count(*) FROM posting;')" 2 "no posting for a command"
+  out=$(payload s1 '<task-notification>
+<task-id>a1b2</task-id>
+<status>completed</status>
+</task-notification>' | gm hook prompt)
+  assert_contains "$out" "background task notification" "a task notification is named for what it is" &&
+    assert_eq "$(db "SELECT count(*) FROM message WHERE disposition='command';")" 2 "recorded verbatim" &&
+    assert_eq "$(db 'SELECT count(*) FROM posting;')" 2 "but not as the patron's posting"
 }
 
 t_hook_output_is_valid_json() {
@@ -864,8 +871,8 @@ t_migration_keeps_schema1_data() {
   for i in 1 2 3 4 5 6; do gm list --all >/dev/null 2>"$WORK/migrate/err$i" & done
   wait
   for i in 1 2 3 4 5 6; do assert_eq "$(cat "$WORK/migrate/err$i")" "" "migration $i ran clean"; done
-  assert_eq "$(db 'PRAGMA user_version;')" 4 "migrated to schema 4" &&
-    assert_eq "$(for t in $tables; do db "SELECT $(db "SELECT group_concat(name, ',') FROM pragma_table_info('$t') WHERE name NOT IN ('trace_id','span_id','span_start_ms','follows_id','closed_at','start_attempts','held_at','held_told');") FROM $t ORDER BY rowid;"; done)" "$before" "every schema-1 row kept as it was" &&
+  assert_eq "$(db 'PRAGMA user_version;')" 5 "migrated to schema 5" &&
+    assert_eq "$(for t in $tables; do db "SELECT $(db "SELECT group_concat(name, ',') FROM pragma_table_info('$t') WHERE name NOT IN ('trace_id','span_id','span_start_ms','follows_id','closed_at','start_attempts','held_at','held_told','close_requested_at');") FROM $t ORDER BY rowid;"; done)" "$before" "every schema-1 row kept as it was" &&
     assert_eq "$(db "SELECT count(*) FROM posting WHERE trace_id IS NULL;")" 2 "old postings have no trace" &&
     assert_eq "$(db "SELECT group_concat(name, ' ') FROM (SELECT name FROM sqlite_master WHERE type='table' AND name IN ('span','span_link','open_span','prompt_version','model_sample') ORDER BY name);")" \
       "model_sample open_span prompt_version span span_link" "the tracing tables" &&
@@ -1470,7 +1477,7 @@ t_up_relaunches_only_dead_and_missing() {
     assert_contains "$out" "bravo: Party Leader started in herdr pane $before_b (dead: the pane holds only a shell)" "dead relaunched" &&
     assert_contains "$out" "charlie: Party Leader started in herdr pane $(pl_pane charlie) (missing: pane $before_c is gone)" "missing relaunched" &&
     assert_contains "$out" "delta: unknown (the pane runs vim, not a Party Leader); left alone" "ambiguous reported"
-  if grep -q 'close' "$HERDR_STUB/calls"; then fail "gm up closed something"; fi
+  if grep -q 'pane close' "$HERDR_STUB/calls"; then fail "gm up closed something"; fi
   assert_eq "$(db "SELECT count(*) FROM event WHERE kind='party-leader.launched';")" 6 "each launch is in the ledger"
 }
 
@@ -1561,6 +1568,117 @@ t_close_retires_a_focus() {
   gm open appt-v2 >/dev/null 2>&1 || fail "reopen failed"
   assert_eq "$(db "SELECT closed_at IS NULL FROM focus;")" 1 "gm open reopens it" &&
     assert_eq "$(roster_state appt-v2)" alive "and starts it"
+}
+
+# wait_for <sql> <expected> [seconds]: the register answers that within the time (the self-close finisher runs
+# detached, so its tests wait for it).
+wait_for() {
+  local i=0
+  while [ "$i" -lt "${3:-15}" ]; do
+    [ "$(db "$1")" != "$2" ] || return 0
+    sleep 1
+    i=$((i + 1))
+  done
+  [ "$(db "$1")" = "$2" ]
+}
+
+# as_pl <command...>: run as appt-v2's Party Leader, in its recorded herdr pane.
+as_pl() { HERDR_ENV=1 HERDR_PANE_ID="$(pl_pane appt-v2)" HERDR_SESSION=gm-test GM_FOCUS=appt-v2 "$@"; }
+
+typed_exit() { cat "$HERDR_STUB/typed" 2>/dev/null | grep -c "	/exit$" || true; }
+
+t_party_leader_closes_itself() {
+  setup selfclose
+  export GM_CLOSE_POLL=1 GM_CLOSE_WAIT=20
+  local out pane
+  gm open appt-v2 >/dev/null 2>&1
+  pane=$(pl_pane appt-v2)
+  GM_FOCUS=appt-v2 gm post "fix the owner field" >/dev/null
+  out=$(as_pl gm close appt-v2 2>&1) && fail "closed with a posting unfinished"
+  assert_contains "$out" "appt-v2 still has postings that are not finished: #1 fix-owner-field received" "names what is open" &&
+    assert_eq "$(db "SELECT closed_at IS NULL AND close_requested_at IS NULL FROM focus;")" 1 "nothing recorded" || return 1
+  GM_FOCUS=appt-v2 gm notice 1 'done' "fixed" >/dev/null
+  # Its turn is still running: the request is recorded, and nothing is typed until the turn ends.
+  printf 'working' >"$HERDR_STUB/agent-status"
+  local t0=$SECONDS
+  out=$(GM_FOCUS=appt-v2 CLAUDECODE=1 gm close appt-v2 2>&1) && fail "another claude in the camp asked to close it"
+  assert_contains "$out" "end it there first (/exit)" "only the Party Leader in its pane may ask" || return 1
+  out=$(as_pl env CLAUDECODE=1 bash "$GM" close appt-v2 2>&1) || fail "the request failed: $out"
+  [ $((SECONDS - t0)) -lt 5 ] || fail "the request waited for the finisher"
+  assert_contains "$out" "appt-v2 closes when this turn ends" "says what happens next" &&
+    assert_eq "$(db "SELECT closed_at IS NULL AND close_requested_at IS NOT NULL FROM focus;")" 1 "the request is recorded" || return 1
+  sleep 3
+  assert_eq "$(typed_exit)" 0 "nothing typed while the turn runs" || return 1
+  printf 'idle' >"$HERDR_STUB/agent-status"
+  wait_for "SELECT closed_at IS NOT NULL FROM focus;" 1 || fail "the focus was not closed"
+  assert_eq "$(typed_exit)" 1 "/exit typed once" &&
+    assert_eq "$(grep -c "pane close $pane --session gm-test" "$HERDR_STUB/calls")" 1 "its husk pane closed" &&
+    assert_eq "$(db "SELECT count(*) FROM endpoint WHERE key='party-leader:appt-v2';")" 0 "endpoint forgotten" &&
+    assert_eq "$(db "SELECT group_concat(actor||' '||kind, ', ') FROM (SELECT * FROM event WHERE kind IN ('focus.close-requested','party-leader.exit','focus.closed') ORDER BY id);")" \
+      "party-leader focus.close-requested, gm party-leader.exit, gm focus.closed" "the ledger says who did what" &&
+    assert_eq "$(db "SELECT close_requested_at IS NULL FROM focus;")" 1 "the request is spent" || return 1
+  [ -d "$CAMP" ] || fail "the camp was removed"
+  : >"$HERDR_STUB/runs"
+  gm up >/dev/null 2>&1
+  assert_eq "$(pl_runs)" 0 "a closed focus is not started again"
+  # From anywhere else, a live Party Leader is still never ended by gm.
+  gm open appt-v2 >/dev/null 2>&1
+  out=$(GM_FOCUS=other gm close appt-v2 2>&1) && fail "another session closed a live Party Leader"
+  assert_contains "$out" "end it there first (/exit)" "and is told to end it first"
+}
+
+t_patron_message_cancels_a_self_close() {
+  setup selfcancel
+  export GM_CLOSE_POLL=1 GM_CLOSE_WAIT=20
+  local out
+  gm open appt-v2 >/dev/null 2>&1
+  printf 'working' >"$HERDR_STUB/agent-status"
+  as_pl gm close appt-v2 >/dev/null 2>&1 || fail "the request failed"
+  out=$(payload s1 "one more thing before you go" | GM_FOCUS=appt-v2 gm hook prompt)
+  assert_contains "$out" "This message cancels the close that the Party Leader of appt-v2 asked for" "the patron is told" &&
+    assert_eq "$(db "SELECT close_requested_at IS NULL FROM focus;")" 1 "the request is dropped" || return 1
+  printf 'idle' >"$HERDR_STUB/agent-status"
+  sleep 3
+  assert_eq "$(typed_exit)" 0 "nothing typed after a cancel" &&
+    assert_eq "$(db "SELECT closed_at IS NULL FROM focus;")" 1 "still open" || return 1
+  # gm open on a focus asked to close keeps it open too.
+  GM_FOCUS=appt-v2 gm notice 1 closed "answered" >/dev/null
+  printf 'working' >"$HERDR_STUB/agent-status"
+  as_pl gm close appt-v2 >/dev/null 2>&1 || fail "the second request failed"
+  gm open appt-v2 >/dev/null 2>&1
+  assert_eq "$(db "SELECT close_requested_at IS NULL FROM focus;")" 1 "gm open keeps it open" &&
+    assert_eq "$(db "SELECT count(*) FROM event WHERE kind='focus.close-cancelled';")" 2 "one ledger row each"
+}
+
+t_muster_finishes_a_self_close() {
+  setup selfmuster
+  local out pane
+  gm open appt-v2 >/dev/null 2>&1
+  pane=$(pl_pane appt-v2)
+  # The finisher gives up at once, as if it had died: the muster starts another, which ends it.
+  GM_CLOSE_WAIT=0 as_pl gm close appt-v2 >/dev/null 2>&1 || fail "the request failed"
+  wait_for "SELECT count(*) FROM event WHERE kind='focus.close-requested';" 1 || return 1
+  sleep 2
+  assert_eq "$(typed_exit)" 0 "the first finisher typed nothing" || return 1
+  : >"$HERDR_STUB/runs"
+  out=$(GM_CLOSE_WAIT=20 GM_CLOSE_POLL=1 gm up 2>&1)
+  assert_contains "$out" "appt-v2: asked to close; gm ends it once its turn is over" "the muster starts a finisher" || return 1
+  out=$(GM_CLOSE_WAIT=20 GM_CLOSE_POLL=1 gm up 2>&1)
+  wait_for "SELECT closed_at IS NOT NULL FROM focus;" 1 || fail "the focus was not closed"
+  assert_eq "$(typed_exit)" 1 "one finisher, one /exit" &&
+    assert_eq "$(pl_runs)" 0 "never started again" || return 1
+  grep -q "pane close $pane --session gm-test" "$HERDR_STUB/calls" || fail "its husk pane was not closed"
+  # Ended some other way while no finisher runs: the muster closes the focus itself.
+  gm open appt-v2 >/dev/null 2>&1
+  pane=$(pl_pane appt-v2)
+  GM_CLOSE_WAIT=0 as_pl gm close appt-v2 >/dev/null 2>&1 || fail "the second request failed"
+  sleep 2
+  stub_proc "$pane" shell
+  : >"$HERDR_STUB/runs"
+  out=$(gm up 2>&1)
+  assert_contains "$out" "appt-v2: closed, as its Party Leader asked" "the muster closes it" &&
+    assert_eq "$(db "SELECT closed_at IS NOT NULL FROM focus;")" 1 "closed" &&
+    assert_eq "$(pl_runs)" 0 "and does not start it again"
 }
 
 t_start_runs_only_in_the_recorded_pane() {

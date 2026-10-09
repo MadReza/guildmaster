@@ -9,6 +9,9 @@
 #   runs         pane<TAB>the line typed into it by pane run
 #   run-proc     what a pane runs after pane run (default claude)
 #   run-proc-collector  what the collector's pane runs after pane run (default otelcol-contrib)
+#   typed        pane<TAB>the text sent to it by pane send-text, or <key> for pane send-keys
+#   agent-status what agent get says a claude pane is doing (default idle)
+#   exit-ignored present while a claude pane ignores /exit; otherwise /exit and Enter leave it holding a shell
 #   focused      each workspace or tab focused, one a line
 #   attached     present once a client attached (herdr with no command)
 # Every call must carry --session $HERDR_STUB_SESSION; any other session is refused and recorded in violations.
@@ -122,6 +125,20 @@ case "${1:-} ${2:-}" in
     proc=$(cat "$D/run-proc" 2>/dev/null || echo claude)
     case $4 in *" start 'collector' "*) proc=$(cat "$D/run-proc-collector" 2>/dev/null || echo otelcol-contrib) ;; esac
     awk -F '\t' -v OFS='\t' -v k="$3" -v v="$proc" '$1 == k { $4 = v } { print }' "$D/panes" >"$D/panes.new" && mv "$D/panes.new" "$D/panes" ;;
+  "pane send-text")
+    up
+    [ -n "$(field panes "$3" 1)" ] || err pane_not_found "pane $3 not found"
+    printf '%s\t%s\n' "$3" "$4" >>"$D/typed"
+    printf '{"result":{"type":"ok"}}\n' ;;
+  "pane send-keys")
+    up
+    [ -n "$(field panes "$3" 1)" ] || err pane_not_found "pane $3 not found"
+    last=$(awk -F '\t' -v k="$3" '$1 == k { t = $2 } END { print t }' "$D/typed" 2>/dev/null)
+    printf '%s\t<%s>\n' "$3" "$4" >>"$D/typed"
+    if [ "$4" = enter ] && [ "$last" = /exit ] && [ "$(field panes "$3" 4)" = claude ] && [ ! -e "$D/exit-ignored" ]; then
+      awk -F '\t' -v OFS='\t' -v k="$3" '$1 == k { $4 = "shell" } { print }' "$D/panes" >"$D/panes.new" && mv "$D/panes.new" "$D/panes"
+    fi
+    printf '{"result":{"type":"ok"}}\n' ;;
   "pane close")
     up
     awk -F '\t' -v k="$3" '$1 != k' "$D/panes" >"$D/panes.new" && mv "$D/panes.new" "$D/panes"
@@ -129,7 +146,7 @@ case "${1:-} ${2:-}" in
   "agent get")
     up
     [ "$(field panes "$3" 4)" = claude ] || err agent_not_found "agent target $3 not found"
-    printf '{"result":{"agent":{"agent":"claude","agent_status":"idle"}}}\n' ;;
+    printf '{"result":{"agent":{"agent":"claude","agent_status":"%s"}}}\n' "$(cat "$D/agent-status" 2>/dev/null || echo idle)" ;;
   *)
     err stub_unknown "the stub does not know: $*" ;;
 esac

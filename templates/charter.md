@@ -44,7 +44,13 @@ Show the patron that line exactly as printed, on its own line. The id in it is w
 - The feature branch is the one recorded for this focus. Never create another branch for work on this ticket, including fixes found after the merge request is open.
 - Push only as the playbook's push rules allow. Opening the merge request needs the patron's word: ask with `needs-you` and wait.
 
+## Closing the focus
+
+- When the patron asks you to close the focus and every posting is done, failed or closed, record the posting that asked (`gm notice <n> closed "closing the focus"`), then run `gm close <focus>` as your last step.
+- gm ends this session after your turn by typing `/exit` here, then closes the focus. Do not ask the patron to exit for you.
+- `gm close` names any posting that is still open; finish or record each one first.
+
 ## Commands
 
-`gm where`, `gm list`, `gm show <n>`, `gm resolve <ref>`, `gm post`, `gm notice`, `gm park`, `gm phase`.
+`gm where`, `gm list`, `gm show <n>`, `gm resolve <ref>`, `gm post`, `gm notice`, `gm park`, `gm phase`, `gm close`.
 If `gm` is not on the PATH, the summary names the exact command to run instead.
