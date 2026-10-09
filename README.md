@@ -160,7 +160,7 @@ A Guildhall from before this file had `setup.conf`; the first `gm` command moves
 
 ### The chat: heraldic banners
 
-By default (`chat: banners`), the Guildmaster and every Party Leader that gm starts load the mod in `mods/guild-chat/` (a Claude Code plugin of function hooks, passed with `--plugin-dir`), which sets each message of the chat under a coloured rule naming who speaks:
+By default (`chat: banners`), the Guildmaster and every Party Leader that gm starts load the mod in `mods/guild-chat/` (a Claude Code plugin of function hooks), which sets each message of the chat under a coloured rule naming who speaks:
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚜ PATRON ━━
