@@ -1,0 +1,15 @@
+#!/bin/sh
+# Stands in for claude's plugin commands in tests/run.sh: appends each call to $GM_FAKE_CLAUDE_CALLS, and does to the
+# folder's .claude/settings.local.json what Claude Code's local scope does: marketplace add declares the marketplace,
+# install enables the plugin, disable turns it off. claude --version answers as claude does.
+[ "${1:-}" = --version ] && { echo '2.1.295 (Claude Code)'; exit 0; }
+printf '%s\n' "$*" >>"$GM_FAKE_CLAUDE_CALLS"
+f=.claude/settings.local.json
+mkdir -p .claude
+[ -f "$f" ] || printf '{}' >"$f"
+set_json() { sqlite3 -batch :memory: "SELECT json_set(CAST(readfile('$f') AS TEXT), '$1', $2);" >"$f.new" && mv "$f.new" "$f"; }
+case "$1 $2 $3" in
+  'plugin marketplace add') set_json '$.extraKnownMarketplaces.guildmaster.source' "json_object('source','directory','path','$4')" ;;
+  'plugin install '*) set_json "\$.enabledPlugins.\"$3\"" "json('true')" ;;
+  'plugin disable '*) set_json "\$.enabledPlugins.\"$3\"" "json('false')" ;;
+esac

@@ -1,0 +1,11 @@
+{
+  "name": "guildmaster",
+  "owner": { "name": "Guildmaster" },
+  "plugins": [
+    {
+      "name": "guild-chat",
+      "source": "./mods/guild-chat",
+      "description": "Guildmaster's chat under heraldic banners, for a claude the patron starts in the clone without gm."
+    }
+  ]
+}
