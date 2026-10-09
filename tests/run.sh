@@ -2333,7 +2333,7 @@ t_config_file_is_documented_and_read() {
   out=$(gm config set collector-port 4999) || fail "set failed: $out"
   assert_contains "$out" "collector-port is 4999" "it says what it set"
   [ -f "$GM_HALL/guild.conf" ] || fail "no guild.conf" || return 1
-  for k in collector collector-port telemetry autostart autostart-every muster-before-commands attach herdr-session \
+  for k in collector collector-port telemetry chat autostart autostart-every muster-before-commands attach herdr-session \
     herdr-workspace launch-grace start-tries repo-roots; do
     grep -q "^# $k: " "$GM_HALL/guild.conf" || fail "guild.conf does not document $k"
   done
@@ -2395,6 +2395,46 @@ t_config_environment_overrides_the_file() {
   GM_TELEMETRY=on GM_CLAUDE=$FAKE gm up >/dev/null 2>&1
   assert_contains "$(grep "start 'guildmaster'" "$HERDR_STUB/runs" | tail -n 1)" "GM_HERDR_SESSION='gm-test'" "the environment's session is" &&
     assert_contains "$(grep "start 'appt-v2'" "$HERDR_STUB/runs" | tail -n 1)" "GM_TELEMETRY='on'" "and its telemetry"
+}
+
+t_config_chat_starts_sessions_with_the_guild_chat_mod() {
+  setup conf-chat
+  initialized
+  local out line f=$WORK/conf-chat/env.txt
+  assert_contains "$(gm config)" "  chat                    off       default" "off unless the patron turns it on"
+  out=$(gm config set chat maybe 2>&1) && fail "chat took maybe"
+  assert_contains "$out" "chat cannot be 'maybe' (off | banners)" "refused, with what it takes"
+  out=$(gm config set chat on)
+  assert_eq "$(conf chat)" banners "on is the one style there is: banners" &&
+    assert_contains "$out" "chat is banners: the Guildmaster and Party Leaders started from now on draw their chat under heraldic banners" "says what it does"
+  # Off, nothing changes; on, the Guildmaster and each Party Leader load the mod from the clone, a Party Leader told
+  # its focus.
+  GM_CLAUDE=$FAKE gm open appt-v2 >/dev/null 2>&1 || fail "open failed"
+  line=$(grep "start 'appt-v2'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)
+  env GM_CHAT_FOCUS=stray GM_FAKE_CLAUDE_ENV="$f" sh -c "$line" </dev/null >"$WORK/conf-chat/start.out" 2>&1 || cat "$WORK/conf-chat/start.out" >&2
+  assert_eq "$(cat "$f.args")" "--name
+appt-v2
+--plugin-dir
+$ROOT/mods/guild-chat" "claude --name <focus> --plugin-dir <the mod>" &&
+    assert_contains "$(cat "$f")" "GM_CHAT=banners" "the mod is told the style" &&
+    assert_contains "$(cat "$f")" "GM_CHAT_FOCUS=appt-v2" "and the focus, not a stray one"
+  line=$(grep "start 'guildmaster'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)
+  env GM_CHAT_FOCUS=stray GM_FAKE_CLAUDE_ENV="$f.desk" sh -c "$line" </dev/null >/dev/null 2>&1
+  assert_eq "$(cat "$f.desk.args")" "--name
+guildmaster
+--plugin-dir
+$ROOT/mods/guild-chat" "the Guildmaster loads it too" &&
+    assert_not_contains "$(cat "$f.desk")" "GM_CHAT_FOCUS=" "as the front desk, with no focus"
+  env GM_CHAT=no GM_FAKE_CLAUDE_ENV="$f.no" sh -c "$(grep "start 'appt-v2'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)" </dev/null >/dev/null 2>&1
+  assert_eq "$(cat "$f.no.args")" "--name
+appt-v2" "GM_CHAT=no in the environment is off too"
+  gm config set chat off >/dev/null
+  env GM_FAKE_CLAUDE_ENV="$f.off" sh -c "$(grep "start 'appt-v2'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)" </dev/null >/dev/null 2>&1
+  assert_eq "$(cat "$f.off.args")" "--name
+appt-v2" "chat: off starts claude as before" &&
+    assert_not_contains "$(cat "$f.off")" "GM_CHAT" "with nothing of the mod"
+  [ -f "$ROOT/mods/guild-chat/.claude-plugin/plugin.json" ] && [ -f "$ROOT/mods/guild-chat/hooks/register.tsx" ] ||
+    fail "the mod gm loads is not in the clone"
 }
 
 t_config_moves_setup_conf_into_guild_conf() {

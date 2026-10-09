@@ -38,6 +38,7 @@ GM_OTELCOL_PINNED=0.162.0
 GM_CONF_TABLE="collector	GM_COLLECTOR	off	collector	Keep the local OpenTelemetry Collector (tracing) running, in herdr tab collector. gm init's answer sets it; later: not decided yet.
 collector-port	GM_OTEL_PORT	4318	port	The port on 127.0.0.1 the collector listens on, and Party Leaders send their telemetry to.
 telemetry	GM_TELEMETRY	on	onoff	Party Leaders that gm starts send Claude Code's telemetry to the collector.
+chat	GM_CHAT	off	chat	How the chat of the Guildmaster and the Party Leaders gm starts looks: off is Claude Code's own, banners sets each message under a heraldic banner (mods/guild-chat). A running session keeps what it started with.
 autostart	-	on	onoff	A launchd agent (macOS) runs the muster at login and every autostart-every minutes.
 autostart-every	-	5	minutes	Minutes between the launchd agent's musters.
 muster-before-commands	GM_HERDR_AUTO	on	onoff	A gm command typed at a terminal first brings back, quietly, whatever is dead or missing.
@@ -78,6 +79,12 @@ gm_conf_norm() {
         installed) [ "$1" = collector ] || return 1; v=on ;;
         skipped) [ "$1" = collector ] || return 1; v=off ;;
         later) [ "$1" = collector ] || return 1 ;;
+        *) return 1 ;;
+      esac ;;
+    chat)
+      case $v in
+        banners | on | yes | true) v=banners ;;
+        off | no | false) v=off ;;
         *) return 1 ;;
       esac ;;
     port) [[ $v =~ ^[0-9]{1,5}$ ]] && [ "$v" -ge 1 ] && [ "$v" -le 65535 ] || return 1 ;;
@@ -624,6 +631,7 @@ They are for advanced use, and for the Guildmaster.
 Environment (each one with a setting in guild.conf overrides it; gm config shows which): GM_HALL (default
   ~/.guildmaster), GM_FOCUS (focus context override), GM_COLLECTOR=on|off (keep the collector running),
   GM_OTEL_PORT (collector port, default 4318), GM_TELEMETRY=off (gm open starts sessions without telemetry),
+  GM_CHAT=off|banners (how the chat of the sessions gm starts looks),
   GM_OTELCOL (the collector binary, default otelcol-contrib on PATH or where gm init put it),
   GM_BIN_DIR (where gm init installs it, default ~/.local/bin), GM_INTERACTIVE=1|0 (force or forbid questions
   and the muster before commands), GM_CLAUDE and GM_HERDR (the claude and herdr commands, default found on PATH),
@@ -830,7 +838,7 @@ SQL
 gm_front_desk_dir() { printf '%s' "$GM_HALL/front-desk"; }
 
 # What the Guildmaster's session carries, so the gm it runs reaches the same Guildhall, herdr session and launchd.
-GM_DESK_VARS="GM_HALL GM_CLAUDE GM_TELEMETRY GM_OTEL_ENDPOINT GM_OTEL_PORT GM_HERDR GM_HERDR_SESSION GM_HERDR_WORKSPACE GM_LAUNCH_AGENTS GM_LAUNCHCTL"
+GM_DESK_VARS="GM_HALL GM_CLAUDE GM_TELEMETRY GM_CHAT GM_OTEL_ENDPOINT GM_OTEL_PORT GM_HERDR GM_HERDR_SESSION GM_HERDR_WORKSPACE GM_LAUNCH_AGENTS GM_LAUNCHCTL"
 
 # The front desk's charter, CLAUDE.md in the Guildhall's front-desk folder: copied once, the patron's from then on.
 gm_front_desk_files() {
@@ -2348,6 +2356,7 @@ gm_conf_header() {
     case $kind in
       onoff) vals='on | off' ;;
       collector) vals='on | off | later' ;;
+      chat) vals='off | banners' ;;
       text) vals='<folder> <folder> ...' ;;
       count) vals='<number>' ;;
       *) vals="<$kind>" ;;
@@ -2914,6 +2923,8 @@ gm_conf_apply() {
       return ;;
     telemetry) printf 'telemetry is %s: Party Leaders started from now on %s; running ones keep what they started with.\n' "$shown" \
       "$([ "${GM_TELEMETRY:-on}" = off ] && printf 'send no telemetry' || printf 'send telemetry to the collector')" ;;
+    chat) printf 'chat is %s: the Guildmaster and Party Leaders started from now on %s; running ones keep what they started with.\n' "$shown" \
+      "$([ "${GM_CHAT:-off}" = off ] && printf "draw Claude Code's own chat" || printf 'draw their chat under heraldic banners')" ;;
     repo-roots) printf 'repo-roots is %s: gm repos looks for clones %s.\n' "$shown" "$([ -n "$val" ] && printf 'there' || printf 'in the usual source folders')" ;;
     *) printf '%s is %s; it takes effect at the next muster.\n' "$key" "$shown" ;;
   esac
@@ -4331,7 +4342,7 @@ gm_endpoint_state() {
 # the camp, or in the clone.
 gm_endpoint_launch() {
   local key=$1 state=$2 cause=$3 name s ws tab pane out dir line v val fid vars role focus=''
-  vars="GM_HALL GM_CLAUDE GM_TELEMETRY GM_OTEL_ENDPOINT GM_OTEL_PORT"
+  vars="GM_HALL GM_CLAUDE GM_TELEMETRY GM_CHAT GM_OTEL_ENDPOINT GM_OTEL_PORT"
   case $key in
     front-desk)
       name=$GM_FRONT_DESK
@@ -4854,9 +4865,24 @@ gm_cmd_start() {
     printf 'gm: no collector answers at %s, so this session'\''s telemetry will be lost; start one with gm collector\n' "$(gm_otel_endpoint)" >&2
   fi
   camp=$(gm_focus_field "$focus" camp)
+  gm_chat_args "$focus"
   cd "$camp"
   exec env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_SESSION_ID -u TRACEPARENT -u GM_FOCUS \
-    ${envargs[@]+"${envargs[@]}"} "$claude" --name "$focus"
+    -u GM_CHAT_FOCUS ${envargs[@]+"${envargs[@]}"} ${GM_CHAT_ENV[@]+"${GM_CHAT_ENV[@]}"} "$claude" --name "$focus" \
+    ${GM_CHAT_ARGS[@]+"${GM_CHAT_ARGS[@]}"}
+}
+
+# The chat setting, for a session gm starts: with chat: banners, claude loads the guild-chat mod from the clone
+# (--plugin-dir), told by GM_CHAT_FOCUS which Party Leader it draws for (none at the front desk).
+GM_CHAT_ARGS=()
+GM_CHAT_ENV=()
+gm_chat_args() {
+  GM_CHAT_ARGS=()
+  GM_CHAT_ENV=()
+  gm_conf_norm chat "${GM_CHAT:-off}" && [ "$GM_CONF_VAL" != off ] || return 0
+  GM_CHAT_ARGS=(--plugin-dir "$GM_ROOT/mods/guild-chat")
+  GM_CHAT_ENV=("GM_CHAT=$GM_CONF_VAL")
+  [ -z "${1:-}" ] || GM_CHAT_ENV+=("GM_CHAT_FOCUS=$1")
 }
 
 # What the front desk's pane runs: the Guildmaster, claude in the clone, whose committed SessionStart hook does the
@@ -4866,9 +4892,11 @@ gm_front_desk_start() {
   [ -n "$pane" ] && [ "$pane" = "$(gm_sql "SELECT pane_id FROM endpoint WHERE key='front-desk';")" ] ||
     gm_die "start: gm start $GM_FRONT_DESK runs only in the front desk's own herdr pane; gm opens it there"
   gm_front_desk_files
+  gm_chat_args
   cd "$GM_ROOT"
   exec env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_SESSION_ID -u TRACEPARENT -u GM_FOCUS \
-    "$claude" --name "$GM_FRONT_DESK"
+    -u GM_CHAT_FOCUS ${GM_CHAT_ENV[@]+"${GM_CHAT_ENV[@]}"} "$claude" --name "$GM_FRONT_DESK" \
+    ${GM_CHAT_ARGS[@]+"${GM_CHAT_ARGS[@]}"}
 }
 
 # ---- Autostart: a launchd user agent runs gm up --quiet at login and every few minutes (macOS) ----
@@ -4890,7 +4918,7 @@ gm_xml() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&g
 # find herdr or claude), at load, which is login, and every <seconds>; its output goes to the Guildhall.
 gm_autostart_plist() {
   local label=$1 every=$2 v val env=''
-  for v in GM_HALL PATH HOME GM_HERDR GM_HERDR_SESSION GM_HERDR_WORKSPACE GM_CLAUDE GM_TELEMETRY GM_OTEL_ENDPOINT GM_OTEL_PORT GM_COLLECTOR GM_OTELCOL; do
+  for v in GM_HALL PATH HOME GM_HERDR GM_HERDR_SESSION GM_HERDR_WORKSPACE GM_CLAUDE GM_TELEMETRY GM_CHAT GM_OTEL_ENDPOINT GM_OTEL_PORT GM_COLLECTOR GM_OTELCOL; do
     gm_conf_carried "$v" || continue
     eval "val=\${$v:-}"
     # ~/.local/bin, where gm is linked and herdr's and Claude Code's installers put them, is always on the agent's PATH.
