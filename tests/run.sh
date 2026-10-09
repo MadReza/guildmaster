@@ -1108,7 +1108,9 @@ t_open_starts_the_party_leader_in_herdr_with_the_telemetry_env() {
     assert_not_contains "$e" "CLAUDECODE=" "the server's Claude Code variables are not passed on" &&
     assert_not_contains "$e" "GM_FOCUS=elsewhere" "nor a stray focus" &&
     assert_eq "$(cat "$f.args")" "--name
-appt-v2" "claude --name <focus>" &&
+appt-v2
+--plugin-dir
+$ROOT/mods/guild-chat" "claude --name <focus>, with the chat's mod (chat: banners, the default)" &&
     assert_eq "$(cat "$f.pwd")" "$CAMP" "in the camp"
 }
 
@@ -1762,7 +1764,9 @@ t_gm_alone_opens_the_front_desk() {
   line=$(awk -F '\t' -v p="$pane" '$1 == p { print $2 }' "$HERDR_STUB/runs")
   env CLAUDECODE=1 GM_FOCUS=elsewhere GM_FAKE_CLAUDE_ENV="$f" sh -c "$line" </dev/null >/dev/null 2>&1
   assert_eq "$(cat "$f.args")" "--name
-guildmaster" "claude --name guildmaster" &&
+guildmaster
+--plugin-dir
+$ROOT/mods/guild-chat" "claude --name guildmaster, with the chat's mod" &&
     assert_eq "$(cat "$f.pwd")" "$ROOT" "in the clone" &&
     assert_contains "$(cat "$f")" "GM_HERDR_SESSION=gm-test" "in the herdr session it was opened in" &&
     assert_contains "$(cat "$f")" "GM_HALL=$GM_HALL" "and the Guildhall" &&
@@ -2439,14 +2443,10 @@ t_config_chat_starts_sessions_with_the_guild_chat_mod() {
   setup conf-chat
   initialized
   local out line f=$WORK/conf-chat/env.txt
-  assert_contains "$(gm config)" "  chat                    off       default" "off unless the patron turns it on"
+  assert_contains "$(gm config)" "  chat                    banners   default" "on for everyone unless the patron turns it off"
   out=$(gm config set chat maybe 2>&1) && fail "chat took maybe"
   assert_contains "$out" "chat cannot be 'maybe' (off | banners)" "refused, with what it takes"
-  out=$(gm config set chat on)
-  assert_eq "$(conf chat)" banners "on is the one style there is: banners" &&
-    assert_contains "$out" "chat is banners: the Guildmaster and Party Leaders started from now on draw their chat under heraldic banners" "says what it does"
-  # Off, nothing changes; on, the Guildmaster and each Party Leader load the mod from the clone, a Party Leader told
-  # its focus.
+  # By default the Guildmaster and each Party Leader load the mod from the clone, a Party Leader told its focus.
   GM_CLAUDE=$FAKE gm open appt-v2 >/dev/null 2>&1 || fail "open failed"
   line=$(grep "start 'appt-v2'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)
   env GM_CHAT_FOCUS=stray GM_FAKE_CLAUDE_ENV="$f" sh -c "$line" </dev/null >"$WORK/conf-chat/start.out" 2>&1 || cat "$WORK/conf-chat/start.out" >&2
@@ -2466,11 +2466,15 @@ $ROOT/mods/guild-chat" "the Guildmaster loads it too" &&
   env GM_CHAT=no GM_FAKE_CLAUDE_ENV="$f.no" sh -c "$(grep "start 'appt-v2'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)" </dev/null >/dev/null 2>&1
   assert_eq "$(cat "$f.no.args")" "--name
 appt-v2" "GM_CHAT=no in the environment is off too"
-  gm config set chat off >/dev/null
+  out=$(gm config set chat off)
+  assert_contains "$out" "chat is off: the Guildmaster and Party Leaders started from now on draw Claude Code's own chat" "says what it does"
   env GM_FAKE_CLAUDE_ENV="$f.off" sh -c "$(grep "start 'appt-v2'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)" </dev/null >/dev/null 2>&1
   assert_eq "$(cat "$f.off.args")" "--name
-appt-v2" "chat: off starts claude as before" &&
+appt-v2" "chat: off starts claude without it" &&
     assert_not_contains "$(cat "$f.off")" "GM_CHAT" "with nothing of the mod"
+  out=$(gm config set chat on)
+  assert_eq "$(conf chat)" banners "on is the one style there is: banners" &&
+    assert_contains "$out" "chat is banners: the Guildmaster and Party Leaders started from now on draw their chat under heraldic banners" "and back"
   [ -f "$ROOT/mods/guild-chat/.claude-plugin/plugin.json" ] && [ -f "$ROOT/mods/guild-chat/hooks/register.tsx" ] ||
     fail "the mod gm loads is not in the clone"
 }

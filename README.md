@@ -142,7 +142,7 @@ Settings, from /Users/you/.guildmaster/guild.conf (gm config set <key> <value> c
 | `collector` | `on`, `off`, `later` (not decided) | off | `GM_COLLECTOR` |
 | `collector-port` | a port on 127.0.0.1 | 4318 | `GM_OTEL_PORT` |
 | `telemetry` | `on`, `off` | on | `GM_TELEMETRY` |
-| `chat` | `off`, `banners` (see The chat, below) | off | `GM_CHAT` |
+| `chat` | `banners`, `off` (see The chat, below) | banners | `GM_CHAT` |
 | `autostart` | `on`, `off` | on | |
 | `autostart-every` | minutes | 5 | |
 | `muster-before-commands` | `on`, `off` | on | `GM_HERDR_AUTO` |
@@ -160,7 +160,7 @@ A Guildhall from before this file had `setup.conf`; the first `gm` command moves
 
 ### The chat: heraldic banners
 
-With `chat: banners` (`gm config set chat banners`, or ask the Guildmaster), the Guildmaster and every Party Leader that gm starts load the mod in `mods/guild-chat/` (a Claude Code plugin of function hooks, passed with `--plugin-dir`), which sets each message of the chat under a coloured rule naming who speaks:
+By default (`chat: banners`), the Guildmaster and every Party Leader that gm starts load the mod in `mods/guild-chat/` (a Claude Code plugin of function hooks, passed with `--plugin-dir`), which sets each message of the chat under a coloured rule naming who speaks:
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚜ PATRON ━━
@@ -174,7 +174,7 @@ With `chat: banners` (`gm config set chat banners`, or ask the Guildmaster), the
 
 The patron's banner is gold and hangs on the right; the Guildmaster's is crimson; a Party Leader's is royal blue and names its focus (`⚔ PARTY LEADER · guild-chat`); tool calls (deeds) are steel grey and adventurers (Claude Code's subagents) green, each under a light rule.
 Only the drawing changes: what the model reads, and the stored conversation, stay as they were.
-A session keeps the chat it started with, so `chat: off` takes effect at its next start.
+For Claude Code's own chat, `gm config set chat off` (or ask the Guildmaster); a session keeps the chat it started with, so the change takes effect at its next start.
 The mod's own tests run with `claude plugin test mods/guild-chat`.
 
 ### The front desk from any terminal: `gm`
