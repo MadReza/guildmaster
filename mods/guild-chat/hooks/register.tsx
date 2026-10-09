@@ -4,7 +4,8 @@ import type { EngineInterface, Register, RenderChildren, RenderInput } from 'cla
 // hangs on the right, everyone else's on the left; the heavy rule is for the patron and the one who answers them, the
 // light one for what is done on their behalf. gm starts a session with this mod while guild.conf says chat: banners,
 // and names in GM_CHAT_FOCUS the Party Leader's focus (none at the front desk). A claude started by hand in a checkout
-// of Guildmaster loads it too, from .claude/skills/guild-chat, and asks guild.conf itself.
+// of Guildmaster loads it too, from .claude/skills/guild-chat, and asks guild.conf itself; in a camp, the GM_FOCUS its
+// settings set names the Party Leader.
 
 const GOLD = '#d4a017'
 const CRIMSON = '#c0392b'
@@ -91,7 +92,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     if (!e.props.isFirstOfReply) return next(e)
-    const focus = await $.env.get('GM_CHAT_FOCUS')
+    const focus = (await $.env.get('GM_CHAT_FOCUS')) || (await $.env.get('GM_FOCUS'))
     return draw($, e, next, focus
       ? { sigil: '⚔', name: `PARTY LEADER · ${focus}`, color: ROYAL, heavy: true }
       : { sigil: '⚔', name: 'GUILDMASTER', color: CRIMSON, heavy: true })

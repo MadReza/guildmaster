@@ -96,6 +96,13 @@ describe('a claude started by hand', () => {
     expect(read).toEqual(['/home/p/.guildmaster/guild.conf'])
   })
 
+  test('in a camp answers as the Party Leader its settings name', async ($, on) => {
+    byHand(on, 'chat: banners\n', { HOME: '/home/p', GM_FOCUS: 'appt-v2' })
+    const ui = await $.ui.mount({ plugin: 'guild-chat', surface: 'terminal', viewport, ...reply })
+    expect(await ui.find({ type: 'Text', text: / ⚔ PARTY LEADER · appt-v2 $/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /GUILDMASTER/ })).toBeUndefined()
+  })
+
   test('keeps Claude Code\'s own chat when guild.conf says chat: off', async ($, on) => {
     byHand(on, '# chat: off | banners\nchat: off\n')
     const ui = await $.ui.mount({ plugin: 'guild-chat', surface: 'terminal', viewport, ...reply })
