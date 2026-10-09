@@ -14,6 +14,7 @@ This repository is at its beginning. The vocabulary comes first, because every l
 - `vision/` holds Guildmaster's own design material: the patron's notes, the requirements drawn from them, a Firstmate-informed consultation, the [step 1 design](vision/step-1-design.md), the [herdr design](vision/herdr-design.md) (Party Leaders kept running and brought back), the [zero-touch start](vision/zero-touch-start.md) (the patron starts `claude` in the clone, and talks to the Guildmaster in herdr), and the [tracing design](vision/tracing-design.md) with its [research](vision/tracing-research.md).
 - [vision/roadmap.md](vision/roadmap.md) is the tracked build plan: each step's goal, scope, done-when criteria, status and links.
 - `.claude/settings.json` makes `claude`, started at the clone's root, start the guild and the Guildmaster in herdr: its start-up hook and tool guard act only in the patron's plain clone (or a folder marked `.gm-front-desk`) and do nothing in a linked worktree, where agents that change Guildmaster work. `CLAUDE.md` is their guidance, not the Guildmaster's charter.
+- `mods/guild-chat/` is the Claude Code mod that draws the chat under heraldic banners while `guild.conf` says `chat: banners`.
 - `bin/gm` is the `gm` command; `templates/` holds the Guildmaster's charter (`guildmaster.md`), the Party Leader's charter, the ticket playbook and the repository rules it copies into the Guildhall, and the local OpenTelemetry Collector's configuration (`otelcol.yaml`); `tests/` holds its test suite (with the redaction cases, a schema-1 register to migrate, and recorded Claude Code telemetry under `tests/fixtures/telemetry/`, and stand-ins for herdr and launchctl so no test touches the real ones, nor your `~/.local/bin`) and an end-to-end demonstration.
 
 ## Getting started
@@ -141,6 +142,7 @@ Settings, from /Users/you/.guildmaster/guild.conf (gm config set <key> <value> c
 | `collector` | `on`, `off`, `later` (not decided) | off | `GM_COLLECTOR` |
 | `collector-port` | a port on 127.0.0.1 | 4318 | `GM_OTEL_PORT` |
 | `telemetry` | `on`, `off` | on | `GM_TELEMETRY` |
+| `chat` | `off`, `banners` (see The chat, below) | off | `GM_CHAT` |
 | `autostart` | `on`, `off` | on | |
 | `autostart-every` | minutes | 5 | |
 | `muster-before-commands` | `on`, `off` | on | `GM_HERDR_AUTO` |
@@ -155,6 +157,25 @@ An environment variable overrides its setting for the command it is set on, and 
 The rest takes effect at the next muster, or the next session gm starts.
 The file also keeps what gm recorded: the first run (`initialized`), and where `gm init` put the collector.
 A Guildhall from before this file had `setup.conf`; the first `gm` command moves its lines into `guild.conf` (the collector's `installed` and `skipped` become `on` and `off`) and keeps the old file as `setup.conf.old`.
+
+### The chat: heraldic banners
+
+With `chat: banners` (`gm config set chat banners`, or ask the Guildmaster), the Guildmaster and every Party Leader that gm starts load the mod in `mods/guild-chat/` (a Claude Code plugin of function hooks, passed with `--plugin-dir`), which sets each message of the chat under a coloured rule naming who speaks:
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚜ PATRON ━━
+  Read the three modules and tell me what they do.
+── ⚒ DEEDS ───────────────────────────────────────────────────
+  Read 3 files
+── ⛨ ADVENTURER · scout-auth ─────────────────────────────────
+━━ ⚔ GUILDMASTER ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  The three modules are small, and the server only serves /health.
+```
+
+The patron's banner is gold and hangs on the right; the Guildmaster's is crimson; a Party Leader's is royal blue and names its focus (`⚔ PARTY LEADER · guild-chat`); tool calls (deeds) are steel grey and adventurers (Claude Code's subagents) green, each under a light rule.
+Only the drawing changes: what the model reads, and the stored conversation, stay as they were.
+A session keeps the chat it started with, so `chat: off` takes effect at its next start.
+The mod's own tests run with `claude plugin test mods/guild-chat`.
 
 ### The front desk from any terminal: `gm`
 
