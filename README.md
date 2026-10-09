@@ -14,6 +14,7 @@ This repository is at its beginning. The vocabulary comes first, because every l
 - `vision/` holds Guildmaster's own design material: the patron's notes, the requirements drawn from them, a Firstmate-informed consultation, the [step 1 design](vision/step-1-design.md), the [herdr design](vision/herdr-design.md) (Party Leaders kept running and brought back), the [zero-touch start](vision/zero-touch-start.md) (the patron starts `claude` in the clone, and talks to the Guildmaster in herdr), and the [tracing design](vision/tracing-design.md) with its [research](vision/tracing-research.md).
 - [vision/roadmap.md](vision/roadmap.md) is the tracked build plan: each step's goal, scope, done-when criteria, status and links.
 - `.claude/settings.json` makes `claude`, started at the clone's root, start the guild and the Guildmaster in herdr: its start-up hook and tool guard act only in the patron's plain clone (or a folder marked `.gm-front-desk`) and do nothing in a linked worktree, where agents that change Guildmaster work. `CLAUDE.md` is their guidance, not the Guildmaster's charter.
+- `mods/guild-chat/` is the Claude Code mod that draws the chat under heraldic banners while `guild.conf` says `chat: banners`.
 - `bin/gm` is the `gm` command; `templates/` holds the Guildmaster's charter (`guildmaster.md`), the Party Leader's charter, the ticket playbook and the repository rules it copies into the Guildhall, and the local OpenTelemetry Collector's configuration (`otelcol.yaml`); `tests/` holds its test suite (with the redaction cases, a schema-1 register to migrate, and recorded Claude Code telemetry under `tests/fixtures/telemetry/`, and stand-ins for herdr and launchctl so no test touches the real ones, nor your `~/.local/bin`) and an end-to-end demonstration.
 
 ## Getting started
@@ -40,7 +41,7 @@ To change Guildmaster itself, work in a linked worktree of the clone (`git workt
 
 ### Start: `claude` in the clone, then the Guildmaster in herdr
 
-The Guildmaster always lives in herdr, the terminal workspace manager: in the `guildmaster` tab of its `guild` workspace, with each Party Leader in a tab of its own beside it.
+The Guildmaster always lives in herdr, the terminal workspace manager: in the `guildmaster` tab of its `guild` workspace, with each Party Leader in a workspace of its own shown under it.
 `claude` started in the clone outside herdr is not the Guildmaster. As it starts, with nothing for you to type:
 
 - `gm`, the command behind the guild, is linked into `~/.local/bin` (never with `sudo`, and never over another `gm`).
@@ -62,12 +63,12 @@ Talk to the Guildmaster in plain words:
 
 ```
 you:          start a focus for CRM-1234 in the appointments repo
-Guildmaster:  crm-1234 is open: its Party Leader is in herdr tab crm-1234. Claude Code will ask once to trust the folder.
+Guildmaster:  crm-1234 is open: its Party Leader is in herdr workspace └ crm-1234. Claude Code will ask once to trust the folder.
 ```
 
 It finds the repository among the clones it knows and those under your usual source folders, or asks you one short question.
-It opens the Party Leader in a herdr tab of its own and never in its own terminal, and tells you which tab.
-Switch to that tab to work on the ticket with its Party Leader.
+It opens the Party Leader in a herdr workspace of its own and never in its own terminal, and tells you which one.
+Switch to that workspace to work on the ticket with its Party Leader.
 
 The Guildmaster is a quiet front desk: it knows what every Party Leader is doing and answers when asked ("what is open on crm-1234?", "what did appt-v2#12 cost?"), but it never reports routine restarts or checks, and it never does a Party Leader's work itself.
 Its charter is `~/.guildmaster/front-desk/CLAUDE.md`, yours to edit; `gm` copies it once, never overwrites it, and hands it to the front desk at every start.
@@ -141,6 +142,7 @@ Settings, from /Users/you/.guildmaster/guild.conf (gm config set <key> <value> c
 | `collector` | `on`, `off`, `later` (not decided) | off | `GM_COLLECTOR` |
 | `collector-port` | a port on 127.0.0.1 | 4318 | `GM_OTEL_PORT` |
 | `telemetry` | `on`, `off` | on | `GM_TELEMETRY` |
+| `chat` | `banners`, `off` (see The chat, below) | banners | `GM_CHAT` |
 | `autostart` | `on`, `off` | on | |
 | `autostart-every` | minutes | 5 | |
 | `muster-before-commands` | `on`, `off` | on | `GM_HERDR_AUTO` |
@@ -155,6 +157,25 @@ An environment variable overrides its setting for the command it is set on, and 
 The rest takes effect at the next muster, or the next session gm starts.
 The file also keeps what gm recorded: the first run (`initialized`), and where `gm init` put the collector.
 A Guildhall from before this file had `setup.conf`; the first `gm` command moves its lines into `guild.conf` (the collector's `installed` and `skipped` become `on` and `off`) and keeps the old file as `setup.conf.old`.
+
+### The chat: heraldic banners
+
+By default (`chat: banners`), the Guildmaster and every Party Leader that gm starts load the mod in `mods/guild-chat/` (a Claude Code plugin of function hooks, passed with `--plugin-dir`), which sets each message of the chat under a coloured rule naming who speaks:
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚜ PATRON ━━
+  Read the three modules and tell me what they do.
+── ⚒ DEEDS ───────────────────────────────────────────────────
+  Read 3 files
+── ⛨ ADVENTURER · scout-auth ─────────────────────────────────
+━━ ⚔ GUILDMASTER ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  The three modules are small, and the server only serves /health.
+```
+
+The patron's banner is gold and hangs on the right; the Guildmaster's is crimson; a Party Leader's is royal blue and names its focus (`⚔ PARTY LEADER · guild-chat`); tool calls (deeds) are steel grey and adventurers (Claude Code's subagents) green, each under a light rule.
+Only the drawing changes: what the model reads, and the stored conversation, stay as they were.
+For Claude Code's own chat, `gm config set chat off` (or ask the Guildmaster); a session keeps the chat it started with, so the change takes effect at its next start.
+The mod's own tests run with `claude plugin test mods/guild-chat`.
 
 ### The front desk from any terminal: `gm`
 
@@ -201,15 +222,29 @@ The demo makes a throwaway repository and Guildhall under a temporary directory,
 gm open appt-v2 --repo ~/work/appointments --ticket CRM-8965
 ```
 
-This records the focus `appt-v2` with ticket `CRM-8965`, makes its camp, and starts its Party Leader, `claude --name appt-v2` in the camp, in a tab of its own in herdr, whichever terminal you ran `gm open` from; it never takes over that terminal and needs none, so the Guildmaster runs it the same way.
+This records the focus `appt-v2` with ticket `CRM-8965`, makes its camp, and starts its Party Leader, `claude --name appt-v2` in the camp, in a workspace of its own in herdr, whichever terminal you ran `gm open` from; it never takes over that terminal and needs none, so the Guildmaster runs it the same way.
 With `--ticket`, the name may be left out: `gm open --repo ~/work/appointments --ticket CRM-8965` names the focus `crm-8965`.
 `--branch` names another branch; `gm open` on an existing focus leaves a running Party Leader as it is, and reopens a closed one.
-It ends with one line saying which tab the Party Leader is in.
+It ends with one line saying which workspace the Party Leader is in.
 `gm repos appointments` lists the clones the Guildmaster would consider; the `repo-roots` setting (folders separated by spaces, see Configuration) replaces the usual source folders it searches.
 
-#### The tabs, and keeping them running
+#### The workspaces, and keeping them running
 
-The tabs live in one herdr workspace, `guild`, in herdr's default session: the `guildmaster` tab (the front desk when it is in herdr; otherwise a shell) and one tab per focus, named after it.
+Everything lives in herdr's default session.
+The `guild` workspace holds the `guildmaster` tab (the front desk) and, with the `collector` setting on, the `collector` tab.
+Each focus has a workspace of its own on its camp, labelled `└ <focus>` and placed right under `guild` in herdr's sidebar, so the sidebar shows the guild and its Party Leaders together, each with its branch:
+
+```
+guild
+main
+└ appt-v2
+feature/CRM-8965
+└ saved-views
+feature/saved-views
+```
+
+herdr's sidebar is one flat list, so the nesting is the label and the place, as Firstmate does for its crew.
+A Party Leader started before this layout stays in its tab of `guild` while it runs, and moves to a workspace of its own the next time it is started.
 
 ```sh
 gm roster           # the front desk's Guildmaster and each Party Leader: pane and state
@@ -220,8 +255,8 @@ gm close appt-v2    # retire a focus: not started again (end its Party Leader fi
 
 ```
 guildmaster              front desk    alive    w1:p1    idle · last started 2026-10-03 19:20
-appt-v2                  party leader  alive    w1:p2    idle · last started 2026-10-03 19:28
-saved-views              party leader  dead     w1:p3    the pane holds only a shell · last started 2026-10-03 09:02
+appt-v2                  party leader  alive    w2:p2    idle · last started 2026-10-03 19:28
+saved-views              party leader  dead     w3:p3    the pane holds only a shell · last started 2026-10-03 09:02
 ```
 
 States are `alive`, `starting` (just launched), `dead` (its pane holds only a shell), `missing` (no pane), `held` and `unknown`.

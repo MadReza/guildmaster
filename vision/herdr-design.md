@@ -66,17 +66,30 @@ Any other `gm` command run in a terminal says once, on stderr, that no Party Lea
 
 ```
 herdr session  (GM_HERDR_SESSION, default "default": the one plain `herdr` attaches to)
-└─ workspace "guild"  (GM_HERDR_WORKSPACE)
-   ├─ tab "guildmaster"   the front desk: the Guildmaster, claude --name guildmaster, in the Guildhall's front-desk folder
-   ├─ tab "collector"     the tracing collector, otelcol-contrib on 127.0.0.1, while guild.conf says collector: on
-   ├─ tab "appt-v2"       Party Leader appt-v2: claude --name appt-v2, in its camp
-   │   └─ (step 3) Adventurer and Scout panes, split below their Party Leader
-   └─ tab "saved-views"   Party Leader saved-views
+├─ workspace "guild"  (GM_HERDR_WORKSPACE)
+│  ├─ tab "guildmaster"   the front desk: the Guildmaster, claude --name guildmaster, in the Guildhall's front-desk folder
+│  └─ tab "collector"     the tracing collector, otelcol-contrib on 127.0.0.1, while guild.conf says collector: on
+├─ workspace "└ appt-v2"  Party Leader appt-v2: claude --name appt-v2, in its camp
+├─ workspace "  └ <job>"  (step 3) an Adventurer or Scout of appt-v2, in its own camp
+└─ workspace "└ saved-views"  Party Leader saved-views
+```
+
+herdr's sidebar shows these as one list, each with the branch of its folder under it:
+
+```
+guild
+main
+└ appt-v2
+feature/CRM-8965
+  └ <job>
+<the job's branch>
+└ saved-views
+feature/saved-views
 ```
 
 - **One workspace for the guild.** Its first tab is renamed `guildmaster`. It is the front desk, where the Guildmaster session sits, kept running by the muster like a Party Leader ([zero-touch-start.md](zero-touch-start.md); until then it was a shell in the Guildhall). The Guildmaster always lives in this tab: `claude` started in the clone outside it sets the guild up, starts the Guildmaster here, and points the patron to it.
-- **One tab per Party Leader**, labelled with the focus name, its pane started in the camp. The patron switches tabs to talk to a Party Leader, as before, but never opens them by hand.
-- **Adventurers and Scouts** (steps 3 and later, proposed here, not built): each one runs in a pane split below its Party Leader in the focus's tab (`herdr pane split <leader pane> --direction down --cwd <camp>`). The patron then sees a Party Leader and its workers together. Each pane is recorded in the same `endpoint` table under `adventurer:<focus>#<n>` or `scout:<focus>#<n>`. A worker is not relaunched by the muster: it is ephemeral, so a dead one ends its run and its posting is reported instead. Step 3 settles that rule with the patron.
+- **One workspace per Party Leader** (since 2026-10-08; until then one tab per Party Leader in `guild`), labelled `└ <focus>`, made on the camp with `workspace create --cwd <camp>`, and placed under the guild's workspace. The patron switches workspaces to talk to a Party Leader, but never opens them by hand. herdr's sidebar is one flat list, so the nesting is the label and the place, which is how Firstmate shows its crew (below).
+- **Adventurers and Scouts** (step 3, the patron's rule, not built): each one runs in a workspace of its own on its camp, labelled `  └ <job>` and placed right under its Party Leader's workspace, so the sidebar shows every Party Leader with its crew under it; the patron prefers seeing everything in the sidebar to tabs or panes inside the Party Leader's workspace (2026-10-08). Each is recorded in the same `endpoint` table under `adventurer:<focus>#<n>` or `scout:<focus>#<n>`. A worker is not relaunched by the muster: it is ephemeral, so a dead one ends its run and its posting is reported instead. Step 3 settles that rule with the patron.
 
 ### The record, in the register
 
@@ -107,7 +120,7 @@ Nothing is ever adopted by its label alone, so a second Guildhall, or a herdr se
 | alive | `pane process-info` shows Claude Code in the pane's foreground or under its shell | leaves it alone; the detail is herdr's agent status (`idle`, `working`, `blocked`, `done`) |
 | starting | the pane holds only a shell, or something else, within `GM_LAUNCH_GRACE` (60 s) of gm's launch | leaves it alone |
 | dead | the pane holds only shells (the patron typed `/exit`, Claude Code crashed, or herdr restarted the server and restored a husk) | starts Claude Code again **in the same pane** |
-| missing | no pane recorded, `pane get` answers `pane_not_found`, or the pane id now sits in another workspace | opens a new tab for the focus and starts it there |
+| missing | no pane recorded, `pane get` answers `pane_not_found`, or the pane id now sits in another workspace | opens a new workspace for the focus, or a new tab in its own workspace while herdr still has it, and starts it there |
 | unknown | herdr's session is not running for that record, herdr does not answer, or the pane runs something else (`vim`, say) | reports it and leaves it alone |
 | held | dead or missing after 3 starts in a row never seen alive | leaves it alone until `gm open <focus>` |
 
@@ -162,8 +175,9 @@ Nothing is ever sent to the Guildmaster session or to a Party Leader's chat.
 
 - Alive, starting and unknown are never touched.
 - A dead Party Leader's pane holds only a shell, so starting it again there kills nothing.
-- A missing one gets a new tab; the old pane is already gone.
-- `gm close <focus>` retires a focus: its Party Leader is no longer started, and its husk pane is closed. It refuses while the Party Leader is alive, starting or unknown, and says to end it in its tab first (`/exit`). It has no `--force`.
+- A missing one gets a new workspace, or a new tab in its own; the old pane is already gone.
+- A dead one still in a tab of `guild`, from before each had a workspace of its own, has its husk (only a shell) closed and starts in a new workspace.
+- `gm close <focus>` retires a focus: its Party Leader is no longer started, and its husk pane is closed. Closing a workspace's last pane closes the workspace. It refuses while the Party Leader is alive, starting or unknown, and says to end it in its workspace first (`/exit`). It has no `--force`.
 - The camp, the branch and the postings stay; `gm open <focus>` reopens the focus.
 
 ### A Party Leader closing its own focus (since 2026-10-09)
@@ -201,13 +215,16 @@ Checked against herdr 0.9.1 (`herdr <group> help`) in an isolated lab session. E
 | `server` (headless, background) | starts the session's server |
 | `workspace create --cwd <hall> --label guild --no-focus` | `.result.workspace.workspace_id`, `.result.tab.tab_id`, `.result.root_pane.pane_id` |
 | `workspace get <id>` | `.result.workspace.label` |
+| `workspace create --cwd <camp> --label "└ <focus>" --no-focus` | as for the guild's (since 2026-10-08) |
+| `workspace list` | `.result.workspaces[].workspace_id`, in the sidebar's order |
+| `workspace.move` on the socket (`.server.socket` of `status --json`), `{"workspace_id", "insert_index"}` | the sidebar's new order; the CLI has no command for it, so gm sends it with `nc -U` |
 | `tab create --workspace <id> --cwd <camp> --label <focus> --no-focus` | `.result.tab.tab_id`, `.result.root_pane.pane_id` |
 | `tab rename <tab> guildmaster` | |
 | `pane get <pane>` | `.result.pane.workspace_id`, or `.error.code` `pane_not_found` |
 | `pane process-info --pane <pane>` | `.result.process_info.shell_pid`, `.foreground_processes[].{name, argv0}` |
 | `agent get <pane>` | `.result.agent.agent_status`, or `agent_not_found` |
 | `pane run <pane> <line>` | types the line and submits it |
-| `pane close <pane>` | only for a dead focus's husk, at `gm close` |
+| `pane close <pane>` | only for a dead focus's husk, at `gm close` and when a dead Party Leader moves out of `guild`; closing a workspace's last pane closes the workspace |
 
 Errors such as `pane_not_found` come back as JSON with exit status 1, so gm reads the JSON, not the status.
 A pane run before its shell is ready keeps the line until the shell reads it; the lab saw the line wait in a zsh still loading its configuration.
