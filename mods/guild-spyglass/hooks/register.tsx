@@ -9,7 +9,7 @@ import { configsTab, parseSettings } from './tabs/configs'
 import { activityTab, deedsOfTranscript, describeCall, FILTERS, isNoticeCommand, KEEP, noticeLines, type Filter } from './tabs/activity'
 import { filesTab, lineCount, merged, openArgv, parseNumstat, untracked } from './tabs/files'
 import { listArgs, parsePostings, postingsTab } from './tabs/postings'
-import { tabStrip } from './tabs/ui'
+import { tabLabel, tabNamed, tabStrip } from './tabs/ui'
 
 // The spyglass: a pane beside the chat whose tabs show the party's work. It never opens by itself: /spyglass opens it,
 // and /spyglass again, the pane's close mark, or ctrl+x x closes it. Every session of the guild has it, and the tabs
@@ -354,8 +354,8 @@ export const register: Register = on => {
     frontDesk = undefined
     await $.command.register({
       name: 'spyglass',
-      description: 'Open the spyglass, a pane of the party\'s work beside the chat, or close it: /spyglass turns it, /spyglass open|close sets it',
-      argumentHint: '[open | close]',
+      description: 'Open the spyglass, a pane of the party\'s work beside the chat, or close it: /spyglass turns it, /spyglass open|close sets it, /spyglass <tab> or next opens it on a tab',
+      argumentHint: '[open | close | board | satchel | deeds | codex | lantern | next]',
       immediate: true,
     })
     // A session that starts again or resumes has its transcript's deeds as rows, unless a reload kept the rows.
@@ -426,17 +426,32 @@ export const register: Register = on => {
   })
 
   // Answers with the pane itself, or a toast, and leaves no row in the transcript.
+  // Answers with the pane itself, or a toast, and leaves no row in the transcript. A tab's name, or next, opens the pane
+  // on that tab: the way to choose one from the chat, where the cursor stays.
   on('command.run', { command: 'spyglass' }, async ($, e) => {
-    const arg = e.args.trim()
-    if (!['', 'open', 'close'].includes(arg)) {
-      $.ui.toast('/spyglass takes open or close')
+    const arg = e.args.trim().toLowerCase()
+    const offered = tabsFor(await seatOf($))
+    const named = tabNamed(arg)
+    if (!['', 'open', 'close', 'next'].includes(arg) && !named) {
+      $.ui.toast(`/spyglass takes open, close, next or a tab: ${TABS.map(t => tabLabel(t.id).split(' ')[1]?.toLowerCase()).join(', ')}`)
       return {}
     }
-    const want = arg || ((await isOpen($)) ? 'close' : 'open')
-    if (want === 'close') {
+    if (named && !offered.some(t => t.id === named)) {
+      $.ui.toast(`The ${tabLabel(named).split(' ')[1]} is not offered here`)
+      return {}
+    }
+    const isUp = await isOpen($)
+    if (arg === 'close' || (arg === '' && isUp)) {
       await closePane($)
       return {}
     }
+    if (named) await update($, tab, () => named)
+    if (arg === 'next' && isUp) {
+      const now = shown(await read($, tab), offered)
+      const at = offered.findIndex(t => t.id === now?.id)
+      await update($, tab, () => offered[(at + 1) % offered.length]?.id ?? '')
+    }
+    if (isUp) return {}
     const opened = await $.ui.open({ id: PANE, title: TITLE })
     if (!opened.isPlaced) {
       $.ui.toast(`The spyglass cannot open here: ${opened.reason}`)

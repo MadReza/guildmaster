@@ -66,9 +66,9 @@ export type PostingsActions = { toggleAll: () => void; refresh: () => void; togg
 export function postingsTab(els: Els, v: PostingsView, act: PostingsActions): RenderChildren {
   const { Box, Text, Button } = els
   const actions = foot(els, [
-    { key: 'postings:refresh', hotkey: 'r', label: 'refresh', run: act.refresh },
-    { key: 'postings:all', hotkey: 'f', label: v.all ? 'hide done' : 'show done', run: act.toggleAll },
-  ], '⏎ open a posting')
+    { key: 'postings:refresh', label: 'refresh', run: act.refresh },
+    { key: 'postings:all', label: v.all ? 'hide done' : 'show done', run: act.toggleAll },
+  ], 'click a posting to open it')
   if (!v.board.isLoaded) return <Box flexDirection="column"><Text dimColor>Reading the quest board…</Text>{actions}</Box>
   if (v.board.why) return <Box flexDirection="column"><Text color={CRIMSON}>gm cannot list the postings: {v.board.why}</Text>{actions}</Box>
   const rows = v.board.rows

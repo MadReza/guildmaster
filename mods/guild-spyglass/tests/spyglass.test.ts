@@ -7,7 +7,7 @@ import { parseSettings, toggledWords } from '../hooks/tabs/configs'
 import { banner, kTokens, resetsIn, stack } from '../hooks/tabs/context'
 import { lineCount, merged, openArgv, parseNumstat, untracked } from '../hooks/tabs/files'
 import { listArgs, parsePostings, stateMark } from '../hooks/tabs/postings'
-import { ruleUnder, stripLabel, tabLabel, when } from '../hooks/tabs/ui'
+import { ruleUnder, tabLabel, tabNamed, when } from '../hooks/tabs/ui'
 
 // What stands for Claude Code and the machine beneath the mod: the environment gm starts a session with, the guild's gm
 // at ~/.local/bin/gm and the board it lists, the clock, and the engine's record of open panes, which the mod's opens
@@ -193,7 +193,7 @@ describe('/spyglass', () => {
     const w = world(on)
     await $.session.start(sessionStart)
     await $.command.run(spyglass('sideways'))
-    expect(w.journal.toasts).toEqual(['/spyglass takes open or close'])
+    expect(w.journal.toasts).toEqual(['/spyglass takes open, close, next or a tab: board, satchel, deeds, codex, lantern'])
     expect(w.journal.opens).toEqual([])
   })
 
@@ -213,6 +213,54 @@ describe('the pane', () => {
       expect((await ui.findAll({ type: 'Button' })).map(b => b.text).filter(t => t === '⚑ Board' || t === '✎ Satchel')).toEqual(['✎ Satchel'])
       await ui.unmount()
     }
+  })
+})
+
+describe('/spyglass <tab>', () => {
+  const drawnText = async (ui: { findAll: (q: { type: 'Text' }) => Promise<{ text?: string }[]> }) =>
+    (await ui.findAll({ type: 'Text' })).map(t => t.text ?? '').join('\n')
+  // Which tab's body is drawn, by what only that tab draws.
+  const body = async (ui: { findAll: (q: { type: 'Text' }) => Promise<{ text?: string }[]> }) => {
+    const t = await drawnText(ui)
+    return t.includes('THE LANTERN') ? 'lantern' : t.includes('click a setting') ? 'codex' : t.includes('click a posting') ? 'board'
+      : t.includes('click a file') ? 'satchel' : t.includes('adventurers') ? 'deeds' : 'unknown'
+  }
+
+  test('opens the pane on the tab it names, by its heraldic name or its plain one', async ($, on) => {
+    const w = world(on)
+    await $.session.start(sessionStart)
+    await $.command.run(spyglass('lantern'))
+    expect([...w.panes]).toEqual([PANE])
+    const ui = await $.ui.mount(pane('terminal'))
+    expect(await body(ui)).toBe('lantern')
+    await $.command.run(spyglass('Satchel'))
+    expect(await body(ui)).toBe('satchel')
+    await $.command.run(spyglass('activity'))
+    expect(await body(ui)).toBe('deeds')
+    expect([...w.panes]).toEqual([PANE])
+  })
+
+  test('next goes round the tabs the seat offers, and opens the pane when it is closed', async ($, on) => {
+    const w = world(on, { HOME, GM_CHAT: 'banners' })
+    await $.session.start(sessionStart)
+    await $.command.run(spyglass('next'))
+    expect([...w.panes]).toEqual([PANE])
+    const ui = await $.ui.mount(pane('terminal'))
+    const seen: string[] = [await body(ui)]
+    for (let i = 0; i < 4; i += 1) {
+      await $.command.run(spyglass('next'))
+      seen.push(await body(ui))
+    }
+    expect(seen).toEqual(['board', 'deeds', 'codex', 'lantern', 'board'])
+  })
+
+  test('a tab the seat does not offer, or a word it does not know, is said and changes nothing', async ($, on) => {
+    const w = world(on, { HOME, GM_CHAT: 'banners' })
+    await $.session.start(sessionStart)
+    await $.command.run(spyglass('satchel'))
+    await $.command.run(spyglass('sideways'))
+    expect(w.journal.toasts).toEqual(['The Satchel is not offered here', '/spyglass takes open, close, next or a tab: board, satchel, deeds, codex, lantern'])
+    expect(w.panes.size).toBe(0)
   })
 })
 
@@ -256,12 +304,10 @@ describe('the front desk without its variables', () => {
     expect(await tabsShown(ui)).toContain('⚑ Board')
   })
 
-  test('each tab is chosen by its digit, in the strip\'s order, as Claude Code keeps the arrows', async ($, on) => {
+  test('no tab or close answers a key: the pane is for the mouse', async ($, on) => {
     world(on)
     const ui = await $.ui.mount(pane('terminal'))
-    const tree = JSON.stringify(await ui.drawn())
-    const digit = (id: string) => new RegExp(`"key":"tab:${id}"[^}]*"hotkey":"(\\d)"|"hotkey":"(\\d)"[^}]*"key":"tab:${id}"`).exec(tree)?.slice(1).find(Boolean)
-    expect(['postings', 'files', 'activity', 'configs', 'context'].map(digit)).toEqual(['1', '2', '3', '4', '5'])
+    expect(JSON.stringify(await ui.drawn())).not.toContain('"hotkey"')
   })
 
   test('any other folder is not', async ($, on) => {
@@ -716,10 +762,12 @@ describe('the configs tab', () => {
   })
 
   test('the quiet ledger: the gold rule sits under the chosen tab, times read as the hour or the day', () => {
-    const labels = ['1: ⚑ Board', '2: ✎ Satchel', '3: ⚒ Deeds']
-    expect(ruleUnder(labels, 0, 40)).toEqual({ before: 0, under: 10, after: 30 })
-    expect(ruleUnder(labels, 1, 40)).toEqual({ before: 12, under: 12, after: 16 })
-    expect(stripLabel('files', 1)).toBe('2: ✎ Satchel')
+    const labels = ['⚑ Board', '✎ Satchel', '⚒ Deeds']
+    expect(ruleUnder(labels, 0, 40)).toEqual({ before: 0, under: 7, after: 33 })
+    expect(ruleUnder(labels, 1, 40)).toEqual({ before: 9, under: 9, after: 22 })
+    expect(tabNamed('Lantern')).toBe('context')
+    expect(tabNamed('files')).toBe('files')
+    expect(tabNamed('nope')).toBeUndefined()
     expect(tabLabel('context')).toBe('◔ Lantern')
     const now = new Date(2026, 9, 10, 15, 0).getTime()
     expect(when(new Date(2026, 9, 10, 9, 5).toISOString(), now)).toBe('09:05')

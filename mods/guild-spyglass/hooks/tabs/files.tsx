@@ -44,7 +44,7 @@ export type FilesActions = { open: (group: SpyglassFileGroup, file: SpyglassChan
 
 export function filesTab(els: Els, files: SpyglassFiles, act: FilesActions): RenderChildren {
   const { Box, Text, Button } = els
-  const actions = foot(els, [{ key: 'files:refresh', hotkey: 'r', label: 'refresh', run: act.refresh }], '⏎ open in the editor')
+  const actions = foot(els, [{ key: 'files:refresh', label: 'refresh', run: act.refresh }], 'click a file to open it in the editor')
   if (!files.isLoaded) return <Box flexDirection="column"><Text dimColor>Reading the changes…</Text>{actions}</Box>
   const pad = Math.max(3, ...files.groups.flatMap(g => g.files.map(f => String(f.added).length + 1)))
   return (

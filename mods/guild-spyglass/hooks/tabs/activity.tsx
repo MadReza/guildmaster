@@ -94,7 +94,7 @@ export function activityTab(els: Els, deeds: readonly SpyglassDeed[], filter: Fi
         )
         return row(els, `deed:${d.id}`, left, <Text dimColor>{d.at > 0 ? clock(d.at).slice(0, 5) : 'earlier'}</Text>)
       })}
-      {foot(els, [{ key: 'activity:clear', hotkey: 'c', label: 'clear', run: act.clear }])}
+      {foot(els, [{ key: 'activity:clear', label: 'clear', run: act.clear }])}
     </Box>
   )
 }

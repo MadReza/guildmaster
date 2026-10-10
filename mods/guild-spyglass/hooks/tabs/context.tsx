@@ -82,8 +82,8 @@ export function stack(cats: readonly { name: string; tokens: number; color: stri
 export function contextTab(els: Els, ctx: SpyglassContext, width: number, now: number, act: ContextActions): RenderChildren {
   const { Box, Text } = els
   const actions = foot(els, [
-    { key: 'context:refresh', hotkey: 'r', label: 'refresh', run: act.refresh },
-    { key: 'context:count', hotkey: 'x', label: 'count exactly', run: act.count },
+    { key: 'context:refresh', label: 'refresh', run: act.refresh },
+    { key: 'context:count', label: 'count exactly', run: act.count },
   ])
   if (!ctx.isLoaded) return <Box flexDirection="column"><Text dimColor>Reading the context…</Text>{actions}</Box>
   if (ctx.why) return <Box flexDirection="column"><Text color={CRIMSON}>The context cannot be read: {ctx.why}</Text>{actions}</Box>

@@ -90,7 +90,7 @@ export const sourceWord = (s: SpyglassSetting) => (s.source === 'default' ? '' :
 
 export function configsTab(els: ConfigEls, settings: SpyglassSettings, open: string, act: ConfigsActions): RenderChildren {
   const { Box, Text, Button } = els
-  const actions = foot(els, [{ key: 'configs:refresh', hotkey: 'r', label: 'refresh', run: act.refresh }], '⏎ change a setting')
+  const actions = foot(els, [{ key: 'configs:refresh', label: 'refresh', run: act.refresh }], 'click a setting to change it')
   if (!settings.isLoaded) return <Box flexDirection="column"><Text dimColor>Reading guild.conf…</Text>{actions}</Box>
   if (settings.why) return <Box flexDirection="column"><Text color={CRIMSON}>gm cannot read the settings: {settings.why}</Text>{actions}</Box>
   return (
