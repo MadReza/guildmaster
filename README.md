@@ -14,7 +14,7 @@ This repository is at its beginning. The vocabulary comes first, because every l
 - `vision/` holds Guildmaster's own design material: the patron's notes, the requirements drawn from them, a Firstmate-informed consultation, the [step 1 design](vision/step-1-design.md), the [herdr design](vision/herdr-design.md) (Party Leaders kept running and brought back), the [zero-touch start](vision/zero-touch-start.md) (the patron starts `claude` in the clone, and talks to the Guildmaster in herdr), the [tracing design](vision/tracing-design.md) with its [research](vision/tracing-research.md), and the [veil design](vision/veil-design.md) (the deeds drawn out of the chat, and back in).
 - [vision/roadmap.md](vision/roadmap.md) is the tracked build plan: each step's goal, scope, done-when criteria, status and links.
 - `.claude/settings.json` makes `claude`, started at the clone's root, start the guild and the Guildmaster in herdr: its start-up hook and tool guard act only in the patron's plain clone (or a folder marked `.gm-front-desk`) and do nothing in a linked worktree, where agents that change Guildmaster work. `CLAUDE.md` is their guidance, not the Guildmaster's charter.
-- `mods/guild-chat/` is the Claude Code mod that draws the chat under heraldic banners while `guild.conf` says `chat: banners`, and draws the veil over the deeds while it says `veil: on`.
+- `mods/guild-chat/` is the Claude Code mod that draws the chat under heraldic banners while `guild.conf` says `chat: banners`, draws the veil over the deeds while it says `veil: on`, and draws the working sprites while it says `sprites: on`.
 - `bin/gm` is the `gm` command; `templates/` holds the Guildmaster's charter (`guildmaster.md`), the Party Leader's charter, the ticket playbook and the repository rules it copies into the Guildhall, and the local OpenTelemetry Collector's configuration (`otelcol.yaml`); `tests/` holds its test suite (with the redaction cases, a schema-1 register to migrate, and recorded Claude Code telemetry under `tests/fixtures/telemetry/`, and stand-ins for herdr and launchctl so no test touches the real ones, nor your `~/.local/bin`) and an end-to-end demonstration.
 
 ## Getting started
@@ -145,6 +145,9 @@ Settings, from /Users/you/.guildmaster/guild.conf (gm config set <key> <value> c
 | `chat` | `banners`, `off` (see The chat, below) | banners | `GM_CHAT` |
 | `veil` | `on`, `off` (see The veil, below) | off | |
 | `veil-hides` | any of `deeds`, `adventurers`, `notes`, `progress` | all four | |
+| `sprites` | `on`, `off` (see The working sprites, below) | on | |
+| `sprites-guildmaster`, `sprites-party-leader` | any of the sprites | `quill`; `skirmish delve boss siege forge wall` | |
+| `idle-guildmaster`, `idle-party-leader` | any of the sprites, or `none` | `campfire`; `none` | |
 | `autostart` | `on`, `off` | on | |
 | `autostart-every` | minutes | 5 | |
 | `muster-before-commands` | `on`, `off` | on | `GM_HERDR_AUTO` |
@@ -209,6 +212,23 @@ A hidden row goes with its banner. A deed that failed or was interrupted hides l
 The veil never hides the patron's messages, a message routed from another session, the reply that ends a turn, longer narration, or anything from a step that ran out of tokens or out of room (`max_tokens`, `model_context_window_exceeded`): that one the patron must see, since the session is stuck there.
 Nor can it hide what Claude Code draws outside the chat: permission and question dialogs, and the working row, which still says a session is busy.
 It hides from the screen only: the model, the stored conversation, `--continue` and exports are unchanged.
+
+### The working sprites
+
+While a turn runs, the mod draws a two-row sprite above Claude Code's working row (its word and timer stay beneath), in Claude orange, moving on its own clock.
+Like Claude Code's word, the sprite is drawn at random each turn, and never the same one twice in a row, from the ones `guild.conf` names for the session's role:
+
+| Setting | Default | Drawn |
+| --- | --- | --- |
+| `sprites-guildmaster` | `quill` | while the Guildmaster works |
+| `sprites-party-leader` | `skirmish delve boss siege forge wall` | while a Party Leader works |
+| `idle-guildmaster` | `campfire` | above the Guildmaster's prompt while it waits |
+| `idle-party-leader` | `none` | above a Party Leader's prompt while it waits |
+
+The sprites: `skirmish` (an adventurer holds the corridor against slimes and counts the kills), `delve` (the party walks a torchlit corridor), `boss` (a knight brings down a dragon), `siege` (a crew rams a castle gate until the guild's flag goes up), `forge` (a smith draws out a sword on the anvil), `wall` (a mason lays a wall in running bond), `quill` (the Guildmaster writes an entry in the ledger) and `campfire` (a fire at the camp).
+Both rows are ones Claude Code redraws in place, so a sprite never enters the chat: it is gone when the turn, or the wait, ends.
+`gm config set sprites off` (or ask the Guildmaster) turns them all off; `gm config set sprites-party-leader forge wall` and the like choose them. Every session follows a change at its next turn.
+They are drawn in a terminal only, and only for a patron with a Guildhall.
 
 ### The front desk from any terminal: `gm`
 

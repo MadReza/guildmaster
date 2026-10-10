@@ -1,5 +1,10 @@
 import type { EngineInterface, Register, RenderChildren, RenderInput } from 'claude-code'
 
+import {
+  isSpriteName, packFrame, paletteFamily, PALETTES, pickSprite, rasterColumns, spriteFrame, spriteTick,
+  SPRITE_ROWS, type Palette, type SpriteName,
+} from '../lib/sprites'
+
 // Heraldic banners: every message of a Guildmaster session is set under a rule naming who speaks. The patron's banner
 // hangs on the right, everyone else's on the left; the heavy rule is for the patron and the one who answers them, the
 // light one for what is done on their behalf. gm starts every session with this mod, tells it in GM_CHAT what
@@ -10,6 +15,13 @@ import type { EngineInterface, Register, RenderChildren, RenderInput } from 'cla
 // The veil (vision/veil-design.md): while guild.conf says veil: on, the kinds of row veil-hides names draw at zero
 // height, banner and all, and come back when it is lifted. It hides from the screen only: nothing stored changes.
 // /veil sets it through the guild's one gm; every other session follows at its next turn, or at /veil refresh.
+//
+// The working sprites (../lib/sprites.ts): while sprites: is on, the row Claude Code animates while a turn runs gets a
+// two-row sprite above its words, drawn at random each turn from the ones guild.conf names for this session's role, the
+// way Claude Code samples its word: sprites-guildmaster at the front desk, sprites-party-leader in a camp. While the
+// session waits for the patron, idle-guildmaster or idle-party-leader names the one drawn above the prompt. Both live
+// in rows Claude Code redraws in place, so a sprite never enters the chat: it is gone when its turn, or the wait, ends.
+// The mod repaints each one on its own tick through $.ui.blit, as Firstmate's calm mod repaints its boat.
 
 const GOLD = '#d4a017'
 const CRIMSON = '#c0392b'
@@ -67,6 +79,47 @@ export function veilOf(conf: string): Veil {
 
 const sameVeil = (a: Veil, b: Veil) => a.on === b.on && a.hides.size === b.hides.size && [...a.hides].every(k => b.hides.has(k))
 
+// The working sprites as guild.conf sets them, with gm's defaults: on, the quill for the Guildmaster, the dungeon and
+// the builders for a Party Leader, the campfire while the Guildmaster waits and nothing while a Party Leader does.
+export type Sprites = {
+  on: boolean
+  guildmaster: readonly SpriteName[]
+  partyLeader: readonly SpriteName[]
+  idleGuildmaster: readonly SpriteName[]
+  idlePartyLeader: readonly SpriteName[]
+}
+
+export const SPRITE_DEFAULTS = {
+  'sprites-guildmaster': 'quill',
+  'sprites-party-leader': 'skirmish delve boss siege forge wall',
+  'idle-guildmaster': 'campfire',
+  'idle-party-leader': 'none',
+} as const
+
+// A list of sprites as gm takes it: the sprites it names, none for no sprite, and the default for a list naming
+// anything else.
+function spriteList(conf: string, key: keyof typeof SPRITE_DEFAULTS): SpriteName[] {
+  const parse = (v: string) => {
+    const words = v.split(/\s+/).filter(Boolean)
+    if (words.length === 1 && words[0] === 'none') return []
+    return words.length > 0 && words.every(isSpriteName) ? [...new Set(words)] : undefined
+  }
+  return parse(confValue(conf, key) ?? '') ?? parse(SPRITE_DEFAULTS[key])!
+}
+
+export function spritesOf(conf: string): Sprites {
+  return {
+    on: !['off', 'no', 'false'].includes(confValue(conf, 'sprites') ?? ''),
+    guildmaster: spriteList(conf, 'sprites-guildmaster'),
+    partyLeader: spriteList(conf, 'sprites-party-leader'),
+    idleGuildmaster: spriteList(conf, 'idle-guildmaster'),
+    idlePartyLeader: spriteList(conf, 'idle-party-leader'),
+  }
+}
+
+const NO_SPRITES: Sprites = { on: false, guildmaster: [], partyLeader: [], idleGuildmaster: [], idlePartyLeader: [] }
+const sameSprites = (a: Sprites, b: Sprites) => JSON.stringify(a) === JSON.stringify(b)
+
 // Short narration between deeds, Firstmate's rule: a text block from a model step that stopped to call tools, with
 // no newline and under 240 characters trimmed. A step that hit a limit is never a note: the patron must see it.
 export const NOTE_MAX = 240
@@ -97,19 +150,21 @@ function bannersOn($: EngineInterface): Promise<boolean> {
   return decided
 }
 
-// The veil as this session holds it: guild.conf's path (none without a Guildhall), what it last read there, and the
-// file's modification time then. Read once, before the first row draws; afterwards only when the file changed.
-type Held = { conf?: string; veil: Veil; mtimeMs?: number }
+// The veil and the sprites as this session holds them: guild.conf's path (none without a Guildhall), what it last read
+// there, and the file's modification time then. Read once, before the first row draws; afterwards only when the file
+// changed. Without a Guildhall the veil is lifted and no sprite is drawn: that patron keeps Claude Code's own rows.
+type Held = { conf?: string; veil: Veil; sprites: Sprites; mtimeMs?: number }
 const LIFTED: Veil = { on: false, hides: new Set() }
 let held: Promise<Held> | undefined
 
-// Reads guild.conf; a file it cannot read leaves the veil lifted.
-async function readVeil($: EngineInterface, conf: string): Promise<{ veil: Veil; mtimeMs?: number }> {
+// Reads guild.conf; a file it cannot read leaves the veil lifted and draws no sprite.
+async function readConf($: EngineInterface, conf: string): Promise<{ veil: Veil; sprites: Sprites; mtimeMs?: number }> {
   try {
     const { mtimeMs } = await $.fs.stat(conf)
-    return { veil: veilOf(await $.fs.read(conf)), mtimeMs }
+    const text = await $.fs.read(conf)
+    return { veil: veilOf(text), sprites: spritesOf(text), mtimeMs }
   } catch {
-    return { veil: LIFTED }
+    return { veil: LIFTED, sprites: NO_SPRITES }
   }
 }
 
@@ -117,21 +172,22 @@ function veil($: EngineInterface): Promise<Held> {
   held ??= (async () => {
     const conf = await hallConf($)
     try {
-      if (!(await $.fs.exists(conf))) return { veil: LIFTED }
+      if (!(await $.fs.exists(conf))) return { veil: LIFTED, sprites: NO_SPRITES }
     } catch {
-      return { veil: LIFTED }
+      return { veil: LIFTED, sprites: NO_SPRITES }
     }
-    return { conf, ...(await readVeil($, conf)) }
+    return { conf, ...(await readConf($, conf)) }
   })()
   return held
 }
 
-// Takes what guild.conf says now; redraws when it changed the veil, or always when asked.
+// Takes what guild.conf says now; redraws when it changed the veil or the sprites, or always when asked.
 async function follow($: EngineInterface, h: Held, always = false): Promise<void> {
   if (!h.conf) return
-  const now = await readVeil($, h.conf)
-  const changed = !sameVeil(now.veil, h.veil)
+  const now = await readConf($, h.conf)
+  const changed = !sameVeil(now.veil, h.veil) || !sameSprites(now.sprites, h.sprites)
   h.veil = now.veil
+  h.sprites = now.sprites
   h.mtimeMs = now.mtimeMs
   if (changed || always) $.ui.invalidate('ui.render')
 }
@@ -189,6 +245,82 @@ async function guildGm($: EngineInterface): Promise<{ gm: string } | { why: stri
   }
 }
 
+// ---- The working sprites on screen ----
+
+// A session is the Guildmaster's unless gm named a Party Leader's focus, as for the banners.
+async function focusOf($: EngineInterface): Promise<string | undefined> {
+  return (await $.env.get('GM_CHAT_FOCUS')) || (await $.env.get('GM_FOCUS')) || undefined
+}
+
+// The sprite this turn draws, drawn at its start, and the one before it, which the next turn does not repeat.
+let turnSprite: SpriteName | undefined
+let lastSprite: SpriteName | undefined
+
+async function drawTurnSprite($: EngineInterface): Promise<SpriteName | undefined> {
+  const { sprites } = await veil($)
+  const from = (await focusOf($)) ? sprites.partyLeader : sprites.guildmaster
+  turnSprite = pickSprite(from, lastSprite, Math.random())
+  if (turnSprite) lastSprite = turnSprite
+  return turnSprite
+}
+
+async function idleSprite($: EngineInterface): Promise<SpriteName | undefined> {
+  const { sprites } = await veil($)
+  const from = (await focusOf($)) ? sprites.idlePartyLeader : sprites.idleGuildmaster
+  // The idle sprite stays the same while the session waits: drawn again only when the list changes.
+  if (!idlePick || !from.includes(idlePick)) idlePick = pickSprite(from, undefined, Math.random())
+  return idlePick
+}
+let idlePick: SpriteName | undefined
+
+// Claude Code's colours for its theme, read at the first drawing and again when the theme changes.
+let palette: Promise<Palette> | undefined
+function paletteOf($: EngineInterface): Promise<Palette> {
+  palette ??= $.config.list().then(
+    rows => PALETTES[paletteFamily(rows.find(r => r.key === 'theme')?.value)],
+    () => PALETTES.light,
+  )
+  return palette
+}
+
+// Every site drawing a sprite now, by its requestId: which sprite, its tick count, its size and its clock. A site's
+// clock stops when a repaint is refused, which is how the mod learns the turn or the wait is over.
+type Site = { sprite: SpriteName; t: number; columns: number; timer: { cancel(): void } }
+const sites = new Map<string, Site>()
+const RASTER_KEY = 'guild-sprite'
+
+function forget(requestId: string): void {
+  sites.get(requestId)?.timer.cancel()
+  sites.delete(requestId)
+}
+
+async function repaint($: EngineInterface, requestId: string, site: Site): Promise<void> {
+  site.t += 1
+  const result = await $.ui.blit({
+    requestId, key: RASTER_KEY, columns: site.columns, rows: SPRITE_ROWS,
+    cells: packFrame(spriteFrame(site.sprite, site.t), site.columns, await paletteOf($)),
+  })
+  if (result.deny !== undefined && sites.get(requestId) === site) forget(requestId)
+}
+
+// The sprite's Raster for a site, its clock started, or kept running when the site already draws this sprite. Only a
+// terminal has Rasters: elsewhere there is none.
+async function spriteRaster($: EngineInterface, e: RenderInput, sprite: SpriteName) {
+  const elements = $.ui.resolve(e)
+  if (e.surface !== 'terminal' || !('Raster' in elements)) return undefined
+  const { Raster } = elements
+  const columns = rasterColumns(e.viewport?.columns)
+  let site = sites.get(e.requestId)
+  if (!site || site.sprite !== sprite || site.columns !== columns) {
+    forget(e.requestId)
+    const fresh: Site = { sprite, t: 0, columns, timer: { cancel() {} } }
+    fresh.timer = $.clock.every(spriteTick(sprite), () => void repaint($, e.requestId, fresh))
+    sites.set(e.requestId, fresh)
+    site = fresh
+  }
+  return <Raster key={RASTER_KEY} columns={columns} rows={SPRITE_ROWS} cells={packFrame(spriteFrame(sprite, site.t), columns, await paletteOf($))} />
+}
+
 const said = (v: Veil) => (v.on ? 'The veil is drawn' : 'The veil is lifted')
 
 export const register: Register = on => {
@@ -196,6 +328,9 @@ export const register: Register = on => {
     notes.clear()
     replies.clear()
     stuckTool.clear()
+    for (const id of [...sites.keys()]) forget(id)
+    turnSprite = undefined
+    idlePick = undefined
     if ((await veil($)).conf) {
       await $.command.register({
         name: 'veil',
@@ -255,7 +390,51 @@ export const register: Register = on => {
         // A guild.conf that cannot be read now leaves the veil as this session holds it.
       }
     }
+    await drawTurnSprite($)
     return next(e)
+  })
+
+  on('config.set', { key: 'theme' }, async ($, e, next) => {
+    const result = await next(e)
+    palette = undefined
+    if (sites.size) $.ui.invalidate('ui.render')
+    return result
+  })
+
+  // The row Claude Code animates while a turn runs: this turn's sprite above Claude Code's own word and timer.
+  on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
+    const { sprites } = await veil($)
+    const sprite = sprites.on && e.surface === 'terminal' ? (turnSprite ?? (await drawTurnSprite($))) : undefined
+    if (!sprite) {
+      forget(e.requestId)
+      return next(e)
+    }
+    const raster = await spriteRaster($, e, sprite)
+    if (!raster) return next(e)
+    const drawn = await next(e)
+    const { Box } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="column">
+        {raster}
+        {drawn}
+      </Box>
+    )
+  })
+
+  // Above the prompt while the session waits: the idle sprite, unless a survey holds the band.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const { sprites } = await veil($)
+    const sprite = sprites.on && e.surface === 'terminal' && !e.props.isWorking && !e.props.hasSurvey && !e.props.view.agentId
+      ? await idleSprite($)
+      : undefined
+    if (!sprite) {
+      forget(e.requestId)
+      return next(e)
+    }
+    const raster = await spriteRaster($, e, sprite)
+    if (!raster) return next(e)
+    const { Box } = $.ui.resolve(e)
+    return <Box flexDirection="column">{raster}</Box>
   })
 
   // Learns which text blocks are notes, and what a step that hit a limit carried. Subagents' steps never draw here.
