@@ -84,16 +84,39 @@ export function shown(chosen: string, offered: readonly Tab[]): Tab | undefined 
   return offered.find(t => t.id === chosen) ?? offered[0]
 }
 
-// A session gm starts is told its focus by GM_CHAT_FOCUS and its style by GM_CHAT, and the front desk has no focus; a
-// camp's own settings set GM_FOCUS. A session told neither is not the guild's own.
-export function seatFrom(env: { GM_CHAT_FOCUS?: string; GM_FOCUS?: string; GM_CHAT?: string }): Seat {
+// A Party Leader is known by its focus: GM_CHAT_FOCUS from gm, or the GM_FOCUS its camp's settings set. The front desk
+// is known by GM_CHAT from gm, or by where it runs, since Claude Code's session host does not always keep the variables
+// a session was started with: the guild's own clone (the one ~/.local/bin/gm leads into) or the Guildhall's
+// front-desk folder. Any other session is not the guild's own.
+export function seatFrom(env: { GM_CHAT_FOCUS?: string; GM_FOCUS?: string; GM_CHAT?: string }, isFrontDesk = false): Seat {
   if (env.GM_CHAT_FOCUS || env.GM_FOCUS) return 'party-leader'
-  if (env.GM_CHAT) return 'guildmaster'
+  if (env.GM_CHAT || isFrontDesk) return 'guildmaster'
   return 'other'
 }
 
-const seatOf = async ($: EngineInterface) =>
-  seatFrom({ GM_CHAT_FOCUS: await $.env.get('GM_CHAT_FOCUS'), GM_FOCUS: await $.env.get('GM_FOCUS'), GM_CHAT: await $.env.get('GM_CHAT') })
+// Whether this session runs at the front desk: worked out once a session, from its folder.
+let frontDesk: Promise<boolean> | undefined
+
+function atFrontDesk($: EngineInterface): Promise<boolean> {
+  frontDesk ??= (async () => {
+    if (!cwd) return false
+    const hall = (await $.env.get('GM_HALL')) || `${await $.env.get('HOME')}/.guildmaster`
+    if (cwd === `${hall}/front-desk`) return true
+    try {
+      const gm = await $.fs.stat(`${await $.env.get('HOME')}/.local/bin/gm`, { resolve: true })
+      const clone = gm.isLink && gm.realPath?.endsWith('/bin/gm') ? gm.realPath.slice(0, -'/bin/gm'.length) : undefined
+      return clone !== undefined && (await toplevel($, cwd)) === clone
+    } catch {
+      return false
+    }
+  })()
+  return frontDesk
+}
+
+const seatOf = async ($: EngineInterface) => {
+  const env = { GM_CHAT_FOCUS: await $.env.get('GM_CHAT_FOCUS'), GM_FOCUS: await $.env.get('GM_FOCUS'), GM_CHAT: await $.env.get('GM_CHAT') }
+  return seatFrom(env, !env.GM_CHAT_FOCUS && !env.GM_FOCUS && !env.GM_CHAT && (await atFrontDesk($)))
+}
 
 // The Party Leader's focus, none at the front desk or elsewhere.
 const focusOf = async ($: EngineInterface) => (await $.env.get('GM_CHAT_FOCUS')) || (await $.env.get('GM_FOCUS')) || undefined
@@ -328,6 +351,7 @@ const isOpen = async ($: EngineInterface) => (await $.ui.panes()).some(p => p.id
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     cwd = e.cwd
+    frontDesk = undefined
     await $.command.register({
       name: 'spyglass',
       description: 'Open the spyglass, a pane of the party\'s work beside the chat, or close it: /spyglass turns it, /spyglass open|close sets it',
