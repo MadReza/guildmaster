@@ -82,6 +82,8 @@ function world(on: On, env: Record<string, string> = LEADER, placed = true): Wor
     journal.runs.push([...e.argv])
     if (failure) return { value: { exitCode: 1, stdout: '', stderr: `gm: ${failure}\n`, isStdoutTruncated: false, isStderrTruncated: false } }
     const args = e.argv.slice(1)
+    // gm visit <focus>: herdr shows that focus's Party Leader.
+    if (args[0] === 'visit') return ok(`${args[1]} is in front: herdr workspace w1, pane w1:p1.\n`)
     // gm config --json, and gm config set|unset <key> [words]: the settings, and gm's one line for a change.
     if (args[0] === 'config') {
       if (args[1] === '--json') return ok(JSON.stringify(w.settings))
@@ -383,6 +385,17 @@ describe('the postings tab', () => {
     const all = await texts(ui)
     expect(all).toContain('appt-v2#1 grey-button')
     expect(all).toContain('crm-1#1 elsewhere')
+  })
+
+  test('at the front desk a click goes to the posting\'s Party Leader in herdr, through the guild\'s gm', async ($, on) => {
+    const w = world(on, DESK)
+    w.board = [row('appt-v2', 1, 'grey-button', 'needs-you'), row('crm-1', 2, 'elsewhere', 'queued')]
+    const ui = await opened($)
+    expect(await texts(ui)).toContain('click a posting to go to its Party Leader')
+    await ui.press({ key: 'posting:crm-1#2' })
+    expect(w.journal.runs.at(-1)).toEqual([GM, 'visit', 'crm-1'])
+    expect(w.journal.toasts.at(-1)).toBe('crm-1 is in front: herdr workspace w1, pane w1:p1.')
+    expect(await texts(ui)).not.toContain('the words of elsewhere')
   })
 
   test('a press opens a posting to its last notice and why it is parked, and a second press folds it', async ($, on) => {

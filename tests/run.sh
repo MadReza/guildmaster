@@ -1543,6 +1543,22 @@ t_roster_lists_each_focus() {
     assert_eq "$(roster_state bravo)" alive "bravo running"
 }
 
+t_visit_brings_a_party_leader_to_the_front() {
+  setup visit
+  gm open bravo --repo "$REPO" >/dev/null 2>&1
+  local out ws tab
+  : >"$HERDR_STUB/focused"
+  out=$(gm visit bravo) || fail "visit failed: $out"
+  IFS='|' read -r ws tab <<<"$(db "SELECT workspace_id||'|'||tab_id FROM endpoint WHERE key='party-leader:bravo';")"
+  assert_eq "$(cat "$HERDR_STUB/focused")" "$ws
+$tab" "its workspace, then its tab" &&
+    assert_contains "$out" "bravo is in front: herdr workspace $ws" "says where it went"
+  out=$(gm visit nobody 2>&1) && fail "visited a focus that does not exist"
+  gm open charlie --repo "$REPO" --no-launch >/dev/null 2>&1
+  out=$(gm visit charlie 2>&1) && fail "visited a focus with no Party Leader"
+  assert_contains "$out" "charlie has no Party Leader in herdr; gm open charlie starts one" "says how to start one"
+}
+
 t_open_needs_herdr() {
   export GM_HALL=$WORK/needs/hall
   mkdir -p "$GM_HALL"

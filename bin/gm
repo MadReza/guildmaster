@@ -628,6 +628,8 @@ They are for advanced use, and for the Guildmaster.
                           Guildmaster turns it on by itself; off is the switch to stop it, and it stays off
   roster [--all]          the front desk's Guildmaster and each Party Leader with its herdr pane and state
                           (alive, starting, dead, missing, held, unknown; --all adds closed focuses)
+  visit <focus>           show that focus's Party Leader in herdr: its workspace and tab come to the front (the
+                          spyglass's Board runs it when the patron clicks a posting at the front desk)
   close <focus>           retire a focus: its Party Leader is not started again (end a running one first);
                           its camp and postings are kept. Run by that Party Leader itself, with every posting
                           finished, it asks to close: gm types /exit once its turn ends, then closes the focus
@@ -5427,6 +5429,20 @@ gm_cmd_install() {
   printf 'herdr is installed %s, at %s; the guild is set up, and the Guildmaster is in herdr tab %s: %s.\n' "$how" "$p" "$GM_FRONT_DESK" "$(gm_front_desk_way)"
 }
 
+# gm visit <focus>: brings the focus's Party Leader to the front in herdr, its workspace and then its tab, without
+# starting or attaching anything; the herdr client the patron is looking at follows. Says where it went, or why not.
+gm_cmd_visit() {
+  [ $# -eq 1 ] || gm_die "visit: gm visit <focus>"
+  local focus s ws tab pane
+  gm_herdr_require visit
+  focus=$(gm_require_focus "$1")
+  IFS=$'\t' read -r s ws tab pane _ _ <<<"$(gm_endpoint "party-leader:$focus")"
+  [ -n "$ws" ] && [ -n "$tab" ] || gm_die "visit: $focus has no Party Leader in herdr; gm open $focus starts one"
+  [ -n "$(gm_herdr "$s" workspace focus "$ws")" ] || gm_die "visit: herdr would not show workspace $ws"
+  gm_herdr "$s" tab focus "$tab" >/dev/null
+  printf '%s is in front: herdr workspace %s, pane %s.\n' "$focus" "$ws" "$pane"
+}
+
 # ---- gm alone: the one thing the patron runs (vision/zero-touch-start.md) ----
 
 # Opens the front desk: the Guildmaster's files, the muster (which starts the Guildmaster in the guild workspace's
@@ -5529,7 +5545,7 @@ if [ -s "$GM_DB" ]; then
   esac
 fi
 case $cmd in
-  front-desk | open | up | close | start | autostart | install | hook | statusline | collector | config | repos | help | -h | --help) ;;
+  front-desk | open | up | close | start | autostart | install | hook | statusline | collector | config | repos | visit | help | -h | --help) ;;
   *) gm_auto_reconcile ;;
 esac
 case $cmd in
@@ -5538,6 +5554,7 @@ case $cmd in
   open) gm_cmd_open "$@" ;;
   up) gm_cmd_up "$@" ;;
   roster) gm_cmd_roster "$@" ;;
+  visit) gm_cmd_visit "$@" ;;
   close) gm_cmd_close "$@" ;;
   start) gm_cmd_start "$@" ;;
   autostart) gm_cmd_autostart "$@" ;;
