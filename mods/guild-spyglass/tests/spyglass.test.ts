@@ -2,6 +2,7 @@ import type { On } from 'claude-code'
 import { describe, expect, mock, test, type Engine } from 'claude-code/testing'
 
 import { PANE, seatFrom, shown, tabsFor, type Tab } from '../hooks/register'
+import { clock, describeCall, isNoticeCommand, noticeLines, shownDeeds } from '../hooks/tabs/activity'
 import { lineCount, merged, openArgv, parseNumstat, untracked } from '../hooks/tabs/files'
 import { listArgs, parsePostings, stateMark, tally } from '../hooks/tabs/postings'
 
@@ -404,5 +405,97 @@ describe('the files tab', () => {
     expect(lineCount('a\nb\n')).toBe(2)
     expect(merged([{ path: 'b', added: 1, deleted: 0, isBinary: false, isNew: false }], untracked('a\0b\0', () => 5)).map(f => f.path)).toEqual(['a', 'b'])
     expect(openArgv('code -g', 'x y')).toEqual(['/bin/sh', '-c', 'code -g "$1"', 'spyglass', 'x y'])
+  })
+})
+
+describe('the activity tab', () => {
+  const opened = async ($: Engine, surface: 'terminal' | 'desktop' = 'terminal') => {
+    await $.session.start(sessionStart)
+    await $.command.run(spyglass())
+    const ui = await $.ui.mount(pane(surface))
+    await ui.press({ key: 'tab:activity' })
+    return ui
+  }
+  const texts = async (ui: { findAll: (q: { type: 'Text' | 'Button' }) => Promise<{ text?: string }[]> }) =>
+    (await ui.findAll({ type: 'Text' })).map(t => t.text ?? '').join('\n')
+
+  // What the tools answer beneath the mod: Bash prints its command's output, gm notice its notice line.
+  const tools = (on: On, failing: string[] = []) =>
+    on('tool.call', async (_$, e) => {
+      if (failing.includes(e.tool)) return { isError: true as const, result: {}, text: 'it failed' }
+      if (e.tool === 'Bash' && e.command.startsWith('gm notice')) return { result: { stdout: 'appt-v2#2 owner-empty started ("the owner")\n', stderr: '' } }
+      return { result: {} }
+    })
+
+  test('every deed as it ends, newest first, an MCP tool by its server, a failure marked', async ($, on) => {
+    world(on)
+    tools(on, ['WebFetch'])
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const ui = await opened($, surface)
+      await $.tool.call({ tool: 'Read', tool_use_id: `r-${surface}`, file_path: '/camps/appt-v2/src/a.ts' } as never)
+      await $.tool.call({ tool: 'mcp__linear__get_issue', tool_use_id: `m-${surface}`, id: 'CRM-12' } as never)
+      await $.tool.call({ tool: 'WebFetch', tool_use_id: `w-${surface}`, url: 'https://example.com', prompt: 'x' } as never)
+      const all = await texts(ui)
+      expect(all).toContain('/camps/appt-v2/src/a.ts')
+      expect(all).toContain('linear · get_issue')
+      expect(all).toMatch(/WebFetch[^\n]*✗/)
+      expect(all.indexOf('WebFetch')).toBeLessThan(all.indexOf('linear · get_issue'))
+      await ui.press({ key: 'activity:mcp' })
+      const mcp = await texts(ui)
+      expect(mcp).toContain('linear · get_issue')
+      expect(mcp).not.toContain('/camps/appt-v2/src/a.ts')
+      await ui.press({ key: 'activity:all' })
+      await ui.press({ key: 'activity:clear' })
+      expect(await texts(ui)).toContain('Nothing done yet.')
+      await ui.unmount()
+      await $.command.run(spyglass('close'))
+    }
+  })
+
+  test('gm\'s notice lines are rows of their own', async ($, on) => {
+    world(on)
+    tools(on)
+    const ui = await opened($)
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command: 'gm notice 2 started' })
+    await ui.press({ key: 'activity:notice' })
+    const all = await texts(ui)
+    expect(all).toContain('appt-v2#2 owner-empty started ("the owner")')
+    expect(all).not.toContain('gm notice 2 started')
+  })
+
+  test('an adventurer sent, its deeds under its name, and its return', async ($, on) => {
+    world(on)
+    tools(on)
+    on('agent.spawn', async () => ({ model: 'm', agentId: 'agent-7' }))
+    on('classic.SubagentStop', async () => ({}))
+    const ui = await opened($)
+    await $.tool.call({ tool: 'Agent', tool_use_id: 'a1', description: 'scout-auth', prompt: 'Read the auth module' } as never)
+    await $.agent.spawn({ tool_use_id: 'a1', prompt: 'Read the auth module', description: 'scout-auth', subagentType: 'Explore',
+      provider: { plugin: 'engine', tier: 'core' }, parentModel: 'm' } as never)
+    await $.tool.call({ tool: 'Grep', tool_use_id: 'g1', pattern: 'login', agentId: 'agent-7' } as never)
+    await $.classic.SubagentStop({ agent_id: 'agent-7', agent_type: 'Explore', stop_hook_active: false, agent_transcript_path: '/t',
+      last_assistant_message: 'Auth is in src/auth.' } as never)
+    await ui.press({ key: 'activity:adventurer' })
+    const advent = await texts(ui)
+    expect(advent).toContain('sent scout-auth')
+    expect(advent).toContain('scout-auth returns')
+    expect(advent).toContain('Auth is in src/auth.')
+    await ui.press({ key: 'activity:all' })
+    expect(await texts(ui)).toMatch(/scout-auth › [^\n]*Grep/)
+  })
+
+  test('names and reads deeds as the tab holds them', () => {
+    expect(describeCall('Bash', { command: 'ls  -la\n' })).toEqual({ kind: 'deed', title: 'Bash', detail: 'ls -la' })
+    expect(describeCall('mcp__claude_ai_Gmail__send_message', { to: 'x' }).title).toBe('claude_ai_Gmail · send_message')
+    expect(describeCall('Agent', { description: 'fix', prompt: 'p' })).toEqual({ kind: 'adventurer', title: 'sent fix', detail: 'p' })
+    expect(describeCall('TodoWrite', {}).detail).toBe('')
+    expect(isNoticeCommand('cd x && gm notice 3 done "y"')).toBe(true)
+    expect(isNoticeCommand('gm list')).toBe(false)
+    expect(isNoticeCommand('pgm notice')).toBe(false)
+    expect(noticeLines('a\n\n b \n')).toEqual(['a', 'b'])
+    expect(clock(0)).toMatch(/^\d\d:\d\d:\d\d$/)
+    const d = (id: string, kind: 'deed' | 'mcp') => ({ id, at: 0, kind, who: '', title: id, detail: '', status: 'ok' as const })
+    expect(shownDeeds([d('1', 'deed'), d('2', 'mcp'), d('3', 'deed')], 'all').map(x => x.id)).toEqual(['3', '2', '1'])
+    expect(shownDeeds([d('1', 'deed'), d('2', 'mcp')], 'mcp').map(x => x.id)).toEqual(['2'])
   })
 })

@@ -30,6 +30,20 @@ export type SpyglassFiles = { groups: SpyglassFileGroup[]; isLoaded: boolean }
 // A working tree an adventurer changed files in, apart from the camp, and the adventurer's name.
 export type SpyglassTree = { root: string; label: string }
 
+// What one activity row is: a deed (a tool call), an MCP server's tool, an adventurer sent or returned, a gm notice.
+export type SpyglassDeedKind = 'deed' | 'mcp' | 'adventurer' | 'notice'
+
+// One row of the activity tab: when, what, who did it (empty for this session itself), and how it ended.
+export type SpyglassDeed = {
+  id: string
+  at: number
+  kind: SpyglassDeedKind
+  who: string
+  title: string
+  detail: string
+  status: 'running' | 'ok' | 'error'
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'guild-spyglass': {
@@ -39,6 +53,8 @@ declare module 'claude-code' {
       postingOpen: string
       files: SpyglassFiles
       trees: SpyglassTree[]
+      deeds: SpyglassDeed[]
+      activityFilter: string
     }
   }
 }

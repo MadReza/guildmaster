@@ -1,7 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren, RenderInput, Timer } from 'claude-code'
 
-import type { SpyglassChangedFile, SpyglassFileGroup, SpyglassFiles, SpyglassPostings, SpyglassTree } from '../types'
+import type { SpyglassChangedFile, SpyglassDeed, SpyglassFileGroup, SpyglassFiles, SpyglassPostings, SpyglassTree } from '../types'
+import { activityTab, describeCall, FILTERS, isNoticeCommand, KEEP, noticeLines, type Filter } from './tabs/activity'
 import { filesTab, lineCount, merged, openArgv, parseNumstat, untracked } from './tabs/files'
 import { listArgs, parsePostings, postingsTab } from './tabs/postings'
 
@@ -23,6 +24,7 @@ export type Tab = { id: string; title: string; seats: readonly Seat[] }
 export const TABS: readonly Tab[] = [
   { id: 'postings', title: 'Postings', seats: ['guildmaster', 'party-leader'] },
   { id: 'files', title: 'Files', seats: ['party-leader', 'other'] },
+  { id: 'activity', title: 'Activity', seats: ['guildmaster', 'party-leader', 'other'] },
 ]
 
 // What the tab's body draws.
@@ -44,6 +46,14 @@ async function body($: EngineInterface, e: RenderInput<'Pane'>, id: string): Pro
         open: (group, file) => void openFile($, group, file),
         refresh: () => void refreshFiles($),
       })
+    case 'activity': {
+      const chosen = await read($, activityFilter)
+      const filter: Filter = FILTERS.find(f => f.id === chosen)?.id ?? 'all'
+      return activityTab($.ui.resolve(e), await read($, deeds), filter, {
+        filter: f => void update($, activityFilter, () => f),
+        clear: () => void update($, deeds, () => []),
+      })
+    }
     default:
       return <Text dimColor>Nothing here yet.</Text>
   }
@@ -207,6 +217,23 @@ async function openFile($: EngineInterface, group: SpyglassFileGroup, file: Spyg
   }
 }
 
+// The activity tab's rows, oldest first, and the filter it shows them through.
+const deeds = atom({ plugin: 'guild-spyglass', key: 'deeds' } as const, [] as SpyglassDeed[])
+const activityFilter = atom({ plugin: 'guild-spyglass', key: 'activityFilter' } as const, 'all')
+let deedCount = 0
+
+async function addDeed($: EngineInterface, deed: Omit<SpyglassDeed, 'id' | 'at'> & { id?: string }): Promise<string> {
+  const id = deed.id ?? `d${(deedCount += 1)}`
+  const at = await $.clock.now()
+  await update($, deeds, list => [...list, { ...deed, id, at }].slice(-KEEP))
+  return id
+}
+
+const endDeed = ($: EngineInterface, id: string, status: SpyglassDeed['status']) =>
+  update($, deeds, list => list.map(d => (d.id === id ? { ...d, status } : d)))
+
+const adventurerName = (agentId: string | undefined) => (agentId === undefined ? '' : adventurers.get(agentId) ?? 'adventurer')
+
 // What the tabs draw from, read again: at the open, every few seconds while the pane is up, and after this session's
 // own gm commands, so a change made in any session shows here soon.
 const EVERY_MS = 5000
@@ -261,13 +288,30 @@ export const register: Register = on => {
     return started
   })
 
-  // An adventurer's edit names its working tree; the camp's own changes are read from git at each refresh.
+  // Every deed is an activity row while it runs and after, with the notice lines a gm command printed. An adventurer's
+  // edit also names its working tree; the camp's own changes are read from git at each refresh.
   on('tool.call', async ($, e, next) => {
+    const { tool, tool_use_id: toolUseId, agentId, ...input } = e
+    const id = await addDeed($, { id: `t:${toolUseId}`, ...describeCall(tool, input), who: adventurerName(agentId), status: 'running' })
     const ran = await next(e)
-    if (e.agentId === undefined) return ran
+    await endDeed($, id, ran.isError ? 'error' : 'ok')
+    if (e.tool === 'Bash' && !ran.isError && isNoticeCommand(e.command)) {
+      const out = (ran.result as { stdout?: unknown } | undefined)?.stdout
+      for (const line of noticeLines(typeof out === 'string' ? out : ran.text ?? '')) {
+        await addDeed($, { kind: 'notice', title: line, detail: '', who: adventurerName(agentId), status: 'ok' })
+      }
+    }
+    if (agentId === undefined) return ran
     const path = e.tool === 'Edit' || e.tool === 'Write' ? e.file_path : e.tool === 'NotebookEdit' ? e.notebook_path : undefined
-    if (path) await noteTree($, path, e.agentId)
+    if (path) await noteTree($, path, agentId)
     return ran
+  })
+
+  // An adventurer's return, whether it ran in the foreground or the background.
+  on('classic.SubagentStop', async ($, e, next) => {
+    await addDeed($, { kind: 'adventurer', title: `${adventurers.get(e.agent_id) ?? e.agent_type} returns`,
+      detail: (e.last_assistant_message ?? '').replace(/\s+/g, ' ').slice(0, 160), who: '', status: 'ok' })
+    return next(e)
   })
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
