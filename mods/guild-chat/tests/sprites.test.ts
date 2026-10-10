@@ -25,12 +25,15 @@ function world(on: On, conf: string | undefined, env: Record<string, string> = {
     e.path === CONF && conf !== undefined
       ? { value: { kind: 'file' as const, size: conf.length, mtimeMs: 1000, isLink: false } }
       : { deny: `ENOENT: ${e.path}` })
+  // A folded band: while it is set, the surface refuses every repaint, as it does for a Raster not on screen.
+  let folded = false
   on('ui.blit', async (_$, e) => {
+    if (folded) return { value: { deny: 'not mounted' } }
     blits.push(e.requestId)
     return { value: {} }
   })
   on('ui.render', () => ({ type: 'Text', props: {}, children: [STOCK] }))
-  return { blits, clock }
+  return { blits, clock, fold: (is: boolean) => (folded = is) }
 }
 
 const spinner = { component: 'Spinner', props: { word: 'Sauteing', message: null, suffix: '…', mode: 'responding' } } as const
@@ -215,6 +218,29 @@ describe('while the session waits', () => {
     const raster = await ui.find({ type: 'Raster' })
     expect(raster).toBeDefined()
     expect(glyphs(raster!.props.cells as string, raster!.props.columns as number)[1]).toContain('▟▌▐▙')
+  })
+
+  test('the campfire burns on after the band is folded away and shown again', async ($, on) => {
+    const { blits, clock, fold } = world(on, '')
+    const ui = await $.ui.mount({ plugin: 'guild-chat', surface: 'terminal', viewport, ...band(false) })
+    expect(await ui.find({ type: 'Raster' })).toBeDefined()
+    fold(true)
+    await clock.advance(1000)
+    const before = blits.length
+    fold(false)
+    await clock.advance(1000)
+    expect(blits.length - before).toBeGreaterThan(3)
+  })
+
+  test('the working row stops repainting once its turn is over', async ($, on) => {
+    const { blits, clock, fold } = world(on, '')
+    await $.ui.mount({ plugin: 'guild-chat', surface: 'terminal', viewport, ...spinner })
+    fold(true)
+    await clock.advance(1000)
+    fold(false)
+    const before = blits.length
+    await clock.advance(1000)
+    expect(blits.length).toBe(before)
   })
 
   test('the campfire is out while a turn runs', async ($, on) => {

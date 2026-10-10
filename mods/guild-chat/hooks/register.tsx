@@ -295,9 +295,11 @@ async function meterLines($: EngineInterface): Promise<[string, string]> {
 }
 
 // Every site drawing a sprite now, by its requestId: which sprite, its tick count, its size, whether the turn's meter
-// stands beside it, and its clock. A site's clock stops when a repaint is refused, which is how the mod learns the
-// turn or the wait is over.
-type Site = { sprite: SpriteName; t: number; columns: number; meter: boolean; timer: { cancel(): void } }
+// stands beside it, and its clock. The working row's clock stops when a repaint is refused, which is how the mod
+// learns the turn is over. The band above the prompt keeps its clock through a refusal: the patron can fold the band
+// away and show it again, and showing it draws the tree it had without asking the hook again, so only a clock still
+// running moves its sprite on. Its clock stops when the hook draws something else there.
+type Site = { sprite: SpriteName; t: number; columns: number; meter: boolean; keep: boolean; timer: { cancel(): void } }
 const sites = new Map<string, Site>()
 const RASTER_KEY = 'guild-sprite'
 
@@ -317,12 +319,12 @@ async function repaint($: EngineInterface, requestId: string, site: Site): Promi
     requestId, key: RASTER_KEY, columns: site.columns, rows: SPRITE_ROWS,
     cells: packFrame(await frameOf($, site), site.columns, await paletteOf($)),
   })
-  if (result.deny !== undefined && sites.get(requestId) === site) forget(requestId)
+  if (result.deny !== undefined && !site.keep && sites.get(requestId) === site) forget(requestId)
 }
 
 // The sprite's Raster for a site, its clock started, or kept running when the site already draws this sprite. Only a
 // terminal has Rasters: elsewhere there is none.
-async function spriteRaster($: EngineInterface, e: RenderInput, sprite: SpriteName, meter = false) {
+async function spriteRaster($: EngineInterface, e: RenderInput, sprite: SpriteName, { meter = false, keep = false } = {}) {
   const elements = $.ui.resolve(e)
   if (e.surface !== 'terminal' || !('Raster' in elements)) return undefined
   const { Raster } = elements
@@ -330,7 +332,7 @@ async function spriteRaster($: EngineInterface, e: RenderInput, sprite: SpriteNa
   let site = sites.get(e.requestId)
   if (!site || site.sprite !== sprite || site.columns !== columns || site.meter !== meter) {
     forget(e.requestId)
-    const fresh: Site = { sprite, t: 0, columns, meter, timer: { cancel() {} } }
+    const fresh: Site = { sprite, t: 0, columns, meter, keep, timer: { cancel() {} } }
     fresh.timer = $.clock.every(spriteTick(sprite), () => void repaint($, e.requestId, fresh))
     sites.set(e.requestId, fresh)
     site = fresh
@@ -432,7 +434,7 @@ export const register: Register = on => {
       return next(e)
     }
     turnStartedAt ??= await $.clock.now()
-    const raster = await spriteRaster($, e, sprite, true)
+    const raster = await spriteRaster($, e, sprite, { meter: true })
     if (!raster) return next(e)
     if (e.props.message === null) return raster
     const drawn = await next(e)
@@ -455,7 +457,7 @@ export const register: Register = on => {
       forget(e.requestId)
       return next(e)
     }
-    const raster = await spriteRaster($, e, sprite)
+    const raster = await spriteRaster($, e, sprite, { keep: true })
     if (!raster) return next(e)
     const { Box } = $.ui.resolve(e)
     return <Box flexDirection="column">{raster}</Box>
