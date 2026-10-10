@@ -62,7 +62,7 @@ The **veil** is the chat's quiet view: deeds, adventurers and short notes drawn 
 | --- | --- | --- |
 | `deeds` | `ToolUse` of every tool but an adventurer's, `ToolResult`, and every `ToolGroup`, one holding an adventurer's call included | the render component, and `ToolUse`'s `tool` |
 | `adventurers` | `ToolUse` of `Agent` or `Task` (`⛨ ADVENTURER · …`), and a `UserMessage` whose origin is a task notification (`⛨ ADVENTURER · returns`) | `isAdventurer` and `origin.kind`, as the banners tell them today |
-| `notes` | Short narration between deeds: a text block from a model step that stopped to call tools, with no newline and under 240 characters | Firstmate's rule, learned from `turn.step` the same way, and read back from the conversation at every `session.start` |
+| `notes` | Short narration between deeds: a text block from a model step that stopped to call tools, with no newline and under 240 characters | Firstmate's rule, learned from `turn.step` the same way, and read back from the conversation at every `session.start`; and every summary row (`isSummary`), Claude Code's stand-in for the text between two tool calls, whatever its length |
 | `progress` | `ToolProgress`, the dim hint under a running deed, such as `(ctrl+b to run in background)` | the render component |
 
 The mod's memory of which blocks were notes starts empty at every load of the module: a hot reload (a mod or skill folder changing under a session), `--continue` and `--resume`, while the rows it drew are still on screen.
@@ -76,7 +76,7 @@ A deed or adventurer that errored or was interrupted (a refusal at a permission 
 
 - The patron's messages.
 - Routed messages: a `UserMessage` with `from`, drawn under its sender's green banner, since someone is speaking to the session.
-- The reply that ends each turn (`⚔ GUILDMASTER`, `⚔ PARTY LEADER · …`), and any narration with a newline or of 240 characters or more.
+- The reply that ends each turn (`⚔ GUILDMASTER`, `⚔ PARTY LEADER · …`), and any narration with a newline or of 240 characters or more that Claude Code draws as written. A summary it draws in its place is a note.
 - **A step that hit a limit.** A model step whose `stopReason` is `max_tokens` (the reply ran out of output tokens) or `model_context_window_exceeded` (the conversation no longer fits) is never veiled: not its text, and not the deeds and adventurers it carried. That is the one stop the patron needs to see, because the session is stuck there and nobody will report it afterwards. Firstmate's notes rule hides such a step's short text; this one does not.
 - What Claude Code draws outside the transcript, which no mod can hide: the permission dialog, the `AskUserQuestion` dialog, and the working row, which still says the session is busy while the deeds are hidden.
 

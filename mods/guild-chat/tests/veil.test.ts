@@ -286,6 +286,19 @@ describe('notes', () => {
     expect(isHidden(await $.ui.render(said(short)))).toBe(true)
   })
 
+  test('a summary Claude Code draws in place of narration between deeds hides, whatever its length', async ($, on) => {
+    world(on, 'veil: on\n')
+    const summary = (text: string) => ({ ...said(text), props: { text, isFirstOfReply: true, isSummary: true as const } })
+    expect(isHidden(await $.ui.render(summary('Checked the stored lines; they look clean.')))).toBe(true)
+    expect(isHidden(await $.ui.render(summary(`${long}\nand more`)))).toBe(true)
+    expect(isHidden(await $.ui.render(said('Checked the stored lines; they look clean.')))).toBe(false)
+  })
+
+  test('with notes left out of veil-hides, a summary shows', async ($, on) => {
+    world(on, 'veil: on\nveil-hides: deeds\n')
+    expect(isHidden(await $.ui.render({ ...said(short), props: { text: short, isFirstOfReply: true, isSummary: true as const } }))).toBe(false)
+  })
+
   test('with notes left out of veil-hides, a short line shows', async ($, on) => {
     world(on, 'veil: on\nveil-hides: deeds\n')
     const step = stepper(on)

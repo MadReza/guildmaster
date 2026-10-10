@@ -543,8 +543,11 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
+    // A summary is Claude Code's stand-in for what the model wrote between two tool calls: narration between deeds
+    // whatever its length, and never the text it learned, so it is told by the mark alone.
     const key = noteKey(e.props.text)
-    if (notes.has(key) && !replies.has(key) && (await hides($, 'notes'))) return hidden($, e)
+    const note = e.props.isSummary === true || (notes.has(key) && !replies.has(key))
+    if (note && (await hides($, 'notes'))) return hidden($, e)
     if (!e.props.isFirstOfReply) return next(e)
     const focus = (await $.env.get('GM_CHAT_FOCUS')) || (await $.env.get('GM_FOCUS'))
     return draw($, e, next, focus
