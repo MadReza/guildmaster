@@ -1,7 +1,10 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren, RenderInput, Timer } from 'claude-code'
 
-import type { SpyglassChangedFile, SpyglassDeed, SpyglassFileGroup, SpyglassFiles, SpyglassPostings, SpyglassSettings, SpyglassTree } from '../types'
+import type {
+  SpyglassChangedFile, SpyglassContext, SpyglassDeed, SpyglassFileGroup, SpyglassFiles, SpyglassPostings, SpyglassSettings, SpyglassTree,
+} from '../types'
+import { contextOf, contextTab } from './tabs/context'
 import { configsTab, parseSettings } from './tabs/configs'
 import { activityTab, describeCall, FILTERS, isNoticeCommand, KEEP, noticeLines, type Filter } from './tabs/activity'
 import { filesTab, lineCount, merged, openArgv, parseNumstat, untracked } from './tabs/files'
@@ -27,6 +30,7 @@ export const TABS: readonly Tab[] = [
   { id: 'files', title: 'Files', seats: ['party-leader', 'other'] },
   { id: 'activity', title: 'Activity', seats: ['guildmaster', 'party-leader', 'other'] },
   { id: 'configs', title: 'Configs', seats: ['guildmaster', 'party-leader'] },
+  { id: 'context', title: 'Context', seats: ['guildmaster', 'party-leader', 'other'] },
 ]
 
 // What the tab's body draws.
@@ -62,6 +66,11 @@ async function body($: EngineInterface, e: RenderInput<'Pane'>, id: string): Pro
         set: (key, words) => void changeSetting($, ['set', key, ...words]),
         unset: key => void changeSetting($, ['unset', key]),
         refresh: () => void refreshSettings($),
+      })
+    case 'context':
+      return contextTab($.ui.resolve(e), await read($, context), e.props.bodyColumns, await $.clock.now(), {
+        refresh: () => void refreshContext($, 'summary'),
+        count: () => void refreshContext($, 'full'),
       })
     default:
       return <Text dimColor>Nothing here yet.</Text>
@@ -174,10 +183,15 @@ async function noteTree($: EngineInterface, path: string, agentId: string): Prom
   await update($, trees, list => (list.some(t => t.root === root) ? list : [...list, { root, label }]))
 }
 
-// One tree's changes against where it left the base, or since its last commit when it has no base.
+// git's empty tree: what a repository with no commit yet is compared against.
+const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+
+// One tree's changes against where it left the base, since its last commit when it has no base, or everything when
+// it has no commit yet.
 async function changesIn($: EngineInterface, root: string): Promise<{ files: SpyglassChangedFile[] } | { why: string }> {
   const base = await git($, ['-C', root, 'merge-base', 'HEAD', 'origin/HEAD'])
-  const from = 'out' in base && base.out.trim() ? base.out.trim() : 'HEAD'
+  const head = 'out' in base ? undefined : await git($, ['-C', root, 'rev-parse', '--verify', '--quiet', 'HEAD'])
+  const from = 'out' in base && base.out.trim() ? base.out.trim() : head && 'why' in head ? EMPTY_TREE : 'HEAD'
   const tracked = await git($, ['-C', root, 'diff', '--numstat', '-z', '--no-renames', from])
   if ('why' in tracked) return { why: `git cannot read ${root}: ${tracked.why}` }
   const others = await git($, ['-C', root, 'ls-files', '--others', '--exclude-standard', '-z'])
@@ -243,6 +257,20 @@ async function changeSetting($: EngineInterface, args: string[]): Promise<void> 
   await refreshSettings($)
 }
 
+// The context tab's figures. The plain read costs nothing and keeps the breakdown last estimated or counted.
+const context = atom({ plugin: 'guild-spyglass', key: 'context' } as const, { isLoaded: false, window: 0, limits: [] } as SpyglassContext)
+
+async function refreshContext($: EngineInterface, breakdown?: 'summary' | 'full'): Promise<void> {
+  try {
+    const usage = await $.session.usage(breakdown ? { breakdown } : undefined)
+    const fresh = contextOf(usage, breakdown)
+    await update($, context, held => ({ ...fresh, breakdown: fresh.breakdown ?? held.breakdown }))
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err)
+    await update($, context, held => ({ ...held, isLoaded: true, why }))
+  }
+}
+
 // The activity tab's rows, oldest first, and the filter it shows them through.
 const deeds = atom({ plugin: 'guild-spyglass', key: 'deeds' } as const, [] as SpyglassDeed[])
 const activityFilter = atom({ plugin: 'guild-spyglass', key: 'activityFilter' } as const, 'all')
@@ -271,6 +299,7 @@ async function refresh($: EngineInterface): Promise<void> {
   if (offered.some(t => t.id === 'postings')) await refreshPostings($, await focusOf($))
   if (offered.some(t => t.id === 'files')) await refreshFiles($)
   if (offered.some(t => t.id === 'configs')) await refreshSettings($)
+  if (offered.some(t => t.id === 'context')) await refreshContext($)
 }
 
 function startWatch($: EngineInterface): void {
@@ -334,6 +363,13 @@ export const register: Register = on => {
     return ran
   })
 
+  // A turn's end changes what fills the context: the estimate is made again while the pane is up.
+  on('turn.complete', async ($, e, next) => {
+    const done = await next(e)
+    if (watch) await refreshContext($, 'summary')
+    return done
+  })
+
   // An adventurer's return, whether it ran in the foreground or the background.
   on('classic.SubagentStop', async ($, e, next) => {
     await addDeed($, { kind: 'adventurer', title: `${adventurers.get(e.agent_id) ?? e.agent_type} returns`,
@@ -367,6 +403,7 @@ export const register: Register = on => {
     }
     startWatch($)
     await refresh($)
+    await refreshContext($, 'summary')
     return {}
   })
 

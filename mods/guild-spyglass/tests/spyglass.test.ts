@@ -4,6 +4,7 @@ import { describe, expect, mock, test, type Engine } from 'claude-code/testing'
 import { PANE, seatFrom, shown, tabsFor, type Tab } from '../hooks/register'
 import { clock, describeCall, isNoticeCommand, noticeLines, shownDeeds } from '../hooks/tabs/activity'
 import { parseSettings, toggledWords } from '../hooks/tabs/configs'
+import { bar, kTokens, resetsIn } from '../hooks/tabs/context'
 import { lineCount, merged, openArgv, parseNumstat, untracked } from '../hooks/tabs/files'
 import { listArgs, parsePostings, stateMark, tally } from '../hooks/tabs/postings'
 
@@ -21,7 +22,7 @@ const row = (focus: string, num: number, slug: string, state: string, more: Part
 
 // A working tree as the stand-in git knows it: its tracked changes as numstat lines, its untracked files and what
 // they hold, and whether it has a base to diff from.
-type Tree = { numstat: string[]; untracked: Record<string, string>; hasBase: boolean; broken?: string }
+type Tree = { numstat: string[]; untracked: Record<string, string>; hasBase: boolean; broken?: string; noCommit?: boolean }
 
 type Setting = { key: string; value: string; source: string; default: string; kind: string; description: string; env: string; choices: string[]; isMulti: boolean }
 const setting = (key: string, value: string, more: Partial<Setting> = {}): Setting =>
@@ -33,7 +34,8 @@ type World = {
   trees: Map<string, Tree>
   conf?: string
   settings: Setting[]
-  clock: { advance: (ms: number) => Promise<void> }
+  usage: { tokens?: number; percent?: number; asked: (string | undefined)[]; fails?: string }
+  clock: { advance: (ms: number) => Promise<void>; now: () => number }
   journal: { opens: string[]; closes: string[]; toasts: string[]; commands: string[]; runs: string[][]; gits: string[][]; edits: string[][] }
   failGm: (why: string | undefined) => void
 }
@@ -41,7 +43,7 @@ type World = {
 function world(on: On, env: Record<string, string> = LEADER, placed = true): World {
   const panes = new Set<string>()
   const journal: World['journal'] = { opens: [], closes: [], toasts: [], commands: [], runs: [], gits: [], edits: [] }
-  const w: World = { panes, board: [], trees: new Map(), settings: [], clock: mock.clock(on), journal, failGm: why => (failure = why) }
+  const w: World = { panes, board: [], trees: new Map(), settings: [], usage: { tokens: 124000, percent: 62, asked: [] }, clock: mock.clock(on), journal, failGm: why => (failure = why) }
   let failure: string | undefined
   mock.env(on, env)
   on('fs.read', async (_$, e) => {
@@ -64,6 +66,7 @@ function world(on: On, env: Record<string, string> = LEADER, placed = true): Wor
       const root = [...w.trees.keys()].find(r => dir === r || dir.startsWith(`${r}/`))
       const t = root ? w.trees.get(root) : undefined
       if (!root || !t) return no('fatal: not a git repository')
+      if (rest[0] === 'rev-parse' && rest[1] === '--verify') return t.noCommit ? no('') : ok('abc999\n')
       if (rest[0] === 'rev-parse') return ok(`${root}\n`)
       if (rest[0] === 'merge-base') return t.hasBase ? ok('abc123\n') : no('fatal: Not a valid object name origin/HEAD')
       if (t.broken) return no(t.broken)
@@ -92,6 +95,26 @@ function world(on: On, env: Record<string, string> = LEADER, placed = true): Wor
     const rows = w.board.filter(r => (!focus || r.focus === focus) && (all || !['done', 'closed'].includes(r.state)))
       .map(r => ({ updated: '2026-10-10T02:00:00Z', why: null, until: null, last: null, ...r }))
     return { value: { exitCode: 0, stdout: JSON.stringify(rows), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  // The status line's figures, and /context's breakdown when asked for one.
+  on('session.usage', async (_$, e) => {
+    w.usage.asked.push(e?.breakdown)
+    if (w.usage.fails) return { deny: w.usage.fails }
+    const breakdown = e?.breakdown ? {
+      categories: [
+        { name: 'Messages', tokens: 90000, color: '#4a7bd9', isDeferred: false, kind: 'used' as const },
+        { name: 'MCP tools', tokens: 20000, color: '#9b59b6', isDeferred: false, kind: 'used' as const },
+        { name: 'Free space', tokens: 50000, color: '#888888', isDeferred: false, kind: 'free' as const },
+        { name: 'Empty', tokens: 0, color: '#888888', isDeferred: false, kind: 'used' as const },
+      ],
+      totalTokens: 120000, maxTokens: 200000, rawMaxTokens: 200000, autocompactSource: 'model' as never, percentage: 60, gridRows: [], model: 'm',
+      memoryFiles: [{ path: '/camps/appt-v2/CLAUDE.md', type: 'Project', tokens: 900 }],
+      mcpTools: [{ name: 'a', serverName: 'linear', tokens: 12000, isLoaded: true }, { name: 'b', serverName: 'linear', tokens: 3000, isLoaded: true },
+        { name: 'c', serverName: 'gmail', tokens: 5000, isLoaded: true }],
+      agents: [], autoCompactThreshold: 160000, isAutoCompactEnabled: true, apiUsage: null,
+    } : undefined
+    return { value: { startedAt: 0, context: { tokens: w.usage.tokens, window: 200000, percent: w.usage.percent, breakdown },
+      rateLimits: [{ kind: 'five_hour', percentUsed: 30, resetsAt: new Date(w.clock.now() + 3 * 3600_000 + 43 * 60_000).toISOString() }], cost: { usd: 1.234 } } }
   })
   on('command.register', async (_$, e) => {
     journal.commands.push(e.name)
@@ -401,6 +424,14 @@ describe('the files tab', () => {
     expect(w.journal.edits[0]?.[2]).toBe('open "$1"')
   })
 
+  test('a repository with no commit yet is read against the empty tree', async ($, on) => {
+    const w = world(on)
+    w.trees.set(CAMP, { numstat: [], untracked: { 'a.txt': 'hi\n' }, hasBase: false, noCommit: true })
+    const ui = await opened($)
+    expect(await texts(ui)).toMatch(/a\.txt\s*\+1\s*new/)
+    expect(w.journal.gits).toContainEqual(['git', '-C', CAMP, 'diff', '--numstat', '-z', '--no-renames', '4b825dc642cb6eb9a060e54bf8d69288fbee4904'])
+  })
+
   test('says why when git cannot read a tree, and when the session is in none', async ($, on) => {
     const w = world(on)
     w.trees.set(CAMP, { numstat: [], untracked: {}, hasBase: true, broken: 'fatal: bad object' })
@@ -602,5 +633,78 @@ describe('the configs tab', () => {
     expect(toggledWords('deeds', 'progress')).toEqual(['deeds', 'progress'])
     expect(toggledWords('quill', 'none')).toEqual(['none'])
     expect(toggledWords('none', 'quill')).toEqual(['quill'])
+  })
+})
+
+describe('the context tab', () => {
+  const opened = async ($: Engine, surface: 'terminal' | 'desktop' = 'terminal') => {
+    await $.session.start(sessionStart)
+    await $.command.run(spyglass())
+    const ui = await $.ui.mount(pane(surface))
+    await ui.press({ key: 'tab:context' })
+    return ui
+  }
+  const texts = async (ui: { findAll: (q: { type: 'Text' | 'Button' }) => Promise<{ text?: string }[]> }) =>
+    (await ui.findAll({ type: 'Text' })).map(t => t.text ?? '').join('\n')
+
+  test('the fill, the cost, when it compacts, and what fills it, estimated at the open', async ($, on) => {
+    const w = world(on)
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const ui = await opened($, surface)
+      const all = await texts(ui)
+      expect(all).toContain('124k of 200k tokens · 62%')
+      expect(all).toContain('$1.23')
+      expect(all).toContain('compacts at 160k, 40k from now')
+      expect(all).toContain('five_hour: 30% used, resets in 3h 43m')
+      expect(all).toContain('(estimated)')
+      expect(all).toMatch(/90k Messages/)
+      expect(all).not.toContain('Empty')
+      expect(all.indexOf('15k linear')).toBeLessThan(all.indexOf('5k gmail'))
+      expect(all).toContain('1 tool')
+      expect(all).toContain('900 /camps/appt-v2/CLAUDE.md')
+      expect(w.usage.asked).toContain('summary')
+      await ui.unmount()
+      await $.command.run(spyglass('close'))
+    }
+  })
+
+  test('Count exactly asks for the token-count API\'s figures; the watch reads only the free ones and keeps the breakdown', async ($, on) => {
+    const w = world(on)
+    const ui = await opened($)
+    await ui.press({ key: 'context:count' })
+    expect(w.usage.asked.at(-1)).toBe('full')
+    expect(await texts(ui)).toContain('(counted)')
+    w.usage.tokens = 150000
+    w.usage.percent = 75
+    await w.clock.advance(5000)
+    expect(w.usage.asked.at(-1)).toBeUndefined()
+    expect(await texts(ui)).toContain('150k of 200k tokens · 75%')
+    expect(await texts(ui)).toContain('(counted)')
+  })
+
+  test('before the first reply, and when the engine will not say', async ($, on) => {
+    const w = world(on)
+    w.usage.tokens = undefined
+    w.usage.percent = undefined
+    const ui = await opened($)
+    expect(await texts(ui)).toContain('no reply yet')
+    w.usage.fails = 'no session bound'
+    await ui.press({ key: 'context:refresh' })
+    expect(await texts(ui)).toMatch(/The context cannot be read: .*no session bound/)
+  })
+
+  test('draws its figures as the tab holds them', () => {
+    expect(kTokens(999)).toBe('999')
+    expect(kTokens(1500)).toBe('1.5k')
+    expect(kTokens(124000)).toBe('124k')
+    expect(kTokens(1_000_000)).toBe('1M')
+    expect(kTokens(1_500_000)).toBe('1.5M')
+    expect(resetsIn('2026-10-12T17:00:00Z', Date.parse('2026-10-10T02:30:00Z'))).toBe('in 2d 14h')
+    expect(resetsIn('2026-10-10T02:40:00Z', Date.parse('2026-10-10T02:30:00Z'))).toBe('in 10m')
+    expect(resetsIn('2026-10-10T02:00:00Z', Date.parse('2026-10-10T02:30:00Z'))).toBe('now')
+    expect(resetsIn('soon', 0)).toBe('soon')
+    expect(bar(50, 100, 10)).toEqual({ filled: '█████', empty: '░░░░░' })
+    expect(bar(500, 100, 4)).toEqual({ filled: '████', empty: '' })
+    expect(bar(1, 0, 3)).toEqual({ filled: '', empty: '░░░' })
   })
 })

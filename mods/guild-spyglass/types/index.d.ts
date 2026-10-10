@@ -61,6 +61,27 @@ export type SpyglassSetting = {
 // The settings as the configs tab last read them, or why gm could not.
 export type SpyglassSettings = { rows: SpyglassSetting[]; why?: string; isLoaded: boolean }
 
+// The context window as the context tab last read it: the status line's fill, cost and rate limits, and, when it
+// was estimated or counted, what fills it.
+export type SpyglassContext = {
+  isLoaded: boolean
+  why?: string
+  tokens?: number
+  window: number
+  percent?: number
+  usd?: number
+  limits: { kind: string; percentUsed: number; resetsAt?: string }[]
+  breakdown?: {
+    counted: 'summary' | 'full'
+    totalTokens: number
+    maxTokens: number
+    autoCompactAt?: number
+    categories: { name: string; tokens: number; color: string; kind: string }[]
+    servers: { server: string; tokens: number; tools: number }[]
+    memory: { path: string; tokens: number }[]
+  }
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'guild-spyglass': {
@@ -74,6 +95,7 @@ declare module 'claude-code' {
       activityFilter: string
       settings: SpyglassSettings
       settingOpen: string
+      context: SpyglassContext
     }
   }
 }
