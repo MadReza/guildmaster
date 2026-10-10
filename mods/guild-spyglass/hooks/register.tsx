@@ -1,7 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren, RenderInput, Timer } from 'claude-code'
 
-import type { SpyglassChangedFile, SpyglassDeed, SpyglassFileGroup, SpyglassFiles, SpyglassPostings, SpyglassTree } from '../types'
+import type { SpyglassChangedFile, SpyglassDeed, SpyglassFileGroup, SpyglassFiles, SpyglassPostings, SpyglassSettings, SpyglassTree } from '../types'
+import { configsTab, parseSettings } from './tabs/configs'
 import { activityTab, describeCall, FILTERS, isNoticeCommand, KEEP, noticeLines, type Filter } from './tabs/activity'
 import { filesTab, lineCount, merged, openArgv, parseNumstat, untracked } from './tabs/files'
 import { listArgs, parsePostings, postingsTab } from './tabs/postings'
@@ -25,6 +26,7 @@ export const TABS: readonly Tab[] = [
   { id: 'postings', title: 'Postings', seats: ['guildmaster', 'party-leader'] },
   { id: 'files', title: 'Files', seats: ['party-leader', 'other'] },
   { id: 'activity', title: 'Activity', seats: ['guildmaster', 'party-leader', 'other'] },
+  { id: 'configs', title: 'Configs', seats: ['guildmaster', 'party-leader'] },
 ]
 
 // What the tab's body draws.
@@ -54,6 +56,13 @@ async function body($: EngineInterface, e: RenderInput<'Pane'>, id: string): Pro
         clear: () => void update($, deeds, () => []),
       })
     }
+    case 'configs':
+      return configsTab($.ui.resolve(e), await read($, settings), await read($, settingOpen), {
+        toggle: key => void update($, settingOpen, v => (v === key ? '' : key)),
+        set: (key, words) => void changeSetting($, ['set', key, ...words]),
+        unset: key => void changeSetting($, ['unset', key]),
+        refresh: () => void refreshSettings($),
+      })
     default:
       return <Text dimColor>Nothing here yet.</Text>
   }
@@ -217,6 +226,23 @@ async function openFile($: EngineInterface, group: SpyglassFileGroup, file: Spyg
   }
 }
 
+// The configs tab's settings, and the one opened.
+const settings = atom({ plugin: 'guild-spyglass', key: 'settings' } as const, { rows: [], isLoaded: false } as SpyglassSettings)
+const settingOpen = atom({ plugin: 'guild-spyglass', key: 'settingOpen' } as const, '')
+
+async function refreshSettings($: EngineInterface): Promise<void> {
+  const got = await runGm($, ['config', '--json'])
+  const next: SpyglassSettings = 'why' in got ? { rows: [], why: got.why, isLoaded: true } : { rows: parseSettings(got.out), isLoaded: true }
+  await update($, settings, () => next)
+}
+
+// gm config set or unset, through the guild's gm: what it says goes under the prompt, and the tab reads the file again.
+async function changeSetting($: EngineInterface, args: string[]): Promise<void> {
+  const got = await runGm($, ['config', ...args])
+  $.ui.toast('why' in got ? `Unchanged: ${got.why}` : got.out.trim().split('\n')[0] ?? '')
+  await refreshSettings($)
+}
+
 // The activity tab's rows, oldest first, and the filter it shows them through.
 const deeds = atom({ plugin: 'guild-spyglass', key: 'deeds' } as const, [] as SpyglassDeed[])
 const activityFilter = atom({ plugin: 'guild-spyglass', key: 'activityFilter' } as const, 'all')
@@ -244,6 +270,7 @@ async function refresh($: EngineInterface): Promise<void> {
   const offered = tabsFor(seat)
   if (offered.some(t => t.id === 'postings')) await refreshPostings($, await focusOf($))
   if (offered.some(t => t.id === 'files')) await refreshFiles($)
+  if (offered.some(t => t.id === 'configs')) await refreshSettings($)
 }
 
 function startWatch($: EngineInterface): void {

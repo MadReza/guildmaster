@@ -3,6 +3,7 @@ import { describe, expect, mock, test, type Engine } from 'claude-code/testing'
 
 import { PANE, seatFrom, shown, tabsFor, type Tab } from '../hooks/register'
 import { clock, describeCall, isNoticeCommand, noticeLines, shownDeeds } from '../hooks/tabs/activity'
+import { parseSettings, toggledWords } from '../hooks/tabs/configs'
 import { lineCount, merged, openArgv, parseNumstat, untracked } from '../hooks/tabs/files'
 import { listArgs, parsePostings, stateMark, tally } from '../hooks/tabs/postings'
 
@@ -22,11 +23,16 @@ const row = (focus: string, num: number, slug: string, state: string, more: Part
 // they hold, and whether it has a base to diff from.
 type Tree = { numstat: string[]; untracked: Record<string, string>; hasBase: boolean; broken?: string }
 
+type Setting = { key: string; value: string; source: string; default: string; kind: string; description: string; env: string; choices: string[]; isMulti: boolean }
+const setting = (key: string, value: string, more: Partial<Setting> = {}): Setting =>
+  ({ key, value, source: 'default', default: value, kind: 'text', description: `what ${key} is`, env: '', choices: [], isMulti: false, ...more })
+
 type World = {
   panes: Set<string>
   board: Row[]
   trees: Map<string, Tree>
   conf?: string
+  settings: Setting[]
   clock: { advance: (ms: number) => Promise<void> }
   journal: { opens: string[]; closes: string[]; toasts: string[]; commands: string[]; runs: string[][]; gits: string[][]; edits: string[][] }
   failGm: (why: string | undefined) => void
@@ -35,7 +41,7 @@ type World = {
 function world(on: On, env: Record<string, string> = LEADER, placed = true): World {
   const panes = new Set<string>()
   const journal: World['journal'] = { opens: [], closes: [], toasts: [], commands: [], runs: [], gits: [], edits: [] }
-  const w: World = { panes, board: [], trees: new Map(), clock: mock.clock(on), journal, failGm: why => (failure = why) }
+  const w: World = { panes, board: [], trees: new Map(), settings: [], clock: mock.clock(on), journal, failGm: why => (failure = why) }
   let failure: string | undefined
   mock.env(on, env)
   on('fs.read', async (_$, e) => {
@@ -72,6 +78,15 @@ function world(on: On, env: Record<string, string> = LEADER, placed = true): Wor
     journal.runs.push([...e.argv])
     if (failure) return { value: { exitCode: 1, stdout: '', stderr: `gm: ${failure}\n`, isStdoutTruncated: false, isStderrTruncated: false } }
     const args = e.argv.slice(1)
+    // gm config --json, and gm config set|unset <key> [words]: the settings, and gm's one line for a change.
+    if (args[0] === 'config') {
+      if (args[1] === '--json') return ok(JSON.stringify(w.settings))
+      const [, verb, key = '', ...words] = args
+      const one = w.settings.find(x => x.key === key)
+      if (!one || (verb === 'set' && words.length === 0)) return no(`gm: config: ${key} cannot be ''`)
+      Object.assign(one, verb === 'set' ? { value: words.join(' '), source: 'guild.conf' } : { value: one.default, source: 'default' })
+      return ok(`${key} is ${verb === 'set' ? words.join(' ') : 'its default'}: running sessions follow at their next turn.\n`)
+    }
     const all = args.includes('--all')
     const focus = args.slice(2).find(a => a !== '--all')
     const rows = w.board.filter(r => (!focus || r.focus === focus) && (all || !['done', 'closed'].includes(r.state)))
@@ -282,11 +297,12 @@ describe('the postings tab', () => {
     w.board = [row('appt-v2', 1, 'grey-button', 'queued')]
     const ui = await opened($)
     w.board = [row('appt-v2', 1, 'grey-button', 'active')]
-    const runs = w.journal.runs.length
+    const lists = () => w.journal.runs.filter(r => r[1] === 'list').length
+    const runs = lists()
     await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command: 'ls -la' })
-    expect(w.journal.runs.length).toBe(runs)
+    expect(lists()).toBe(runs)
     await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', command: 'gm notice 1 started' })
-    expect(w.journal.runs.length).toBe(runs + 1)
+    expect(lists()).toBe(runs + 1)
     expect(await texts(ui)).toContain('1 active')
   })
 
@@ -497,5 +513,94 @@ describe('the activity tab', () => {
     const d = (id: string, kind: 'deed' | 'mcp') => ({ id, at: 0, kind, who: '', title: id, detail: '', status: 'ok' as const })
     expect(shownDeeds([d('1', 'deed'), d('2', 'mcp'), d('3', 'deed')], 'all').map(x => x.id)).toEqual(['3', '2', '1'])
     expect(shownDeeds([d('1', 'deed'), d('2', 'mcp')], 'mcp').map(x => x.id)).toEqual(['2'])
+  })
+})
+
+describe('the configs tab', () => {
+  const opened = async ($: Engine, surface: 'terminal' | 'desktop' = 'terminal') => {
+    await $.session.start(sessionStart)
+    await $.command.run(spyglass())
+    const ui = await $.ui.mount(pane(surface))
+    await ui.press({ key: 'tab:configs' })
+    return ui
+  }
+  const texts = async (ui: { findAll: (q: { type: 'Text' | 'Button' }) => Promise<{ text?: string }[]> }) =>
+    [...(await ui.findAll({ type: 'Button' })), ...(await ui.findAll({ type: 'Text' }))].map(t => t.text ?? '').join('\n')
+  const settings = () => [
+    setting('veil', 'off', { kind: 'onoff', choices: ['on', 'off'] }),
+    setting('veil-hides', 'deeds notes', { kind: 'veilhides', choices: ['deeds', 'adventurers', 'notes', 'progress'], isMulti: true, source: 'guild.conf' }),
+    setting('editor', 'open', { kind: 'command' }),
+    setting('telemetry', 'on', { kind: 'onoff', choices: ['on', 'off'], env: 'GM_TELEMETRY', source: 'environment (GM_TELEMETRY)' }),
+  ]
+
+  test('every setting with its value and where it came from; a press opens one to its description', async ($, on) => {
+    const w = world(on)
+    w.settings = settings()
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const ui = await opened($, surface)
+      const all = await texts(ui)
+      expect(all).toMatch(/veil off/)
+      expect(all).toMatch(/veil-hides deeds notes\s*· guild\.conf/)
+      expect(all).not.toContain('what veil is')
+      await ui.press({ key: 'setting-key:veil' })
+      expect(await texts(ui)).toContain('what veil is')
+      await ui.press({ key: 'setting-key:veil' })
+      expect(await texts(ui)).not.toContain('what veil is')
+      await ui.unmount()
+      await $.command.run(spyglass('close'))
+    }
+  })
+
+  test('a switch is set with a press, through the guild\'s gm, which says what it did', async ($, on) => {
+    const w = world(on)
+    w.settings = settings()
+    const ui = await opened($)
+    await ui.press({ key: 'setting-key:veil' })
+    await ui.press({ key: 'set:veil:on' })
+    expect(w.journal.runs).toContainEqual([GM, 'config', 'set', 'veil', 'on'])
+    expect(w.journal.toasts).toContain('veil is on: running sessions follow at their next turn.')
+    expect(await texts(ui)).toMatch(/veil on\s*· guild\.conf/)
+  })
+
+  test('a word of a list is added or taken away, and Default takes the line out', async ($, on) => {
+    const w = world(on)
+    w.settings = settings()
+    const ui = await opened($)
+    await ui.press({ key: 'setting-key:veil-hides' })
+    await ui.press({ key: 'set:veil-hides:progress' })
+    expect(w.journal.runs).toContainEqual([GM, 'config', 'set', 'veil-hides', 'deeds', 'notes', 'progress'])
+    await ui.press({ key: 'set:veil-hides:deeds' })
+    expect(w.journal.runs).toContainEqual([GM, 'config', 'set', 'veil-hides', 'notes', 'progress'])
+    await ui.press({ key: 'unset:veil-hides' })
+    expect(w.journal.runs).toContainEqual([GM, 'config', 'unset', 'veil-hides'])
+  })
+
+  test('anything else is typed in its field', async ($, on) => {
+    const w = world(on)
+    w.settings = settings()
+    const ui = await opened($)
+    await ui.press({ key: 'setting-key:editor' })
+    await ui.input({ key: 'input:editor', text: ' open -a Zed ' })
+    expect(w.journal.runs).toContainEqual([GM, 'config', 'set', 'editor', 'open', '-a', 'Zed'])
+  })
+
+  test('says when the environment overrides a setting, and what gm refused', async ($, on) => {
+    const w = world(on)
+    w.settings = settings()
+    const ui = await opened($)
+    await ui.press({ key: 'setting-key:telemetry' })
+    expect(await texts(ui)).toContain('GM_TELEMETRY overrides it in this session')
+    await ui.press({ key: 'setting-key:editor' })
+    await ui.input({ key: 'input:editor', text: '   ' })
+    expect(w.journal.toasts.at(-1)).toBe("Unchanged: gm: config: editor cannot be ''")
+  })
+
+  test('reads gm config --json as the tab holds it', () => {
+    expect(parseSettings('nope')).toEqual([])
+    expect(parseSettings('[{"key":"veil","choices":["on",3]}]')[0]).toMatchObject({ key: 'veil', value: '', choices: ['on'], isMulti: false })
+    expect(toggledWords('deeds notes', 'notes')).toEqual(['deeds'])
+    expect(toggledWords('deeds', 'progress')).toEqual(['deeds', 'progress'])
+    expect(toggledWords('quill', 'none')).toEqual(['none'])
+    expect(toggledWords('none', 'quill')).toEqual(['quill'])
   })
 })

@@ -2551,6 +2551,15 @@ t_config_file_is_documented_and_read() {
   out=$(gm config set editor open -a Zed)
   assert_eq "$(conf editor)" "open -a Zed" "the editor, a command with its arguments" &&
     assert_contains "$out" "the spyglass opens a changed file with it" "says what it does"
+  # --json: every setting, for the spyglass, read back by sqlite3.
+  gm config --json >"$WORK/conf/settings.json"
+  local q="SELECT value->>'value'||' | '||(value->>'source')||' | '||(value->'choices')||' | '||(value->>'isMulti') FROM json_each(readfile('$WORK/conf/settings.json')) WHERE value->>'key'="
+  assert_eq "$(sqlite3 :memory: "SELECT json_array_length(readfile('$WORK/conf/settings.json'));")" "$(gm config | grep -c '^  ')" "every setting gm config shows" &&
+    assert_eq "$(sqlite3 :memory: "$q'editor';")" "open -a Zed | guild.conf | [] | 0" "a command, from the file" &&
+    assert_eq "$(sqlite3 :memory: "$q'telemetry';" | cut -d '|' -f 3)" ' ["on","off"] ' "a switch, its two values" &&
+    assert_eq "$(sqlite3 :memory: "$q'veil-hides';")" "deeds adventurers notes progress | default | [\"deeds\",\"adventurers\",\"notes\",\"progress\"] | 1" "words, several at once" &&
+    assert_eq "$(GM_TELEMETRY=off gm config --json >"$WORK/conf/settings.json"; sqlite3 :memory: "$q'telemetry';" | cut -d '|' -f 2)" \
+      " environment (GM_TELEMETRY) " "and where a value came from"
   grep -q '^# collector: on | off | later, default off; GM_COLLECTOR overrides it' "$GM_HALL/guild.conf" ||
     fail "the documentation is kept through every write"
 }

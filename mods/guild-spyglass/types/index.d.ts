@@ -44,6 +44,23 @@ export type SpyglassDeed = {
   status: 'running' | 'ok' | 'error'
 }
 
+// One setting as gm config --json prints it: the words it takes when it takes a set of them, several at once when
+// isMulti.
+export type SpyglassSetting = {
+  key: string
+  value: string
+  source: string
+  default: string
+  kind: string
+  description: string
+  env: string
+  choices: string[]
+  isMulti: boolean
+}
+
+// The settings as the configs tab last read them, or why gm could not.
+export type SpyglassSettings = { rows: SpyglassSetting[]; why?: string; isLoaded: boolean }
+
 declare module 'claude-code' {
   interface PluginState {
     'guild-spyglass': {
@@ -55,6 +72,8 @@ declare module 'claude-code' {
       trees: SpyglassTree[]
       deeds: SpyglassDeed[]
       activityFilter: string
+      settings: SpyglassSettings
+      settingOpen: string
     }
   }
 }

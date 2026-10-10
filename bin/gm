@@ -616,7 +616,7 @@ They are for advanced use, and for the Guildmaster.
                           whichever is dead or missing, and leave the running ones alone; one that fails to start
                           3 times in a row is held until gm open (gm, for the Guildmaster; a day, for the
                           collector); any other gm command at a terminal does the same, quietly
-  config [get <key> | set <key> <value> | unset <key>]
+  config [get <key> | set <key> <value> | unset <key> | --json]
                           the settings in guild.conf in the Guildhall: every one, its value and where it came
                           from (the environment, the file, or the default); set changes one and acts on it at
                           once (autostart, the collector); the Guildmaster runs it when the patron asks
@@ -2891,6 +2891,35 @@ gm_conf_effective_all() {
   done <<<"$GM_CONF_TABLE"
 }
 
+# gm_conf_json: every setting as one JSON array, for the spyglass: its key, value and where it came from, its default,
+# kind, description and overriding variable, and, where it takes a set of words, those words (several of them at once
+# when isMulti).
+gm_conf_json() {
+  local key val src env def kind desc choices multi w list parts=() eff
+  eff=$(gm_conf_effective_all)
+  while IFS=$'\t' read -r key env def kind desc; do
+    val=$(awk -F '\t' -v k="$key" '$1 == k { print $2; exit }' <<<"$eff")
+    src=$(awk -F '\t' -v k="$key" '$1 == k { print $3; exit }' <<<"$eff")
+    [ "$val" != - ] || val=''
+    [ "$def" != - ] || def=''
+    [ "$env" != - ] || env=''
+    multi=false
+    case $kind in
+      onoff) choices='on off' ;;
+      collector) choices='on off later' ;;
+      chat) choices='banners off' ;;
+      veilhides) choices='deeds adventurers notes progress' multi=true ;;
+      sprites) choices='skirmish delve boss siege forge wall quill campfire none' multi=true ;;
+      *) choices='' ;;
+    esac
+    list=''
+    for w in $choices; do list="$list${list:+, }$(gm_q "$w")"; done
+    parts+=("json_object('key', $(gm_q "$key"), 'value', $(gm_q "$val"), 'source', $(gm_q "$src"), 'default', $(gm_q "$def"), 'kind', $(gm_q "$kind"), 'description', $(gm_q "$desc"), 'env', $(gm_q "$env"), 'choices', json_array($list), 'isMulti', json('$multi'))")
+  done <<<"$GM_CONF_TABLE"
+  local IFS=,
+  sqlite3 -batch -noheader :memory: "SELECT json_array(${parts[*]});"
+}
+
 # gm_conf_row <key>: env<TAB>default<TAB>kind<TAB>description of one setting; nothing for an unknown key.
 gm_conf_row() {
   local key env def kind desc
@@ -2910,6 +2939,10 @@ gm_cmd_config() {
   gm_conf_migrate
   file=$(gm_conf_file)
   case $action in
+    --json)
+      [ $# -eq 0 ] || gm_die "config: gm config --json takes no arguments"
+      gm_conf_json
+      ;;
     show | list)
       [ $# -eq 0 ] || gm_die "config: gm config takes no arguments (gm config get|set|unset <key>)"
       printf 'Settings, from %s (gm config set <key> <value> changes one):\n' "$file"
