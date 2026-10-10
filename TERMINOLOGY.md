@@ -103,6 +103,7 @@ Where a term replaces one from Firstmate, the Firstmate column records the origi
 | **Deed** | A tool call as the chat shows it: the call, its result, or a group of them. | tool call |
 | **Veil** | The chat's quiet view: deeds, adventurers and short notes drawn out of the chat while it is on, and back when it is lifted. Hides from the screen only, never from the record. | Calm |
 | **Working Sprite** | The two-row figure drawn while a session works (a fight, a craft, the Guildmaster's quill), or above the prompt while it waits (the campfire). Drawn on the screen only: it never enters the chat. | working ship |
+| **Spyglass** | The pane beside the chat, opened and closed with `/spyglass`, whose tabs show the party's work and the guild's settings. | (none) |
 
 ## Words kept as they are
 

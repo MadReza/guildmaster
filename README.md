@@ -15,6 +15,7 @@ This repository is at its beginning. The vocabulary comes first, because every l
 - [vision/roadmap.md](vision/roadmap.md) is the tracked build plan: each step's goal, scope, done-when criteria, status and links.
 - `.claude/settings.json` makes `claude`, started at the clone's root, start the guild and the Guildmaster in herdr: its start-up hook and tool guard act only in the patron's plain clone (or a folder marked `.gm-front-desk`) and do nothing in a linked worktree, where agents that change Guildmaster work. `CLAUDE.md` is their guidance, not the Guildmaster's charter.
 - `mods/guild-chat/` is the Claude Code mod that draws the chat under heraldic banners while `guild.conf` says `chat: banners`, draws the veil over the deeds while it says `veil: on`, and draws the working sprites while it says `sprites: on`.
+- `mods/guild-spyglass/` is the Claude Code mod of the spyglass, the pane `/spyglass` opens beside the chat.
 - `bin/gm` is the `gm` command; `templates/` holds the Guildmaster's charter (`guildmaster.md`), the Party Leader's charter, the ticket playbook and the repository rules it copies into the Guildhall, and the local OpenTelemetry Collector's configuration (`otelcol.yaml`); `tests/` holds its test suite (with the redaction cases, a schema-1 register to migrate, and recorded Claude Code telemetry under `tests/fixtures/telemetry/`, and stand-ins for herdr and launchctl so no test touches the real ones, nor your `~/.local/bin`) and an end-to-end demonstration.
 
 ## Getting started
@@ -229,6 +230,20 @@ The sprites: `skirmish` (an adventurer holds the corridor against slimes and cou
 Both rows are ones Claude Code redraws in place, so a sprite never enters the chat: it is gone when the turn, or the wait, ends.
 `gm config set sprites off` (or ask the Guildmaster) turns them all off; `gm config set sprites-party-leader forge wall` and the like choose them. Every session follows a change at its next turn.
 They are drawn in a terminal only, and only for a patron with a Guildhall.
+### The spyglass
+
+The spyglass is a pane beside the chat whose tabs show the party's work. It never opens by itself:
+
+| Command | Does |
+| --- | --- |
+| `/spyglass` | Opens the pane, or closes it when it is open. |
+| `/spyglass open`, `/spyglass close` | Sets it outright. |
+
+The pane also closes from its own close mark or ctrl+x x, and ctrl+x tab gives it the keyboard.
+In Claude Code's fullscreen layout it docks beside the chat; on the main screen (under tmux, for one) it opens above the prompt.
+Every session gm starts loads the mod in `mods/guild-spyglass/`, as it does guild-chat, and a `claude` started by hand in the clone loads it from `.claude/skills/guild-spyglass`.
+The tabs follow where the pane is opened: the Guildmaster's front desk, a Party Leader's camp, or any other session; the last tab chosen is kept for the session.
+The mod's own tests run with `claude plugin test mods/guild-spyglass`.
 
 ### The front desk from any terminal: `gm`
 

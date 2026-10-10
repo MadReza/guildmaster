@@ -5177,19 +5177,22 @@ gm_cmd_start() {
     ${GM_CHAT_ARGS[@]+"${GM_CHAT_ARGS[@]}"}
 }
 
-# The guild-chat mod, for a session gm starts in <dir>: gm_chat_args <dir> [focus]. Every session gets it, whatever
-# the chat setting, since it also carries the veil and /veil: claude loads it from the clone (--plugin-dir), told by
-# GM_CHAT whether to draw the banners (chat: off keeps Claude Code's own drawing) and by GM_CHAT_FOCUS which Party
-# Leader it draws for (none at the front desk). A checkout of Guildmaster loads the mod itself, from
-# .claude/skills/guild-chat, so there gm passes only the variables: a second copy by --plugin-dir would leave Claude
-# Code reporting the first as not loaded.
+# The guild's mods, for a session gm starts in <dir>: gm_chat_args <dir> [focus]. Every session gets guild-chat,
+# whatever the chat setting, since it also carries the veil and /veil, and guild-spyglass, the pane /spyglass opens:
+# claude loads each from the clone (--plugin-dir), guild-chat told by GM_CHAT whether to draw the banners (chat: off
+# keeps Claude Code's own drawing) and both by GM_CHAT_FOCUS which Party Leader they serve (none at the front desk). A
+# checkout of Guildmaster loads the mods itself, from .claude/skills/<mod>, so there gm passes only the variables: a
+# second copy by --plugin-dir would leave Claude Code reporting the first as not loaded.
 GM_CHAT_ARGS=()
 GM_CHAT_ENV=()
 gm_chat_args() {
   GM_CHAT_ARGS=()
   GM_CHAT_ENV=()
   gm_conf_norm chat "${GM_CHAT:-banners}" || GM_CONF_VAL=banners
-  [ -f "$1/.claude/skills/guild-chat/.claude-plugin/plugin.json" ] || GM_CHAT_ARGS=(--plugin-dir "$GM_ROOT/mods/guild-chat")
+  local mod
+  for mod in guild-chat guild-spyglass; do
+    [ -f "$1/.claude/skills/$mod/.claude-plugin/plugin.json" ] || GM_CHAT_ARGS+=(--plugin-dir "$GM_ROOT/mods/$mod")
+  done
   GM_CHAT_ENV=("GM_CHAT=$GM_CONF_VAL")
   [ -z "${2:-}" ] || GM_CHAT_ENV+=("GM_CHAT_FOCUS=$2")
 }

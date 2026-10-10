@@ -1117,7 +1117,9 @@ t_open_starts_the_party_leader_in_herdr_with_the_telemetry_env() {
     assert_eq "$(cat "$f.args")" "--name
 appt-v2
 --plugin-dir
-$ROOT/mods/guild-chat" "claude --name <focus>, with the chat's mod (chat: banners, the default)" &&
+$ROOT/mods/guild-chat
+--plugin-dir
+$ROOT/mods/guild-spyglass" "claude --name <focus>, with the chat's mod (chat: banners, the default) and the spyglass" &&
     assert_eq "$(cat "$f.pwd")" "$CAMP" "in the camp"
 }
 
@@ -2571,7 +2573,9 @@ t_config_chat_starts_sessions_with_the_guild_chat_mod() {
   assert_eq "$(cat "$f.args")" "--name
 appt-v2
 --plugin-dir
-$ROOT/mods/guild-chat" "claude --name <focus> --plugin-dir <the mod>" &&
+$ROOT/mods/guild-chat
+--plugin-dir
+$ROOT/mods/guild-spyglass" "claude --name <focus> --plugin-dir <each mod>" &&
     assert_contains "$(cat "$f")" "GM_CHAT=banners" "the mod is told the style" &&
     assert_contains "$(cat "$f")" "GM_CHAT_FOCUS=appt-v2" "and the focus, not a stray one"
   line=$(grep "start 'guildmaster'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)
@@ -2589,7 +2593,9 @@ guildmaster" "the Guildmaster loads it too, from the clone's .claude/skills, wit
   assert_eq "$(cat "$f.off.args")" "--name
 appt-v2
 --plugin-dir
-$ROOT/mods/guild-chat" "chat: off starts a Party Leader with the mod too" &&
+$ROOT/mods/guild-chat
+--plugin-dir
+$ROOT/mods/guild-spyglass" "chat: off starts a Party Leader with the mod too" &&
     assert_contains "$(cat "$f.off")" "GM_CHAT=off" "told to draw Claude Code's own chat" &&
     assert_contains "$(cat "$f.off")" "GM_CHAT_FOCUS=appt-v2" "with its focus"
   env GM_FAKE_CLAUDE_ENV="$f.desk-off" sh -c "$(grep "start 'guildmaster'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)" </dev/null >/dev/null 2>&1
@@ -2597,8 +2603,10 @@ $ROOT/mods/guild-chat" "chat: off starts a Party Leader with the mod too" &&
   out=$(gm config set chat on)
   assert_eq "$(conf chat)" banners "on is the one style there is: banners" &&
     assert_contains "$out" "chat is banners: the Guildmaster and Party Leaders started from now on draw their chat under heraldic banners" "and back"
-  [ -f "$ROOT/mods/guild-chat/.claude-plugin/plugin.json" ] && [ -f "$ROOT/mods/guild-chat/hooks/register.tsx" ] ||
-    fail "the mod gm loads is not in the clone"
+  for mod in guild-chat guild-spyglass; do
+    [ -f "$ROOT/mods/$mod/.claude-plugin/plugin.json" ] && [ -f "$ROOT/mods/$mod/hooks/register.tsx" ] &&
+      [ -f "$ROOT/.claude/skills/$mod/.claude-plugin/plugin.json" ] || fail "the mod $mod gm loads is not in the clone"
+  done
 }
 
 t_config_veil_and_what_it_hides() {
