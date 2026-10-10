@@ -216,6 +216,26 @@ describe('the pane', () => {
   })
 })
 
+describe('closing the pane', () => {
+  test('its own close, beside the tabs, closes it and ends the watch', async ($, on) => {
+    const w = world(on)
+    await $.session.start(sessionStart)
+    await $.command.run(spyglass())
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const ui = await $.ui.mount(pane(surface))
+      expect((await ui.find({ key: 'spyglass:close' }))?.text).toContain('close')
+      await ui.press({ key: 'spyglass:close' })
+      expect(w.panes.size).toBe(0)
+      await ui.unmount()
+      await $.command.run(spyglass('open'))
+    }
+    await $.command.run(spyglass('close'))
+    const runs = w.journal.runs.length
+    await w.clock.advance(20000)
+    expect(w.journal.runs.length).toBe(runs)
+  })
+})
+
 describe('the seat and its tabs', () => {
   const tabs: Tab[] = [
     { id: 'postings', title: 'Postings', seats: ['guildmaster', 'party-leader'] },

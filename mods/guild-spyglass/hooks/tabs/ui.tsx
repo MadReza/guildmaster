@@ -38,20 +38,28 @@ export function ruleUnder(labels: readonly string[], chosen: number, width: numb
   return { before, under, after: Math.max(0, width - before - under) }
 }
 
+// The tabs, and on the right the pane's own close: a wide target, unlike the engine's one-cell mark in the corner, also
+// pressed with q while the pane has the keyboard.
 export function tabStrip(
   { Box, Text, Button }: Els, tabs: readonly { id: string }[], chosen: string, width: number, choose: (id: string) => void,
+  close: () => void,
 ): RenderChildren {
   const labels = tabs.map(t => tabLabel(t.id))
   const at = tabs.findIndex(t => t.id === chosen)
   const rule = ruleUnder(labels, at, width)
   return (
     <Box flexDirection="column">
-      <Box flexDirection="row" columnGap={GAP} flexWrap="wrap">
-        {tabs.map((t, i) => (
-          <Button key={`tab:${t.id}`} plain onPress={() => choose(t.id)}>
-            {t.id === chosen ? <Text color={GOLD} bold>{labels[i]}</Text> : <Text dimColor>{labels[i]}</Text>}
-          </Button>
-        ))}
+      <Box flexDirection="row" justifyContent="space-between" columnGap={1}>
+        <Box flexDirection="row" columnGap={GAP} flexWrap="wrap" flexShrink={1}>
+          {tabs.map((t, i) => (
+            <Button key={`tab:${t.id}`} plain onPress={() => choose(t.id)}>
+              {t.id === chosen ? <Text color={GOLD} bold>{labels[i]}</Text> : <Text dimColor>{labels[i]}</Text>}
+            </Button>
+          ))}
+        </Box>
+        <Box flexShrink={0}>
+          <Button key="spyglass:close" plain role="dismiss" hotkey="q" label="✕ close" onPress={() => close()} />
+        </Box>
       </Box>
       <Text wrap="truncate-end">
         <Text color={RULE}>{'━'.repeat(rule.before)}</Text>

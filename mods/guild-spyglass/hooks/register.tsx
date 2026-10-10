@@ -318,6 +318,11 @@ function stopWatch(): void {
 
 const tab = atom({ plugin: 'guild-spyglass', key: 'tab' } as const, '')
 
+async function closePane($: EngineInterface): Promise<void> {
+  stopWatch()
+  await $.ui.close({ id: PANE })
+}
+
 const isOpen = async ($: EngineInterface) => (await $.ui.panes()).some(p => p.id === PANE)
 
 export const register: Register = on => {
@@ -405,8 +410,7 @@ export const register: Register = on => {
     }
     const want = arg || ((await isOpen($)) ? 'close' : 'open')
     if (want === 'close') {
-      stopWatch()
-      await $.ui.close({ id: PANE })
+      await closePane($)
       return {}
     }
     const opened = await $.ui.open({ id: PANE, title: TITLE })
@@ -428,7 +432,7 @@ export const register: Register = on => {
     const width = Math.max(20, e.props.bodyColumns)
     return (
       <Box flexDirection="column">
-        {tabStrip($.ui.resolve(e), offered, current.id, width, id => void update($, tab, () => id))}
+        {tabStrip($.ui.resolve(e), offered, current.id, width, id => void update($, tab, () => id), () => void closePane($))}
         <Box flexDirection="column" marginTop={1}>{await body($, e, current.id)}</Box>
       </Box>
     )
