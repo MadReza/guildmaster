@@ -637,8 +637,9 @@ They are for advanced use, and for the Guildmaster.
   post [--slug S] [--from REF] [--follows REF] <words|->
                           add a posting to the current focus (state received)
   resolve <ref>           print the one record a reference names: 12, #12, focus#12, focus#slug, focus, KEY-123
-  list [--all] [--state S] [focus]
-                          postings of the current focus (or every focus at the front desk)
+  list [--all] [--state S] [--json] [focus]
+                          postings of the current focus (or every focus at the front desk); --json prints them
+                          as one JSON array, for the spyglass
   show <ref>              a posting with the patron's words, additions and history
   notice <ref> <verb> [detail] [--slug S] [--follows REF]
                           record an event and print its one-line notice; --follows ties the posting
@@ -1430,10 +1431,11 @@ gm_cmd_resolve() {
 }
 
 gm_cmd_list() {
-  local all=0 state='' focus='' where
+  local all=0 state='' focus='' where json=0
   while [ $# -gt 0 ]; do
     case $1 in
       --all) all=1; shift ;;
+      --json) json=1; shift ;;
       --state) state=${2:?--state needs a state}; shift 2 ;;
       -*) gm_die "list: unknown option $1" ;;
       *) focus=$1; shift ;;
@@ -1449,6 +1451,21 @@ gm_cmd_list() {
   elif [ "$all" = 0 ]; then
     where="$where AND p.state NOT IN ('done','closed')"
   fi
+  local order="f.name, CASE p.state WHEN 'active' THEN 0 WHEN 'needs-you' THEN 1 WHEN 'received' THEN 2 WHEN 'queued' THEN 3 WHEN 'parked' THEN 4 ELSE 5 END, p.num"
+  if [ "$json" = 1 ]; then
+    # One array, in the order the text shows, each posting with its last notice line: what the spyglass draws.
+    gm_sql <<SQL
+SELECT COALESCE(json_group_array(json(o)), '[]') FROM (
+  SELECT json_object('ref', f.name||'#'||p.num, 'focus', f.name, 'num', p.num, 'slug', p.slug, 'state', p.state,
+                     'updated', p.updated_at, 'summary', $(gm_summary_sql p.words), 'why', p.park_why,
+                     'until', p.park_until,
+                     'last', (SELECT e.line FROM event e WHERE e.posting_id=p.id AND e.line IS NOT NULL ORDER BY e.id DESC LIMIT 1)) AS o
+  FROM posting p JOIN focus f ON f.id=p.focus_id
+  WHERE $where
+  ORDER BY $order);
+SQL
+    return
+  fi
   gm_sql <<SQL
 SELECT printf('%-36s %-10s %s  "%s"%s',
               f.name||'#'||p.num||' '||p.slug, p.state, substr(p.updated_at,1,16),
@@ -1456,7 +1473,7 @@ SELECT printf('%-36s %-10s %s  "%s"%s',
               CASE WHEN p.state='parked' THEN '  why: '||p.park_why||COALESCE(', until '||p.park_until,'') ELSE '' END)
 FROM posting p JOIN focus f ON f.id=p.focus_id
 WHERE $where
-ORDER BY f.name, CASE p.state WHEN 'active' THEN 0 WHEN 'needs-you' THEN 1 WHEN 'received' THEN 2 WHEN 'queued' THEN 3 WHEN 'parked' THEN 4 ELSE 5 END, p.num;
+ORDER BY $order;
 SQL
 }
 

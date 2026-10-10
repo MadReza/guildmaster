@@ -243,6 +243,14 @@ The pane also closes from its own close mark or ctrl+x x, and ctrl+x tab gives i
 In Claude Code's fullscreen layout it docks beside the chat; on the main screen (under tmux, for one) it opens above the prompt.
 Every session gm starts loads the mod in `mods/guild-spyglass/`, as it does guild-chat, and a `claude` started by hand in the clone loads it from `.claude/skills/guild-spyglass`.
 The tabs follow where the pane is opened: the Guildmaster's front desk, a Party Leader's camp, or any other session; the last tab chosen is kept for the session.
+Its tabs:
+
+| Tab | Shown at | Shows |
+| --- | --- | --- |
+| Postings | the front desk, a Party Leader | the quest board, from `gm list --json`: a Party Leader's own focus, or every focus at the front desk under its name. A press on a posting opens it to its summary, its last notice line and, when parked, why; *Show finished* adds the done and closed ones. |
+
+While the pane is up it reads what its tabs show again every 5 seconds, and at once after a `gm` command of its own session's, so a change made in any session shows soon; it stops when the pane closes.
+It runs the guild's own `gm` (`~/.local/bin/gm`, only when that is a link to a gm), never a camp's draft of it, so a tab says why when that `gm` cannot answer.
 The mod's own tests run with `claude plugin test mods/guild-spyglass`.
 
 ### The front desk from any terminal: `gm`

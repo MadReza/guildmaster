@@ -311,6 +311,29 @@ t_park_and_resume() {
   assert_contains "$(gm list --all)" "grey-button" "listed"
 }
 
+t_list_json_is_what_the_spyglass_reads() {
+  setup list-json
+  export GM_FOCUS=appt-v2
+  assert_eq "$(gm list --json)" "[]" "no postings, an empty array" || return 1
+  gm post --slug grey-button "The save button is grey on Safari" >/dev/null
+  gm post --slug owner-empty "The owner is empty after save" >/dev/null
+  gm notice 2 started >/dev/null
+  gm park 1 --why "waits for dev deploy" --until 2000-01-01 >/dev/null
+  local f=$WORK/list-json/out.json
+  # What the array says, read back by sqlite3: list <SQL over each posting as value>.
+  list() { sqlite3 :memory: "SELECT $1 FROM json_each(readfile('$f'));"; }
+  gm list --json >"$f"
+  assert_eq "$(list "group_concat(value->>'ref'||' '||(value->>'state'),', ')")" "appt-v2#2 active, appt-v2#1 parked" \
+    "the postings in the order gm list shows them" &&
+    assert_eq "$(list "(value->>'why')||' | '||(value->>'until')||' | '||(value->>'summary')" | sed -n 2p)" \
+      "waits for dev deploy | 2000-01-01 | The save button is grey on Safari" "with why, until and the summary" &&
+    assert_eq "$(list "value->>'last'" | sed -n 1p)" 'appt-v2#2 owner-empty started ("The owner is empty after save")' \
+      "and its last notice line"
+  gm notice 2 'done' "fixed" >/dev/null
+  assert_not_contains "$(gm list --json)" "owner-empty" "done is left out" &&
+    assert_contains "$(gm list --json --all)" "owner-empty" "and in with --all"
+}
+
 t_phase_follows_the_playbook() {
   setup phase
   export GM_FOCUS=appt-v2
