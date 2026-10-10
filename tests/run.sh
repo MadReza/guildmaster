@@ -2492,7 +2492,8 @@ t_config_file_is_documented_and_read() {
   out=$(gm config set collector-port 4999) || fail "set failed: $out"
   assert_contains "$out" "collector-port is 4999" "it says what it set"
   [ -f "$GM_HALL/guild.conf" ] || fail "no guild.conf" || return 1
-  for k in collector collector-port telemetry chat veil veil-hides autostart autostart-every muster-before-commands attach herdr-session \
+  for k in collector collector-port telemetry chat veil veil-hides sprites sprites-guildmaster sprites-party-leader \
+    idle-guildmaster idle-party-leader autostart autostart-every muster-before-commands attach herdr-session \
     herdr-workspace launch-grace start-tries repo-roots; do
     grep -q "^# $k: " "$GM_HALL/guild.conf" || fail "guild.conf does not document $k"
   done
@@ -2632,6 +2633,34 @@ t_config_veil_and_what_it_hides() {
   out=$(gm config)
   assert_contains "$out" "  veil                    off       ignored: guild.conf says 'perhaps'" "a bad veil is off" &&
     assert_contains "$out" "  veil-hides              deeds adventurers notes progress ignored: guild.conf says 'rubbish'" "a bad veil-hides is all four"
+}
+
+t_config_working_sprites() {
+  export GM_HALL=$WORK/conf-sprites/hall
+  local out
+  out=$(gm config)
+  assert_contains "$out" "  sprites                 on        default" "the sprites are on unless the patron turns them off" &&
+    assert_contains "$out" "  sprites-guildmaster     quill     default" "the Guildmaster writes with the quill" &&
+    assert_contains "$out" "  sprites-party-leader    skirmish delve boss siege forge wall default" "a Party Leader fights and builds" &&
+    assert_contains "$out" "  idle-guildmaster        campfire  default" "the Guildmaster waits by the campfire" &&
+    assert_contains "$out" "  idle-party-leader       none      default" "a Party Leader waits with nothing drawn"
+  out=$(gm config set sprites off)
+  assert_eq "$(conf sprites)" off "sprites: off written" &&
+    assert_contains "$out" "sprites is off: no session draws a working sprite; running sessions follow at their next turn" "says what it does"
+  grep -q '^# sprites-party-leader: skirmish delve boss siege forge wall quill campfire, any of them, or none, default skirmish delve boss siege forge wall$' \
+    "$GM_HALL/guild.conf" || fail "guild.conf documents sprites-party-leader"
+  out=$(gm config set sprites-party-leader forge wall forge)
+  assert_eq "$(conf sprites-party-leader)" "forge wall" "several sprites, as words, each kept once" &&
+    assert_contains "$out" "sprites-party-leader is forge wall: running sessions follow at their next turn" "says so"
+  gm config set idle-party-leader campfire >/dev/null
+  assert_eq "$(conf idle-party-leader)" campfire "a Party Leader can wait by the fire too"
+  gm config set idle-guildmaster none >/dev/null
+  assert_eq "$(conf idle-guildmaster)" none "none draws nothing"
+  out=$(gm config set sprites-guildmaster quill dragon 2>&1) && fail "sprites-guildmaster took a dragon"
+  assert_contains "$out" "sprites-guildmaster cannot be 'quill dragon' (skirmish delve boss siege forge wall quill campfire" "refused, naming the sprites"
+  out=$(gm config set idle-guildmaster none campfire 2>&1) && fail "none took company"
+  printf 'sprites-guildmaster: rubbish\n' >>"$GM_HALL/guild.conf"
+  assert_contains "$(gm config)" "  sprites-guildmaster     quill     ignored: guild.conf says 'rubbish'" "a bad list keeps the default"
 }
 
 t_config_moves_setup_conf_into_guild_conf() {

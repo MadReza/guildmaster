@@ -41,6 +41,11 @@ telemetry	GM_TELEMETRY	on	onoff	Party Leaders that gm starts send Claude Code's 
 chat	GM_CHAT	banners	chat	How the chat of the Guildmaster and the Party Leaders gm starts looks: off is Claude Code's own, banners sets each message under a heraldic banner (mods/guild-chat). A running session keeps what it started with.
 veil	-	off	onoff	The veil: while on, every session's chat draws what veil-hides names out of sight, the record unchanged; /veil in any session turns it. A running session follows a change at its next turn, or at /veil refresh.
 veil-hides	-	deeds adventurers notes progress	veilhides	What the veil hides, any of: deeds (tool calls and their results), adventurers (their calls and returns), notes (short narration between deeds), progress (the hint under a running deed).
+sprites	-	on	onoff	The working sprites: while on, every session's chat draws a two-row sprite while a turn runs, one at random from the ones named for its role, and one above the prompt while it waits; neither stays in the chat. A running session follows a change at its next turn.
+sprites-guildmaster	-	quill	sprites	The sprites the Guildmaster draws one of while a turn runs.
+sprites-party-leader	-	skirmish delve boss siege forge wall	sprites	The sprites a Party Leader draws one of while a turn runs.
+idle-guildmaster	-	campfire	sprites	The sprite drawn above the Guildmaster's prompt while it waits.
+idle-party-leader	-	none	sprites	The sprite drawn above a Party Leader's prompt while it waits.
 autostart	-	on	onoff	A launchd agent (macOS) runs the muster at login and every autostart-every minutes.
 autostart-every	-	5	minutes	Minutes between the launchd agent's musters.
 muster-before-commands	GM_HERDR_AUTO	on	onoff	A gm command typed at a terminal first brings back, quietly, whatever is dead or missing.
@@ -99,6 +104,18 @@ gm_conf_norm() {
       v=${seen# }
       v=${v% }
       [ -n "$v" ] || return 1 ;;
+    sprites)
+      local w seen=' '
+      [[ $v =~ ^[a-z0-9[:space:]]+$ ]] || return 1
+      for w in $v; do
+        case $w in skirmish | delve | boss | siege | forge | wall | quill | campfire | none) ;; *) return 1 ;; esac
+        case $seen in *" $w "*) ;; *) seen="$seen$w " ;; esac
+      done
+      v=${seen# }
+      v=${v% }
+      [ -n "$v" ] || return 1
+      # none stands alone: it is no sprite at all.
+      case " $v " in *" none "*) [ "$v" = none ] || return 1 ;; esac ;;
     port) [[ $v =~ ^[0-9]{1,5}$ ]] && [ "$v" -ge 1 ] && [ "$v" -le 65535 ] || return 1 ;;
     minutes | count) [[ $v =~ ^[0-9]{1,6}$ ]] && [ "$v" -ge 1 ] || return 1 ;;
     seconds) [[ $v =~ ^[0-9]{1,6}$ ]] || return 1 ;;
@@ -2382,6 +2399,7 @@ gm_conf_header() {
       collector) vals='on | off | later' ;;
       chat) vals='off | banners' ;;
       veilhides) vals='deeds adventurers notes progress, any of them' ;;
+      sprites) vals='skirmish delve boss siege forge wall quill campfire, any of them, or none' ;;
       text) vals='<folder> <folder> ...' ;;
       count) vals='<number>' ;;
       *) vals="<$kind>" ;;
@@ -2902,7 +2920,7 @@ gm_cmd_config() {
       if [ "$action" = set ]; then
         [ $# -ge 1 ] || gm_die "config: gm config set $key <value>"
         val="$*"
-        [ "$kind" = text ] || [ "$kind" = veilhides ] || [ $# -eq 1 ] || gm_die "config: $key takes one value"
+        [ "$kind" = text ] || [ "$kind" = veilhides ] || [ "$kind" = sprites ] || [ $# -eq 1 ] || gm_die "config: $key takes one value"
         gm_conf_norm "$kind" "$val" || gm_die "config: $key cannot be '$val' ($(gm_conf_header | sed -n "s/^# $key: \\([^,;]*\\).*/\\1/p"))"
         val=$GM_CONF_VAL
       else
@@ -2953,6 +2971,9 @@ gm_conf_apply() {
     veil) printf 'veil is %s: the veil is %s; running sessions follow at their next turn, or at once with /veil refresh.\n' "$shown" \
       "$([ "$val" = on ] && printf 'drawn over %s' "$(gm_conf_effective_all | awk -F '\t' '$1 == "veil-hides" { print $2 }')" || printf 'lifted')" ;;
     veil-hides) printf 'veil-hides is %s: running sessions follow at their next turn, or at once with /veil refresh.\n' "$shown" ;;
+    sprites) printf 'sprites is %s: %s; running sessions follow at their next turn.\n' "$shown" \
+      "$([ "$val" = off ] && printf 'no session draws a working sprite' || printf 'every session draws its working sprites')" ;;
+    sprites-* | idle-*) printf '%s is %s: running sessions follow at their next turn.\n' "$key" "$shown" ;;
     repo-roots) printf 'repo-roots is %s: gm repos looks for clones %s.\n' "$shown" "$([ -n "$val" ] && printf 'there' || printf 'in the usual source folders')" ;;
     *) printf '%s is %s; it takes effect at the next muster.\n' "$key" "$shown" ;;
   esac

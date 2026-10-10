@@ -1,5 +1,5 @@
 {
   "name": "guild-chat",
   "version": "0.1.0",
-  "description": "Guildmaster's chat under heraldic banners: the patron, the Guildmaster or Party Leader, their deeds and their adventurers, each under a coloured rule; and the veil, /veil, that draws the deeds out of the chat and back in."
+  "description": "Guildmaster's chat under heraldic banners: the patron, the Guildmaster or Party Leader, their deeds and their adventurers, each under a coloured rule; the veil, /veil, that draws the deeds out of the chat and back in; and the working sprites, drawn while a turn runs and while the session waits."
 }
