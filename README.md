@@ -243,7 +243,7 @@ The spyglass is a pane beside the chat whose tabs show the party's work. It neve
 The pane also closes from its own close mark or ctrl+x x, and ctrl+x tab gives it the keyboard.
 In Claude Code's fullscreen layout it docks beside the chat; on the main screen (under tmux, for one) it opens above the prompt.
 Every session gm starts loads the mod in `mods/guild-spyglass/`, as it does guild-chat, and a `claude` started by hand in the clone loads it from `.claude/skills/guild-spyglass`.
-The tabs follow where the pane is opened: the Guildmaster's front desk, a Party Leader's camp, or any other session; the last tab chosen is kept for the session.
+The tabs follow where the pane is opened: the Guildmaster's front desk (told by gm, or known by its folder, the guild's own clone, since Claude Code's session host does not always keep the variables gm starts a session with), a Party Leader's camp, or any other session; the last tab chosen is kept for the session.
 It is drawn as a quiet ledger: the tabs as words, a gold rule under the chosen one, a dim head for each group with its figure on the right, and the actions as one line of hotkeys at the foot (`r` refresh, and the tab's own), pressed while the pane has the keyboard (ctrl+x tab) or by a click. *✕ close* at the right of the tabs (or `q`) closes the pane: a wider target than the one-cell mark Claude Code draws in its corner. Its tabs:
 
 | Tab | Shown at | Shows |

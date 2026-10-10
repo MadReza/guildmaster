@@ -236,6 +236,35 @@ describe('closing the pane', () => {
   })
 })
 
+describe('the front desk without its variables', () => {
+  const tabsShown = async (ui: { findAll: (q: { type: 'Button' }) => Promise<{ text?: string }[]> }) =>
+    (await ui.findAll({ type: 'Button' })).map(b => b.text ?? '').filter(t => /^[⚑✎⚒⚙◔] /.test(t))
+
+  test('a session in the guild\'s own clone is the front desk, even when the session host dropped GM_CHAT', async ($, on) => {
+    const w = world(on, { HOME })
+    w.trees.set('/clone', { numstat: [], untracked: {}, hasBase: true })
+    await $.session.start({ ...sessionStart, cwd: '/clone' })
+    await $.command.run(spyglass())
+    const ui = await $.ui.mount(pane('terminal'))
+    expect(await tabsShown(ui)).toEqual(['⚑ Board', '⚒ Deeds', '⚙ Codex', '◔ Lantern'])
+  })
+
+  test('so is the Guildhall\'s front-desk folder', async ($, on) => {
+    world(on, { HOME })
+    await $.session.start({ ...sessionStart, cwd: `${HOME}/.guildmaster/front-desk` })
+    const ui = await $.ui.mount(pane('terminal'))
+    expect(await tabsShown(ui)).toContain('⚑ Board')
+  })
+
+  test('any other folder is not', async ($, on) => {
+    const w = world(on, { HOME })
+    w.trees.set('/elsewhere', { numstat: [], untracked: {}, hasBase: true })
+    await $.session.start({ ...sessionStart, cwd: '/elsewhere' })
+    const ui = await $.ui.mount(pane('terminal'))
+    expect(await tabsShown(ui)).toEqual(['✎ Satchel', '⚒ Deeds', '◔ Lantern'])
+  })
+})
+
 describe('the seat and its tabs', () => {
   const tabs: Tab[] = [
     { id: 'postings', title: 'Postings', seats: ['guildmaster', 'party-leader'] },
@@ -247,6 +276,8 @@ describe('the seat and its tabs', () => {
     expect(seatFrom({ GM_FOCUS: 'appt-v2' })).toBe('party-leader')
     expect(seatFrom({ GM_CHAT: 'off' })).toBe('guildmaster')
     expect(seatFrom({})).toBe('other')
+    expect(seatFrom({}, true)).toBe('guildmaster')
+    expect(seatFrom({ GM_FOCUS: 'appt-v2' }, true)).toBe('party-leader')
   })
 
   test('each seat is offered its own tabs, in order', () => {
