@@ -2,3 +2,5 @@
 /.claude/settings.local.json
 # The marker that makes a checkout the patron's front desk (bin/gm-front-desk-lib.sh) never travels in a commit.
 /.gm-front-desk
+# The folder notes macOS Finder leaves in every folder it opens are never part of the project.
+.DS_Store
