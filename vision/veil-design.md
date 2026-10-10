@@ -62,8 +62,12 @@ The **veil** is the chat's quiet view: deeds, adventurers and short notes drawn 
 | --- | --- | --- |
 | `deeds` | `ToolUse` of every tool but an adventurer's, `ToolResult`, and every `ToolGroup`, one holding an adventurer's call included | the render component, and `ToolUse`'s `tool` |
 | `adventurers` | `ToolUse` of `Agent` or `Task` (`⛨ ADVENTURER · …`), and a `UserMessage` whose origin is a task notification (`⛨ ADVENTURER · returns`) | `isAdventurer` and `origin.kind`, as the banners tell them today |
-| `notes` | Short narration between deeds: a text block from a model step that stopped to call tools, with no newline and under 240 characters | Firstmate's rule, learned from `turn.step` the same way |
+| `notes` | Short narration between deeds: a text block from a model step that stopped to call tools, with no newline and under 240 characters | Firstmate's rule, learned from `turn.step` the same way, and read back from the conversation at every `session.start` |
 | `progress` | `ToolProgress`, the dim hint under a running deed, such as `(ctrl+b to run in background)` | the render component |
+
+The mod's memory of which blocks were notes starts empty at every load of the module: a hot reload (a mod or skill folder changing under a session), `--continue` and `--resume`, while the rows it drew are still on screen.
+So at every `session.start` it reads the conversation back (`$.session.messages({ as: "api" })`) and takes a text block of an assistant message that holds a tool call as a step that stopped to call tools.
+The conversation keeps no stop reason, so a step that hit a limit is known only while its turn runs; one cut off mid-call keeps no call, and its text shows as a reply.
 
 A hidden row draws as `Box({ display: "none" })` before its banner is drawn, so the banner goes with it.
 A deed or adventurer that errored or was interrupted (a refusal at a permission dialog, a failed command, an adventurer stopped with Esc) stays hidden like any other: the Guildmaster or the Party Leader deals with it, and tells the patron afterwards.
@@ -156,6 +160,7 @@ The mod rests on the same early-access function-hooks surface the banners do; no
 - A `ToolGroup` holding an `Agent` call hides with `deeds`; an errored or interrupted deed or adventurer hides like any other.
 - A routed message (`from`) and the patron's message draw under the veil.
 - The notes rule on its edges: one line under 240 characters hidden; a newline, or 240 characters, shown; the reply that ends the turn shown.
+- A session that starts with a conversation behind it (a reload, `--continue`): its notes hidden again, with one redraw while the veil is drawn.
 - A step that stopped on `max_tokens` or `model_context_window_exceeded`: its text, deeds and adventurers all drawn under the veil. And by hand, once, on a real stop: the line Claude Code draws for it still shows.
 - `/veil`, `/veil on`, `/veil off`: one `~/.local/bin/gm config set` each, then a redraw and the toast; a failing gm, or a `~/.local/bin/gm` that is missing or not a link, leaves the veil and the screen as they were. In a camp of Guildmaster, the camp's own `bin/gm` is never run.
 - `turn.start` with `guild.conf` unchanged: one stat, no read, no redraw. Changed: one read, and one redraw only when `veil` or `veil-hides` changed. After the session's own save: no second redraw.

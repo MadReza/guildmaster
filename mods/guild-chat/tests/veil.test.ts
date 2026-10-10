@@ -21,6 +21,8 @@ type World = {
   failGm: (why: string | undefined) => void
   // Another session's change: guild.conf rewritten, its time moved on.
   write: (conf: string) => void
+  // The conversation the session already holds, as $.session.messages({ as: 'api' }) gives it.
+  conversation: { role: 'user' | 'assistant'; content: { type: string; [field: string]: unknown }[] }[]
 }
 
 function world(on: On, conf: string | undefined, env: Record<string, string> = { HOME, GM_CHAT: 'banners' }): World {
@@ -71,6 +73,8 @@ function world(on: On, conf: string | undefined, env: Record<string, string> = {
     journal.invalidations += 1
     return { value: undefined }
   })
+  const conversation: World['conversation'] = []
+  on('session.messages', async () => ({ value: conversation as never }))
   on('session.start', async (_$, e) => ({ cwd: e.cwd }))
   on('turn.start', async (_$, e) => ({ turnId: e.turnId }))
   on('ui.render', () => ({ type: 'Text', props: {}, children: [STOCK] }))
@@ -80,6 +84,7 @@ function world(on: On, conf: string | undefined, env: Record<string, string> = {
     gm: is => (gm = is),
     failGm: why => (failure = why),
     write,
+    conversation,
   }
 }
 
@@ -254,6 +259,32 @@ describe('notes', () => {
       expect(isHidden(await $.ui.render(toolUse('Bash', 'another')))).toBe(true)
     })
   }
+
+  test('a session that starts with a conversation behind it, a reload or --continue, hides its notes again', async ($, on) => {
+    const w = world(on, 'veil: on\n')
+    w.conversation.push(
+      { role: 'user', content: [{ type: 'text', text: 'Read the files.' }] },
+      { role: 'assistant', content: [{ type: 'thinking', thinking: '' }, { type: 'text', text: short },
+        { type: 'text', text: 'one\ntwo' }, { type: 'tool_use', id: 't1', name: 'Bash', input: {} }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'x' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
+    )
+    await $.session.start(sessionStart)
+    expect(w.journal.invalidations).toBe(1)
+    expect(isHidden(await $.ui.render(said(short)))).toBe(true)
+    expect(isHidden(await $.ui.render(said('one\ntwo')))).toBe(false)
+    expect(drawn(await $.ui.render(said('Done.')))).toContain(' ⚔ GUILDMASTER ')
+  })
+
+  test('with the veil lifted, a session that starts learns its notes without a redraw', async ($, on) => {
+    const w = world(on, 'veil: off\n')
+    w.conversation.push({ role: 'assistant', content: [{ type: 'text', text: short }, { type: 'tool_use', id: 't1', name: 'Bash', input: {} }] })
+    await $.session.start(sessionStart)
+    expect(w.journal.invalidations).toBe(0)
+    w.write('veil: on\n')
+    await $.turn.start({ turnId: 'turn-1', prompt: '' } as never)
+    expect(isHidden(await $.ui.render(said(short)))).toBe(true)
+  })
 
   test('with notes left out of veil-hides, a short line shows', async ($, on) => {
     world(on, 'veil: on\nveil-hides: deeds\n')
