@@ -329,6 +329,13 @@ describe('the postings tab', () => {
     expect(await texts(ui)).toContain('1 active')
   })
 
+  test('says plainly when the guild\'s gm is older than the tab', async ($, on) => {
+    const w = world(on)
+    w.failGm('list: unknown option --json')
+    const ui = await opened($)
+    expect(await texts(ui)).toContain('is older than the spyglass: it learns --json when the change that brings the spyglass is merged')
+  })
+
   test('says why when gm cannot list the board', async ($, on) => {
     const w = world(on)
     w.failGm('no focus here')
@@ -531,6 +538,24 @@ describe('the activity tab', () => {
     expect(await texts(ui)).toMatch(/scout-auth › [^\n]*Grep/)
   })
 
+  test('a session that starts again or resumes shows what its transcript did, its notices included', async ($, on) => {
+    world(on)
+    on('session.messages', async () => ({ value: [
+      { role: 'user' as const, text: 'go', toolUses: [] },
+      { role: 'assistant' as const, text: '', toolUses: [
+        { tool_use_id: 'old1', tool: 'Read', input: { file_path: '/camps/appt-v2/README.md' }, text: 'x' },
+        { tool_use_id: 'old2', tool: 'Bash', input: { command: 'gm notice 3 done "x"' }, text: 'appt-v2#3 x done: x ("y")\n' },
+        { tool_use_id: 'old3', tool: 'mcp__linear__get_issue', input: { id: 'A-1' }, isError: true as const, text: 'no' },
+      ] },
+    ] }))
+    const ui = await opened($)
+    const all = await texts(ui)
+    expect(all).toMatch(/earlier\s*⚒\s*Read/)
+    expect(all).toContain('/camps/appt-v2/README.md')
+    expect(all).toContain('appt-v2#3 x done: x ("y")')
+    expect(all).toMatch(/linear · get_issue[^\n]*✗/)
+  })
+
   test('names and reads deeds as the tab holds them', () => {
     expect(describeCall('Bash', { command: 'ls  -la\n' })).toEqual({ kind: 'deed', title: 'Bash', detail: 'ls -la' })
     expect(describeCall('mcp__claude_ai_Gmail__send_message', { to: 'x' }).title).toBe('claude_ai_Gmail · send_message')
@@ -540,7 +565,8 @@ describe('the activity tab', () => {
     expect(isNoticeCommand('gm list')).toBe(false)
     expect(isNoticeCommand('pgm notice')).toBe(false)
     expect(noticeLines('a\n\n b \n')).toEqual(['a', 'b'])
-    expect(clock(0)).toMatch(/^\d\d:\d\d:\d\d$/)
+    expect(clock(1)).toMatch(/^\d\d:\d\d:\d\d$/)
+    expect(clock(0)).toBe('earlier ')
     const d = (id: string, kind: 'deed' | 'mcp') => ({ id, at: 0, kind, who: '', title: id, detail: '', status: 'ok' as const })
     expect(shownDeeds([d('1', 'deed'), d('2', 'mcp'), d('3', 'deed')], 'all').map(x => x.id)).toEqual(['3', '2', '1'])
     expect(shownDeeds([d('1', 'deed'), d('2', 'mcp')], 'mcp').map(x => x.id)).toEqual(['2'])

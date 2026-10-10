@@ -42,7 +42,18 @@ export const isNoticeCommand = (command: string) => /(^|[\s;&|(])gm\s+(notice|pa
 
 export const noticeLines = (stdout: string) => stdout.split('\n').map(l => l.trim()).filter(Boolean)
 
-export const clock = (at: number) => new Date(at).toTimeString().slice(0, 8)
+// A row read back from the transcript (a resumed or restarted session) has no time: it is drawn as earlier.
+export const clock = (at: number) => (at > 0 ? new Date(at).toTimeString().slice(0, 8) : 'earlier ')
+
+// The rows of a transcript's deeds, oldest first: what a session that starts again, or resumes, has already done.
+export function deedsOfTranscript(messages: readonly { toolUses: readonly { tool_use_id: string; tool: string; input: Record<string, unknown>; text?: string; isError?: true }[] }[]) {
+  return messages.flatMap(m => m.toolUses.flatMap(u => {
+    const row = { id: `t:${u.tool_use_id}`, at: 0, ...describeCall(u.tool, u.input), who: '', status: u.isError ? ('error' as const) : ('ok' as const) }
+    const command = typeof u.input.command === 'string' ? u.input.command : ''
+    const notices = u.tool === 'Bash' && !u.isError && isNoticeCommand(command) ? noticeLines(u.text ?? '') : []
+    return [row, ...notices.map((line, i) => ({ id: `n:${u.tool_use_id}:${i}`, at: 0, kind: 'notice' as const, title: line, detail: '', who: '', status: 'ok' as const }))]
+  })).slice(-KEEP)
+}
 
 const MARK: Record<SpyglassDeedKind, { glyph: string; color?: string }> = {
   deed: { glyph: '⚒', color: '#8a9199' },

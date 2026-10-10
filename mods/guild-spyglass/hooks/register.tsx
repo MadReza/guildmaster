@@ -6,7 +6,7 @@ import type {
 } from '../types'
 import { contextOf, contextTab } from './tabs/context'
 import { configsTab, parseSettings } from './tabs/configs'
-import { activityTab, describeCall, FILTERS, isNoticeCommand, KEEP, noticeLines, type Filter } from './tabs/activity'
+import { activityTab, deedsOfTranscript, describeCall, FILTERS, isNoticeCommand, KEEP, noticeLines, type Filter } from './tabs/activity'
 import { filesTab, lineCount, merged, openArgv, parseNumstat, untracked } from './tabs/files'
 import { listArgs, parsePostings, postingsTab } from './tabs/postings'
 
@@ -131,9 +131,13 @@ const postings = atom({ plugin: 'guild-spyglass', key: 'postings' } as const, EM
 const showAll = atom({ plugin: 'guild-spyglass', key: 'postingsAll' } as const, false)
 const opened = atom({ plugin: 'guild-spyglass', key: 'postingOpen' } as const, '')
 
+// The guild's gm before gm list --json and gm config --json says only that it does not know them: the tab says why.
+const OLD_GM = 'the guild\'s gm (~/.local/bin/gm) is older than the spyglass: it learns --json when the change that brings the spyglass is merged'
+const whyNot = (why: string) => (/unknown option --json|gm config \[get <key>/.test(why) ? OLD_GM : why)
+
 async function refreshPostings($: EngineInterface, focus: string | undefined): Promise<void> {
   const got = await runGm($, listArgs(focus, await read($, showAll)))
-  const board: SpyglassPostings = 'why' in got ? { rows: [], why: got.why, isLoaded: true } : { rows: parsePostings(got.out), isLoaded: true }
+  const board: SpyglassPostings = 'why' in got ? { rows: [], why: whyNot(got.why), isLoaded: true } : { rows: parsePostings(got.out), isLoaded: true }
   await update($, postings, () => board)
 }
 
@@ -246,7 +250,7 @@ const settingOpen = atom({ plugin: 'guild-spyglass', key: 'settingOpen' } as con
 
 async function refreshSettings($: EngineInterface): Promise<void> {
   const got = await runGm($, ['config', '--json'])
-  const next: SpyglassSettings = 'why' in got ? { rows: [], why: got.why, isLoaded: true } : { rows: parseSettings(got.out), isLoaded: true }
+  const next: SpyglassSettings = 'why' in got ? { rows: [], why: whyNot(got.why), isLoaded: true } : { rows: parseSettings(got.out), isLoaded: true }
   await update($, settings, () => next)
 }
 
@@ -325,6 +329,15 @@ export const register: Register = on => {
       argumentHint: '[open | close]',
       immediate: true,
     })
+    // A session that starts again or resumes has its transcript's deeds as rows, unless a reload kept the rows.
+    if ((await read($, deeds)).length === 0) {
+      try {
+        const done = deedsOfTranscript(await $.session.messages())
+        if (done.length) await update($, deeds, list => (list.length ? list : done))
+      } catch {
+        // No transcript to read: the tab starts empty.
+      }
+    }
     // A reload finds the pane still up: the watch starts again.
     if (await isOpen($)) {
       startWatch($)
