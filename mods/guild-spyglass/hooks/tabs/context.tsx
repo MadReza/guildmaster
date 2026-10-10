@@ -1,7 +1,7 @@
 import type { RenderChildren, SessionContextBreakdown, SessionUsage } from 'claude-code'
 
 import type { SpyglassContext } from '../../types'
-import type { Els } from './postings'
+import { CRIMSON, foot, GOLD, head, row, type Els } from './ui'
 
 // The context tab, on trial: how full this session's context window is, when it compacts, and what fills it, by
 // category as /context counts it, with the MCP servers and memory files that weigh most. The fill and the cost are the
@@ -54,67 +54,78 @@ export function resetsIn(at: string, now: number): string {
   return d > 0 ? `in ${d}d ${h}h` : h > 0 ? `in ${h}h ${m % 60}m` : `in ${m}m`
 }
 
-// A bar of `width` cells, `part` of `whole` filled.
-export function bar(part: number, whole: number, width: number): { filled: string; empty: string } {
-  const n = whole > 0 ? Math.min(width, Math.max(0, Math.round((part / whole) * width))) : 0
-  return { filled: '█'.repeat(n), empty: '░'.repeat(width - n) }
-}
-
 export type ContextActions = { refresh: () => void; count: () => void }
 
-export function contextTab({ Box, Text, Button }: Els, ctx: SpyglassContext, width: number, now: number, act: ContextActions): RenderChildren {
-  const controls = (
-    <Box flexDirection="row" columnGap={1}>
-      <Button key="context:refresh" label="Refresh" dimColor onPress={() => act.refresh()} />
-      <Button key="context:count" label="Count exactly" dimColor onPress={() => act.count()} />
-    </Box>
-  )
-  if (!ctx.isLoaded) return <Box flexDirection="column">{controls}<Text dimColor>Reading the context…</Text></Box>
-  if (ctx.why) return <Box flexDirection="column">{controls}<Text color="#c0392b">The context cannot be read: {ctx.why}</Text></Box>
-  const room = Math.max(10, Math.min(40, width - 2))
-  const fill = bar(ctx.tokens ?? 0, ctx.window, room)
-  const b = ctx.breakdown
+// The banner over the lantern, as the chat's banners are drawn: a heavy rule, the words, the figure, the rule again.
+export function banner(words: string, figure: string, width: number): { lead: string; label: string; tail: string } {
+  const label = ` ${words} `
+  const end = ` ${figure} ━━`
+  return { lead: '━━', label, tail: `${'━'.repeat(Math.max(2, width - 2 - [...label].length - [...end].length))}${end}` }
+}
+
+// One stacked bar across `width` cells: each used category its share of the window in its own colour, then the free
+// room dim. A category too small for a cell still shows as one while there is room.
+export function stack(cats: readonly { name: string; tokens: number; color: string; kind: string }[], window: number, width: number) {
+  const used = cats.filter(c => c.kind === 'used' && c.tokens > 0)
+  const cells = used.map(c => ({ name: c.name, color: c.color, n: window > 0 ? Math.max(1, Math.round((c.tokens / window) * width)) : 0 }))
+  let over = cells.reduce((t, c) => t + c.n, 0) - width
+  for (const c of [...cells].sort((x, y) => y.n - x.n)) {
+    if (over <= 0) break
+    const take = Math.min(over, c.n - 1)
+    c.n -= take
+    over -= take
+  }
+  const filled = cells.reduce((t, c) => t + c.n, 0)
+  return { cells, free: Math.max(0, width - filled) }
+}
+
+export function contextTab(els: Els, ctx: SpyglassContext, width: number, now: number, act: ContextActions): RenderChildren {
+  const { Box, Text } = els
+  const actions = foot(els, [
+    { key: 'context:refresh', hotkey: 'r', label: 'refresh', run: act.refresh },
+    { key: 'context:count', hotkey: 'x', label: 'count exactly', run: act.count },
+  ])
+  if (!ctx.isLoaded) return <Box flexDirection="column"><Text dimColor>Reading the context…</Text>{actions}</Box>
+  if (ctx.why) return <Box flexDirection="column"><Text color={CRIMSON}>The context cannot be read: {ctx.why}</Text>{actions}</Box>
+  const room = Math.max(20, width)
   const hot = (ctx.percent ?? 0) >= 80
+  const tone = hot ? CRIMSON : GOLD
+  const top = banner(hot ? 'THE LANTERN BURNS LOW' : 'THE LANTERN BURNS', ctx.percent === undefined ? '–' : `${ctx.percent}%`, room)
+  const b = ctx.breakdown
+  const bar = b ? stack(b.categories, b.maxTokens, room) : undefined
+  const plain = bar ? undefined : { n: ctx.window ? Math.round(((ctx.tokens ?? 0) / ctx.window) * room) : 0 }
+  const deferred = b?.categories.filter(k => k.kind === 'deferred') ?? []
   return (
     <Box flexDirection="column">
-      {controls}
-      <Text>
-        <Text color={hot ? '#c0392b' : '#d4a017'}>{fill.filled}</Text><Text dimColor>{fill.empty}</Text>
-      </Text>
+      <Text wrap="truncate-end"><Text color={tone}>{top.lead}</Text><Text color={tone} bold>{top.label}</Text><Text color={tone}>{top.tail}</Text></Text>
       <Text wrap="truncate-end">
-        {ctx.tokens === undefined ? 'no reply yet' : `${kTokens(ctx.tokens)} of ${kTokens(ctx.window)} tokens · ${ctx.percent ?? 0}%`}
-        {ctx.usd !== undefined && <Text dimColor> · ${ctx.usd.toFixed(2)}</Text>}
+        {bar ? bar.cells.map(c => <Text key={`seg:${c.name}`} color={c.color}>{'█'.repeat(c.n)}</Text>) : <Text color={tone}>{'█'.repeat(plain?.n ?? 0)}</Text>}
+        <Text dimColor>{'░'.repeat(bar ? bar.free : room - (plain?.n ?? 0))}</Text>
       </Text>
-      {b?.autoCompactAt !== undefined && (
-        <Text dimColor wrap="truncate-end">compacts at {kTokens(b.autoCompactAt)}, {kTokens(Math.max(0, b.autoCompactAt - b.totalTokens))} from now</Text>
-      )}
-      {ctx.limits.map(l => (
-        <Text key={`limit:${l.kind}`} dimColor wrap="truncate-end">{l.kind}: {l.percentUsed}% used{l.resetsAt ? `, resets ${resetsIn(l.resetsAt, now)}` : ''}</Text>
-      ))}
+      {row(els, 'fill', <Text>{ctx.tokens === undefined ? 'no reply yet' : `${kTokens(ctx.tokens)} of ${kTokens(ctx.window)} tokens`}</Text>,
+        ctx.usd !== undefined ? <Text dimColor>${ctx.usd.toFixed(2)}</Text> : undefined)}
+      {b?.autoCompactAt !== undefined && row(els, 'compact', <Text dimColor>compacts at {kTokens(b.autoCompactAt)}</Text>,
+        <Text dimColor>{kTokens(Math.max(0, b.autoCompactAt - b.totalTokens))} to go</Text>)}
+      {ctx.limits.map(l => row(els, `limit:${l.kind}`, <Text dimColor>{l.kind.replace('_', ' ')} limit {l.percentUsed}%</Text>,
+        l.resetsAt ? <Text dimColor>resets {resetsIn(l.resetsAt, now)}</Text> : undefined))}
       {b && (
-        <Box flexDirection="column" marginTop={1}>
-          <Text bold>What fills it <Text dimColor>({b.counted === 'full' ? 'counted' : 'estimated'})</Text></Text>
-          {b.categories.map(k => {
-            const part = bar(k.tokens, b.maxTokens, Math.max(4, Math.min(16, room - 24)))
-            return (
-              <Text key={`cat:${k.name}`} wrap="truncate-end" dimColor={k.kind !== 'used'}>
-                <Text color={k.color}>{part.filled}</Text><Text dimColor>{part.empty}</Text> {kTokens(k.tokens)} {k.name}
-              </Text>
-            )
-          })}
-          {b.servers.length > 0 && <Text bold>MCP servers <Text dimColor>(deferred: not in the context until fetched)</Text></Text>}
-          {b.servers.map(s => (
-            <Text key={`mcp:${s.server}`} wrap="truncate-end">
-              {kTokens(s.tokens)} {s.server}{' '}
-              <Text dimColor>· {s.tools} {s.tools === 1 ? 'tool' : 'tools'} loaded{s.deferred ? ` · ${kTokens(s.deferred)} deferred` : ''}</Text>
-            </Text>
-          ))}
-          {b.memory.length > 0 && <Text bold>Memory files</Text>}
-          {b.memory.map(m => (
-            <Text key={`mem:${m.path}`} wrap="truncate-start">{kTokens(m.tokens)} {m.path}</Text>
-          ))}
+        <Box flexDirection="column">
+          {head(els, 'feeds', `what feeds it`, b.counted === 'full' ? 'counted' : 'estimated')}
+          {b.categories.filter(k => k.kind === 'used').map(k => row(els, `cat:${k.name}`,
+            <Text wrap="truncate-end"><Text color={k.color}>■</Text> {k.name}</Text>, <Text>{kTokens(k.tokens)}</Text>))}
+          {b.categories.filter(k => k.kind === 'free' || k.kind === 'buffer').map(k => row(els, `cat:${k.name}`,
+            <Text dimColor wrap="truncate-end">□ {k.name}</Text>, <Text dimColor>{kTokens(k.tokens)}</Text>))}
+          {deferred.length > 0 && (
+            <Text dimColor wrap="wrap">deferred, not burning: {deferred.map(k => `${k.name.replace(' (deferred)', '')} ${kTokens(k.tokens)}`).join(' · ')}</Text>
+          )}
+          {b.servers.length > 0 && head(els, 'mcp', 'mcp servers', 'loaded · deferred')}
+          {b.servers.map(s => row(els, `mcp:${s.server}`, <Text wrap="truncate-end">{s.server}</Text>,
+            <Text>{kTokens(s.tokens)}<Text dimColor> · {kTokens(s.deferred)}</Text></Text>))}
+          {b.memory.length > 0 && head(els, 'memory', 'memory files', '')}
+          {b.memory.map(m => row(els, `mem:${m.path}`, <Text wrap="truncate-start">{m.path}</Text>, <Text>{kTokens(m.tokens)}</Text>))}
         </Box>
       )}
+      {actions}
     </Box>
   )
 }

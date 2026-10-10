@@ -1,7 +1,7 @@
 import type { RenderChildren } from 'claude-code'
 
 import type { SpyglassDeed, SpyglassDeedKind } from '../../types'
-import type { Els } from './postings'
+import { CRIMSON, foot, GOLD, GREEN, PURPLE, row, STEEL, type Els } from './ui'
 
 // The activity tab: what this session has done, newest first. Every deed (a tool call) as it runs and how it ended,
 // an MCP server's tools marked apart, each adventurer sent and its return, a deed an adventurer did under its name, and
@@ -12,10 +12,10 @@ export const KEEP = 300
 
 export type Filter = 'all' | SpyglassDeedKind
 export const FILTERS: readonly { id: Filter; title: string }[] = [
-  { id: 'all', title: 'All' },
-  { id: 'mcp', title: 'MCP' },
-  { id: 'adventurer', title: 'Adventurers' },
-  { id: 'notice', title: 'Notices' },
+  { id: 'all', title: 'all' },
+  { id: 'mcp', title: 'mcp' },
+  { id: 'adventurer', title: 'adventurers' },
+  { id: 'notice', title: 'notices' },
 ]
 
 const cut = (text: string, n = 160) => {
@@ -43,7 +43,7 @@ export const isNoticeCommand = (command: string) => /(^|[\s;&|(])gm\s+(notice|pa
 export const noticeLines = (stdout: string) => stdout.split('\n').map(l => l.trim()).filter(Boolean)
 
 // A row read back from the transcript (a resumed or restarted session) has no time: it is drawn as earlier.
-export const clock = (at: number) => (at > 0 ? new Date(at).toTimeString().slice(0, 8) : 'earlier ')
+export const clock = (at: number) => (at > 0 ? new Date(at).toTimeString().slice(0, 8) : 'earlier')
 
 // The rows of a transcript's deeds, oldest first: what a session that starts again, or resumes, has already done.
 export function deedsOfTranscript(messages: readonly { toolUses: readonly { tool_use_id: string; tool: string; input: Record<string, unknown>; text?: string; isError?: true }[] }[]) {
@@ -56,10 +56,10 @@ export function deedsOfTranscript(messages: readonly { toolUses: readonly { tool
 }
 
 const MARK: Record<SpyglassDeedKind, { glyph: string; color?: string }> = {
-  deed: { glyph: '⚒', color: '#8a9199' },
-  mcp: { glyph: '✦', color: '#9b59b6' },
-  adventurer: { glyph: '⛨', color: '#3fa34d' },
-  notice: { glyph: '✎', color: '#d4a017' },
+  deed: { glyph: '⚒', color: STEEL },
+  mcp: { glyph: '✦', color: PURPLE },
+  adventurer: { glyph: '⛨', color: GREEN },
+  notice: { glyph: '✎', color: GOLD },
 }
 
 export const shownDeeds = (deeds: readonly SpyglassDeed[], filter: Filter) =>
@@ -67,34 +67,34 @@ export const shownDeeds = (deeds: readonly SpyglassDeed[], filter: Filter) =>
 
 export type ActivityActions = { filter: (f: Filter) => void; clear: () => void }
 
-export function activityTab({ Box, Text, Button }: Els, deeds: readonly SpyglassDeed[], filter: Filter, act: ActivityActions): RenderChildren {
+export function activityTab(els: Els, deeds: readonly SpyglassDeed[], filter: Filter, act: ActivityActions): RenderChildren {
+  const { Box, Text, Button } = els
   const rows = shownDeeds(deeds, filter)
   return (
     <Box flexDirection="column">
-      <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
-        {FILTERS.map(f => (
-          <Button key={`activity:${f.id}`} label={f.title} dimColor={f.id !== filter} variant={f.id === filter ? 'primary' : undefined}
-            onPress={() => act.filter(f.id)} />
+      <Box flexDirection="row" flexWrap="wrap">
+        {FILTERS.map((f, i) => (
+          <Button key={`activity:${f.id}`} plain onPress={() => act.filter(f.id)}>
+            {i > 0 ? <Text dimColor> · </Text> : ''}{f.id === filter ? <Text color={GOLD} bold>{f.title}</Text> : <Text dimColor>{f.title}</Text>}
+          </Button>
         ))}
-        <Button key="activity:clear" label="Clear" dimColor onPress={() => act.clear()} />
       </Box>
       {rows.length === 0 && <Text dimColor>Nothing done yet.</Text>}
       {rows.map(d => {
         const mark = MARK[d.kind]
-        return (
-          <Box key={`deed:${d.id}`} flexDirection="column">
-            <Text wrap="truncate-end">
-              <Text dimColor>{clock(d.at)} </Text>
-              <Text color={mark.color}>{mark.glyph}</Text>{' '}
-              {d.who && <Text color="#3fa34d">{d.who} › </Text>}
-              <Text bold={d.kind !== 'deed'}>{d.title}</Text>
-              {d.status === 'running' && <Text dimColor> …</Text>}
-              {d.status === 'error' && <Text color="#c0392b"> ✗</Text>}
-            </Text>
-            {d.detail && <Box paddingLeft={9}><Text dimColor wrap="truncate-end">{d.detail}</Text></Box>}
-          </Box>
+        const left = (
+          <Text wrap="truncate-end">
+            {d.who ? <Text color={GREEN}>  │ </Text> : <Text color={mark.color}>{mark.glyph} </Text>}
+            {d.who && <Text color={GREEN}>{d.who} › </Text>}
+            <Text color={d.kind === 'deed' ? undefined : mark.color} bold={d.kind === 'notice'}>{d.title}</Text>
+            {d.status === 'error' && <Text color={CRIMSON}> ✗</Text>}
+            {d.status === 'running' && <Text color={GOLD}> …</Text>}
+            {d.detail && <Text dimColor>  {d.detail}</Text>}
+          </Text>
         )
+        return row(els, `deed:${d.id}`, left, <Text dimColor>{d.at > 0 ? clock(d.at).slice(0, 5) : 'earlier'}</Text>)
       })}
+      {foot(els, [{ key: 'activity:clear', hotkey: 'c', label: 'clear', run: act.clear }])}
     </Box>
   )
 }

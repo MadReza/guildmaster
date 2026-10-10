@@ -1,6 +1,7 @@
 import type { Elements, RenderChildren } from 'claude-code'
 
 import type { SpyglassSetting, SpyglassSettings } from '../../types'
+import { CRIMSON, foot, GOLD, row } from './ui'
 
 // The configs tab: every setting in guild.conf as gm config --json gives it, with its value and where it came from.
 // A press on a setting opens it to its description and its controls: a button for each value a switch or a choice
@@ -50,61 +51,74 @@ export type ConfigsActions = {
   refresh: () => void
 }
 
-function controls({ Box, Text, Button, Input }: ConfigEls, s: SpyglassSetting, act: ConfigsActions): RenderChildren {
+function controls(els: ConfigEls, s: SpyglassSetting, act: ConfigsActions): RenderChildren {
+  const { Box, Text, Button, Input } = els
+  const reset = fromFile(s) && (
+    <Button key={`unset:${s.key}`} plain onPress={() => act.unset(s.key)}><Text dimColor>default</Text></Button>
+  )
   if (s.choices.length) {
     const held = s.value.split(/\s+/)
     return (
-      <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
-        {s.choices.map(c => {
-          const isHeld = s.isMulti ? held.includes(c) : s.value === c
-          return (
-            <Button key={`set:${s.key}:${c}`} label={c} variant={isHeld ? 'primary' : undefined} dimColor={!isHeld}
-              onPress={() => (s.isMulti ? act.set(s.key, toggledWords(s.value, c)) : act.set(s.key, [c]))} />
-          )
-        })}
-        {fromFile(s) && <Button key={`unset:${s.key}`} label="Default" dimColor onPress={() => act.unset(s.key)} />}
-        {s.isMulti && <Text dimColor>press a word to add or take it away</Text>}
+      <Box flexDirection="column">
+        <Box flexDirection="row" flexWrap="wrap">
+          {s.choices.map((c, i) => {
+            const isHeld = s.isMulti ? held.includes(c) : s.value === c
+            return (
+              <Button key={`set:${s.key}:${c}`} plain onPress={() => (s.isMulti ? act.set(s.key, toggledWords(s.value, c)) : act.set(s.key, [c]))}>
+                {i > 0 ? <Text dimColor> · </Text> : ''}{isHeld ? <Text color={GOLD} bold>{c}</Text> : <Text dimColor>{c}</Text>}
+              </Button>
+            )
+          })}
+        </Box>
+        {s.isMulti && <Text dimColor>a press adds a word or takes it away</Text>}
+        {reset}
       </Box>
     )
   }
   if (!Input) return <Text dimColor>{`gm config set ${s.key} <value> changes it.`}</Text>
   return (
     <Box flexDirection="column">
-      <Input key={`input:${s.key}`} value={s.value} placeholder={s.default || 'a value'} submitLabel="Set"
+      <Input key={`input:${s.key}`} value={s.value} placeholder={s.default || 'a value'} submitLabel="set"
         onSubmit={value => act.set(s.key, value.trim().split(/\s+/).filter(Boolean))} />
-      {fromFile(s) && <Button key={`unset:${s.key}`} label="Default" dimColor onPress={() => act.unset(s.key)} />}
+      {reset}
     </Box>
   )
 }
 
+// Where a value came from, in a word: the file, the environment, or nothing for the default.
+export const sourceWord = (s: SpyglassSetting) => (s.source === 'default' ? '' : s.source.startsWith('environment') ? 'env' : s.source.startsWith('ignored') ? 'ignored' : 'file')
+
 export function configsTab(els: ConfigEls, settings: SpyglassSettings, open: string, act: ConfigsActions): RenderChildren {
   const { Box, Text, Button } = els
-  const refresh = <Button key="configs:refresh" label="Refresh" dimColor onPress={() => act.refresh()} />
-  if (!settings.isLoaded) return <Box flexDirection="column">{refresh}<Text dimColor>Reading guild.conf…</Text></Box>
-  if (settings.why) {
-    return <Box flexDirection="column">{refresh}<Text color="#c0392b">gm cannot read the settings: {settings.why}</Text></Box>
-  }
+  const actions = foot(els, [{ key: 'configs:refresh', hotkey: 'r', label: 'refresh', run: act.refresh }], '⏎ change a setting')
+  if (!settings.isLoaded) return <Box flexDirection="column"><Text dimColor>Reading guild.conf…</Text>{actions}</Box>
+  if (settings.why) return <Box flexDirection="column"><Text color={CRIMSON}>gm cannot read the settings: {settings.why}</Text>{actions}</Box>
   return (
     <Box flexDirection="column">
-      {refresh}
-      {settings.rows.map(s => (
-        <Box key={`setting:${s.key}`} flexDirection="column">
-          <Button key={`setting-key:${s.key}`} plain onPress={() => act.toggle(s.key)}>
-            <Text bold={open === s.key}>{s.key}</Text> {s.value || <Text dimColor>(none)</Text>}
-            {s.source !== 'default' && <Text dimColor> · {s.source}</Text>}
-          </Button>
-          {open === s.key && (
-            <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
-              <Text dimColor>{s.description}</Text>
-              {s.default && <Text dimColor>default: {s.default}</Text>}
-              {s.source.startsWith('environment') && (
-                <Text color="#d4a017">{s.env} overrides it in this session; a change to guild.conf counts where {s.env} is not set.</Text>
-              )}
-              {controls(els, s, act)}
-            </Box>
-          )}
-        </Box>
-      ))}
+      {settings.rows.map(s => {
+        const isOpen = open === s.key
+        const from = sourceWord(s)
+        return (
+          <Box key={`setting:${s.key}`} flexDirection="column" marginBottom={isOpen ? 1 : 0}>
+            {row(els, `line:${s.key}`,
+              <Button key={`setting-key:${s.key}`} plain onPress={() => act.toggle(s.key)}>
+                {isOpen ? <Text color={GOLD} bold>{s.key}</Text> : <Text>{s.key}</Text>}
+              </Button>,
+              <Text wrap="truncate-end">{s.value ? <Text bold={from === 'file'}>{s.value}</Text> : <Text dimColor>none</Text>}{from && <Text dimColor> · {from}</Text>}</Text>)}
+            {isOpen && (
+              <Box flexDirection="column" paddingLeft={2}>
+                <Text dimColor>{s.description}</Text>
+                {s.default && <Text dimColor>default {s.default}</Text>}
+                {s.source.startsWith('environment') && (
+                  <Text color={GOLD}>{s.env} overrides it in this session; a change to guild.conf counts where {s.env} is not set.</Text>
+                )}
+                {controls(els, s, act)}
+              </Box>
+            )}
+          </Box>
+        )
+      })}
+      {actions}
     </Box>
   )
 }

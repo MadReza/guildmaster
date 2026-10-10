@@ -9,6 +9,7 @@ import { configsTab, parseSettings } from './tabs/configs'
 import { activityTab, deedsOfTranscript, describeCall, FILTERS, isNoticeCommand, KEEP, noticeLines, type Filter } from './tabs/activity'
 import { filesTab, lineCount, merged, openArgv, parseNumstat, untracked } from './tabs/files'
 import { listArgs, parsePostings, postingsTab } from './tabs/postings'
+import { tabStrip } from './tabs/ui'
 
 // The spyglass: a pane beside the chat whose tabs show the party's work. It never opens by itself: /spyglass opens it,
 // and /spyglass again, the pane's close mark, or ctrl+x x closes it. Every session of the guild has it, and the tabs
@@ -39,10 +40,9 @@ async function body($: EngineInterface, e: RenderInput<'Pane'>, id: string): Pro
   switch (id) {
     case 'postings': {
       const focus = await focusOf($)
-      const view = { board: await read($, postings), focus, all: await read($, showAll), open: await read($, opened),
-        width: Math.max(20, e.props.bodyColumns) }
+      const view = { board: await read($, postings), focus, all: await read($, showAll), open: await read($, opened), now: await $.clock.now() }
       return postingsTab($.ui.resolve(e), view, {
-        toggleAll: () => void update($, showAll, v => !v).then(() => refreshPostings($, focus)),
+        toggleAll: () => void update($, showAll, v => !v),
         refresh: () => void refreshPostings($, focus),
         toggle: ref => void update($, opened, v => (v === ref ? '' : ref)),
       })
@@ -68,7 +68,7 @@ async function body($: EngineInterface, e: RenderInput<'Pane'>, id: string): Pro
         refresh: () => void refreshSettings($),
       })
     case 'context':
-      return contextTab($.ui.resolve(e), await read($, context), e.props.bodyColumns, await $.clock.now(), {
+      return contextTab($.ui.resolve(e), await read($, context), Math.max(20, e.props.bodyColumns), await $.clock.now(), {
         refresh: () => void refreshContext($, 'summary'),
         count: () => void refreshContext($, 'full'),
       })
@@ -136,7 +136,7 @@ const OLD_GM = 'the guild\'s gm (~/.local/bin/gm) is older than the spyglass: it
 const whyNot = (why: string) => (/unknown option --json|gm config \[get <key>/.test(why) ? OLD_GM : why)
 
 async function refreshPostings($: EngineInterface, focus: string | undefined): Promise<void> {
-  const got = await runGm($, listArgs(focus, await read($, showAll)))
+  const got = await runGm($, listArgs(focus))
   const board: SpyglassPostings = 'why' in got ? { rows: [], why: whyNot(got.why), isLoaded: true } : { rows: parsePostings(got.out), isLoaded: true }
   await update($, postings, () => board)
 }
@@ -421,24 +421,14 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const { Box, Text } = $.ui.resolve(e)
     const offered = tabsFor(await seatOf($))
     const current = shown(await read($, tab), offered)
-    if (!current) {
-      return (
-        <Box flexDirection="column">
-          <Text dimColor>Nothing to see through the spyglass yet.</Text>
-        </Box>
-      )
-    }
+    if (!current) return <Text dimColor>Nothing to see through the spyglass yet.</Text>
+    const width = Math.max(20, e.props.bodyColumns)
     return (
       <Box flexDirection="column">
-        <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
-          {offered.map(t => (
-            <Button key={`tab:${t.id}`} label={t.title} variant={t.id === current.id ? 'primary' : undefined}
-              dimColor={t.id !== current.id} onPress={() => void update($, tab, () => t.id)} />
-          ))}
-        </Box>
+        {tabStrip($.ui.resolve(e), offered, current.id, width, id => void update($, tab, () => id))}
         <Box flexDirection="column" marginTop={1}>{await body($, e, current.id)}</Box>
       </Box>
     )

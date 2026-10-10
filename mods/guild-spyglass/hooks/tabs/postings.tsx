@@ -1,15 +1,15 @@
-import type { Elements, RenderChildren } from 'claude-code'
+import type { RenderChildren } from 'claude-code'
 
 import type { SpyglassPosting, SpyglassPostings } from '../../types'
+import { CRIMSON, foot, GOLD, GREEN, head, ROYAL, row, when, type Els } from './ui'
+
+export type { Els } from './ui'
 
 // The postings tab: the quest board as gm list --json gives it. A Party Leader sees its own focus's postings, the
 // Guildmaster every focus's, grouped by focus. Finished ones (done, closed) show only while asked for. A press on a
 // posting opens it to its words' summary, its last notice line and, when parked, why. What runs gm and holds the
 // board is in register.tsx; this file only reads and draws.
 
-export type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
-
-const STATES = ['received', 'queued', 'active', 'needs-you', 'parked', 'done', 'failed', 'closed'] as const
 
 // What gm list --json printed, as the tab holds it: anything that is not an array of postings is no postings.
 export function parsePostings(json: string): SpyglassPosting[] {
@@ -31,80 +31,78 @@ export function parsePostings(json: string): SpyglassPosting[] {
   })
 }
 
-// The gm list arguments for a seat: its own focus for a Party Leader, every focus at the front desk.
-export const listArgs = (focus: string | undefined, all: boolean) =>
-  ['list', '--json', ...(all ? ['--all'] : []), ...(focus ? [focus] : [])]
+// The gm list arguments for a seat: its own focus for a Party Leader, every focus at the front desk. Finished postings
+// are always read, so the board can count them while it folds them away.
+export const listArgs = (focus: string | undefined) => ['list', '--json', '--all', ...(focus ? [focus] : [])]
+
+// The board's groups, in the order they are drawn: what needs the patron first, what is finished last.
+export const GROUPS: readonly { title: string; states: readonly string[]; isFinished?: true; isTold?: true }[] = [
+  { title: 'needs you', states: ['needs-you'], isTold: true },
+  { title: 'active', states: ['active'], isTold: true },
+  { title: 'received', states: ['received'] },
+  { title: 'queued', states: ['queued'] },
+  { title: 'parked', states: ['parked'] },
+  { title: 'failed', states: ['failed'] },
+  { title: 'done', states: ['done', 'closed'], isFinished: true },
+]
 
 // The colour and mark of each state: what needs the patron stands out, what is finished recedes.
 export function stateMark(state: string): { glyph: string; color?: string; isDim: boolean } {
   switch (state) {
-    case 'needs-you': return { glyph: '!', color: '#c0392b', isDim: false }
-    case 'active': return { glyph: '▶', color: '#d4a017', isDim: false }
-    case 'received': return { glyph: '✉', color: '#4a7bd9', isDim: false }
+    case 'needs-you': return { glyph: '!', color: CRIMSON, isDim: false }
+    case 'active': return { glyph: '▶', color: GOLD, isDim: false }
+    case 'received': return { glyph: '✉', color: ROYAL, isDim: false }
     case 'queued': return { glyph: '·', isDim: false }
     case 'parked': return { glyph: '⏸', isDim: true }
-    case 'done': return { glyph: '✓', color: '#3fa34d', isDim: true }
-    case 'failed': return { glyph: '✗', color: '#c0392b', isDim: true }
+    case 'done': return { glyph: '✓', color: GREEN, isDim: true }
+    case 'failed': return { glyph: '✗', color: CRIMSON, isDim: true }
     default: return { glyph: ' ', isDim: true }
   }
 }
 
-// One count per state, in the board's order, for the line above the list.
-export function tally(rows: readonly SpyglassPosting[]): string {
-  const counts = STATES.map(s => [s, rows.filter(r => r.state === s).length] as const).filter(([, n]) => n > 0)
-  return counts.length ? counts.map(([s, n]) => `${n} ${s}`).join(' · ') : 'no postings'
-}
-
-export type PostingsView = { board: SpyglassPostings; focus: string | undefined; all: boolean; open: string; width: number }
+export type PostingsView = { board: SpyglassPostings; focus: string | undefined; all: boolean; open: string; now: number }
 export type PostingsActions = { toggleAll: () => void; refresh: () => void; toggle: (ref: string) => void }
 
-export function postingsTab({ Box, Text, Button }: Els, v: PostingsView, act: PostingsActions): RenderChildren {
-  const controls = (
-    <Box flexDirection="row" columnGap={1}>
-      <Button key="postings:all" label={v.all ? 'Hide finished' : 'Show finished'} dimColor onPress={() => act.toggleAll()} />
-      <Button key="postings:refresh" label="Refresh" dimColor onPress={() => act.refresh()} />
-    </Box>
-  )
-  if (!v.board.isLoaded) return <Box flexDirection="column">{controls}<Text dimColor>Reading the quest board…</Text></Box>
-  if (v.board.why) {
+export function postingsTab(els: Els, v: PostingsView, act: PostingsActions): RenderChildren {
+  const { Box, Text, Button } = els
+  const actions = foot(els, [
+    { key: 'postings:refresh', hotkey: 'r', label: 'refresh', run: act.refresh },
+    { key: 'postings:all', hotkey: 'f', label: v.all ? 'hide done' : 'show done', run: act.toggleAll },
+  ], '⏎ open a posting')
+  if (!v.board.isLoaded) return <Box flexDirection="column"><Text dimColor>Reading the quest board…</Text>{actions}</Box>
+  if (v.board.why) return <Box flexDirection="column"><Text color={CRIMSON}>gm cannot list the postings: {v.board.why}</Text>{actions}</Box>
+  const rows = v.board.rows
+  const drawn = GROUPS.map((g, i) => {
+    const mine = rows.filter(r => g.states.includes(r.state))
+    if (mine.length === 0) return null
+    if (g.isFinished && !v.all) return head(els, `group:${g.title}`, g.title, `${mine.length} · hidden`, i > 0)
     return (
-      <Box flexDirection="column">
-        {controls}
-        <Text color="#c0392b">gm cannot list the postings: {v.board.why}</Text>
+      <Box key={`group:${g.title}`} flexDirection="column">
+        {head(els, `head:${g.title}`, g.title, String(mine.length))}
+        {mine.map(r => {
+          const mark = stateMark(r.state)
+          const isOpen = v.open === r.ref
+          const name = v.focus ? `#${r.num} ${r.slug}` : `${r.ref} ${r.slug}`
+          return (
+            <Box key={`row:${r.ref}`} flexDirection="column">
+              {row(els, `line:${r.ref}`,
+                <Button key={`posting:${r.ref}`} plain onPress={() => act.toggle(r.ref)}>
+                  <Text color={mark.color} bold={!mark.isDim}>{mark.glyph}</Text> <Text bold={!mark.isDim} dimColor={mark.isDim}>{name}</Text>
+                </Button>,
+                <Text dimColor>{when(r.updated, v.now)}</Text>)}
+              {(isOpen || g.isTold) && r.summary && <Box paddingLeft={2}><Text dimColor wrap={isOpen ? 'wrap' : 'truncate-end'}>{r.summary}</Text></Box>}
+              {isOpen && r.why && <Box paddingLeft={2}><Text dimColor>parked: {r.why}{r.until ? `, until ${r.until}` : ''}</Text></Box>}
+              {isOpen && r.last && <Box paddingLeft={2}><Text dimColor>{r.last}</Text></Box>}
+            </Box>
+          )
+        })}
       </Box>
     )
-  }
-  const rows = v.board.rows
-  const focuses = v.focus ? [v.focus] : [...new Set(rows.map(r => r.focus))]
+  })
   return (
     <Box flexDirection="column">
-      {controls}
-      <Text dimColor wrap="truncate-end">{tally(rows)}</Text>
-      {focuses.map(f => (
-        <Box key={`focus:${f}`} flexDirection="column" marginTop={1}>
-          {!v.focus && <Text bold wrap="truncate-end">⚔ {f}</Text>}
-          {rows.filter(r => r.focus === f).map(r => {
-            const mark = stateMark(r.state)
-            return (
-              <Box key={`row:${r.ref}`} flexDirection="column">
-                <Button key={`posting:${r.ref}`} plain dimColor={mark.isDim} onPress={() => act.toggle(r.ref)}>
-                  <Text color={mark.color}>{mark.glyph}</Text> #{r.num} {r.slug} <Text dimColor>{r.state}</Text>
-                </Button>
-                {v.open === r.ref ? (
-                  <Box flexDirection="column" paddingLeft={2} width={v.width}>
-                    <Text>{r.summary}</Text>
-                    {r.why && <Text dimColor>parked: {r.why}{r.until ? `, until ${r.until}` : ''}</Text>}
-                    {r.last && <Text dimColor>{r.last}</Text>}
-                  </Box>
-                ) : (
-                  <Box paddingLeft={2}><Text dimColor wrap="truncate-end">{r.summary}</Text></Box>
-                )}
-              </Box>
-            )
-          })}
-        </Box>
-      ))}
-      {rows.length === 0 && <Text dimColor>The board is empty.</Text>}
+      {rows.length === 0 ? <Text dimColor>The board is empty.</Text> : drawn}
+      {actions}
     </Box>
   )
 }

@@ -4,9 +4,10 @@ import { describe, expect, mock, test, type Engine } from 'claude-code/testing'
 import { PANE, seatFrom, shown, tabsFor, type Tab } from '../hooks/register'
 import { clock, describeCall, isNoticeCommand, noticeLines, shownDeeds } from '../hooks/tabs/activity'
 import { parseSettings, toggledWords } from '../hooks/tabs/configs'
-import { bar, kTokens, resetsIn } from '../hooks/tabs/context'
+import { banner, kTokens, resetsIn, stack } from '../hooks/tabs/context'
 import { lineCount, merged, openArgv, parseNumstat, untracked } from '../hooks/tabs/files'
-import { listArgs, parsePostings, stateMark, tally } from '../hooks/tabs/postings'
+import { listArgs, parsePostings, stateMark } from '../hooks/tabs/postings'
+import { ruleUnder, tabLabel, when } from '../hooks/tabs/ui'
 
 // What stands for Claude Code and the machine beneath the mod: the environment gm starts a session with, the guild's gm
 // at ~/.local/bin/gm and the board it lists, the clock, and the engine's record of open panes, which the mod's opens
@@ -209,7 +210,7 @@ describe('the pane', () => {
     world(on, { HOME })
     for (const surface of ['terminal', 'desktop'] as const) {
       const ui = await $.ui.mount(pane(surface))
-      expect((await ui.findAll({ type: 'Button' })).map(b => b.text).filter(t => t === 'Postings' || t === 'Files')).toEqual(['Files'])
+      expect((await ui.findAll({ type: 'Button' })).map(b => b.text).filter(t => t === '⚑ Board' || t === '✎ Satchel')).toEqual(['✎ Satchel'])
       await ui.unmount()
     }
   })
@@ -256,11 +257,13 @@ describe('the postings tab', () => {
     w.board = [row('appt-v2', 1, 'grey-button', 'active'), row('appt-v2', 2, 'owner-empty', 'needs-you'), row('crm-1', 1, 'elsewhere', 'queued')]
     for (const surface of ['terminal', 'desktop'] as const) {
       const ui = await opened($, surface)
-      expect(w.journal.runs[0]).toEqual([GM, 'list', '--json', 'appt-v2'])
+      expect(w.journal.runs[0]).toEqual([GM, 'list', '--json', '--all', 'appt-v2'])
       const all = await texts(ui)
       expect(all).toContain('#1 grey-button')
       expect(all).toContain('#2 owner-empty')
-      expect(all).toContain('1 active · 1 needs-you')
+      expect(all).toMatch(/NEEDS YOU\n1\n/)
+      expect(all).toMatch(/ACTIVE\n1\n/)
+      expect(all.indexOf('#2 owner-empty')).toBeLessThan(all.indexOf('#1 grey-button'))
       expect(all).not.toContain('elsewhere')
       await ui.unmount()
       await $.command.run(spyglass('close'))
@@ -271,11 +274,10 @@ describe('the postings tab', () => {
     const w = world(on, DESK)
     w.board = [row('appt-v2', 1, 'grey-button', 'active'), row('crm-1', 1, 'elsewhere', 'queued')]
     const ui = await opened($)
-    expect(w.journal.runs[0]).toEqual([GM, 'list', '--json'])
+    expect(w.journal.runs[0]).toEqual([GM, 'list', '--json', '--all'])
     const all = await texts(ui)
-    expect(all).toContain('⚔ appt-v2')
-    expect(all).toContain('⚔ crm-1')
-    expect(all).toContain('#1 elsewhere')
+    expect(all).toContain('appt-v2#1 grey-button')
+    expect(all).toContain('crm-1#1 elsewhere')
   })
 
   test('a press opens a posting to its last notice and why it is parked, and a second press folds it', async ($, on) => {
@@ -295,10 +297,12 @@ describe('the postings tab', () => {
     w.board = [row('appt-v2', 1, 'shipped', 'done'), row('appt-v2', 2, 'next-one', 'queued')]
     const ui = await opened($)
     expect(await texts(ui)).not.toContain('shipped')
+    expect(await texts(ui)).toContain('1 · hidden')
+    const runs = w.journal.runs.length
     await ui.press({ key: 'postings:all' })
-    expect(w.journal.runs.at(-1)).toEqual([GM, 'list', '--json', '--all', 'appt-v2'])
+    expect(w.journal.runs.length).toBe(runs)
     expect(await texts(ui)).toContain('#1 shipped')
-    expect(await texts(ui)).toContain('Hide finished')
+    expect(await texts(ui)).toContain('hide done')
   })
 
   test('a change made anywhere shows within the watch\'s few seconds, and the watch ends with the pane', async ($, on) => {
@@ -307,7 +311,7 @@ describe('the postings tab', () => {
     const ui = await opened($)
     w.board = [row('appt-v2', 1, 'grey-button', 'active')]
     await w.clock.advance(5000)
-    expect(await texts(ui)).toContain('1 active')
+    expect(await texts(ui)).toMatch(/ACTIVE\n1\n/)
     await $.command.run(spyglass('close'))
     const runs = w.journal.runs.length
     await w.clock.advance(20000)
@@ -326,7 +330,7 @@ describe('the postings tab', () => {
     expect(lists()).toBe(runs)
     await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', command: 'gm notice 1 started' })
     expect(lists()).toBe(runs + 1)
-    expect(await texts(ui)).toContain('1 active')
+    expect(await texts(ui)).toMatch(/ACTIVE\n1\n/)
   })
 
   test('says plainly when the guild\'s gm is older than the tab', async ($, on) => {
@@ -349,11 +353,10 @@ describe('the postings tab', () => {
     expect(parsePostings('[{"ref":"a#1","num":1,"state":"queued"},{"num":2}]')).toEqual([
       { ref: 'a#1', focus: '', num: 1, slug: '', state: 'queued', updated: '', summary: '', why: null, until: null, last: null },
     ])
-    expect(listArgs(undefined, false)).toEqual(['list', '--json'])
-    expect(listArgs('appt-v2', true)).toEqual(['list', '--json', '--all', 'appt-v2'])
+    expect(listArgs(undefined)).toEqual(['list', '--json', '--all'])
+    expect(listArgs('appt-v2')).toEqual(['list', '--json', '--all', 'appt-v2'])
     expect(stateMark('needs-you').isDim).toBe(false)
     expect(stateMark('done').isDim).toBe(true)
-    expect(tally([])).toBe('no postings')
   })
 })
 
@@ -374,11 +377,11 @@ describe('the files tab', () => {
     for (const surface of ['terminal', 'desktop'] as const) {
       const ui = await opened($, surface)
       const all = await texts(ui)
-      expect(all).toContain('⚔ CAMP · appt-v2')
-      expect(all).toMatch(/src\/a\.ts\s*\+12\s*−3/)
-      expect(all).toMatch(/logo\.png\s*binary/)
-      expect(all).toMatch(/notes\.md\s*\+2\s*new/)
+      expect(all).toContain('CAMP · APPT-V2')
       expect(all).toContain('3 files +14 −3')
+      expect(all).toMatch(/src\/a\.ts\nsrc\/\n\s*\+12 −3/)
+      expect(all).toMatch(/logo\.png\n\nbinary/)
+      expect(all).toMatch(/notes\.md\n\n\s*\+2\s*new/)
       expect(w.journal.gits).toContainEqual(['git', '-C', CAMP, 'diff', '--numstat', '-z', '--no-renames', 'abc123'])
       await ui.unmount()
       await $.command.run(spyglass('close'))
@@ -408,8 +411,8 @@ describe('the files tab', () => {
     await $.tool.call({ tool: 'Write', tool_use_id: 'e2', file_path: `${TREE}/lib/c.ts`, content: 'x', agentId: 'agent-1' } as never)
     await ui.press({ key: 'files:refresh' })
     const all = await texts(ui)
-    expect(all).toContain('⛨ ADVENTURER · fix-owner')
-    expect(all).toMatch(/lib\/b\.ts\s*\+4\s*−0/)
+    expect(all).toContain('ADVENTURER · FIX-OWNER')
+    expect(all).toMatch(/lib\/b\.ts\nlib\/\n\s*\+4/)
     expect(all.match(/ADVENTURER/g)?.length).toBe(1)
   })
 
@@ -435,7 +438,7 @@ describe('the files tab', () => {
     const w = world(on)
     w.trees.set(CAMP, { numstat: [], untracked: { 'a.txt': 'hi\n' }, hasBase: false, noCommit: true })
     const ui = await opened($)
-    expect(await texts(ui)).toMatch(/a\.txt\s*\+1\s*new/)
+    expect(await texts(ui)).toMatch(/a\.txt\n\n\s*\+1\s*new/)
     expect(w.journal.gits).toContainEqual(['git', '-C', CAMP, 'diff', '--numstat', '-z', '--no-renames', '4b825dc642cb6eb9a060e54bf8d69288fbee4904'])
   })
 
@@ -566,7 +569,7 @@ describe('the activity tab', () => {
     expect(isNoticeCommand('pgm notice')).toBe(false)
     expect(noticeLines('a\n\n b \n')).toEqual(['a', 'b'])
     expect(clock(1)).toMatch(/^\d\d:\d\d:\d\d$/)
-    expect(clock(0)).toBe('earlier ')
+    expect(clock(0)).toBe('earlier')
     const d = (id: string, kind: 'deed' | 'mcp') => ({ id, at: 0, kind, who: '', title: id, detail: '', status: 'ok' as const })
     expect(shownDeeds([d('1', 'deed'), d('2', 'mcp'), d('3', 'deed')], 'all').map(x => x.id)).toEqual(['3', '2', '1'])
     expect(shownDeeds([d('1', 'deed'), d('2', 'mcp')], 'mcp').map(x => x.id)).toEqual(['2'])
@@ -596,8 +599,9 @@ describe('the configs tab', () => {
     for (const surface of ['terminal', 'desktop'] as const) {
       const ui = await opened($, surface)
       const all = await texts(ui)
-      expect(all).toMatch(/veil off/)
-      expect(all).toMatch(/veil-hides deeds notes\s*· guild\.conf/)
+      expect(all).toMatch(/veil\noff\n/)
+      expect(all).toContain('deeds notes · file')
+      expect(all).toContain('on · env')
       expect(all).not.toContain('what veil is')
       await ui.press({ key: 'setting-key:veil' })
       expect(await texts(ui)).toContain('what veil is')
@@ -616,7 +620,7 @@ describe('the configs tab', () => {
     await ui.press({ key: 'set:veil:on' })
     expect(w.journal.runs).toContainEqual([GM, 'config', 'set', 'veil', 'on'])
     expect(w.journal.toasts).toContain('veil is on: running sessions follow at their next turn.')
-    expect(await texts(ui)).toMatch(/veil on\s*· guild\.conf/)
+    expect(await texts(ui)).toContain('on · file')
   })
 
   test('a word of a list is added or taken away, and Default takes the line out', async ($, on) => {
@@ -652,6 +656,17 @@ describe('the configs tab', () => {
     expect(w.journal.toasts.at(-1)).toBe("Unchanged: gm: config: editor cannot be ''")
   })
 
+  test('the quiet ledger: the gold rule sits under the chosen tab, times read as the hour or the day', () => {
+    const labels = ['⚑ Board', '✎ Satchel', '⚒ Deeds']
+    expect(ruleUnder(labels, 0, 40)).toEqual({ before: 0, under: 7, after: 33 })
+    expect(ruleUnder(labels, 1, 40)).toEqual({ before: 9, under: 9, after: 22 })
+    expect(tabLabel('context')).toBe('◔ Lantern')
+    const now = new Date(2026, 9, 10, 15, 0).getTime()
+    expect(when(new Date(2026, 9, 10, 9, 5).toISOString(), now)).toBe('09:05')
+    expect(when(new Date(2026, 9, 9, 9, 5).toISOString(), now)).toBe('Oct 9')
+    expect(when('not a time', now)).toBe('')
+  })
+
   test('reads gm config --json as the tab holds it', () => {
     expect(parseSettings('nope')).toEqual([])
     expect(parseSettings('[{"key":"veil","choices":["on",3]}]')[0]).toMatchObject({ key: 'veil', value: '', choices: ['on'], isMulti: false })
@@ -678,17 +693,18 @@ describe('the context tab', () => {
     for (const surface of ['terminal', 'desktop'] as const) {
       const ui = await opened($, surface)
       const all = await texts(ui)
-      expect(all).toContain('124k of 200k tokens · 62%')
-      expect(all).toContain('$1.23')
-      expect(all).toContain('compacts at 160k, 40k from now')
-      expect(all).toContain('five_hour: 30% used, resets in 3h 43m')
-      expect(all).toContain('(estimated)')
-      expect(all).toMatch(/90k Messages/)
+      expect(all).toContain('━━ THE LANTERN BURNS ━')
+      expect(all).toContain(' 62% ━━')
+      expect(all).toMatch(/124k of 200k tokens\n\$1\.23/)
+      expect(all).toMatch(/compacts at 160k\n40k to go/)
+      expect(all).toMatch(/five hour limit 30%\nresets in 3h 43m/)
+      expect(all).toMatch(/WHAT FEEDS IT\nestimated/)
+      expect(all).toMatch(/■ Messages\n■\n90k/)
       expect(all).not.toContain('Empty')
-      expect(all.indexOf('15k linear')).toBeLessThan(all.indexOf('5k gmail'))
-      expect(all).toContain('5k gmail · 1 tool loaded · 29k deferred')
-      expect(all).toContain('15k linear · 2 tools loaded')
-      expect(all).toContain('900 /camps/appt-v2/CLAUDE.md')
+      expect(all.indexOf('linear')).toBeLessThan(all.indexOf('gmail'))
+      expect(all).toMatch(/gmail\n5k · 29k/)
+      expect(all).toMatch(/linear\n15k · 0/)
+      expect(all).toMatch(/\/camps\/appt-v2\/CLAUDE\.md\n900/)
       expect(w.usage.asked).toContain('summary')
       await ui.unmount()
       await $.command.run(spyglass('close'))
@@ -700,13 +716,14 @@ describe('the context tab', () => {
     const ui = await opened($)
     await ui.press({ key: 'context:count' })
     expect(w.usage.asked.at(-1)).toBe('full')
-    expect(await texts(ui)).toContain('(counted)')
+    expect(await texts(ui)).toMatch(/WHAT FEEDS IT\ncounted/)
     w.usage.tokens = 150000
     w.usage.percent = 75
     await w.clock.advance(5000)
     expect(w.usage.asked.at(-1)).toBeUndefined()
-    expect(await texts(ui)).toContain('150k of 200k tokens · 75%')
-    expect(await texts(ui)).toContain('(counted)')
+    expect(await texts(ui)).toContain('150k of 200k tokens')
+    expect(await texts(ui)).toContain(' 75% ━━')
+    expect(await texts(ui)).toMatch(/WHAT FEEDS IT\ncounted/)
   })
 
   test('before the first reply, and when the engine will not say', async ($, on) => {
@@ -720,6 +737,14 @@ describe('the context tab', () => {
     expect(await texts(ui)).toMatch(/The context cannot be read: .*no session bound/)
   })
 
+  test('the lantern burns low past 80%', async ($, on) => {
+    const w = world(on)
+    w.usage.tokens = 170000
+    w.usage.percent = 85
+    const ui = await opened($)
+    expect(await texts(ui)).toContain('THE LANTERN BURNS LOW')
+  })
+
   test('draws its figures as the tab holds them', () => {
     expect(kTokens(999)).toBe('999')
     expect(kTokens(1500)).toBe('1.5k')
@@ -730,8 +755,11 @@ describe('the context tab', () => {
     expect(resetsIn('2026-10-10T02:40:00Z', Date.parse('2026-10-10T02:30:00Z'))).toBe('in 10m')
     expect(resetsIn('2026-10-10T02:00:00Z', Date.parse('2026-10-10T02:30:00Z'))).toBe('now')
     expect(resetsIn('soon', 0)).toBe('soon')
-    expect(bar(50, 100, 10)).toEqual({ filled: '█████', empty: '░░░░░' })
-    expect(bar(500, 100, 4)).toEqual({ filled: '████', empty: '' })
-    expect(bar(1, 0, 3)).toEqual({ filled: '', empty: '░░░' })
+    const cat = (name: string, tokens: number, kind = 'used') => ({ name, tokens, color: '#fff', kind })
+    expect(stack([cat('a', 50), cat('b', 1), cat('free', 49, 'free')], 100, 10)).toEqual({ cells: [{ name: 'a', color: '#fff', n: 5 }, { name: 'b', color: '#fff', n: 1 }], free: 4 })
+    expect(stack([cat('a', 300), cat('b', 300)], 100, 4).cells.reduce((t, c) => t + c.n, 0)).toBe(4)
+    const top = banner('THE LANTERN BURNS', '29%', 40)
+    expect(top).toEqual({ lead: '━━', label: ' THE LANTERN BURNS ', tail: `${'━'.repeat(12)} 29% ━━` })
+    expect([...top.lead + top.label + top.tail].length).toBe(40)
   })
 })

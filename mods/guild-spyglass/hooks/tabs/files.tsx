@@ -1,7 +1,7 @@
 import type { RenderChildren } from 'claude-code'
 
 import type { SpyglassChangedFile, SpyglassFileGroup, SpyglassFiles } from '../../types'
-import type { Els } from './postings'
+import { CRIMSON, delta, foot, head, path, row, type Els } from './ui'
 
 // The files tab: every file the party changed, one group for each working tree it changed them in. The camp's own is
 // its branch against where it left the base (git merge-base HEAD origin/HEAD), committed or not, untracked files
@@ -36,41 +36,36 @@ export function merged(tracked: readonly SpyglassChangedFile[], fresh: readonly 
 // it holds.
 export const openArgv = (editor: string, path: string) => ['/bin/sh', '-c', `${editor} "$1"`, 'spyglass', path]
 
-const GREEN = '#3fa34d'
-const RED = '#c0392b'
-
 export function totals(files: readonly SpyglassChangedFile[]): { added: number; deleted: number } {
   return files.reduce((t, f) => ({ added: t.added + f.added, deleted: t.deleted + f.deleted }), { added: 0, deleted: 0 })
 }
 
 export type FilesActions = { open: (group: SpyglassFileGroup, file: SpyglassChangedFile) => void; refresh: () => void }
 
-export function filesTab({ Box, Text, Button }: Els, files: SpyglassFiles, act: FilesActions): RenderChildren {
-  const controls = <Button key="files:refresh" label="Refresh" dimColor onPress={() => act.refresh()} />
-  if (!files.isLoaded) return <Box flexDirection="column">{controls}<Text dimColor>Reading the changes…</Text></Box>
-  const all = files.groups.flatMap(g => g.files)
-  const t = totals(all)
+export function filesTab(els: Els, files: SpyglassFiles, act: FilesActions): RenderChildren {
+  const { Box, Text, Button } = els
+  const actions = foot(els, [{ key: 'files:refresh', hotkey: 'r', label: 'refresh', run: act.refresh }], '⏎ open in the editor')
+  if (!files.isLoaded) return <Box flexDirection="column"><Text dimColor>Reading the changes…</Text>{actions}</Box>
+  const pad = Math.max(3, ...files.groups.flatMap(g => g.files.map(f => String(f.added).length + 1)))
   return (
     <Box flexDirection="column">
-      {controls}
-      <Text dimColor wrap="truncate-end">
-        {all.length} {all.length === 1 ? 'file' : 'files'} <Text color={GREEN}>+{t.added}</Text> <Text color={RED}>−{t.deleted}</Text>
-      </Text>
-      {files.groups.map(g => (
-        <Box key={`group:${g.root}`} flexDirection="column" marginTop={1}>
-          <Text bold wrap="truncate-end">{g.isCamp ? '⚔' : '⛨'} {g.label}</Text>
-          {g.why && <Text color={RED} wrap="truncate-end">{g.why}</Text>}
-          {!g.why && g.files.length === 0 && <Text dimColor>No changes.</Text>}
-          {g.files.map(f => (
-            <Button key={`file:${g.root}:${f.path}`} plain dimColor onPress={() => act.open(g, f)}>
-              {f.path}{' '}
-              {f.isBinary ? <Text dimColor>binary</Text> : <Text color={GREEN}>+{f.added}</Text>}
-              {!f.isBinary && !f.isNew && <Text color={RED}> −{f.deleted}</Text>}
-              {f.isNew && <Text dimColor> new</Text>}
-            </Button>
-          ))}
-        </Box>
-      ))}
+      {files.groups.map((g, i) => {
+        const t = totals(g.files)
+        const count = `${g.files.length} ${g.files.length === 1 ? 'file' : 'files'} `
+        return (
+          <Box key={`group:${g.root}`} flexDirection="column">
+            {head(els, `head:${g.root}`, g.label, g.why ? '' : <Text><Text dimColor>{count}</Text>{delta(els, t.added, t.deleted, 0)}</Text>, i > 0)}
+            {g.why && <Text color={CRIMSON} wrap="truncate-end">{g.why}</Text>}
+            {!g.why && g.files.length === 0 && <Text dimColor>No changes.</Text>}
+            {g.files.map(f => row(els, `line:${g.root}:${f.path}`,
+              <Button key={`file:${g.root}:${f.path}`} plain onPress={() => act.open(g, f)}>{path(els, f.path)}</Button>,
+              f.isBinary ? <Text dimColor>binary</Text>
+                : f.isNew ? <Text>{delta(els, f.added, 0, pad)}<Text dimColor>new</Text></Text>
+                : delta(els, f.added, f.deleted, pad)))}
+          </Box>
+        )
+      })}
+      {actions}
     </Box>
   )
 }
