@@ -205,11 +205,11 @@ What it hides is `veil-hides` (`gm config set veil-hides deeds notes`, or ask th
 | --- | --- |
 | `deeds` | tool calls, their results and their folded groups |
 | `adventurers` | an adventurer's call (`⛨ ADVENTURER · …`) and its return |
-| `notes` | short narration between deeds: one line under 240 characters from a step that went on to call tools |
+| `notes` | narration between deeds: one line under 240 characters from a step that went on to call tools, and every summary Claude Code draws in place of what the model wrote between two tool calls |
 | `progress` | the dim hint under a running deed, `(ctrl+b to run in background)` |
 
 A hidden row goes with its banner. A deed that failed or was interrupted hides like any other: the Guildmaster or the Party Leader tells the patron afterwards.
-The veil never hides the patron's messages, a message routed from another session, the reply that ends a turn, longer narration, or anything from a step that ran out of tokens or out of room (`max_tokens`, `model_context_window_exceeded`): that one the patron must see, since the session is stuck there.
+The veil never hides the patron's messages, a message routed from another session, the reply that ends a turn, longer narration Claude Code draws as written, or anything from a step that ran out of tokens or out of room (`max_tokens`, `model_context_window_exceeded`): that one the patron must see, since the session is stuck there.
 Nor can it hide what Claude Code draws outside the chat: permission and question dialogs, and the working row, which still says a session is busy.
 It hides from the screen only: the model, the stored conversation, `--continue` and exports are unchanged.
 

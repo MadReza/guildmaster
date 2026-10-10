@@ -198,6 +198,44 @@ const notes = new Set<string>()
 const replies = new Set<string>()
 const stuckTool = new Set<string>()
 
+// Takes one text block as a note or not; a block once taken as a reply stays one. True when that changed anything.
+function learn(text: string, note: boolean): boolean {
+  const key = noteKey(text)
+  if (!key) return false
+  if (note && !replies.has(key)) {
+    if (notes.has(key)) return false
+    notes.add(key)
+    return true
+  }
+  let changed = !replies.has(key)
+  replies.add(key)
+  if (notes.delete(key)) changed = true
+  return changed
+}
+
+// The notes of the conversation so far, read back from what the session holds: the module's memory starts empty at
+// every load, a reload and --continue among them, while the rows it drew are still on screen. An assistant message
+// holding a tool call is a step that stopped to call tools. What stop a step made is not kept, so one that hit a limit
+// is known only while its turn runs; one cut off mid-call keeps no call, and its text shows as a reply.
+async function relearn($: EngineInterface): Promise<boolean> {
+  let changed = false
+  try {
+    const messages = await $.session.messages({ as: 'api' })
+    if ('deny' in messages) return false
+    for (const m of messages) {
+      if (m.role !== 'assistant') continue
+      const calls = m.content.some(b => b.type === 'tool_use')
+      for (const b of m.content) {
+        if (b.type !== 'text' || typeof b.text !== 'string') continue
+        if (learn(b.text, isNote(calls ? 'tool_use' : 'end_turn', b.text))) changed = true
+      }
+    }
+  } catch {
+    // A conversation it cannot read leaves its rows drawn as they are.
+  }
+  return changed
+}
+
 async function hides($: EngineInterface, kind: Kind): Promise<boolean> {
   const { veil: v } = await veil($)
   return v.on && v.hides.has(kind)
@@ -350,6 +388,7 @@ export const register: Register = on => {
     for (const id of [...sites.keys()]) forget(id)
     turnSprite = undefined
     idlePick = undefined
+    if ((await relearn($)) && (await veil($)).veil.on) $.ui.invalidate('ui.render')
     if ((await veil($)).conf) {
       await $.command.register({
         name: 'veil',
@@ -483,17 +522,7 @@ export const register: Register = on => {
     const stuck = STUCK.includes(result.stopReason ?? '')
     let changed = false
     for (const text of blocks.size ? blocks.values() : [result.answer]) {
-      const key = noteKey(text)
-      if (!key) continue
-      if (isNote(result.stopReason, text) && !replies.has(key)) {
-        if (notes.has(key)) continue
-        notes.add(key)
-        changed = true
-      } else {
-        if (!replies.has(key)) changed = true
-        replies.add(key)
-        if (notes.delete(key)) changed = true
-      }
+      if (learn(text, isNote(result.stopReason, text))) changed = true
     }
     if (stuck && tools.length) {
       for (const id of tools) stuckTool.add(id)
@@ -514,8 +543,11 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
+    // A summary is Claude Code's stand-in for what the model wrote between two tool calls: narration between deeds
+    // whatever its length, and never the text it learned, so it is told by the mark alone.
     const key = noteKey(e.props.text)
-    if (notes.has(key) && !replies.has(key) && (await hides($, 'notes'))) return hidden($, e)
+    const note = e.props.isSummary === true || (notes.has(key) && !replies.has(key))
+    if (note && (await hides($, 'notes'))) return hidden($, e)
     if (!e.props.isFirstOfReply) return next(e)
     const focus = (await $.env.get('GM_CHAT_FOCUS')) || (await $.env.get('GM_FOCUS'))
     return draw($, e, next, focus
