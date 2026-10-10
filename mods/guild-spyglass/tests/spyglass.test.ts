@@ -7,7 +7,7 @@ import { parseSettings, toggledWords } from '../hooks/tabs/configs'
 import { banner, kTokens, resetsIn, stack } from '../hooks/tabs/context'
 import { lineCount, merged, openArgv, parseNumstat, untracked } from '../hooks/tabs/files'
 import { listArgs, parsePostings, stateMark } from '../hooks/tabs/postings'
-import { ruleUnder, tabLabel, when } from '../hooks/tabs/ui'
+import { ruleUnder, stripLabel, tabLabel, when } from '../hooks/tabs/ui'
 
 // What stands for Claude Code and the machine beneath the mod: the environment gm starts a session with, the guild's gm
 // at ~/.local/bin/gm and the board it lists, the clock, and the engine's record of open panes, which the mod's opens
@@ -254,6 +254,14 @@ describe('the front desk without its variables', () => {
     await $.session.start({ ...sessionStart, cwd: `${HOME}/.guildmaster/front-desk` })
     const ui = await $.ui.mount(pane('terminal'))
     expect(await tabsShown(ui)).toContain('⚑ Board')
+  })
+
+  test('each tab is chosen by its digit, in the strip\'s order, as Claude Code keeps the arrows', async ($, on) => {
+    world(on)
+    const ui = await $.ui.mount(pane('terminal'))
+    const tree = JSON.stringify(await ui.drawn())
+    const digit = (id: string) => new RegExp(`"key":"tab:${id}"[^}]*"hotkey":"(\\d)"|"hotkey":"(\\d)"[^}]*"key":"tab:${id}"`).exec(tree)?.slice(1).find(Boolean)
+    expect(['postings', 'files', 'activity', 'configs', 'context'].map(digit)).toEqual(['1', '2', '3', '4', '5'])
   })
 
   test('any other folder is not', async ($, on) => {
@@ -708,9 +716,10 @@ describe('the configs tab', () => {
   })
 
   test('the quiet ledger: the gold rule sits under the chosen tab, times read as the hour or the day', () => {
-    const labels = ['⚑ Board', '✎ Satchel', '⚒ Deeds']
-    expect(ruleUnder(labels, 0, 40)).toEqual({ before: 0, under: 7, after: 33 })
-    expect(ruleUnder(labels, 1, 40)).toEqual({ before: 9, under: 9, after: 22 })
+    const labels = ['1: ⚑ Board', '2: ✎ Satchel', '3: ⚒ Deeds']
+    expect(ruleUnder(labels, 0, 40)).toEqual({ before: 0, under: 10, after: 30 })
+    expect(ruleUnder(labels, 1, 40)).toEqual({ before: 12, under: 12, after: 16 })
+    expect(stripLabel('files', 1)).toBe('2: ✎ Satchel')
     expect(tabLabel('context')).toBe('◔ Lantern')
     const now = new Date(2026, 9, 10, 15, 0).getTime()
     expect(when(new Date(2026, 9, 10, 9, 5).toISOString(), now)).toBe('09:05')

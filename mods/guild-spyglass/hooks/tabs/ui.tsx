@@ -38,13 +38,17 @@ export function ruleUnder(labels: readonly string[], chosen: number, width: numb
   return { before, under, after: Math.max(0, width - before - under) }
 }
 
+// A tab's label in the strip: the digit that chooses it while the pane has the keyboard (Claude Code keeps the arrows),
+// then its sigil and name. The engine draws the digit itself, as `1: `.
+export const stripLabel = (id: string, i: number) => `${i + 1}: ${tabLabel(id)}`
+
 // The tabs, and on the right the pane's own close: a wide target, unlike the engine's one-cell mark in the corner, also
 // pressed with q while the pane has the keyboard.
 export function tabStrip(
   { Box, Text, Button }: Els, tabs: readonly { id: string }[], chosen: string, width: number, choose: (id: string) => void,
   close: () => void,
 ): RenderChildren {
-  const labels = tabs.map(t => tabLabel(t.id))
+  const labels = tabs.map((t, i) => stripLabel(t.id, i))
   const at = tabs.findIndex(t => t.id === chosen)
   const rule = ruleUnder(labels, at, width)
   return (
@@ -52,8 +56,8 @@ export function tabStrip(
       <Box flexDirection="row" justifyContent="space-between" columnGap={1}>
         <Box flexDirection="row" columnGap={GAP} flexWrap="wrap" flexShrink={1}>
           {tabs.map((t, i) => (
-            <Button key={`tab:${t.id}`} plain onPress={() => choose(t.id)}>
-              {t.id === chosen ? <Text color={GOLD} bold>{labels[i]}</Text> : <Text dimColor>{labels[i]}</Text>}
+            <Button key={`tab:${t.id}`} plain hotkey={i < 9 ? String(i + 1) : undefined} onPress={() => choose(t.id)}>
+              {t.id === chosen ? <Text color={GOLD} bold>{tabLabel(t.id)}</Text> : <Text dimColor>{tabLabel(t.id)}</Text>}
             </Button>
           ))}
         </Box>
