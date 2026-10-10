@@ -77,7 +77,7 @@ export type SpyglassContext = {
     maxTokens: number
     autoCompactAt?: number
     categories: { name: string; tokens: number; color: string; kind: string }[]
-    servers: { server: string; tokens: number; tools: number }[]
+    servers: { server: string; tokens: number; tools: number; deferred: number }[]
     memory: { path: string; tokens: number }[]
   }
 }

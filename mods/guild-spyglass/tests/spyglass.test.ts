@@ -110,7 +110,7 @@ function world(on: On, env: Record<string, string> = LEADER, placed = true): Wor
       totalTokens: 120000, maxTokens: 200000, rawMaxTokens: 200000, autocompactSource: 'model' as never, percentage: 60, gridRows: [], model: 'm',
       memoryFiles: [{ path: '/camps/appt-v2/CLAUDE.md', type: 'Project', tokens: 900 }],
       mcpTools: [{ name: 'a', serverName: 'linear', tokens: 12000, isLoaded: true }, { name: 'b', serverName: 'linear', tokens: 3000, isLoaded: true },
-        { name: 'c', serverName: 'gmail', tokens: 5000, isLoaded: true }],
+        { name: 'c', serverName: 'gmail', tokens: 5000, isLoaded: true }, { name: 'd', serverName: 'gmail', tokens: 29000, isLoaded: false }],
       agents: [], autoCompactThreshold: 160000, isAutoCompactEnabled: true, apiUsage: null,
     } : undefined
     return { value: { startedAt: 0, context: { tokens: w.usage.tokens, window: 200000, percent: w.usage.percent, breakdown },
@@ -686,7 +686,8 @@ describe('the context tab', () => {
       expect(all).toMatch(/90k Messages/)
       expect(all).not.toContain('Empty')
       expect(all.indexOf('15k linear')).toBeLessThan(all.indexOf('5k gmail'))
-      expect(all).toContain('1 tool')
+      expect(all).toContain('5k gmail · 1 tool loaded · 29k deferred')
+      expect(all).toContain('15k linear · 2 tools loaded')
       expect(all).toContain('900 /camps/appt-v2/CLAUDE.md')
       expect(w.usage.asked).toContain('summary')
       await ui.unmount()

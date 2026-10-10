@@ -15,10 +15,11 @@ const TOP = 5
 export function contextOf(usage: SessionUsage, counted?: 'summary' | 'full'): SpyglassContext {
   const c = usage.context
   const b: SessionContextBreakdown | undefined = c.breakdown
-  const servers = new Map<string, { tokens: number; tools: number }>()
+  // Each server's tools in the context now (loaded) and the ones it would add when they are fetched (deferred).
+  const servers = new Map<string, { tokens: number; tools: number; deferred: number }>()
   for (const t of b?.mcpTools ?? []) {
-    const s = servers.get(t.serverName) ?? { tokens: 0, tools: 0 }
-    servers.set(t.serverName, { tokens: s.tokens + t.tokens, tools: s.tools + 1 })
+    const s = servers.get(t.serverName) ?? { tokens: 0, tools: 0, deferred: 0 }
+    servers.set(t.serverName, t.isLoaded ? { ...s, tokens: s.tokens + t.tokens, tools: s.tools + 1 } : { ...s, deferred: s.deferred + t.tokens })
   }
   return {
     isLoaded: true,
@@ -33,7 +34,7 @@ export function contextOf(usage: SessionUsage, counted?: 'summary' | 'full'): Sp
       maxTokens: b.rawMaxTokens,
       autoCompactAt: b.isAutoCompactEnabled ? b.autoCompactThreshold : undefined,
       categories: b.categories.filter(k => k.tokens > 0).map(k => ({ name: k.name, tokens: k.tokens, color: k.color, kind: k.kind })),
-      servers: [...servers].map(([server, s]) => ({ server, ...s })).sort((x, y) => y.tokens - x.tokens).slice(0, TOP),
+      servers: [...servers].map(([server, s]) => ({ server, ...s })).sort((x, y) => y.tokens - x.tokens || y.deferred - x.deferred).slice(0, TOP),
       memory: [...b.memoryFiles].sort((x, y) => y.tokens - x.tokens).slice(0, TOP).map(m => ({ path: m.path, tokens: m.tokens })),
     } : undefined,
   }
@@ -101,9 +102,12 @@ export function contextTab({ Box, Text, Button }: Els, ctx: SpyglassContext, wid
               </Text>
             )
           })}
-          {b.servers.length > 0 && <Text bold>MCP servers</Text>}
+          {b.servers.length > 0 && <Text bold>MCP servers <Text dimColor>(deferred: not in the context until fetched)</Text></Text>}
           {b.servers.map(s => (
-            <Text key={`mcp:${s.server}`} wrap="truncate-end">{kTokens(s.tokens)} {s.server} <Text dimColor>· {s.tools} {s.tools === 1 ? 'tool' : 'tools'}</Text></Text>
+            <Text key={`mcp:${s.server}`} wrap="truncate-end">
+              {kTokens(s.tokens)} {s.server}{' '}
+              <Text dimColor>· {s.tools} {s.tools === 1 ? 'tool' : 'tools'} loaded{s.deferred ? ` · ${kTokens(s.deferred)} deferred` : ''}</Text>
+            </Text>
           ))}
           {b.memory.length > 0 && <Text bold>Memory files</Text>}
           {b.memory.map(m => (
