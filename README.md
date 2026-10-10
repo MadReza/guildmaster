@@ -157,6 +157,7 @@ Settings, from /Users/you/.guildmaster/guild.conf (gm config set <key> <value> c
 | `launch-grace` | seconds a fresh start may hold only a shell | 60 | `GM_LAUNCH_GRACE` |
 | `start-tries` | starts in a row before something is held | 3 | `GM_START_TRIES` |
 | `repo-roots` | folders where `gm repos` looks | the usual source folders | |
+| `editor` | the command the spyglass opens a changed file with (see The spyglass, below) | `open` | |
 
 An environment variable overrides its setting for the command it is set on, and `gm config` says so; a value gm cannot take is ignored, and `gm config` and `gm doctor` say that too.
 `gm config set` acts at once where it can: autostart is turned on or off, or reloaded at its new interval, and the collector is started or stopped.
@@ -248,6 +249,7 @@ Its tabs:
 | Tab | Shown at | Shows |
 | --- | --- | --- |
 | Postings | the front desk, a Party Leader | the quest board, from `gm list --json`: a Party Leader's own focus, or every focus at the front desk under its name. A press on a posting opens it to its summary, its last notice line and, when parked, why; *Show finished* adds the done and closed ones. |
+| Files | a Party Leader, any other session | every file the party changed, with its lines added and deleted: the camp's branch against where it left the base (`git merge-base HEAD origin/HEAD`), committed or not, new files included, and under its own name each adventurer that edited files in a worktree of its own (Claude Code's Agent tool with `isolation: worktree`). A press opens the file in the patron's editor, `editor` in `guild.conf` (`gm config set editor open -a Zed`; by default `open`, the app the Mac opens its kind with); the pane never shows a diff. |
 
 While the pane is up it reads what its tabs show again every 5 seconds, and at once after a `gm` command of its own session's, so a change made in any session shows soon; it stops when the pane closes.
 It runs the guild's own `gm` (`~/.local/bin/gm`, only when that is a link to a gm), never a camp's draft of it, so a tab says why when that `gm` cannot answer.

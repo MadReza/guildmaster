@@ -1,7 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren, RenderInput, Timer } from 'claude-code'
 
-import type { SpyglassPostings } from '../types'
+import type { SpyglassChangedFile, SpyglassFileGroup, SpyglassFiles, SpyglassPostings, SpyglassTree } from '../types'
+import { filesTab, lineCount, merged, openArgv, parseNumstat, untracked } from './tabs/files'
 import { listArgs, parsePostings, postingsTab } from './tabs/postings'
 
 // The spyglass: a pane beside the chat whose tabs show the party's work. It never opens by itself: /spyglass opens it,
@@ -21,6 +22,7 @@ export type Tab = { id: string; title: string; seats: readonly Seat[] }
 // are built.
 export const TABS: readonly Tab[] = [
   { id: 'postings', title: 'Postings', seats: ['guildmaster', 'party-leader'] },
+  { id: 'files', title: 'Files', seats: ['party-leader', 'other'] },
 ]
 
 // What the tab's body draws.
@@ -37,6 +39,11 @@ async function body($: EngineInterface, e: RenderInput<'Pane'>, id: string): Pro
         toggle: ref => void update($, opened, v => (v === ref ? '' : ref)),
       })
     }
+    case 'files':
+      return filesTab($.ui.resolve(e), await read($, files), {
+        open: (group, file) => void openFile($, group, file),
+        refresh: () => void refreshFiles($),
+      })
     default:
       return <Text dimColor>Nothing here yet.</Text>
   }
@@ -102,6 +109,104 @@ async function refreshPostings($: EngineInterface, focus: string | undefined): P
   await update($, postings, () => board)
 }
 
+// A setting in guild.conf, as gm reads it: the first line naming the key with a value, comments skipped.
+export function confValue(conf: string, key: string): string | undefined {
+  for (const line of conf.split('\n')) {
+    if (/^\s*#/.test(line) || !line.startsWith(`${key}:`)) continue
+    const value = line.slice(key.length + 1).trim()
+    if (value) return value
+  }
+  return undefined
+}
+
+async function hallConf($: EngineInterface): Promise<string> {
+  return `${(await $.env.get('GM_HALL')) || `${await $.env.get('HOME')}/.guildmaster`}/guild.conf`
+}
+
+async function git($: EngineInterface, args: string[]): Promise<{ out: string } | { why: string }> {
+  try {
+    const run = await $.process.run(['git', ...args])
+    if (run.exitCode === 0) return { out: run.stdout }
+    return { why: run.stderr.trim().split('\n')[0] || `git exited ${run.exitCode}` }
+  } catch (err) {
+    return { why: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+// Where this session works, from its start, and the names of the adventurers it sent, by agent id.
+let cwd: string | undefined
+const adventurers = new Map<string, string>()
+
+const files = atom({ plugin: 'guild-spyglass', key: 'files' } as const, { groups: [], isLoaded: false } as SpyglassFiles)
+const trees = atom({ plugin: 'guild-spyglass', key: 'trees' } as const, [] as SpyglassTree[])
+
+const toplevel = async ($: EngineInterface, dir: string) => {
+  const got = await git($, ['-C', dir, 'rev-parse', '--show-toplevel'])
+  return 'out' in got ? got.out.trim() || undefined : undefined
+}
+
+const dirOf = (path: string) => path.slice(0, Math.max(1, path.lastIndexOf('/')))
+
+// An adventurer edited this file: its working tree joins the tab when it is not the camp's.
+async function noteTree($: EngineInterface, path: string, agentId: string): Promise<void> {
+  const root = await toplevel($, dirOf(path))
+  if (!root || !cwd || root === (await toplevel($, cwd))) return
+  const label = `ADVENTURER · ${adventurers.get(agentId) ?? root.slice(root.lastIndexOf('/') + 1)}`
+  await update($, trees, list => (list.some(t => t.root === root) ? list : [...list, { root, label }]))
+}
+
+// One tree's changes against where it left the base, or since its last commit when it has no base.
+async function changesIn($: EngineInterface, root: string): Promise<{ files: SpyglassChangedFile[] } | { why: string }> {
+  const base = await git($, ['-C', root, 'merge-base', 'HEAD', 'origin/HEAD'])
+  const from = 'out' in base && base.out.trim() ? base.out.trim() : 'HEAD'
+  const tracked = await git($, ['-C', root, 'diff', '--numstat', '-z', '--no-renames', from])
+  if ('why' in tracked) return { why: `git cannot read ${root}: ${tracked.why}` }
+  const others = await git($, ['-C', root, 'ls-files', '--others', '--exclude-standard', '-z'])
+  const fresh = 'out' in others ? others.out : ''
+  const lines = new Map<string, number>()
+  for (const path of fresh.split('\0').filter(Boolean).slice(0, 200)) {
+    try {
+      lines.set(path, lineCount(await $.fs.read(`${root}/${path}`)))
+    } catch {
+      lines.set(path, 0)
+    }
+  }
+  return { files: merged(parseNumstat(tracked.out), untracked(fresh, p => lines.get(p) ?? 0)) }
+}
+
+async function refreshFiles($: EngineInterface): Promise<void> {
+  const camp = cwd ? await toplevel($, cwd) : undefined
+  const focus = await focusOf($)
+  const groups: SpyglassFileGroup[] = []
+  const wanted = [
+    ...(camp ? [{ root: camp, label: focus ? `CAMP · ${focus}` : camp.slice(camp.lastIndexOf('/') + 1), isCamp: true }] : []),
+    ...(await read($, trees)).map(t => ({ ...t, isCamp: false })),
+  ]
+  for (const w of wanted) {
+    const got = await changesIn($, w.root)
+    groups.push('why' in got ? { ...w, files: [], why: got.why } : { ...w, files: got.files })
+  }
+  if (!camp) groups.unshift({ root: cwd ?? '', label: 'this session', isCamp: true, files: [], why: 'not in a git working tree' })
+  await update($, files, () => ({ groups, isLoaded: true }))
+}
+
+// Opens the file with editor: from guild.conf (the Mac's open by default), and says so under the prompt.
+async function openFile($: EngineInterface, group: SpyglassFileGroup, file: SpyglassChangedFile): Promise<void> {
+  let editor = 'open'
+  try {
+    editor = confValue(await $.fs.read(await hallConf($)), 'editor') ?? editor
+  } catch {
+    // No guild.conf: the default editor.
+  }
+  const path = `${group.root}/${file.path}`
+  try {
+    const run = await $.process.run(openArgv(editor, path))
+    $.ui.toast(run.exitCode === 0 ? `Opened ${file.path}` : `${editor} could not open ${file.path}: ${run.stderr.trim().split('\n')[0] ?? ''}`)
+  } catch (err) {
+    $.ui.toast(`${editor} could not open ${file.path}: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
 // What the tabs draw from, read again: at the open, every few seconds while the pane is up, and after this session's
 // own gm commands, so a change made in any session shows here soon.
 const EVERY_MS = 5000
@@ -109,7 +214,9 @@ let watch: Timer | undefined
 
 async function refresh($: EngineInterface): Promise<void> {
   const seat = await seatOf($)
-  if (tabsFor(seat).some(t => t.id === 'postings')) await refreshPostings($, await focusOf($))
+  const offered = tabsFor(seat)
+  if (offered.some(t => t.id === 'postings')) await refreshPostings($, await focusOf($))
+  if (offered.some(t => t.id === 'files')) await refreshFiles($)
 }
 
 function startWatch($: EngineInterface): void {
@@ -128,6 +235,7 @@ const isOpen = async ($: EngineInterface) => (await $.ui.panes()).some(p => p.id
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    cwd = e.cwd
     await $.command.register({
       name: 'spyglass',
       description: 'Open the spyglass, a pane of the party\'s work beside the chat, or close it: /spyglass turns it, /spyglass open|close sets it',
@@ -145,6 +253,21 @@ export const register: Register = on => {
   on('ui.close', async ($, e, next) => {
     if (e.id === PANE) stopWatch()
     return next(e)
+  })
+
+  on('agent.spawn', async ($, e, next) => {
+    const started = await next(e)
+    if (started.agentId) adventurers.set(started.agentId, e.description)
+    return started
+  })
+
+  // An adventurer's edit names its working tree; the camp's own changes are read from git at each refresh.
+  on('tool.call', async ($, e, next) => {
+    const ran = await next(e)
+    if (e.agentId === undefined) return ran
+    const path = e.tool === 'Edit' || e.tool === 'Write' ? e.file_path : e.tool === 'NotebookEdit' ? e.notebook_path : undefined
+    if (path) await noteTree($, path, e.agentId)
+    return ran
   })
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {

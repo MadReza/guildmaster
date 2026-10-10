@@ -54,7 +54,8 @@ herdr-session	GM_HERDR_SESSION	default	name	The herdr session the guild lives in
 herdr-workspace	GM_HERDR_WORKSPACE	guild	name	The herdr workspace holding the guildmaster tab; each Party Leader has a workspace of its own shown under it.
 launch-grace	GM_LAUNCH_GRACE	60	seconds	Seconds after a start during which a pane holding only a shell is starting, not dead.
 start-tries	GM_START_TRIES	3	count	Starts in a row never seen alive before a Party Leader, the Guildmaster or the collector is held.
-repo-roots	-	-	text	Folders, separated by spaces, where gm repos looks for clones instead of the usual source folders."
+repo-roots	-	-	text	Folders, separated by spaces, where gm repos looks for clones instead of the usual source folders.
+editor	-	open	command	The command the spyglass opens a changed file with, the file's path given after it: open is the app the Mac opens its kind with; for one editor, open -a Zed, or code -g."
 GM_CONF_ENV=' '
 GM_CONF_VARS=' '
 GM_CONF_VAL=''
@@ -120,7 +121,7 @@ gm_conf_norm() {
     minutes | count) [[ $v =~ ^[0-9]{1,6}$ ]] && [ "$v" -ge 1 ] || return 1 ;;
     seconds) [[ $v =~ ^[0-9]{1,6}$ ]] || return 1 ;;
     name) [[ $v =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || return 1 ;;
-    text) [ -n "$v" ] || return 1 ;;
+    text | command) [ -n "$v" ] || return 1 ;;
     *) return 1 ;;
   esac
   GM_CONF_VAL=$v
@@ -2937,7 +2938,7 @@ gm_cmd_config() {
       if [ "$action" = set ]; then
         [ $# -ge 1 ] || gm_die "config: gm config set $key <value>"
         val="$*"
-        [ "$kind" = text ] || [ "$kind" = veilhides ] || [ "$kind" = sprites ] || [ $# -eq 1 ] || gm_die "config: $key takes one value"
+        [ "$kind" = text ] || [ "$kind" = command ] || [ "$kind" = veilhides ] || [ "$kind" = sprites ] || [ $# -eq 1 ] || gm_die "config: $key takes one value"
         gm_conf_norm "$kind" "$val" || gm_die "config: $key cannot be '$val' ($(gm_conf_header | sed -n "s/^# $key: \\([^,;]*\\).*/\\1/p"))"
         val=$GM_CONF_VAL
       else
@@ -2991,6 +2992,7 @@ gm_conf_apply() {
     sprites) printf 'sprites is %s: %s; running sessions follow at their next turn.\n' "$shown" \
       "$([ "$val" = off ] && printf 'no session draws a working sprite' || printf 'every session draws its working sprites')" ;;
     sprites-* | idle-*) printf '%s is %s: running sessions follow at their next turn.\n' "$key" "$shown" ;;
+    editor) printf 'editor is %s: the spyglass opens a changed file with it, in every session from now on.\n' "$shown" ;;
     repo-roots) printf 'repo-roots is %s: gm repos looks for clones %s.\n' "$shown" "$([ -n "$val" ] && printf 'there' || printf 'in the usual source folders')" ;;
     *) printf '%s is %s; it takes effect at the next muster.\n' "$key" "$shown" ;;
   esac

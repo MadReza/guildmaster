@@ -2,6 +2,7 @@ import type { On } from 'claude-code'
 import { describe, expect, mock, test, type Engine } from 'claude-code/testing'
 
 import { PANE, seatFrom, shown, tabsFor, type Tab } from '../hooks/register'
+import { lineCount, merged, openArgv, parseNumstat, untracked } from '../hooks/tabs/files'
 import { listArgs, parsePostings, stateMark, tally } from '../hooks/tabs/postings'
 
 // What stands for Claude Code and the machine beneath the mod: the environment gm starts a session with, the guild's gm
@@ -16,24 +17,57 @@ type Row = { ref: string; focus: string; num: number; slug: string; state: strin
 const row = (focus: string, num: number, slug: string, state: string, more: Partial<Row> = {}): Row =>
   ({ ref: `${focus}#${num}`, focus, num, slug, state, summary: `the words of ${slug}`, ...more })
 
+// A working tree as the stand-in git knows it: its tracked changes as numstat lines, its untracked files and what
+// they hold, and whether it has a base to diff from.
+type Tree = { numstat: string[]; untracked: Record<string, string>; hasBase: boolean; broken?: string }
+
 type World = {
   panes: Set<string>
   board: Row[]
+  trees: Map<string, Tree>
+  conf?: string
   clock: { advance: (ms: number) => Promise<void> }
-  journal: { opens: string[]; closes: string[]; toasts: string[]; commands: string[]; runs: string[][] }
+  journal: { opens: string[]; closes: string[]; toasts: string[]; commands: string[]; runs: string[][]; gits: string[][]; edits: string[][] }
   failGm: (why: string | undefined) => void
 }
 
 function world(on: On, env: Record<string, string> = LEADER, placed = true): World {
   const panes = new Set<string>()
-  const journal: World['journal'] = { opens: [], closes: [], toasts: [], commands: [], runs: [] }
-  const w: World = { panes, board: [], clock: mock.clock(on), journal, failGm: why => (failure = why) }
+  const journal: World['journal'] = { opens: [], closes: [], toasts: [], commands: [], runs: [], gits: [], edits: [] }
+  const w: World = { panes, board: [], trees: new Map(), clock: mock.clock(on), journal, failGm: why => (failure = why) }
   let failure: string | undefined
   mock.env(on, env)
+  on('fs.read', async (_$, e) => {
+    if (e.path === `${HOME}/.guildmaster/guild.conf` && w.conf !== undefined) return { value: w.conf }
+    for (const [root, t] of w.trees) {
+      const text = t.untracked[e.path.slice(root.length + 1)]
+      if (e.path.startsWith(`${root}/`) && text !== undefined) return { value: text }
+    }
+    return { deny: `ENOENT: ${e.path}` }
+  })
   on('fs.stat', async (_$, e) =>
     e.path === GM ? { value: { kind: 'file' as const, size: 1, mtimeMs: 0, isLink: true, realPath: '/clone/bin/gm' } } : { deny: `ENOENT: ${e.path}` })
   // gm list --json [--all] [focus]: the board, as gm prints it.
+  const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  const no = (stderr: string) => ({ value: { exitCode: 128, stdout: '', stderr, isStdoutTruncated: false, isStderrTruncated: false } })
   on('process.run', async (_$, e) => {
+    if (e.argv[0] === 'git') {
+      journal.gits.push([...e.argv])
+      const [, , dir = '', ...rest] = e.argv
+      const root = [...w.trees.keys()].find(r => dir === r || dir.startsWith(`${r}/`))
+      const t = root ? w.trees.get(root) : undefined
+      if (!root || !t) return no('fatal: not a git repository')
+      if (rest[0] === 'rev-parse') return ok(`${root}\n`)
+      if (rest[0] === 'merge-base') return t.hasBase ? ok('abc123\n') : no('fatal: Not a valid object name origin/HEAD')
+      if (t.broken) return no(t.broken)
+      if (rest[0] === 'diff') return ok(t.numstat.map(l => `${l}\0`).join(''))
+      if (rest[0] === 'ls-files') return ok(Object.keys(t.untracked).map(f => `${f}\0`).join(''))
+      return no('unknown')
+    }
+    if (e.argv[0] === '/bin/sh') {
+      journal.edits.push([...e.argv])
+      return ok('')
+    }
     journal.runs.push([...e.argv])
     if (failure) return { value: { exitCode: 1, stdout: '', stderr: `gm: ${failure}\n`, isStdoutTruncated: false, isStderrTruncated: false } }
     const args = e.argv.slice(1)
@@ -69,7 +103,8 @@ function world(on: On, env: Record<string, string> = LEADER, placed = true): Wor
   return w
 }
 
-const sessionStart = { cwd: '/work', surface: 'terminal' as const, isInteractive: true }
+const CAMP = '/camps/appt-v2'
+const sessionStart = { cwd: `${CAMP}/src`, surface: 'terminal' as const, isInteractive: true }
 const spyglass = (args = '') => ({
   command: 'spyglass',
   args,
@@ -131,11 +166,11 @@ describe('/spyglass', () => {
 })
 
 describe('the pane', () => {
-  test('draws on every surface, and says so where the seat is offered no tab', async ($, on) => {
+  test('draws on every surface; a session outside the guild is offered the files tab alone', async ($, on) => {
     world(on, { HOME })
     for (const surface of ['terminal', 'desktop'] as const) {
       const ui = await $.ui.mount(pane(surface))
-      expect(await ui.find({ type: 'Text', text: /Nothing to see through the spyglass yet/ })).toBeDefined()
+      expect((await ui.findAll({ type: 'Button' })).map(b => b.text).filter(t => t === 'Postings' || t === 'Files')).toEqual(['Files'])
       await ui.unmount()
     }
   })
@@ -272,5 +307,102 @@ describe('the postings tab', () => {
     expect(stateMark('needs-you').isDim).toBe(false)
     expect(stateMark('done').isDim).toBe(true)
     expect(tally([])).toBe('no postings')
+  })
+})
+
+describe('the files tab', () => {
+  const opened = async ($: Engine, surface: 'terminal' | 'desktop' = 'terminal') => {
+    await $.session.start(sessionStart)
+    await $.command.run(spyglass())
+    const ui = await $.ui.mount(pane(surface))
+    await ui.press({ key: 'tab:files' })
+    return ui
+  }
+  const texts = async (ui: { findAll: (q: { type: 'Text' | 'Button' }) => Promise<{ text?: string }[]> }) =>
+    [...(await ui.findAll({ type: 'Button' })), ...(await ui.findAll({ type: 'Text' }))].map(t => t.text ?? '').join('\n')
+
+  test('the camp\'s branch against its base, committed or not, new files with their lines', async ($, on) => {
+    const w = world(on)
+    w.trees.set(CAMP, { numstat: ['12\t3\tsrc/a.ts', '-\t-\tlogo.png'], untracked: { 'notes.md': 'one\ntwo\n' }, hasBase: true })
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const ui = await opened($, surface)
+      const all = await texts(ui)
+      expect(all).toContain('⚔ CAMP · appt-v2')
+      expect(all).toMatch(/src\/a\.ts\s*\+12\s*−3/)
+      expect(all).toMatch(/logo\.png\s*binary/)
+      expect(all).toMatch(/notes\.md\s*\+2\s*new/)
+      expect(all).toContain('3 files +14 −3')
+      expect(w.journal.gits).toContainEqual(['git', '-C', CAMP, 'diff', '--numstat', '-z', '--no-renames', 'abc123'])
+      await ui.unmount()
+      await $.command.run(spyglass('close'))
+    }
+  })
+
+  test('a tree with no base is read since its last commit', async ($, on) => {
+    const w = world(on)
+    w.trees.set(CAMP, { numstat: [], untracked: {}, hasBase: false })
+    const ui = await opened($)
+    expect(await texts(ui)).toContain('No changes.')
+    expect(w.journal.gits).toContainEqual(['git', '-C', CAMP, 'diff', '--numstat', '-z', '--no-renames', 'HEAD'])
+  })
+
+  test('an adventurer\'s worktree joins under its name the first time it edits there; the camp\'s own edits add nothing', async ($, on) => {
+    const w = world(on)
+    const TREE = '/camps/appt-v2/.claude/worktrees/agent-1'
+    w.trees.set(TREE, { numstat: ['4\t0\tlib/b.ts'], untracked: {}, hasBase: true })
+    w.trees.set(CAMP, { numstat: ['1\t1\tsrc/a.ts'], untracked: {}, hasBase: true })
+    on('agent.spawn', async () => ({ model: 'm', agentId: 'agent-1' }))
+    on('tool.call', async () => ({ result: {} }))
+    const ui = await opened($)
+    await $.agent.spawn({ tool_use_id: 'a1', prompt: 'p', description: 'fix-owner', subagentType: 'general-purpose',
+      provider: { plugin: 'engine', tier: 'core' }, parentModel: 'm' } as never)
+    await $.tool.call({ tool: 'Edit', tool_use_id: 'e0', file_path: `${CAMP}/src/a.ts`, old_string: 'a', new_string: 'b', agentId: 'agent-1' } as never)
+    await $.tool.call({ tool: 'Edit', tool_use_id: 'e1', file_path: `${TREE}/lib/b.ts`, old_string: 'a', new_string: 'b', agentId: 'agent-1' } as never)
+    await $.tool.call({ tool: 'Write', tool_use_id: 'e2', file_path: `${TREE}/lib/c.ts`, content: 'x', agentId: 'agent-1' } as never)
+    await ui.press({ key: 'files:refresh' })
+    const all = await texts(ui)
+    expect(all).toContain('⛨ ADVENTURER · fix-owner')
+    expect(all).toMatch(/lib\/b\.ts\s*\+4\s*−0/)
+    expect(all.match(/ADVENTURER/g)?.length).toBe(1)
+  })
+
+  test('a press opens the file in the editor guild.conf names, its path one argument', async ($, on) => {
+    const w = world(on)
+    w.trees.set(CAMP, { numstat: ['1\t0\tsrc/my file.ts'], untracked: {}, hasBase: true })
+    w.conf = '# editor: <command>, default open\neditor: open -a Zed\n'
+    const ui = await opened($)
+    await ui.press({ key: `file:${CAMP}:src/my file.ts` })
+    expect(w.journal.edits).toEqual([['/bin/sh', '-c', 'open -a Zed "$1"', 'spyglass', `${CAMP}/src/my file.ts`]])
+    expect(w.journal.toasts).toContain('Opened src/my file.ts')
+  })
+
+  test('with no editor set, the Mac\'s open', async ($, on) => {
+    const w = world(on)
+    w.trees.set(CAMP, { numstat: ['1\t0\tsrc/a.ts'], untracked: {}, hasBase: true })
+    const ui = await opened($)
+    await ui.press({ key: `file:${CAMP}:src/a.ts` })
+    expect(w.journal.edits[0]?.[2]).toBe('open "$1"')
+  })
+
+  test('says why when git cannot read a tree, and when the session is in none', async ($, on) => {
+    const w = world(on)
+    w.trees.set(CAMP, { numstat: [], untracked: {}, hasBase: true, broken: 'fatal: bad object' })
+    const ui = await opened($)
+    expect(await texts(ui)).toContain(`git cannot read ${CAMP}: fatal: bad object`)
+    w.trees.clear()
+    await ui.press({ key: 'files:refresh' })
+    expect(await texts(ui)).toContain('not in a git working tree')
+  })
+
+  test('reads git\'s output as the tab holds it', () => {
+    expect(parseNumstat('3\t1\ta.ts\0-\t-\tb.png\0junk\0')).toEqual([
+      { path: 'a.ts', added: 3, deleted: 1, isBinary: false, isNew: false },
+      { path: 'b.png', added: 0, deleted: 0, isBinary: true, isNew: false },
+    ])
+    expect(lineCount('')).toBe(0)
+    expect(lineCount('a')).toBe(1)
+    expect(lineCount('a\nb\n')).toBe(2)
+    expect(merged([{ path: 'b', added: 1, deleted: 0, isBinary: false, isNew: false }], untracked('a\0b\0', () => 5)).map(f => f.path)).toEqual(['a', 'b'])
+    expect(openArgv('code -g', 'x y')).toEqual(['/bin/sh', '-c', 'code -g "$1"', 'spyglass', 'x y'])
   })
 })

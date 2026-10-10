@@ -2519,7 +2519,7 @@ t_config_file_is_documented_and_read() {
   [ -f "$GM_HALL/guild.conf" ] || fail "no guild.conf" || return 1
   for k in collector collector-port telemetry chat veil veil-hides sprites sprites-guildmaster sprites-party-leader \
     idle-guildmaster idle-party-leader autostart autostart-every muster-before-commands attach herdr-session \
-    herdr-workspace launch-grace start-tries repo-roots; do
+    herdr-workspace launch-grace start-tries repo-roots editor; do
     grep -q "^# $k: " "$GM_HALL/guild.conf" || fail "guild.conf does not document $k"
   done
   assert_eq "$(conf collector-port)" 4999 "the line written"
@@ -2548,6 +2548,9 @@ t_config_file_is_documented_and_read() {
     assert_eq "$(gm config get collector-port)" 4318 "and the default holds"
   gm config set repo-roots "$WORK/a" "$WORK/b" >/dev/null
   assert_eq "$(conf repo-roots)" "$WORK/a $WORK/b" "several folders"
+  out=$(gm config set editor open -a Zed)
+  assert_eq "$(conf editor)" "open -a Zed" "the editor, a command with its arguments" &&
+    assert_contains "$out" "the spyglass opens a changed file with it" "says what it does"
   grep -q '^# collector: on | off | later, default off; GM_COLLECTOR overrides it' "$GM_HALL/guild.conf" ||
     fail "the documentation is kept through every write"
 }

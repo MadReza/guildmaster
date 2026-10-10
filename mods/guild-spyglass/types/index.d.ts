@@ -18,6 +18,18 @@ export type SpyglassPosting = {
 // The quest board as the postings tab last read it, or why gm could not list it.
 export type SpyglassPostings = { rows: SpyglassPosting[]; why?: string; isLoaded: boolean }
 
+// One file the party changed in one working tree: its path in that tree and its lines added and deleted.
+export type SpyglassChangedFile = { path: string; added: number; deleted: number; isBinary: boolean; isNew: boolean }
+
+// One working tree's changes: the camp's own, or an adventurer's worktree; why, when git could not read it.
+export type SpyglassFileGroup = { root: string; label: string; isCamp: boolean; files: SpyglassChangedFile[]; why?: string }
+
+// The files tab as it last read the trees.
+export type SpyglassFiles = { groups: SpyglassFileGroup[]; isLoaded: boolean }
+
+// A working tree an adventurer changed files in, apart from the camp, and the adventurer's name.
+export type SpyglassTree = { root: string; label: string }
+
 declare module 'claude-code' {
   interface PluginState {
     'guild-spyglass': {
@@ -25,6 +37,8 @@ declare module 'claude-code' {
       postings: SpyglassPostings
       postingsAll: boolean
       postingOpen: string
+      files: SpyglassFiles
+      trees: SpyglassTree[]
     }
   }
 }
