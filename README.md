@@ -15,6 +15,7 @@ This repository is at its beginning. The vocabulary comes first, because every l
 - [vision/roadmap.md](vision/roadmap.md) is the tracked build plan: each step's goal, scope, done-when criteria, status and links.
 - `.claude/settings.json` makes `claude`, started at the clone's root, start the guild and the Guildmaster in herdr: its start-up hook and tool guard act only in the patron's plain clone (or a folder marked `.gm-front-desk`) and do nothing in a linked worktree, where agents that change Guildmaster work. `CLAUDE.md` is their guidance, not the Guildmaster's charter.
 - `mods/guild-chat/` is the Claude Code mod that draws the chat under heraldic banners while `guild.conf` says `chat: banners`, draws the veil over the deeds while it says `veil: on`, and draws the working sprites while it says `sprites: on`.
+- `mods/guild-spyglass/` is the Claude Code mod of the spyglass, the pane `/spyglass` opens beside the chat.
 - `bin/gm` is the `gm` command; `templates/` holds the Guildmaster's charter (`guildmaster.md`), the Party Leader's charter, the ticket playbook and the repository rules it copies into the Guildhall, and the local OpenTelemetry Collector's configuration (`otelcol.yaml`); `tests/` holds its test suite (with the redaction cases, a schema-1 register to migrate, and recorded Claude Code telemetry under `tests/fixtures/telemetry/`, and stand-ins for herdr and launchctl so no test touches the real ones, nor your `~/.local/bin`) and an end-to-end demonstration.
 
 ## Getting started
@@ -156,6 +157,7 @@ Settings, from /Users/you/.guildmaster/guild.conf (gm config set <key> <value> c
 | `launch-grace` | seconds a fresh start may hold only a shell | 60 | `GM_LAUNCH_GRACE` |
 | `start-tries` | starts in a row before something is held | 3 | `GM_START_TRIES` |
 | `repo-roots` | folders where `gm repos` looks | the usual source folders | |
+| `editor` | the command the spyglass opens a changed file with (see The spyglass, below) | `open` | |
 
 An environment variable overrides its setting for the command it is set on, and `gm config` says so; a value gm cannot take is ignored, and `gm config` and `gm doctor` say that too.
 `gm config set` acts at once where it can: autostart is turned on or off, or reloaded at its new interval, and the collector is started or stopped.
@@ -229,6 +231,32 @@ The sprites: `skirmish` (an adventurer holds the corridor against slimes and cou
 Both rows are ones Claude Code redraws in place, so a sprite never enters the chat: it is gone when the turn, or the wait, ends.
 `gm config set sprites off` (or ask the Guildmaster) turns them all off; `gm config set sprites-party-leader forge wall` and the like choose them. Every session follows a change at its next turn.
 They are drawn in a terminal only, and only for a patron with a Guildhall.
+### The spyglass
+
+The spyglass is a pane beside the chat whose tabs show the party's work. It never opens by itself:
+
+| Command | Does |
+| --- | --- |
+| `/spyglass` | Opens the pane, or closes it when it is open. |
+| `/spyglass open`, `/spyglass close` | Sets it outright. |
+
+The pane also closes from its own close mark or ctrl+x x, and ctrl+x tab gives it the keyboard.
+In Claude Code's fullscreen layout it docks beside the chat; on the main screen (under tmux, for one) it opens above the prompt.
+Every session gm starts loads the mod in `mods/guild-spyglass/`, as it does guild-chat, and a `claude` started by hand in the clone loads it from `.claude/skills/guild-spyglass`.
+The tabs follow where the pane is opened: the Guildmaster's front desk, a Party Leader's camp, or any other session; the last tab chosen is kept for the session.
+It is drawn as a quiet ledger: the tabs as words, a gold rule under the chosen one, a dim head for each group with its figure on the right, and the actions as one line of hotkeys at the foot (`r` refresh, and the tab's own), pressed while the pane has the keyboard (ctrl+x tab) or by a click. *✕ close* at the right of the tabs (or `q`) closes the pane: a wider target than the one-cell mark Claude Code draws in its corner. Its tabs:
+
+| Tab | Shown at | Shows |
+| --- | --- | --- |
+| ⚑ Board (postings) | the front desk, a Party Leader | the quest board, from `gm list --json`: a Party Leader's own focus, or every focus at the front desk under its name. A press on a posting opens it to its summary, its last notice line and, when parked, why; *show done* (`f`) unfolds the done and closed ones, which are otherwise one counted line. |
+| ✎ Satchel (files) | a Party Leader, any other session | every file the party changed, with its lines added and deleted: the camp's branch against where it left the base (`git merge-base HEAD origin/HEAD`), committed or not, new files included, and under its own name each adventurer that edited files in a worktree of its own (Claude Code's Agent tool with `isolation: worktree`). A press opens the file in the patron's editor, `editor` in `guild.conf` (`gm config set editor open -a Zed`; by default `open`, the app the Mac opens its kind with); the pane never shows a diff. |
+| ⚒ Deeds (activity) | every session | what this session has done, newest first: each deed (tool call) as it runs and how it ended (✗ when it failed), an MCP server's tools by server and tool, each adventurer sent, its deeds under its name and its return, and the notice lines `gm` printed; *mcp*, *adventurers* and *notices* show one kind alone. Kept for the session only, since tracing (`gm trace`) holds the longer record; a session that starts again or resumes shows its transcript's deeds first, marked earlier, since the transcript keeps no time. |
+| ⚙ Codex (settings) | the front desk, a Party Leader | every setting in `guild.conf`, from `gm config --json`, with its value and where it came from. A press opens one to its description and its controls: a button for each value of a switch or a choice, a button for each word of a list (pressed to add or take it away), a field for anything else, and *default* to take its line out of the file. Each change goes through the guild's `gm config set` (or `unset`), and what it says shows under the prompt. The guild's mods have no options of their own: `guild.conf` is where they are set. |
+| ◔ Lantern (context) | every session | on trial: how full the session's context window is, the cost so far, when it compacts and the rate-limit windows, as the status line has them; and what fills it, by category as `/context` counts it, with the MCP servers and memory files that weigh most. The breakdown is estimated on this machine at the open, after each turn and on *refresh* (`r`), or counted with the token-count API on *count exactly* (`x`); deferred tools, which are not in the context until the model fetches them, are set apart. |
+
+While the pane is up it reads what its tabs show again every 5 seconds, and at once after a `gm` command of its own session's, so a change made in any session shows soon; it stops when the pane closes.
+It runs the guild's own `gm` (`~/.local/bin/gm`, only when that is a link to a gm), never a camp's draft of it, so a tab says why when that `gm` cannot answer.
+The mod's own tests run with `claude plugin test mods/guild-spyglass`.
 
 ### The front desk from any terminal: `gm`
 

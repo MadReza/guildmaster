@@ -54,7 +54,8 @@ herdr-session	GM_HERDR_SESSION	default	name	The herdr session the guild lives in
 herdr-workspace	GM_HERDR_WORKSPACE	guild	name	The herdr workspace holding the guildmaster tab; each Party Leader has a workspace of its own shown under it.
 launch-grace	GM_LAUNCH_GRACE	60	seconds	Seconds after a start during which a pane holding only a shell is starting, not dead.
 start-tries	GM_START_TRIES	3	count	Starts in a row never seen alive before a Party Leader, the Guildmaster or the collector is held.
-repo-roots	-	-	text	Folders, separated by spaces, where gm repos looks for clones instead of the usual source folders."
+repo-roots	-	-	text	Folders, separated by spaces, where gm repos looks for clones instead of the usual source folders.
+editor	-	open	command	The command the spyglass opens a changed file with, the file's path given after it: open is the app the Mac opens its kind with; for one editor, open -a Zed, or code -g."
 GM_CONF_ENV=' '
 GM_CONF_VARS=' '
 GM_CONF_VAL=''
@@ -120,7 +121,7 @@ gm_conf_norm() {
     minutes | count) [[ $v =~ ^[0-9]{1,6}$ ]] && [ "$v" -ge 1 ] || return 1 ;;
     seconds) [[ $v =~ ^[0-9]{1,6}$ ]] || return 1 ;;
     name) [[ $v =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || return 1 ;;
-    text) [ -n "$v" ] || return 1 ;;
+    text | command) [ -n "$v" ] || return 1 ;;
     *) return 1 ;;
   esac
   GM_CONF_VAL=$v
@@ -615,7 +616,7 @@ They are for advanced use, and for the Guildmaster.
                           whichever is dead or missing, and leave the running ones alone; one that fails to start
                           3 times in a row is held until gm open (gm, for the Guildmaster; a day, for the
                           collector); any other gm command at a terminal does the same, quietly
-  config [get <key> | set <key> <value> | unset <key>]
+  config [get <key> | set <key> <value> | unset <key> | --json]
                           the settings in guild.conf in the Guildhall: every one, its value and where it came
                           from (the environment, the file, or the default); set changes one and acts on it at
                           once (autostart, the collector); the Guildmaster runs it when the patron asks
@@ -637,8 +638,9 @@ They are for advanced use, and for the Guildmaster.
   post [--slug S] [--from REF] [--follows REF] <words|->
                           add a posting to the current focus (state received)
   resolve <ref>           print the one record a reference names: 12, #12, focus#12, focus#slug, focus, KEY-123
-  list [--all] [--state S] [focus]
-                          postings of the current focus (or every focus at the front desk)
+  list [--all] [--state S] [--json] [focus]
+                          postings of the current focus (or every focus at the front desk); --json prints them
+                          as one JSON array, for the spyglass
   show <ref>              a posting with the patron's words, additions and history
   notice <ref> <verb> [detail] [--slug S] [--follows REF]
                           record an event and print its one-line notice; --follows ties the posting
@@ -1430,10 +1432,11 @@ gm_cmd_resolve() {
 }
 
 gm_cmd_list() {
-  local all=0 state='' focus='' where
+  local all=0 state='' focus='' where json=0
   while [ $# -gt 0 ]; do
     case $1 in
       --all) all=1; shift ;;
+      --json) json=1; shift ;;
       --state) state=${2:?--state needs a state}; shift 2 ;;
       -*) gm_die "list: unknown option $1" ;;
       *) focus=$1; shift ;;
@@ -1449,6 +1452,21 @@ gm_cmd_list() {
   elif [ "$all" = 0 ]; then
     where="$where AND p.state NOT IN ('done','closed')"
   fi
+  local order="f.name, CASE p.state WHEN 'active' THEN 0 WHEN 'needs-you' THEN 1 WHEN 'received' THEN 2 WHEN 'queued' THEN 3 WHEN 'parked' THEN 4 ELSE 5 END, p.num"
+  if [ "$json" = 1 ]; then
+    # One array, in the order the text shows, each posting with its last notice line: what the spyglass draws.
+    gm_sql <<SQL
+SELECT COALESCE(json_group_array(json(o)), '[]') FROM (
+  SELECT json_object('ref', f.name||'#'||p.num, 'focus', f.name, 'num', p.num, 'slug', p.slug, 'state', p.state,
+                     'updated', p.updated_at, 'summary', $(gm_summary_sql p.words), 'why', p.park_why,
+                     'until', p.park_until,
+                     'last', (SELECT e.line FROM event e WHERE e.posting_id=p.id AND e.line IS NOT NULL ORDER BY e.id DESC LIMIT 1)) AS o
+  FROM posting p JOIN focus f ON f.id=p.focus_id
+  WHERE $where
+  ORDER BY $order);
+SQL
+    return
+  fi
   gm_sql <<SQL
 SELECT printf('%-36s %-10s %s  "%s"%s',
               f.name||'#'||p.num||' '||p.slug, p.state, substr(p.updated_at,1,16),
@@ -1456,7 +1474,7 @@ SELECT printf('%-36s %-10s %s  "%s"%s',
               CASE WHEN p.state='parked' THEN '  why: '||p.park_why||COALESCE(', until '||p.park_until,'') ELSE '' END)
 FROM posting p JOIN focus f ON f.id=p.focus_id
 WHERE $where
-ORDER BY f.name, CASE p.state WHEN 'active' THEN 0 WHEN 'needs-you' THEN 1 WHEN 'received' THEN 2 WHEN 'queued' THEN 3 WHEN 'parked' THEN 4 ELSE 5 END, p.num;
+ORDER BY $order;
 SQL
 }
 
@@ -2873,6 +2891,35 @@ gm_conf_effective_all() {
   done <<<"$GM_CONF_TABLE"
 }
 
+# gm_conf_json: every setting as one JSON array, for the spyglass: its key, value and where it came from, its default,
+# kind, description and overriding variable, and, where it takes a set of words, those words (several of them at once
+# when isMulti).
+gm_conf_json() {
+  local key val src env def kind desc choices multi w list parts=() eff
+  eff=$(gm_conf_effective_all)
+  while IFS=$'\t' read -r key env def kind desc; do
+    val=$(awk -F '\t' -v k="$key" '$1 == k { print $2; exit }' <<<"$eff")
+    src=$(awk -F '\t' -v k="$key" '$1 == k { print $3; exit }' <<<"$eff")
+    [ "$val" != - ] || val=''
+    [ "$def" != - ] || def=''
+    [ "$env" != - ] || env=''
+    multi=false
+    case $kind in
+      onoff) choices='on off' ;;
+      collector) choices='on off later' ;;
+      chat) choices='banners off' ;;
+      veilhides) choices='deeds adventurers notes progress' multi=true ;;
+      sprites) choices='skirmish delve boss siege forge wall quill campfire none' multi=true ;;
+      *) choices='' ;;
+    esac
+    list=''
+    for w in $choices; do list="$list${list:+, }$(gm_q "$w")"; done
+    parts+=("json_object('key', $(gm_q "$key"), 'value', $(gm_q "$val"), 'source', $(gm_q "$src"), 'default', $(gm_q "$def"), 'kind', $(gm_q "$kind"), 'description', $(gm_q "$desc"), 'env', $(gm_q "$env"), 'choices', json_array($list), 'isMulti', json('$multi'))")
+  done <<<"$GM_CONF_TABLE"
+  local IFS=,
+  sqlite3 -batch -noheader :memory: "SELECT json_array(${parts[*]});"
+}
+
 # gm_conf_row <key>: env<TAB>default<TAB>kind<TAB>description of one setting; nothing for an unknown key.
 gm_conf_row() {
   local key env def kind desc
@@ -2892,6 +2939,10 @@ gm_cmd_config() {
   gm_conf_migrate
   file=$(gm_conf_file)
   case $action in
+    --json)
+      [ $# -eq 0 ] || gm_die "config: gm config --json takes no arguments"
+      gm_conf_json
+      ;;
     show | list)
       [ $# -eq 0 ] || gm_die "config: gm config takes no arguments (gm config get|set|unset <key>)"
       printf 'Settings, from %s (gm config set <key> <value> changes one):\n' "$file"
@@ -2920,7 +2971,7 @@ gm_cmd_config() {
       if [ "$action" = set ]; then
         [ $# -ge 1 ] || gm_die "config: gm config set $key <value>"
         val="$*"
-        [ "$kind" = text ] || [ "$kind" = veilhides ] || [ "$kind" = sprites ] || [ $# -eq 1 ] || gm_die "config: $key takes one value"
+        [ "$kind" = text ] || [ "$kind" = command ] || [ "$kind" = veilhides ] || [ "$kind" = sprites ] || [ $# -eq 1 ] || gm_die "config: $key takes one value"
         gm_conf_norm "$kind" "$val" || gm_die "config: $key cannot be '$val' ($(gm_conf_header | sed -n "s/^# $key: \\([^,;]*\\).*/\\1/p"))"
         val=$GM_CONF_VAL
       else
@@ -2974,6 +3025,7 @@ gm_conf_apply() {
     sprites) printf 'sprites is %s: %s; running sessions follow at their next turn.\n' "$shown" \
       "$([ "$val" = off ] && printf 'no session draws a working sprite' || printf 'every session draws its working sprites')" ;;
     sprites-* | idle-*) printf '%s is %s: running sessions follow at their next turn.\n' "$key" "$shown" ;;
+    editor) printf 'editor is %s: the spyglass opens a changed file with it, in every session from now on.\n' "$shown" ;;
     repo-roots) printf 'repo-roots is %s: gm repos looks for clones %s.\n' "$shown" "$([ -n "$val" ] && printf 'there' || printf 'in the usual source folders')" ;;
     *) printf '%s is %s; it takes effect at the next muster.\n' "$key" "$shown" ;;
   esac
@@ -5177,19 +5229,22 @@ gm_cmd_start() {
     ${GM_CHAT_ARGS[@]+"${GM_CHAT_ARGS[@]}"}
 }
 
-# The guild-chat mod, for a session gm starts in <dir>: gm_chat_args <dir> [focus]. Every session gets it, whatever
-# the chat setting, since it also carries the veil and /veil: claude loads it from the clone (--plugin-dir), told by
-# GM_CHAT whether to draw the banners (chat: off keeps Claude Code's own drawing) and by GM_CHAT_FOCUS which Party
-# Leader it draws for (none at the front desk). A checkout of Guildmaster loads the mod itself, from
-# .claude/skills/guild-chat, so there gm passes only the variables: a second copy by --plugin-dir would leave Claude
-# Code reporting the first as not loaded.
+# The guild's mods, for a session gm starts in <dir>: gm_chat_args <dir> [focus]. Every session gets guild-chat,
+# whatever the chat setting, since it also carries the veil and /veil, and guild-spyglass, the pane /spyglass opens:
+# claude loads each from the clone (--plugin-dir), guild-chat told by GM_CHAT whether to draw the banners (chat: off
+# keeps Claude Code's own drawing) and both by GM_CHAT_FOCUS which Party Leader they serve (none at the front desk). A
+# checkout of Guildmaster loads the mods itself, from .claude/skills/<mod>, so there gm passes only the variables: a
+# second copy by --plugin-dir would leave Claude Code reporting the first as not loaded.
 GM_CHAT_ARGS=()
 GM_CHAT_ENV=()
 gm_chat_args() {
   GM_CHAT_ARGS=()
   GM_CHAT_ENV=()
   gm_conf_norm chat "${GM_CHAT:-banners}" || GM_CONF_VAL=banners
-  [ -f "$1/.claude/skills/guild-chat/.claude-plugin/plugin.json" ] || GM_CHAT_ARGS=(--plugin-dir "$GM_ROOT/mods/guild-chat")
+  local mod
+  for mod in guild-chat guild-spyglass; do
+    [ -f "$1/.claude/skills/$mod/.claude-plugin/plugin.json" ] || GM_CHAT_ARGS+=(--plugin-dir "$GM_ROOT/mods/$mod")
+  done
   GM_CHAT_ENV=("GM_CHAT=$GM_CONF_VAL")
   [ -z "${2:-}" ] || GM_CHAT_ENV+=("GM_CHAT_FOCUS=$2")
 }

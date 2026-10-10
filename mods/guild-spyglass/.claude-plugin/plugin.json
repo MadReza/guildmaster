@@ -1,0 +1,6 @@
+{
+  "name": "guild-spyglass",
+  "version": "0.1.0",
+  "description": "Guildmaster's spyglass: a pane beside the chat, opened and closed with /spyglass, whose tabs show the party's work.",
+  "types": "./types/index.d.ts"
+}

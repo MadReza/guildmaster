@@ -311,6 +311,29 @@ t_park_and_resume() {
   assert_contains "$(gm list --all)" "grey-button" "listed"
 }
 
+t_list_json_is_what_the_spyglass_reads() {
+  setup list-json
+  export GM_FOCUS=appt-v2
+  assert_eq "$(gm list --json)" "[]" "no postings, an empty array" || return 1
+  gm post --slug grey-button "The save button is grey on Safari" >/dev/null
+  gm post --slug owner-empty "The owner is empty after save" >/dev/null
+  gm notice 2 started >/dev/null
+  gm park 1 --why "waits for dev deploy" --until 2000-01-01 >/dev/null
+  local f=$WORK/list-json/out.json
+  # What the array says, read back by sqlite3: list <SQL over each posting as value>.
+  list() { sqlite3 :memory: "SELECT $1 FROM json_each(readfile('$f'));"; }
+  gm list --json >"$f"
+  assert_eq "$(list "group_concat(value->>'ref'||' '||(value->>'state'),', ')")" "appt-v2#2 active, appt-v2#1 parked" \
+    "the postings in the order gm list shows them" &&
+    assert_eq "$(list "(value->>'why')||' | '||(value->>'until')||' | '||(value->>'summary')" | sed -n 2p)" \
+      "waits for dev deploy | 2000-01-01 | The save button is grey on Safari" "with why, until and the summary" &&
+    assert_eq "$(list "value->>'last'" | sed -n 1p)" 'appt-v2#2 owner-empty started ("The owner is empty after save")' \
+      "and its last notice line"
+  gm notice 2 'done' "fixed" >/dev/null
+  assert_not_contains "$(gm list --json)" "owner-empty" "done is left out" &&
+    assert_contains "$(gm list --json --all)" "owner-empty" "and in with --all"
+}
+
 t_phase_follows_the_playbook() {
   setup phase
   export GM_FOCUS=appt-v2
@@ -1117,7 +1140,9 @@ t_open_starts_the_party_leader_in_herdr_with_the_telemetry_env() {
     assert_eq "$(cat "$f.args")" "--name
 appt-v2
 --plugin-dir
-$ROOT/mods/guild-chat" "claude --name <focus>, with the chat's mod (chat: banners, the default)" &&
+$ROOT/mods/guild-chat
+--plugin-dir
+$ROOT/mods/guild-spyglass" "claude --name <focus>, with the chat's mod (chat: banners, the default) and the spyglass" &&
     assert_eq "$(cat "$f.pwd")" "$CAMP" "in the camp"
 }
 
@@ -2494,7 +2519,7 @@ t_config_file_is_documented_and_read() {
   [ -f "$GM_HALL/guild.conf" ] || fail "no guild.conf" || return 1
   for k in collector collector-port telemetry chat veil veil-hides sprites sprites-guildmaster sprites-party-leader \
     idle-guildmaster idle-party-leader autostart autostart-every muster-before-commands attach herdr-session \
-    herdr-workspace launch-grace start-tries repo-roots; do
+    herdr-workspace launch-grace start-tries repo-roots editor; do
     grep -q "^# $k: " "$GM_HALL/guild.conf" || fail "guild.conf does not document $k"
   done
   assert_eq "$(conf collector-port)" 4999 "the line written"
@@ -2523,6 +2548,18 @@ t_config_file_is_documented_and_read() {
     assert_eq "$(gm config get collector-port)" 4318 "and the default holds"
   gm config set repo-roots "$WORK/a" "$WORK/b" >/dev/null
   assert_eq "$(conf repo-roots)" "$WORK/a $WORK/b" "several folders"
+  out=$(gm config set editor open -a Zed)
+  assert_eq "$(conf editor)" "open -a Zed" "the editor, a command with its arguments" &&
+    assert_contains "$out" "the spyglass opens a changed file with it" "says what it does"
+  # --json: every setting, for the spyglass, read back by sqlite3.
+  gm config --json >"$WORK/conf/settings.json"
+  local q="SELECT value->>'value'||' | '||(value->>'source')||' | '||(value->'choices')||' | '||(value->>'isMulti') FROM json_each(readfile('$WORK/conf/settings.json')) WHERE value->>'key'="
+  assert_eq "$(sqlite3 :memory: "SELECT json_array_length(readfile('$WORK/conf/settings.json'));")" "$(gm config | grep -c '^  ')" "every setting gm config shows" &&
+    assert_eq "$(sqlite3 :memory: "$q'editor';")" "open -a Zed | guild.conf | [] | 0" "a command, from the file" &&
+    assert_eq "$(sqlite3 :memory: "$q'telemetry';" | cut -d '|' -f 3)" ' ["on","off"] ' "a switch, its two values" &&
+    assert_eq "$(sqlite3 :memory: "$q'veil-hides';")" "deeds adventurers notes progress | default | [\"deeds\",\"adventurers\",\"notes\",\"progress\"] | 1" "words, several at once" &&
+    assert_eq "$(GM_TELEMETRY=off gm config --json >"$WORK/conf/settings.json"; sqlite3 :memory: "$q'telemetry';" | cut -d '|' -f 2)" \
+      " environment (GM_TELEMETRY) " "and where a value came from"
   grep -q '^# collector: on | off | later, default off; GM_COLLECTOR overrides it' "$GM_HALL/guild.conf" ||
     fail "the documentation is kept through every write"
 }
@@ -2571,7 +2608,9 @@ t_config_chat_starts_sessions_with_the_guild_chat_mod() {
   assert_eq "$(cat "$f.args")" "--name
 appt-v2
 --plugin-dir
-$ROOT/mods/guild-chat" "claude --name <focus> --plugin-dir <the mod>" &&
+$ROOT/mods/guild-chat
+--plugin-dir
+$ROOT/mods/guild-spyglass" "claude --name <focus> --plugin-dir <each mod>" &&
     assert_contains "$(cat "$f")" "GM_CHAT=banners" "the mod is told the style" &&
     assert_contains "$(cat "$f")" "GM_CHAT_FOCUS=appt-v2" "and the focus, not a stray one"
   line=$(grep "start 'guildmaster'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)
@@ -2589,7 +2628,9 @@ guildmaster" "the Guildmaster loads it too, from the clone's .claude/skills, wit
   assert_eq "$(cat "$f.off.args")" "--name
 appt-v2
 --plugin-dir
-$ROOT/mods/guild-chat" "chat: off starts a Party Leader with the mod too" &&
+$ROOT/mods/guild-chat
+--plugin-dir
+$ROOT/mods/guild-spyglass" "chat: off starts a Party Leader with the mod too" &&
     assert_contains "$(cat "$f.off")" "GM_CHAT=off" "told to draw Claude Code's own chat" &&
     assert_contains "$(cat "$f.off")" "GM_CHAT_FOCUS=appt-v2" "with its focus"
   env GM_FAKE_CLAUDE_ENV="$f.desk-off" sh -c "$(grep "start 'guildmaster'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)" </dev/null >/dev/null 2>&1
@@ -2597,8 +2638,10 @@ $ROOT/mods/guild-chat" "chat: off starts a Party Leader with the mod too" &&
   out=$(gm config set chat on)
   assert_eq "$(conf chat)" banners "on is the one style there is: banners" &&
     assert_contains "$out" "chat is banners: the Guildmaster and Party Leaders started from now on draw their chat under heraldic banners" "and back"
-  [ -f "$ROOT/mods/guild-chat/.claude-plugin/plugin.json" ] && [ -f "$ROOT/mods/guild-chat/hooks/register.tsx" ] ||
-    fail "the mod gm loads is not in the clone"
+  for mod in guild-chat guild-spyglass; do
+    [ -f "$ROOT/mods/$mod/.claude-plugin/plugin.json" ] && [ -f "$ROOT/mods/$mod/hooks/register.tsx" ] &&
+      [ -f "$ROOT/.claude/skills/$mod/.claude-plugin/plugin.json" ] || fail "the mod $mod gm loads is not in the clone"
+  done
 }
 
 t_config_veil_and_what_it_hides() {
