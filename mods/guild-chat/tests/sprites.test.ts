@@ -3,12 +3,12 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { SPRITE_DEFAULTS, spritesOf } from '../hooks/register'
 import {
-  fromBraille, packFrame, PALETTES, pickSprite, QUILL_ROOM, QUILL_SAYINGS, quillSaying, SPRITE_COLUMNS, SPRITE_NAMES,
+  formatElapsed, formatTokens, fromBraille, packFrame, PALETTES, pickSprite, QUILL_ROOM, QUILL_SAYINGS, quillSaying, SPRITE_COLUMNS, SPRITE_NAMES,
   SPRITE_ROWS, spriteFrame, toBraille,
 } from '../lib/sprites'
 
 // What stands for Claude Code and the machine beneath the mod: the environment gm starts a session with, a Guildhall
-// whose guild.conf the test writes (none when it is undefined), and the engine's own row. The journal records the
+// whose guild.conf the test writes (none when it is undefined), a clock, and the engine's own row. The journal records the
 // repaints the mod asks for.
 const HOME = '/home/p'
 const CONF = `${HOME}/.guildmaster/guild.conf`
@@ -17,6 +17,7 @@ const viewport = { columns: 60, rows: 20 }
 
 function world(on: On, conf: string | undefined, env: Record<string, string> = { HOME, GM_CHAT: 'banners' }) {
   const blits: string[] = []
+  const clock = mock.clock(on)
   mock.env(on, env)
   on('fs.exists', async (_$, e) => ({ value: e.path === CONF && conf !== undefined }))
   on('fs.read', async (_$, e) => (e.path === CONF && conf !== undefined ? { value: conf } : { deny: `ENOENT: ${e.path}` }))
@@ -29,7 +30,7 @@ function world(on: On, conf: string | undefined, env: Record<string, string> = {
     return { value: {} }
   })
   on('ui.render', () => ({ type: 'Text', props: {}, children: [STOCK] }))
-  return { blits }
+  return { blits, clock }
 }
 
 const spinner = { component: 'Spinner', props: { word: 'Sauteing', message: null, suffix: '…', mode: 'responding' } } as const
@@ -102,6 +103,18 @@ describe("the quill's braille", () => {
   })
 })
 
+describe('the meter', () => {
+  test('says the time and the tokens as Claude Code does', () => {
+    expect(formatElapsed(0)).toBe('0s')
+    expect(formatElapsed(12_400)).toBe('12s')
+    expect(formatElapsed(64_000)).toBe('1m 4s')
+    expect(formatElapsed(3_720_000)).toBe('1h 2m')
+    expect(formatTokens(300)).toBe('↓ 300 tokens')
+    expect(formatTokens(1200)).toBe('↓ 1.2k tokens')
+    expect(formatTokens(2000)).toBe('↓ 2k tokens')
+  })
+})
+
 describe('drawing one at random', () => {
   test('never the one drawn last while the list holds another', () => {
     const from = ['skirmish', 'forge'] as const
@@ -139,12 +152,23 @@ describe('the settings, read as gm reads them', () => {
 })
 
 describe('while a turn runs', () => {
-  test('the Guildmaster writes with the quill, above Claude Code\'s own words', async ($, on) => {
+  test('the Guildmaster writes with the quill, in place of Claude Code\'s words, the time and tokens beside it', async ($, on) => {
     world(on, '')
     const ui = await $.ui.mount({ plugin: 'guild-chat', surface: 'terminal', viewport, ...spinner })
     const raster = await ui.find({ type: 'Raster' })
     expect(raster).toBeDefined()
-    expect(glyphs(raster!.props.cells as string, raster!.props.columns as number)[1]).toContain('№12')
+    const rows = glyphs(raster!.props.cells as string, raster!.props.columns as number)
+    expect(rows[1]).toContain('№12')
+    expect(rows[0]!.slice(SPRITE_COLUMNS)).toContain('0s')
+    expect(rows[1]!.slice(SPRITE_COLUMNS)).toContain('↓ 0 tokens')
+    expect(await ui.find({ type: 'Text', text: STOCK })).toBeUndefined()
+  })
+
+  test('while a state overrides the word, Claude Code\'s row stays beneath the sprite', async ($, on) => {
+    world(on, '')
+    const ui = await $.ui.mount({ plugin: 'guild-chat', surface: 'terminal', viewport, component: 'Spinner',
+      props: { ...spinner.props, message: 'Compacting conversation' } })
+    expect(await ui.find({ type: 'Raster' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: STOCK })).toBeDefined()
   })
 
@@ -157,8 +181,7 @@ describe('while a turn runs', () => {
   })
 
   test('the sprite moves on its own clock', async ($, on) => {
-    const clock = mock.clock(on)
-    const { blits } = world(on, '')
+    const { blits, clock } = world(on, '')
     const ui = await $.ui.mount({ plugin: 'guild-chat', surface: 'terminal', viewport, ...spinner })
     expect(await ui.find({ type: 'Raster' })).toBeDefined()
     await clock.advance(1000)

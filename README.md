@@ -215,7 +215,7 @@ It hides from the screen only: the model, the stored conversation, `--continue` 
 
 ### The working sprites
 
-While a turn runs, the mod draws a two-row sprite above Claude Code's working row (its word and timer stay beneath), in Claude orange, moving on its own clock.
+While a turn runs, the mod draws a two-row sprite in place of Claude Code's working row, in Claude orange, moving on its own clock, with the turn's time and tokens on two lines to its right; while Claude Code says the session is waiting on something (compacting, say), its own row stays beneath.
 Like Claude Code's word, the sprite is drawn at random each turn, and never the same one twice in a row, from the ones `guild.conf` names for the session's role:
 
 | Setting | Default | Drawn |

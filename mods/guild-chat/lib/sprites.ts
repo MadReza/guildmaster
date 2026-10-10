@@ -14,7 +14,7 @@ export const SPRITE_ROWS = 2
 
 export type SpriteColor =
   | 'plain' | 'orange' | 'deep' | 'cream' | 'white' | 'gold' | 'flame' | 'ember'
-  | 'muted' | 'stone' | 'log' | 'tent' | 'slime'
+  | 'muted' | 'stone' | 'log' | 'tent' | 'slime' | 'meter'
 
 export type Cell = readonly [glyph: string, color: SpriteColor]
 export type Frame = Cell[][]
@@ -351,6 +351,38 @@ export function pickSprite(from: readonly SpriteName[], last: SpriteName | undef
   return pool.length ? pool[Math.min(pool.length - 1, Math.floor(roll * pool.length))] : undefined
 }
 
+// ---- The meter: the turn's time and tokens, beside the sprite ----
+
+/** The blank columns between the sprite and its meter, and the meter's own width. */
+export const METER_GAP = 2
+export const METER_COLUMNS = 16
+
+/** A turn's time as Claude Code's working row says it: `12s`, `1m 4s`, `1h 2m`. */
+export function formatElapsed(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  if (s < 60) return `${s}s`
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`
+  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
+}
+
+/** A token count as Claude Code's working row says it: `300 tokens`, `1.2k tokens`. */
+export function formatTokens(n: number): string {
+  const t = Math.max(0, Math.round(n))
+  return t < 1000 ? `↓ ${t} tokens` : `↓ ${(t / 1000).toFixed(1).replace(/\.0$/, '')}k tokens`
+}
+
+/** A frame with its meter to the right: one line of the meter a row, cut to the meter's width. */
+export function withMeter(frame: Frame, lines: readonly [string, string]): Frame {
+  return frame.map((row, r) => {
+    const text = [...(lines[r] ?? '')].slice(0, METER_COLUMNS)
+    const cells: Cell[] = Array.from({ length: METER_GAP + METER_COLUMNS }, (_, i): Cell => {
+      const ch = text[i - METER_GAP]
+      return i >= METER_GAP && ch !== undefined ? [ch, 'meter'] : [' ', 'plain']
+    })
+    return [...row, ...cells]
+  })
+}
+
 // ---- Colour and packing ----
 
 /** `0x01000000` asks the terminal for its default colour. */
@@ -366,10 +398,12 @@ export const PALETTES: Readonly<Record<'dark' | 'light', Palette>> = {
   dark: {
     plain: DEFAULT_COLOR, orange: 0xd77757, deep: 0xa9573d, cream: 0xe9dcc0, white: 0xf4f4f4, gold: 0xffd27a,
     flame: 0xffd27a, ember: 0xe0614a, muted: 0x5c5f66, stone: 0x46423d, log: 0x8a7560, tent: 0x9c8f78, slime: 0x4eba65,
+    meter: 0x999999,
   },
   light: {
     plain: DEFAULT_COLOR, orange: 0xd77757, deep: 0xa9573d, cream: 0x8a7a5c, white: 0x3a3a3a, gold: 0xb7791f,
     flame: 0xc98a1a, ember: 0xc0392b, muted: 0xa3a6ad, stone: 0xc9c2b8, log: 0x7a6450, tent: 0x8a7d66, slime: 0x2c7a39,
+    meter: 0x666666,
   },
 }
 
@@ -398,9 +432,12 @@ export function encodeBase64(bytes: Uint8Array): string {
   return out
 }
 
-/** How many columns a sprite's Raster takes in a row of the given width: the sprite's, or less on a narrow terminal. */
-export const rasterColumns = (viewportColumns: number | undefined) =>
-  Math.max(1, Math.min(SPRITE_COLUMNS, (viewportColumns ?? 80) - 2))
+/**
+ * How many columns a sprite's Raster takes in a row of the given width: the sprite's, and its meter's when it has one,
+ * or less on a narrow terminal.
+ */
+export const rasterColumns = (viewportColumns: number | undefined, meter = false) =>
+  Math.max(1, Math.min(SPRITE_COLUMNS + (meter ? METER_GAP + METER_COLUMNS : 0), (viewportColumns ?? 80) - 2))
 
 /** A frame as a Raster's `cells`: `columns * rows` little-endian [codePoint, foreground, background] triplets. */
 export function packFrame(frame: Frame, columns: number, palette: Palette): string {

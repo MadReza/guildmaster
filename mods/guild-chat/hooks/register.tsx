@@ -1,8 +1,8 @@
 import type { EngineInterface, Register, RenderChildren, RenderInput } from 'claude-code'
 
 import {
-  isSpriteName, packFrame, paletteFamily, PALETTES, pickSprite, rasterColumns, spriteFrame, spriteTick,
-  SPRITE_ROWS, type Palette, type SpriteName,
+  formatElapsed, formatTokens, isSpriteName, packFrame, paletteFamily, PALETTES, pickSprite, rasterColumns,
+  spriteFrame, spriteTick, SPRITE_ROWS, withMeter, type Frame, type Palette, type SpriteName,
 } from '../lib/sprites'
 
 // Heraldic banners: every message of a Guildmaster session is set under a rule naming who speaks. The patron's banner
@@ -17,7 +17,7 @@ import {
 // /veil sets it through the guild's one gm; every other session follows at its next turn, or at /veil refresh.
 //
 // The working sprites (../lib/sprites.ts): while sprites: is on, the row Claude Code animates while a turn runs gets a
-// two-row sprite above its words, drawn at random each turn from the ones guild.conf names for this session's role, the
+// two-row sprite in place of its words, the turn's time and tokens beside it, drawn at random each turn from the ones guild.conf names for this session's role, the
 // way Claude Code samples its word: sprites-guildmaster at the front desk, sprites-party-leader in a camp. While the
 // session waits for the patron, idle-guildmaster or idle-party-leader names the one drawn above the prompt. Both live
 // in rows Claude Code redraws in place, so a sprite never enters the chat: it is gone when its turn, or the wait, ends.
@@ -283,9 +283,21 @@ function paletteOf($: EngineInterface): Promise<Palette> {
   return palette
 }
 
-// Every site drawing a sprite now, by its requestId: which sprite, its tick count, its size and its clock. A site's
-// clock stops when a repaint is refused, which is how the mod learns the turn or the wait is over.
-type Site = { sprite: SpriteName; t: number; columns: number; timer: { cancel(): void } }
+// The turn's meter, as Claude Code's own row keeps it and no prop carries: when the turn started, the output tokens of
+// its finished model steps, and the characters streamed so far in the step under way, a token being about four.
+let turnStartedAt: number | undefined
+let stepTokens = 0
+let streamed = 0
+
+async function meterLines($: EngineInterface): Promise<[string, string]> {
+  const now = await $.clock.now()
+  return [formatElapsed(now - (turnStartedAt ?? now)), formatTokens(stepTokens + streamed / 4)]
+}
+
+// Every site drawing a sprite now, by its requestId: which sprite, its tick count, its size, whether the turn's meter
+// stands beside it, and its clock. A site's clock stops when a repaint is refused, which is how the mod learns the
+// turn or the wait is over.
+type Site = { sprite: SpriteName; t: number; columns: number; meter: boolean; timer: { cancel(): void } }
 const sites = new Map<string, Site>()
 const RASTER_KEY = 'guild-sprite'
 
@@ -294,31 +306,36 @@ function forget(requestId: string): void {
   sites.delete(requestId)
 }
 
+async function frameOf($: EngineInterface, site: Site): Promise<Frame> {
+  const frame = spriteFrame(site.sprite, site.t)
+  return site.meter ? withMeter(frame, await meterLines($)) : frame
+}
+
 async function repaint($: EngineInterface, requestId: string, site: Site): Promise<void> {
   site.t += 1
   const result = await $.ui.blit({
     requestId, key: RASTER_KEY, columns: site.columns, rows: SPRITE_ROWS,
-    cells: packFrame(spriteFrame(site.sprite, site.t), site.columns, await paletteOf($)),
+    cells: packFrame(await frameOf($, site), site.columns, await paletteOf($)),
   })
   if (result.deny !== undefined && sites.get(requestId) === site) forget(requestId)
 }
 
 // The sprite's Raster for a site, its clock started, or kept running when the site already draws this sprite. Only a
 // terminal has Rasters: elsewhere there is none.
-async function spriteRaster($: EngineInterface, e: RenderInput, sprite: SpriteName) {
+async function spriteRaster($: EngineInterface, e: RenderInput, sprite: SpriteName, meter = false) {
   const elements = $.ui.resolve(e)
   if (e.surface !== 'terminal' || !('Raster' in elements)) return undefined
   const { Raster } = elements
-  const columns = rasterColumns(e.viewport?.columns)
+  const columns = rasterColumns(e.viewport?.columns, meter)
   let site = sites.get(e.requestId)
-  if (!site || site.sprite !== sprite || site.columns !== columns) {
+  if (!site || site.sprite !== sprite || site.columns !== columns || site.meter !== meter) {
     forget(e.requestId)
-    const fresh: Site = { sprite, t: 0, columns, timer: { cancel() {} } }
+    const fresh: Site = { sprite, t: 0, columns, meter, timer: { cancel() {} } }
     fresh.timer = $.clock.every(spriteTick(sprite), () => void repaint($, e.requestId, fresh))
     sites.set(e.requestId, fresh)
     site = fresh
   }
-  return <Raster key={RASTER_KEY} columns={columns} rows={SPRITE_ROWS} cells={packFrame(spriteFrame(sprite, site.t), columns, await paletteOf($))} />
+  return <Raster key={RASTER_KEY} columns={columns} rows={SPRITE_ROWS} cells={packFrame(await frameOf($, site), columns, await paletteOf($))} />
 }
 
 const said = (v: Veil) => (v.on ? 'The veil is drawn' : 'The veil is lifted')
@@ -391,6 +408,9 @@ export const register: Register = on => {
       }
     }
     await drawTurnSprite($)
+    turnStartedAt = await $.clock.now()
+    stepTokens = 0
+    streamed = 0
     return next(e)
   })
 
@@ -401,7 +421,9 @@ export const register: Register = on => {
     return result
   })
 
-  // The row Claude Code animates while a turn runs: this turn's sprite above Claude Code's own word and timer.
+  // The row Claude Code animates while a turn runs: this turn's sprite in place of Claude Code's word, the turn's time
+  // and tokens to its right. While a state overrides the word (its message), Claude Code's row stays beneath, so the
+  // patron still reads what the session waits on.
   on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
     const { sprites } = await veil($)
     const sprite = sprites.on && e.surface === 'terminal' ? (turnSprite ?? (await drawTurnSprite($))) : undefined
@@ -409,8 +431,10 @@ export const register: Register = on => {
       forget(e.requestId)
       return next(e)
     }
-    const raster = await spriteRaster($, e, sprite)
+    turnStartedAt ??= await $.clock.now()
+    const raster = await spriteRaster($, e, sprite, true)
     if (!raster) return next(e)
+    if (e.props.message === null) return raster
     const drawn = await next(e)
     const { Box } = $.ui.resolve(e)
     return (
@@ -442,13 +466,18 @@ export const register: Register = on => {
     const stream = next(e)
     const blocks = new Map<number, string>()
     const tools: string[] = []
+    const main = e.agentId === undefined
     for await (const chunk of stream) {
       if (chunk.kind === 'text') blocks.set(chunk.index, (blocks.get(chunk.index) ?? '') + chunk.text)
       if (chunk.kind === 'tool') tools.push(chunk.id)
+      if (main) streamed += chunk.kind === 'text' || chunk.kind === 'thinking' ? chunk.text.length : chunk.kind === 'input' ? chunk.json.length : 0
       yield chunk
     }
     const result = await stream.result
-    if (e.agentId !== undefined) return result
+    if (!main) return result
+    // A finished step counts what the API says it wrote, in place of the estimate.
+    stepTokens += result.usage?.output_tokens ?? streamed / 4
+    streamed = 0
     const stuck = STUCK.includes(result.stopReason ?? '')
     let changed = false
     for (const text of blocks.size ? blocks.values() : [result.answer]) {
