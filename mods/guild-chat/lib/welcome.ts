@@ -202,7 +202,7 @@ export const COMMANDS: readonly Command[] = [
   { id: 'ref', seats: BOTH, type: { guildmaster: 'appt-v2#12 …', 'party-leader': '#12 …' }, says: 'add to a posting, or answer it', tryIt: true },
   { id: 'open', seats: ['guildmaster'], type: { all: 'open CRM-1234 in ~/src/crm' }, says: 'start a Party Leader', tryIt: true },
   { id: 'spyglass', seats: BOTH, type: { all: '/spyglass' }, says: "the party's work in a pane",
-    tabs: { guildmaster: '1 postings  2 activity  3 configs  4 context', 'party-leader': '1 postings  2 files  3 activity  4 configs  5 context' } },
+    tabs: { guildmaster: '/spyglass board · deeds · codex · lantern', 'party-leader': '/spyglass board · satchel · deeds · codex · lantern' } },
   { id: 'veil', seats: BOTH, type: { all: '/veil' }, says: 'hide the deeds, keep the talk' },
   { id: 'roster', seats: ['guildmaster'], type: { all: "who's working?" }, says: 'see the roster' },
   { id: 'board', seats: ['party-leader'], type: { all: "what's on the board?" }, says: 'see the postings', tryIt: true },

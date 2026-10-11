@@ -181,7 +181,7 @@ describe('the card', () => {
     const below = lines(cardOf(GUILD, opts({ usage: recordUse({}, 'veil', 's1') })).below)
     expect(below).toContain('── What you can type ── ▱▱▱▱▱▱▱▱▱ 0/9 learned · novice')
     expect(below.some(l => /^ {2}\/veil +●○○○○ {2}hide the deeds, keep the talk$/.test(l))).toBe(true)
-    expect(below.some(l => l.includes('tabs: 1 postings  2 activity  3 configs  4 context'))).toBe(true)
+    expect(below.some(l => l.includes('tabs: /spyglass board · deeds · codex · lantern'))).toBe(true)
     expect(below).toContain('  try: "appt-v2#12 yes, go ahead"')
     expect(lines(cardOf({ ...GUILD, needs: [] }, opts()).below)).toContain('  try: "appt-v2#12 yes, go ahead"')
     expect(lines(cardOf({ ...GUILD, needs: [{ ref: 'crm-9#2', question: '?' }] }, opts()).below)).toContain('  try: "crm-9#2 yes, go ahead"')
