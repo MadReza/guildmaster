@@ -2,6 +2,18 @@
 # Stands in for claude in tests/run.sh: records the environment, arguments and directory it was started with.
 # Without GM_FAKE_CLAUDE_ENV (gm's first-run check asks claude --version) it records nothing, rather than leaving
 # .args and .pwd in whatever folder it ran in.
+# As an Adventurer (-p, with GM_FAKE_RUN set to a directory) it records the same there, with the writ it read on
+# standard input, waits while GM_FAKE_RUN/hold exists, prints GM_FAKE_RUN/stream.jsonl as its transcript when there
+# is one, and exits with the code in GM_FAKE_RUN/exit (default 0).
+if [ "${1:-}" = -p ] && [ -n "${GM_FAKE_RUN:-}" ]; then
+  env >"$GM_FAKE_RUN/env"
+  printf '%s\n' "$@" >"$GM_FAKE_RUN/args"
+  pwd -P >"$GM_FAKE_RUN/pwd"
+  cat >"$GM_FAKE_RUN/stdin"
+  while [ -e "$GM_FAKE_RUN/hold" ]; do sleep 0.1; done
+  [ ! -f "$GM_FAKE_RUN/stream.jsonl" ] || cat "$GM_FAKE_RUN/stream.jsonl"
+  exit "$(cat "$GM_FAKE_RUN/exit" 2>/dev/null || echo 0)"
+fi
 [ -n "${GM_FAKE_CLAUDE_ENV:-}" ] || exit 0
 env >"$GM_FAKE_CLAUDE_ENV"
 printf '%s\n' "$@" >"$GM_FAKE_CLAUDE_ENV.args"

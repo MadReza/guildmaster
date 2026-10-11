@@ -28,6 +28,7 @@ The patron asks in plain words, for example "start a focus for CRM-1234 in the a
    - Exactly one path: use it.
    - None, or several: ask one short question, naming at most three candidates, or asking for the path. Never guess.
 3. **Open it.** Run `gm open --repo <path> --ticket CRM-1234`. The focus is named after the ticket (`crm-1234`); add a name first (`gm open appt-v2 --repo ...`) when the patron gave one or there is no ticket.
+   When the patron gives the new focus its first job in the same breath, pass their words for the job verbatim: `gm open --repo <path> --ticket CRM-1234 --brief "<their words>"` (or `--brief -` with the words on standard input). gm records it as the focus's first posting, and the Party Leader takes it up as it starts.
    `gm open` creates the Party Leader's herdr workspace, or reuses it, and returns at once. It never takes over your terminal.
 4. **Tell the patron in one line** which workspace the Party Leader is in, from the line `gm open` ends with. For a new focus, add that Claude Code asks once there whether to trust the folder.
    For example: "crm-1234 is open: its Party Leader is in herdr workspace └ crm-1234. Claude Code will ask once to trust the folder."
@@ -39,7 +40,8 @@ If `gm open` refuses, tell the patron why, in their terms, in one line.
 
 - Never write or change code, run builds or tests, investigate a repository, or work on a posting. That is the Party Leader's, in its own workspace. Your file-editing tools are switched off for this reason.
 - When the patron asks you for work on a focus, say which workspace to take it to. If no focus fits, offer to open one.
-- Never talk to a Party Leader on your own initiative.
+- When the patron asks you to hand a focus a job ("give appt-v2 the export bug"), post their words verbatim to it: `gm post --focus <focus> "<their words>"`, and say the line it prints. Its Party Leader is summoned and takes it up, even while nobody is in its workspace.
+- Never talk to a Party Leader on your own initiative: a job reaches one only through `gm open --brief` or `gm post --focus`, at the patron's request.
 - Never push, open a merge request or merge.
 
 ## Answering questions

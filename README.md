@@ -90,6 +90,19 @@ Start a message with an id (`#1 also the edit form`) to add to that posting inst
 The status line shows the focus, phase, and posting counts.
 A Stop guard keeps the turn going until every posting has a recorded state.
 
+Work that changes the project goes to an Adventurer: the Party Leader runs `gm dispatch`, and a headless Claude Code session works the posting in the camp, on the feature branch, and commits there as you, with Claude Code's attribution off (`commit-attribution` in `guild.conf`).
+The Party Leader stays free while it works, so keep talking to it.
+When the run finishes, gm wakes the Party Leader, which reviews the result and the commit and tells you:
+
+```
+appt-v2#1 fix-owner-empty dispatched: contract, run 1 on claude-opus-5-5[1m] at medium effort ("the owner field is empty…")
+appt-v2#1 fix-owner-empty run 1 finished: exit 0, 14 turns, $0.22 ("the owner field is empty…")
+appt-v2#1 fix-owner-empty done: fixed in 6b6a581 ("the owner field is empty…")
+```
+
+A job the Guildmaster hands a focus for you (`gm post --focus`, or `gm open --brief` for a new focus) wakes its Party Leader the same way, with nobody in its workspace.
+An Adventurer may edit, read and commit; to let it run the repository's build and tests, add `adventurer-allow:` lines to the repository's rules file in the Guildhall.
+
 #### Kill it and come back
 
 Exit Claude Code (`/exit`), kill the process, close its pane, restart the machine, or let it compact.

@@ -57,7 +57,15 @@ The Adventurer spans the design defines are built with step 3, where Adventurers
 
 ## Step 3: Adventurers and enforced rules
 
-**Status:** In progress. Design proposed in [step-3-design.md](step-3-design.md), in five build slices, waiting for the patron's agreement and answers; it takes in issue <https://github.com/MadReza/guildmaster/issues/41> with slice 1's wake. It was the next step until the patron moved tracing ahead of it on 2026-09-30.
+**Status:** In progress. Design agreed on 2026-10-11 in [step-3-design.md](step-3-design.md), in five build slices; it takes in issue <https://github.com/MadReza/guildmaster/issues/41> with slice 1's wake. It was the next step until the patron moved tracing ahead of it on 2026-09-30.
+
+| Slice | What | Status |
+| --- | --- | --- |
+| 1 | `gm dispatch`, one headless Adventurer, its result in the register, and the watch that summons the Party Leader (with issue #41) | In review |
+| 2 | `PreToolUse` push rules in every camp | Planned |
+| 3 | `gm check` after every run | Planned |
+| 4 | Parallel surveys and the dispatch cap | Planned |
+| 5 | Adventurer spans, `TRACEPARENT` and writ hashes | Planned |
 
 **Goal.** The Party Leader stays answerable while Adventurers do the work, and the rules the playbook states are enforced, not only asked for.
 

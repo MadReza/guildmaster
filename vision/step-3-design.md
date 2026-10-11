@@ -1,7 +1,7 @@
 # Step 3 design: Adventurers and enforced rules
 
 This is the design of roadmap step 3 ([roadmap.md](roadmap.md#step-3-adventurers-and-enforced-rules)), whose scope is build-order step 2 of [consultation.md](consultation.md#build-order), turned into build slices.
-It is a proposal: nothing here is built until the patron agrees, and the [questions](#questions-for-the-patron) at the end decide parts of it.
+The patron agreed to it on 2026-10-11 ("Go for it."), with every [question](#questions-for-the-patron) settled. Slice 1 is built; [What building slice 1 changed](#what-building-slice-1-changed) records where it differs from the text below.
 Vocabulary is [TERMINOLOGY.md](../TERMINOLOGY.md)'s.
 
 The patron asked for it on 2026-10-11, in the Party Leader of `adventurers`:
@@ -38,7 +38,7 @@ Answered on 2026-10-11; every question is settled.
 | GitLab credentials | Only the patron's SSH key, through the running ssh-agent, for `git fetch` and the pushes slice 2 allows. No `glab` token: an Adventurer never opens, approves or merges a merge request. |
 | Q14 models | Contracts on the Party Leader's own model at medium effort; surveys on Sonnet 5.5 at medium. Each kind's model and effort are `guild.conf` settings (`contract-model`, `contract-effort`, `survey-model`, `survey-effort`), and the Party Leader can override them per dispatch with `--model` and `--effort`. A kind moves to a cheaper model when its recorded outcomes ([below](#a-runs-outcome-for-judging-models-and-prompts)) show it holds. A **contract** changes the project, in the ticket's camp, one at a time per focus; a **survey** only finds things out, read-only, in a throwaway worktree, ending in a field report. |
 | The words | **Summons** for the event and **the watch** for the process, both already in TERMINOLOGY.md and widened there to any supervisor; **run** and **keeper** added. Herald was not needed: a new term is added only for a concept with no name yet, and both concepts had one. |
-| The nudge | When a Party Leader's watch has died and a summons has waited 2 minutes, the muster types `/summons`, only when the Party Leader is idle, its input has not changed for 1.5 seconds, and the input is empty or holds a draft with no stash (stashed first, and restored by Claude Code). Otherwise it types nothing and the roster shows the summons as unheard. Chosen after [the lab tests](#what-the-lab-showed). |
+| The nudge | When a Party Leader's watch has died and a summons has waited 2 minutes, the muster types `/summons` (`/guild-chat:summons`, as built), only when the Party Leader is idle, its input has not changed for 1.5 seconds, and the input is empty or holds a draft with no stash (stashed first, and restored by Claude Code). Otherwise it types nothing and the roster shows the summons as unheard. Chosen after [the lab tests](#what-the-lab-showed). |
 | Correction runs | A failed check dispatches one correction run at once; a second failure on the same posting goes to the patron as `needs-you`. |
 
 ## The slices
@@ -79,10 +79,10 @@ When it exits, the keeper reads the final `result` event (its text, cost, turns 
 ### An Adventurer is not a Party Leader
 
 A camp's `.claude/settings.local.json` is the Party Leader's: its charter, its capture hook, its Stop guard. A `claude -p` started in the camp would load it too, and its writ would be recorded as a patron message and made a posting.
-So an Adventurer runs with `--setting-sources user,project`, which leaves the camp's local settings out, and `--settings runs/<run>/settings.json`, which `gm` writes per run with only what an Adventurer needs: `GM_HALL`, `GM_FOCUS` and `GM_RUN` in `env`; the tool-recording hooks, so its tool calls are in the register; from slice 2, the rules hook; and Claude Code's commit attribution switched off unless `guild.conf` says `commit-attribution: on`. No charter, no capture, no Stop guard, no status line.
+So an Adventurer runs with `--setting-sources user,project`, which leaves the camp's local settings out, and `--settings runs/<run>/settings.json`, which `gm` writes per run with only what an Adventurer needs: `GM_HALL`, `GM_FOCUS` and `GM_RUN` in `env`; its permissions; from slice 2, the rules hook; from slice 5, the tool-recording hooks; and Claude Code's commit attribution switched off unless `guild.conf` says `commit-attribution: on`. No charter, no capture, no Stop guard, no status line.
 The repository's own committed `.claude/settings.json` and `CLAUDE.md` still load, as they would for the patron.
 
-*To check before building:* that `--setting-sources` without `local` leaves out a linked worktree's `settings.local.json` (step 1 found Claude Code reads it from the starting directory as well as the main checkout), and that `-p` in a camp never stops on the folder-trust question.
+Checked before building: `--setting-sources` without `local` leaves out a linked worktree's `settings.local.json` and the main checkout's, and `-p` in a camp never stops on the folder-trust question ([below](#what-building-slice-1-changed)).
 
 ### Permissions in slice 1
 
@@ -183,6 +183,16 @@ The front desk's charter gains: when the patron gives a new focus its job in the
 
 The Party Leader's charter template gains one line: "A summons from gm names a run that finished or a posting added while you were idle; review or sort it like a patron message." The patron's own `charter.md` in the Guildhall is never overwritten; the pull request names the lines to add there by hand.
 A running Party Leader gets the watch hooks at its next start, since `gm open` writes the camp's settings.
+
+### What building slice 1 changed
+
+- **The command is `/guild-chat:summons`.** Claude Code names a plugin's command after its plugin: with the mod loaded by `--plugin-dir`, `/summons` is "not installed" and `/guild-chat:summons` runs (checked on 2.1.296, headless). The nudge types the full name.
+- **The Adventurer's tool hooks wait for slice 5.** The tool-recording hooks write a span only under an open session span, which an Adventurer does not have until slice 5 opens one; in slice 1 they would record nothing, so its settings carry none.
+- **Build and test commands are `adventurer-allow:` lines** in the rules file, above the line, each a Claude Code permission rule (`adventurer-allow: Bash(npm test*)`); the prose under "How to build and test" is for people. Without them an Adventurer can edit, read and commit, but a build or test command is refused, since nobody is there to allow it.
+- **Checked before building**, on 2.1.296 in a throwaway repository with a linked worktree: `claude -p --setting-sources user,project --settings <file>` ran only that file's hooks, neither the worktree's nor the main checkout's `settings.local.json`; it never stopped on the folder-trust question; its `result` event carries `subtype`, `is_error`, `num_turns`, `result`, `total_cost_usd`, `duration_ms` and `modelUsage`, though not as the line's first key; and `--model` takes the status line's model name with its `[1m]`.
+- **A run whose keeper is gone** (a restart, a kill) is ended as `lost` by the next `gm dispatch`, `gm runs`, watch or muster, so it neither blocks the next contract nor waits for ever.
+- **A posting records where it came from** (`origin`: `patron` from the capture hook, `party-leader` from `gm post` in its own session, `outside` from anywhere else), so only one added from outside is summoned.
+- **Commands added:** `gm runs` lists a focus's runs; `gm summons` is what `/guild-chat:summons` runs; `gm run <run>` is the keeper. The resume summary (`gm where`) names a live run and any finished run not yet reviewed.
 
 ## Slice 2: push rules in every camp
 

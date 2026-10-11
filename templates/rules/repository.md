@@ -5,9 +5,11 @@ Rename nothing above the line; `gm` reads these settings when it opens a new foc
 
 feature-branch: feature/{ticket}
 base-branch:
+adventurer-allow:
 
 - `feature-branch` is the pattern for a new focus's branch. `{ticket}` is the first ticket key given to `gm open` (the focus name when there is none), and `{focus}` is the focus name. `gm open --branch` overrides it.
 - `base-branch` is where a new feature branch starts when it does not exist yet. Empty means the remote's default branch (`origin/HEAD`), or the clone's current commit when there is no remote. `gm open --base` overrides it.
+- `adventurer-allow` is a command an Adventurer may run, as a Claude Code permission rule, one a line: this repository's build and test commands, such as `adventurer-allow: Bash(npm test*)`. Headless, a command nobody allowed is refused.
 
 ---
 
