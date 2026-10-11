@@ -11,7 +11,7 @@ Vocabulary is [TERMINOLOGY.md](../TERMINOLOGY.md)'s.
 | --- | --- | --- |
 | 1 | One ticket that never forgets | Done |
 | 2 | Tracing and audit | In progress |
-| 3 | Adventurers and enforced rules | Planned |
+| 3 | Adventurers and enforced rules | In progress (design proposed) |
 | 4 | Several Party Leaders and the Guildmaster lobby | In progress (the front desk built early) |
 | 5 | The other kinds | Planned |
 | 6 | Hardening | Planned |
@@ -57,7 +57,7 @@ The Adventurer spans the design defines are built with step 3, where Adventurers
 
 ## Step 3: Adventurers and enforced rules
 
-**Status:** Planned. No PR yet. It was the next step until the patron moved tracing ahead of it on 2026-09-30.
+**Status:** In progress. Design proposed in [step-3-design.md](step-3-design.md), in five build slices, waiting for the patron's agreement and answers; it takes in issue <https://github.com/MadReza/guildmaster/issues/41> with slice 1's wake. It was the next step until the patron moved tracing ahead of it on 2026-09-30.
 
 **Goal.** The Party Leader stays answerable while Adventurers do the work, and the rules the playbook states are enforced, not only asked for.
 
