@@ -264,7 +264,7 @@ The roster, or a Party Leader's now, next and last, sits beside the art when the
 
 The patron's first message folds the card to one rule naming the seat and what needs the patron (`welcome-fold: rule`), or takes it away (`vanish`); either way the idle sprite has the band again while the session waits.
 A slash command (`/spyglass`, `/veil`) is no message to the model, so the card stays up through it, and while Claude Code's typeahead is up (a draft starting with `/`, or a word at the cursor starting with `@`) the card steps aside, since the typeahead draws over the band.
-A session that resumes starts folded. The card is drawn on the screen only: the model never reads it, and it costs no tokens.
+A session that resumes starts folded; a `/clear` shows the card again, read anew from the board, with another piece of art. The card is drawn on the screen only: the model never reads it, and it costs no tokens.
 
 The art rotates by default, a different piece at every start: the Guildmaster's crowned shield, robed Guildmaster and guildhall, a Party Leader's plumed helm, banner bearer and camp tent.
 Files of the patron's own in `art/guildmaster/` or `art/party-leader/` of the Guildhall join that seat's rotation: one row of palette letters a line, `.` for an empty pixel, at most 16 by 16, a line starting with `#` a comment.

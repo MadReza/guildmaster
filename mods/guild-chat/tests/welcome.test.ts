@@ -243,6 +243,7 @@ describe('the card', () => {
 function world(on: On, conf: string, said: unknown, { turns = 0, env = {} as Record<string, string>, exit = 0, store = {} as Record<string, unknown> } = {}) {
   const kept = new Map(Object.entries(store))
   on('store.get', async (_$, e) => ({ value: kept.get(e.key) }))
+  on('session.end', async (_$, e) => ({ sessionId: e.sessionId }))
   on('store.set', async (_$, e) => {
     kept.set(e.key, e.value)
     return { value: undefined }
@@ -327,6 +328,33 @@ describe('the welcome on screen', () => {
     await settle()
     await $.prompt.submit(submit('hello'))
     expect(await drawn($)).toEqual([STOCK])
+  })
+
+  test('a /clear shows the card again, read anew, with another piece of art', async ($, on) => {
+    const kept = world(on, 'chat: banners\nsprites: off\n', GUILD)
+    await $.session.start(sessionStart)
+    await settle()
+    const first = (kept.get('welcome-art-last') as Record<string, string>).guildmaster
+    await $.prompt.submit(submit('hello'))
+    expect((await drawn($))[0]).toMatch(/^━━ ⚔ GUILDMASTER ━ ⚜ 1 needs you/)
+    await $.session.end({ reason: 'clear', sessionId: 'session-1', resume: { id: 'session-1' } })
+    await drawn($)
+    await settle()
+    const rows = await drawn($)
+    expect(rows[0]).toBe('[art 16×8]')
+    expect(rows).toContain('── What you can type ── ▱▱▱▱▱▱▱▱▱ 0/9 learned · novice')
+    expect((kept.get('welcome-art-last') as Record<string, string>).guildmaster).not.toBe(first)
+  })
+
+  test('any other end leaves the card folded', async ($, on) => {
+    world(on, 'chat: banners\nsprites: off\n', GUILD)
+    await $.session.start(sessionStart)
+    await settle()
+    await $.prompt.submit(submit('hello'))
+    await $.session.end({ reason: 'other', sessionId: 'session-1', resume: { id: 'session-1' } })
+    await drawn($)
+    await settle()
+    expect((await drawn($))[0]).toMatch(/^━━ ⚔ GUILDMASTER ━ ⚜ 1 needs you/)
   })
 
   test('a session that resumes starts folded', async ($, on) => {
