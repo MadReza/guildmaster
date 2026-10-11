@@ -58,7 +58,8 @@ assert_not_contains() {
   case $1 in *"$2"*) fail "${3:-unexpected text}: [$2] in output" ;; esac
 }
 
-db() { sqlite3 -batch -noheader "$GM_HALL/register.db" "$@"; }
+# Waits for a lock as gm does: the last connection to close checkpoints the WAL under a lock for a moment.
+db() { sqlite3 -batch -noheader -cmd '.timeout 15000' "$GM_HALL/register.db" "$@"; }
 
 json() { sqlite3 -batch :memory: "$@"; }
 
