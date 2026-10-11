@@ -149,6 +149,11 @@ Settings, from /Users/you/.guildmaster/guild.conf (gm config set <key> <value> c
 | `sprites` | `on`, `off` (see The working sprites, below) | on | |
 | `sprites-guildmaster`, `sprites-party-leader` | any of the sprites | `quill`; `skirmish delve boss siege forge wall` | |
 | `idle-guildmaster`, `idle-party-leader` | any of the sprites, or `none` | `campfire`; `none` | |
+| `welcome` | `on`, `off` (see The welcome, below) | on | |
+| `welcome-art-guildmaster`, `welcome-art-party-leader` | `rotate`, a piece (`crest`, `robed`, `hall`, `helm`, `bearer`, `tent`), `none`, or a file | `rotate` | |
+| `welcome-art-size` | `auto`, `full`, `mini` | auto | |
+| `welcome-fold` | `rule`, `vanish` | rule | |
+| `tutorial` | `auto`, `on`, `off` | auto | |
 | `autostart` | `on`, `off` | on | |
 | `autostart-every` | minutes | 5 | |
 | `muster-before-commands` | `on`, `off` | on | `GM_HERDR_AUTO` |
@@ -231,6 +236,41 @@ The sprites: `skirmish` (an adventurer holds the corridor against slimes and cou
 Both rows are ones Claude Code redraws in place, so a sprite never enters the chat: it is gone when the turn, or the wait, ends.
 `gm config set sprites off` (or ask the Guildmaster) turns them all off; `gm config set sprites-party-leader forge wall` and the like choose them. Every session follows a change at its next turn.
 They are drawn in a terminal only, and only for a patron with a Guildhall.
+### The welcome
+
+When the Guildmaster or a Party Leader starts, the band above the prompt holds the welcome: a card saying who answers, what needs the patron, where the work stands and what the patron can type, beside a piece of guild art.
+
+```
+(the art)  ━━ ⚔ GUILDMASTER ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           Good morning, Reza · Sun 11 Oct
+            ⚜ 1 needs you
+             appt-v2#12  Open the merge request to integration?
+
+⛨ appt-v2      dev-test       waiting on you
+⛨ crm-1234     build          working
+
+── What you can type ── ▰▰▱▱▱▱▱▱▱ 2/9 learned · novice
+  appt-v2#12 …             ●●●○○  add to a posting, or answer it
+  /spyglass                ●○○○○  the party's work in a pane
+  ...
+```
+
+At the front desk the card greets the patron by name, puts what needs the patron first in gold (every focus's questions), then any trouble (a Party Leader held after failed starts, a held collector) and the roster, each focus with its phase and whether it works, waits on the patron, idles or is held.
+A Party Leader's card names its focus and tickets, draws the road through the playbook's phases, its branch and how far it is ahead of its upstream, its questions for the patron, the board's counts, and the posting it works on now, the next in the queue and the last notice.
+`gm welcome --json` says what the card shows; the mod runs it once at the start through the guild's own `gm`, and a card whose `gm` cannot say names the seat and why.
+
+The patron's first message folds the card to one rule naming the seat and what needs the patron (`welcome-fold: rule`), or takes it away (`vanish`); either way the idle sprite has the band again while the session waits.
+A session that resumes starts folded. The card is drawn on the screen only: the model never reads it, and it costs no tokens.
+
+The art rotates by default, a different piece at every start: the Guildmaster's crowned shield, robed Guildmaster and guildhall, a Party Leader's plumed helm, banner bearer and camp tent.
+Files of the patron's own in `art/guildmaster/` or `art/party-leader/` of the Guildhall join that seat's rotation: one row of palette letters a line, `.` for an empty pixel, at most 16 by 16, a line starting with `#` a comment.
+Naming a piece or a file in `welcome-art-guildmaster` or `welcome-art-party-leader` pins it, and `none` draws none. `welcome-art-size` is `full` (16 columns by 8 rows), `mini` (10 by 3, the size of Claude Code's own mark) or `auto`: full for a novice, small after.
+
+The commands panel is the tutorial. Every command it teaches is counted as the patron uses it, across sessions, and is learned at 5 uses in 3 separate sessions, so one busy afternoon teaches nothing for good; each shows its progress as five pips until then.
+The patron's rank is how many of the seat's commands are learned: a novice (fewer than four) sees the whole panel, with the spyglass's tabs, a sentence to try and the sigils; a journeyman sees one line of the commands left; a master sees none, but a command added later shows once, marked new.
+`tutorial: on` keeps the whole panel at any rank, and `tutorial: off` never shows it, still counting, so `auto` picks up where the patron was. A band too short for the whole card takes the commands as one line, then the small piece of art.
+It is drawn in a terminal only, and only for a patron with a Guildhall; every setting takes effect at a session's next start.
+
 ### The spyglass
 
 The spyglass is a pane beside the chat whose tabs show the party's work. It never opens by itself:

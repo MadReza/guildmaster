@@ -46,6 +46,12 @@ sprites-guildmaster	-	quill	sprites	The sprites the Guildmaster draws one of whi
 sprites-party-leader	-	skirmish delve boss siege forge wall	sprites	The sprites a Party Leader draws one of while a turn runs.
 idle-guildmaster	-	campfire	sprites	The sprite drawn above the Guildmaster's prompt while it waits.
 idle-party-leader	-	none	sprites	The sprite drawn above a Party Leader's prompt while it waits.
+welcome	-	on	onoff	The welcome: while on, the Guildmaster and every Party Leader start with a card above the prompt saying who answers, what needs the patron and what to type, folded at the patron's first message; the model never reads it. A session follows a change at its next start.
+welcome-art-guildmaster	-	rotate	art	The art beside the Guildmaster's welcome: rotate draws a different piece at every start, from the guild's own and the files in art/guildmaster/ of the Guildhall; a piece's name, or a file, pins it.
+welcome-art-party-leader	-	rotate	art	The art beside a Party Leader's welcome, rotating the same way through its own pieces and art/party-leader/.
+welcome-art-size	-	auto	artsize	How large the welcome's art is: full (16 columns by 8 rows), mini (10 by 3), or auto, full until the patron has learned a few commands.
+welcome-fold	-	rule	fold	What the welcome becomes after the patron's first message: rule keeps one line naming the seat, vanish leaves the band to the idle sprite.
+tutorial	-	auto	tutorial	The welcome's commands panel: auto fades it as the patron learns each command (5 uses in 3 separate sessions), on always shows it, off never does.
 autostart	-	on	onoff	A launchd agent (macOS) runs the muster at login and every autostart-every minutes.
 autostart-every	-	5	minutes	Minutes between the launchd agent's musters.
 muster-before-commands	GM_HERDR_AUTO	on	onoff	A gm command typed at a terminal first brings back, quietly, whatever is dead or missing.
@@ -117,6 +123,26 @@ gm_conf_norm() {
       [ -n "$v" ] || return 1
       # none stands alone: it is no sprite at all.
       case " $v " in *" none "*) [ "$v" = none ] || return 1 ;; esac ;;
+    art)
+      case $v in
+        rotate | none | crest | robed | hall | helm | bearer | tent) ;;
+        /* | \~/*) ;;
+        *) return 1 ;;
+      esac ;;
+    artsize) case $v in auto | full | mini) ;; *) return 1 ;; esac ;;
+    fold)
+      case $v in
+        rule | shrink) v=rule ;;
+        vanish | disappear) v=vanish ;;
+        *) return 1 ;;
+      esac ;;
+    tutorial)
+      case $v in
+        auto) ;;
+        on | yes | true) v=on ;;
+        off | no | false) v=off ;;
+        *) return 1 ;;
+      esac ;;
     port) [[ $v =~ ^[0-9]{1,5}$ ]] && [ "$v" -ge 1 ] && [ "$v" -le 65535 ] || return 1 ;;
     minutes | count) [[ $v =~ ^[0-9]{1,6}$ ]] && [ "$v" -ge 1 ] || return 1 ;;
     seconds) [[ $v =~ ^[0-9]{1,6}$ ]] || return 1 ;;
@@ -652,6 +678,8 @@ They are for advanced use, and for the Guildmaster.
                           set a posting aside, visibly, with a reason
   phase [focus] [phase]   show or set the focus's playbook phase
   where [focus]           the resume summary, built from the register
+  welcome --json [focus]  what the welcome card shows, as JSON: a focus's Party Leader, or with none the
+                          Guildmaster's guild (needs, roster, trouble); the guild-chat mod reads it at start-up
   statusline              the Claude Code status line (reads the session JSON on stdin)
   trace [posting|focus]   a posting's trace as a text waterfall (a focus: every posting and session)
   trace import            fold Claude Code's telemetry from the local collector into the register
@@ -1582,6 +1610,84 @@ gm_cmd_where() {
   gm_where "$focus"
 }
 
+# What the welcome card shows, as one JSON object: a Party Leader's focus (named, or this camp's) or, with none, the
+# Guildmaster's whole guild. The guild-chat mod runs it once at a session's start; it changes nothing.
+gm_cmd_welcome() {
+  local json=0 focus=''
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --json) json=1; shift ;;
+      -*) gm_die "welcome: unknown option $1" ;;
+      *) focus=$1; shift ;;
+    esac
+  done
+  [ "$json" = 1 ] || gm_die "welcome: gm welcome --json [focus]"
+  [ -n "$focus" ] || focus=$(gm_context_focus)
+  if [ -n "$focus" ]; then
+    gm_welcome_party_leader "$(gm_require_focus "$focus")"
+  else
+    gm_welcome_guildmaster
+  fi
+}
+
+# The question a needs-you posting asks: its last needs-you notice's detail.
+gm_welcome_question_sql() {
+  printf "COALESCE((SELECT e.detail FROM event e WHERE e.posting_id=%s.id AND e.verb='needs-you' ORDER BY e.id DESC LIMIT 1),'')" "$1"
+}
+
+gm_welcome_party_leader() {
+  local focus=$1 fid camp kind phases='' p upstream='' ahead=''
+  fid=$(gm_focus_id "$focus")
+  camp=$(gm_focus_field "$focus" camp)
+  kind=$(gm_focus_field "$focus" kind)
+  for p in $(gm_phases "$(gm_playbook_path "$kind")"); do phases="${phases:+$phases, }$(gm_q "$p")"; done
+  if [ -d "$camp" ]; then
+    upstream=$(git -C "$camp" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || true)
+    [ -z "$upstream" ] || ahead=$(git -C "$camp" rev-list --count '@{upstream}..HEAD' 2>/dev/null || true)
+  fi
+  [[ $ahead =~ ^[0-9]+$ ]] || ahead=NULL
+  gm_sql <<SQL
+SELECT json_object(
+  'seat', 'party-leader', 'focus', f.name, 'kind', f.kind,
+  'tickets', json((SELECT COALESCE(json_group_array(key), '[]') FROM (SELECT key FROM ticket WHERE focus_id=f.id ORDER BY key))),
+  'phase', f.phase, 'phases', json_array($phases), 'branch', f.branch,
+  'upstream', $(gm_qn "$upstream"), 'ahead', $ahead,
+  'counts', json((SELECT COALESCE(json_group_object(state, n), '{}') FROM (SELECT state, count(*) n FROM posting
+    WHERE focus_id=f.id AND state NOT IN ('done','closed') GROUP BY state))),
+  'needs', json((SELECT COALESCE(json_group_array(json_object('ref', '#'||p.num, 'question', $(gm_welcome_question_sql p))), '[]')
+    FROM (SELECT * FROM posting WHERE focus_id=f.id AND state='needs-you' ORDER BY num) p)),
+  'active', (SELECT '#'||num||' '||slug FROM posting WHERE focus_id=f.id AND state='active' ORDER BY num LIMIT 1),
+  'next', (SELECT '#'||num||' '||slug FROM posting WHERE focus_id=f.id AND state='queued' ORDER BY num LIMIT 1),
+  'last', json((SELECT json_object('at', substr(at,12,5), 'line', line) FROM event WHERE focus_id=f.id AND line IS NOT NULL ORDER BY id DESC LIMIT 1)))
+FROM focus f WHERE f.id=$fid;
+SQL
+}
+
+gm_welcome_guildmaster() {
+  local patron
+  patron=$(git config --global user.name 2>/dev/null || true)
+  patron=${patron%% *}
+  gm_sql <<SQL
+SELECT json_object(
+  'seat', 'guildmaster', 'patron', $(gm_qn "$patron"),
+  'needs', json((SELECT COALESCE(json_group_array(json_object('ref', p.name||'#'||p.num, 'question', $(gm_welcome_question_sql p))), '[]')
+    FROM (SELECT p.*, f.name FROM posting p JOIN focus f ON f.id=p.focus_id
+          WHERE p.state='needs-you' AND f.closed_at IS NULL ORDER BY f.name, p.num) p)),
+  'roster', json((SELECT COALESCE(json_group_array(json_object('focus', f.name, 'phase', f.phase, 'state',
+      CASE WHEN f.held_at IS NOT NULL THEN 'held'
+           WHEN EXISTS (SELECT 1 FROM posting WHERE focus_id=f.id AND state='needs-you') THEN 'waiting'
+           WHEN EXISTS (SELECT 1 FROM posting WHERE focus_id=f.id AND state='active') THEN 'working'
+           ELSE 'idle' END)), '[]')
+    FROM (SELECT * FROM focus WHERE closed_at IS NULL ORDER BY name) f)),
+  'trouble', json((SELECT COALESCE(json_group_array(json_object('what', what, 'fix', fix)), '[]') FROM (
+    SELECT name||' is held after '||start_attempts||' failed starts' AS what, 'say "reopen '||name||'"' AS fix
+      FROM focus WHERE closed_at IS NULL AND held_at IS NOT NULL
+    UNION ALL
+    SELECT 'the collector is held after '||start_attempts||' failed starts', 'gm tries again in a day'
+      FROM endpoint WHERE key='collector' AND held_at IS NOT NULL))))
+SQL
+}
+
 gm_cmd_statusline() {
   local input focus fid kind playbook phase pos ctx='' model='' cwd=''
   input=$(cat || true)
@@ -2420,6 +2526,10 @@ gm_conf_header() {
       chat) vals='off | banners' ;;
       veilhides) vals='deeds adventurers notes progress, any of them' ;;
       sprites) vals='skirmish delve boss siege forge wall quill campfire, any of them, or none' ;;
+      art) vals='rotate | crest | robed | hall | helm | bearer | tent | none | <file>' ;;
+      artsize) vals='auto | full | mini' ;;
+      fold) vals='rule | vanish' ;;
+      tutorial) vals='auto | on | off' ;;
       text) vals='<folder> <folder> ...' ;;
       count) vals='<number>' ;;
       *) vals="<$kind>" ;;
@@ -3027,6 +3137,7 @@ gm_conf_apply() {
     sprites) printf 'sprites is %s: %s; running sessions follow at their next turn.\n' "$shown" \
       "$([ "$val" = off ] && printf 'no session draws a working sprite' || printf 'every session draws its working sprites')" ;;
     sprites-* | idle-*) printf '%s is %s: running sessions follow at their next turn.\n' "$key" "$shown" ;;
+    welcome | welcome-* | tutorial) printf '%s is %s: the Guildmaster and Party Leaders show it from their next start.\n' "$key" "$shown" ;;
     editor) printf 'editor is %s: the spyglass opens a changed file with it, in every session from now on.\n' "$shown" ;;
     repo-roots) printf 'repo-roots is %s: gm repos looks for clones %s.\n' "$shown" "$([ -n "$val" ] && printf 'there' || printf 'in the usual source folders')" ;;
     *) printf '%s is %s; it takes effect at the next muster.\n' "$key" "$shown" ;;
@@ -5545,7 +5656,7 @@ if [ -s "$GM_DB" ]; then
   esac
 fi
 case $cmd in
-  front-desk | open | up | close | start | autostart | install | hook | statusline | collector | config | repos | visit | help | -h | --help) ;;
+  front-desk | open | up | close | start | autostart | install | hook | statusline | welcome | collector | config | repos | visit | help | -h | --help) ;;
   *) gm_auto_reconcile ;;
 esac
 case $cmd in
@@ -5567,6 +5678,7 @@ case $cmd in
   park) gm_cmd_park "$@" ;;
   phase) gm_cmd_phase "$@" ;;
   where) gm_cmd_where "$@" ;;
+  welcome) gm_cmd_welcome "$@" ;;
   statusline) gm_cmd_statusline "$@" ;;
   trace) gm_cmd_trace "$@" ;;
   stats) gm_cmd_stats "$@" ;;
