@@ -19,13 +19,14 @@ This step removes step 1's deliberate shortfall: the Party Leader stops doing th
 
 ## What the patron settled
 
-Answered on 2026-10-11; question 7 is still open below.
+Answered on 2026-10-11; every question is settled.
 
 <!-- patron: begin -->
 
 "1. Ok. 2. That is fine until there is a list of tasks that can be picked up. So Patron still asks for tasks, tasks might be queued after those 3 or merged into one depending on judgement call. [...] 4. Claude Code's commit attribution is completly turned off. User can overwrite it if they want or think it's necessary. This would be the way it currently works. GM doesn't need to check for this. I don't see why it would ? 5. Sounds good. [...] 8. yes."
 "3. Okay with the new recommendation."
 "6. Herald maybe ? Watch could be good. Whatever you pick, add it to the terminology list. The terms could also be in different context mean different things. Until the ai doesn't get confused or the user."
+"For number seven, let's go with your recommendation."
 
 <!-- patron: end -->
 
@@ -37,13 +38,14 @@ Answered on 2026-10-11; question 7 is still open below.
 | GitLab credentials | Only the patron's SSH key, through the running ssh-agent, for `git fetch` and the pushes slice 2 allows. No `glab` token: an Adventurer never opens, approves or merges a merge request. |
 | Q14 models | Contracts on the Party Leader's own model at medium effort; surveys on Sonnet 5.5 at medium. Each kind's model and effort are `guild.conf` settings (`contract-model`, `contract-effort`, `survey-model`, `survey-effort`), and the Party Leader can override them per dispatch with `--model` and `--effort`. A kind moves to a cheaper model when its recorded outcomes ([below](#a-runs-outcome-for-judging-models-and-prompts)) show it holds. A **contract** changes the project, in the ticket's camp, one at a time per focus; a **survey** only finds things out, read-only, in a throwaway worktree, ending in a field report. |
 | The words | **Summons** for the event and **the watch** for the process, both already in TERMINOLOGY.md and widened there to any supervisor; **run** and **keeper** added. Herald was not needed: a new term is added only for a concept with no name yet, and both concepts had one. |
+| The nudge | When a Party Leader's watch has died and a summons has waited 2 minutes, the muster types `/summons`, only when the Party Leader is idle, its input has not changed for 1.5 seconds, and the input is empty or holds a draft with no stash (stashed first, and restored by Claude Code). Otherwise it types nothing and the roster shows the summons as unheard. Chosen after [the lab tests](#what-the-lab-showed). |
 | Correction runs | A failed check dispatches one correction run at once; a second failure on the same posting goes to the patron as `needs-you`. |
 
 ## The slices
 
 | Slice | What | Needs from the patron |
 | --- | --- | --- |
-| 1 | `gm dispatch` runs one headless `claude -p` Adventurer in the camp; its result lands in the register and wakes the Party Leader. With it, the wake for a posting added from outside (issue #41) | question 7 (a nudge) |
+| 1 | `gm dispatch` runs one headless `claude -p` Adventurer in the camp; its result lands in the register and wakes the Party Leader. With it, the wake for a posting added from outside (issue #41) | settled |
 | 2 | `PreToolUse` push rules in every camp, from the playbook | settled |
 | 3 | `gm check` after every run, reopening a posting that broke a rule | settled |
 | 4 | Parallel surveys and the dispatch cap | settled |
@@ -231,9 +233,7 @@ The run's own record (slice 1) does not wait for this slice: the run row already
 
 ## Questions for the patron
 
-Questions 1 to 6 and 8 are settled ([above](#what-the-patron-settled)); this one is open, numbered as first asked.
-
-7. **The nudge, after testing.** Who summons: nobody's model; `gm` records the event and the Party Leader's watch wakes it. Who nudges: the muster, plain code, only when the watch has died and a summons has waited 2 minutes. *Recommended, from [the lab](#what-the-lab-showed):* the safe nudge [above](#the-wake-and-issue-41): `/summons` typed only when the input is empty, or after stashing a draft when there is no stash already, never while someone is typing; otherwise nothing is typed and the roster shows it as unheard. Do you agree?
+All eight are settled; see [What the patron settled](#what-the-patron-settled).
 
 ## How it will be checked
 
