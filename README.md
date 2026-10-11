@@ -246,20 +246,24 @@ When the Guildmaster or a Party Leader starts, the band above the prompt holds t
             ⚜ 1 needs you
              appt-v2#12  Open the merge request to integration?
 
-⛨ appt-v2      dev-test       waiting on you
-⛨ crm-1234     build          working
+           ⛨ appt-v2      dev-test       waiting on you
+           ⛨ crm-1234     build          working
 
 ── What you can type ── ▰▰▱▱▱▱▱▱▱ 2/9 learned · novice
-  appt-v2#12 …             ●●●○○  add to a posting, or answer it
-  /spyglass                ●○○○○  the party's work in a pane
+  appt-v2#12 …             ●●●○○  add to a posting, or answer it     turn the sprites off      ○○○○○  change a guild setting
+  /spyglass                ●○○○○  the party's work in a pane         use the guildhall art     ○○○○○  change this art
   ...
+  try: "appt-v2#12 yes, go ahead"    tabs: /spyglass board · deeds · codex · lantern    ⚜ you  ⚔ guildmaster  …
 ```
 
 At the front desk the card greets the patron by name, puts what needs the patron first in gold (every focus's questions), then any trouble (a Party Leader held after failed starts, a held collector) and the roster, each focus with its phase and whether it works, waits on the patron, idles or is held.
 A Party Leader's card names its focus and tickets, draws the road through the playbook's phases, its branch and how far it is ahead of its upstream, its questions for the patron, the board's counts, and the posting it works on now, the next in the queue and the last notice.
 `gm welcome --json` says what the card shows; the mod runs it once at the start through the guild's own `gm`, and a card whose `gm` cannot say names the seat and why.
 
+The roster, or a Party Leader's now, next and last, sits beside the art when there is room for it; a wide band lays the commands out in two columns.
+
 The patron's first message folds the card to one rule naming the seat and what needs the patron (`welcome-fold: rule`), or takes it away (`vanish`); either way the idle sprite has the band again while the session waits.
+A slash command (`/spyglass`, `/veil`) is no message to the model, so the card stays up through it, and while Claude Code's typeahead is up (a draft starting with `/`, or a word at the cursor starting with `@`) the card steps aside, since the typeahead draws over the band.
 A session that resumes starts folded. The card is drawn on the screen only: the model never reads it, and it costs no tokens.
 
 The art rotates by default, a different piece at every start: the Guildmaster's crowned shield, robed Guildmaster and guildhall, a Party Leader's plumed helm, banner bearer and camp tent.
@@ -268,7 +272,7 @@ Naming a piece or a file in `welcome-art-guildmaster` or `welcome-art-party-lead
 
 The commands panel is the tutorial. Every command it teaches is counted as the patron uses it, across sessions, and is learned at 5 uses in 3 separate sessions, so one busy afternoon teaches nothing for good; each shows its progress as five pips until then.
 The patron's rank is how many of the seat's commands are learned: a novice (fewer than four) sees the whole panel, with the spyglass's tabs, a sentence to try and the sigils; a journeyman sees one line of the commands left; a master sees none, but a command added later shows once, marked new.
-`tutorial: on` keeps the whole panel at any rank, and `tutorial: off` never shows it, still counting, so `auto` picks up where the patron was. A band too short for the whole card takes the commands as one line, then the small piece of art.
+`tutorial: on` keeps the whole panel at any rank, and `tutorial: off` never shows it, still counting, so `auto` picks up where the patron was. A band too short for the whole card drops its blank rows, then takes the small piece of art; one shorter still scrolls, the panel kept whole.
 It is drawn in a terminal only, and only for a patron with a Guildhall; every setting takes effect at a session's next start.
 
 ### The spyglass

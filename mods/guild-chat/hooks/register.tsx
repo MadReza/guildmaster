@@ -5,7 +5,7 @@ import {
   spriteFrame, spriteTick, SPRITE_ROWS, withMeter, type Frame, type Palette, type SpriteName,
 } from '../lib/sprites'
 import {
-  ART, artCells, cardOf, cardRows, COMMANDS, foldedOf, isArtName, MINI_ART, parseArt, pickArt, rankOf, recordUse, SEAT_ART,
+  ART, artCells, cardOf, cardRows, COMMANDS, foldedOf, isArtName, MINI_ART, parseArt, pickArt, placeCard, rankOf, recordUse, SEAT_ART,
   SLASH, commandsIn, welcomeOf, type CommandId, type Hue, type Line, type Seat, type Theme, type Usage, type Welcome,
   type WelcomeData,
 } from '../lib/welcome'
@@ -485,6 +485,7 @@ async function startWelcome($: EngineInterface, e: { isInteractive: boolean; sur
   welcomeData = undefined
   welcomeArt = undefined
   folded = false
+  typeahead = false
   try {
     folded = (await $.session.turns()) > 0
     sessionId = await $.session.id()
@@ -507,6 +508,14 @@ async function used($: EngineInterface, ids: readonly CommandId[]): Promise<void
   if (!ids.length) return
   for (const id of ids) usage = recordUse(usage, id, sessionId)
   await $.store.set(USAGE_KEY, usage)
+}
+
+// While the typeahead is up the card gives it the band, and takes it back when the draft no longer calls for one.
+let typeahead = false
+function typing($: EngineInterface, up: boolean): void {
+  if (typeahead === up) return
+  typeahead = up
+  if (welcomeData && !folded) $.ui.invalidate('ui.render')
 }
 
 // The patron's first message folds the card, whatever it says; the band is drawn again only when a card is up.
@@ -544,21 +553,27 @@ async function artRaster($: EngineInterface, e: RenderInput, grid: readonly stri
 }
 
 // The card, its art at the size guild.conf asks: full for a novice under auto, the small piece after, none on a
-// terminal too narrow for it.
+// terminal too narrow for it. A band too short for the card drops its blank rows, then takes the small piece; one
+// shorter still scrolls it, the panel kept whole.
 async function welcomeCard($: EngineInterface, e: RenderInput<'AbovePrompt'>, w: Welcome, data: WelcomeData) {
   const { Box } = $.ui.resolve(e)
   const columns = e.props.bodyColumns
   const seat = data.seat
   const mini = w.artSize === 'mini' || (w.artSize === 'auto' && rankOf(usage, seat) !== 'novice') || columns < 72
-  const grid = columns < 44 || !welcomeArt ? undefined : mini ? MINI_ART[seat] : welcomeArt
-  let art = await artRaster($, e, grid)
-  const opts = { now: new Date(await $.clock.now()), columns: columns - (art ? art.columns + 2 : 0), tutorial: w.tutorial, usage, unseen }
-  let card = cardOf(data, opts)
-  // A band too short for the whole card takes the commands as one line, then the small piece.
-  if (cardRows(card, art ? Math.ceil((grid?.length ?? 0) / 2) : 0) > e.props.maxRows) {
-    card = cardOf(data, { ...opts, compact: true })
-    if (art && !mini && cardRows(card, 8) > e.props.maxRows) art = await artRaster($, e, MINI_ART[seat])
+  const now = new Date(await $.clock.now())
+  const lay = async (grid: readonly string[] | undefined, tight: boolean) => {
+    const art = await artRaster($, e, grid)
+    const artRows = art ? Math.ceil(grid!.length / 2) : 0
+    const sideColumns = columns - (art ? art.columns + 2 : 0)
+    const card = placeCard(cardOf(data, { now, columns: sideColumns, wide: columns, tutorial: w.tutorial, usage, unseen }), artRows, sideColumns, tight)
+    return { art, card, fits: cardRows(card, artRows) <= e.props.maxRows }
   }
+  const grid = columns < 44 || !welcomeArt ? undefined : mini ? MINI_ART[seat] : welcomeArt
+  // Short of rows, the blank rows go first, then the large piece.
+  let laid = await lay(grid, false)
+  if (!laid.fits) laid = await lay(grid, true)
+  if (!laid.fits && laid.art && !mini) laid = await lay(MINI_ART[seat], true)
+  const { art, card } = laid
   return (
     <Box flexDirection="column">
       <Box flexDirection="row">
@@ -596,7 +611,6 @@ export const register: Register = on => {
     const h = await veil($)
     if (!h.conf) return {}
     if (e.origin.kind === 'composer' || e.origin.kind === 'bridge') {
-      fold($)
       await used($, ['veil']).catch(() => undefined)
     }
     const arg = e.args.trim()
@@ -686,20 +700,31 @@ export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     if (e.origin.kind === 'composer' || e.origin.kind === 'bridge') {
       fold($)
+      typing($, false)
       // A count the store will not keep never holds up the prompt.
       await used($, commandsIn(e.text)).catch(() => undefined)
     }
     return next(e)
   })
 
-  // A slash command the card teaches counts too; /veil counts in its own hook above.
+  // A slash command the card teaches counts too; /veil counts in its own hook above. A command is no message to the
+  // model, so it leaves the card up.
   on('command.run', async ($, e, next) => {
     const id = SLASH[e.command]
     if (id && id !== 'veil' && (e.origin.kind === 'composer' || e.origin.kind === 'bridge')) {
-      fold($)
       await used($, [id]).catch(() => undefined)
     }
+    typing($, false)
     return next(e)
+  })
+
+  // Claude Code draws its typeahead over the band, so the card steps aside while one is up: a draft that is a slash
+  // command, or a word at the cursor that names a file with @.
+  on('prompt.edit', async ($, e, next) => {
+    const box = await next(e)
+    const word = box.text.slice(0, box.cursor).split(/\s/).at(-1) ?? ''
+    typing($, /^\s*\//.test(box.text) || word.startsWith('@'))
+    return box
   })
 
   // Above the prompt: the welcome until the patron's first message, then its rule; and while the session waits, the
@@ -711,7 +736,7 @@ export const register: Register = on => {
     const { Box } = $.ui.resolve(e)
     if (data && !folded) {
       forget(e.requestId)
-      return welcomeCard($, e, welcome, data)
+      return typeahead ? next(e) : welcomeCard($, e, welcome, data)
     }
     const rule = data && welcome.fold === 'rule' ? lineOf($, e, foldedOf(data, e.props.bodyColumns), 0) : undefined
     const sprite = sprites.on && free && !e.props.isWorking ? await idleSprite($) : undefined

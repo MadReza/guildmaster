@@ -302,8 +302,8 @@ export type CardOptions = {
   usage: Usage
   /** Commands this patron has never been shown: marked new at a master's rank. */
   unseen: ReadonlySet<CommandId>
-  /** A band too short for the whole panel: the commands left to learn as one line, whatever the rank. */
-  compact?: boolean
+  /** The width under the art, where the lessons go: the whole band's. Defaults to `columns`. */
+  wide?: number
 }
 
 const seg = (text: string, hue?: Hue, more: Omit<Seg, 'text' | 'hue'> = {}): Seg => ({ text, hue, ...more })
@@ -355,27 +355,54 @@ function tutorialLines(seat: Seat, o: CardOptions, ref?: string): Line[] {
   const learned = all.filter(c => isLearned(o.usage[c.id]))
   const rank = rankOf(o.usage, seat)
   const meter = [seg('▰'.repeat(learned.length), 'gold'), dim('▱'.repeat(all.length - learned.length))]
-  if ((o.tutorial === 'on' || rank === 'novice') && !o.compact) {
+  const wide = o.wide ?? o.columns
+  if (o.tutorial === 'on' || rank === 'novice') {
     const out: Line[] = [[dim('── '), seg('What you can type', undefined, { bold: true }), dim(' ── '), ...meter, dim(` ${learned.length}/${all.length} learned · ${rank}`)]]
-    for (const c of all) {
+    const says = Math.max(...all.map(c => c.says.length))
+    const cell = (c: Command, padded = false): Seg[] => {
       const u = o.usage[c.id]
       const n = Math.min(LEARN_USES, u?.uses ?? 0)
       const mark: Seg[] = isLearned(u) ? [seg('✓    ', 'green')] : [seg('●'.repeat(n), 'gold'), dim('○'.repeat(LEARN_USES - n))]
-      out.push([seg('  '), seg(pad(clip(typed(c, seat), 24), 25), 'orange'), ...mark, seg('  '), seg(c.says)])
-      if (c.tabs?.[seat]) out.push([seg(' '.repeat(34)), dim(`tabs: ${c.tabs[seat]}`)])
+      return [seg('  '), seg(pad(clip(typed(c, seat), 24), 25), 'orange'), ...mark, seg('  '), seg(padded ? pad(c.says, says) : c.says)]
     }
+    const tabs = all.find(c => c.tabs?.[seat])?.tabs?.[seat]
     const tryIt = all.find(c => c.tryIt && !isLearned(o.usage[c.id]))
     // The sentence to try names a real posting when one waits on the patron.
     const sentence = tryIt?.id === 'ref' && ref ? `${ref} yes, go ahead` : tryIt && typed(tryIt, seat).replace(' …', ' yes, go ahead')
-    if (sentence) out.push([dim('  try: '), seg(`"${sentence}"`, 'gold')])
-    out.push([seg('  '), seg('⚜ you  ', 'gold'), seg('⚔ guildmaster  ', 'crimson'), seg('⚔ party leader  ', 'royal'), seg('⛨ adventurer', 'green')])
+    const tried: Seg[] = sentence ? [dim('  try: '), seg(`"${sentence}"`, 'gold')] : []
+    const sigils: Seg[] = [seg('  '), seg('⚜ you  ', 'gold'), seg('⚔ guildmaster  ', 'crimson'), seg('⚔ party leader  ', 'royal'), seg('⛨ adventurer', 'green')]
+    const width = 2 + 25 + LEARN_USES + 2 + says
+    if (wide >= 2 * width + 4) {
+      // A wide band takes the commands in two columns, down then across, and the sentence beside the sigils.
+      const half = Math.ceil(all.length / 2)
+      for (let i = 0; i < half; i++) out.push([...cell(all[i]!, !!all[i + half]), ...(all[i + half] ? [seg('  '), ...cell(all[i + half]!)] : [])])
+      // The sentence to try, the spyglass's tabs and the sigils share rows, as many to a row as the band holds.
+      const tail: Seg[][] = [tried, tabs ? [seg('  '), dim(`tabs: ${tabs}`)] : [], sigils].filter(g => g.length)
+      const len = (g: readonly Seg[]) => g.reduce((n, x) => n + x.text.length, 0)
+      let row: Seg[] = []
+      for (const g of tail) {
+        if (row.length && len(row) + 2 + len(g) > wide) {
+          out.push(row)
+          row = []
+        }
+        row = row.length ? [...row, seg('  '), ...g] : [...g]
+      }
+      if (row.length) out.push(row)
+      return out
+    }
+    for (const c of all) {
+      out.push(cell(c))
+      if (c.tabs?.[seat]) out.push([seg(' '.repeat(34)), dim(`tabs: ${c.tabs[seat]}`)])
+    }
+    if (tried.length) out.push(tried)
+    out.push(sigils)
     return out
   }
-  const left = rank === 'master' && !o.compact ? all.filter(c => o.unseen.has(c.id)) : all.filter(c => !isLearned(o.usage[c.id]))
+  const left = rank === 'master' ? all.filter(c => o.unseen.has(c.id)) : all.filter(c => !isLearned(o.usage[c.id]))
   if (!left.length) return []
   // As many as the line holds, the rest counted; the meter at the end.
-  const withMeter = rank !== 'master' || o.compact
-  const room = o.columns - 5 - (withMeter ? all.length + 3 : 0) - 9
+  const withMeter = rank !== 'master'
+  const room = wide - 5 - (withMeter ? all.length + 3 : 0) - 9
   const chips: Seg[] = [dim('try  ')]
   let width = 0
   let shown = 0
@@ -402,12 +429,13 @@ const STATE_HUE: Readonly<Record<GuildmasterData['roster'][number]['state'], Hue
 const STATE_SAYS = { working: 'working', waiting: 'waiting on you', idle: 'idle', held: 'held' } as const
 
 /**
- * The card: `side` beside the art, `below` under it. The art is drawn by the caller; columns is the width the card
+ * The card: `side` beside the art; `info` (the roster, or now, next and last) beside it too when it fits, else under
+ * it; and `lessons`, the tutorial, under it all. The art is drawn by the caller; columns is the width the card
  * may take beside it.
  */
-export function cardOf(d: WelcomeData, o: CardOptions): { side: Line[]; below: Line[] } {
+export function cardOf(d: WelcomeData, o: CardOptions): Card {
   const side: Line[] = [seatRule(labelOf(d), hueOf(d), Math.min(o.columns, 60))]
-  const below: Line[] = []
+  const info: Line[] = []
   if (isBare(d)) {
     side.push([dim(`The board could not be read: ${clip(d.why, o.columns - 32)}`)])
   } else if (d.seat === 'guildmaster') {
@@ -421,10 +449,9 @@ export function cardOf(d: WelcomeData, o: CardOptions): { side: Line[]; below: L
     side.push(...needLines(d.needs, o.columns))
     for (const t of d.trouble) side.push([seg('⚠ ', 'crimson', { bold: true }), seg(clip(t.what, o.columns - 30), 'crimson'), dim(`  ${t.fix}`)])
     if (d.roster.length) {
-      below.push([])
       const w = Math.min(24, Math.max(...d.roster.map(r => r.focus.length)) + 2)
       for (const r of d.roster) {
-        below.push([seg('⛨ ', 'royal'), seg(pad(r.focus, w), undefined, { bold: true }), dim(pad(r.phase ?? '—', 15)), seg(STATE_SAYS[r.state], STATE_HUE[r.state], { dim: !STATE_HUE[r.state] })])
+        info.push([seg('⛨ ', 'royal'), seg(pad(r.focus, w), undefined, { bold: true }), dim(pad(r.phase ?? '—', 15)), seg(STATE_SAYS[r.state], STATE_HUE[r.state], { dim: !STATE_HUE[r.state] })])
       }
     }
   } else {
@@ -437,13 +464,27 @@ export function cardOf(d: WelcomeData, o: CardOptions): { side: Line[]; below: L
     if (d.needs.length) side.push(...needLines(d.needs, o.columns))
     else if (!total) side.push([seg('Nothing on the board yet. Tell me what to work on.', undefined, { bold: true })])
     if (total) side.push([dim(`${c('active')} active · ${c('queued')} queued · ${c('needs-you')} needs you · ${c('parked')} parked`)])
-    if (d.active || d.next || d.last) below.push([])
-    if (d.active) below.push([dim('now   '), seg(d.active, undefined, { bold: true })])
-    if (d.next) below.push([dim('next  '), seg(d.next, undefined, { bold: true })])
-    if (d.last) below.push([dim('last  '), dim(clip(`${d.last.at} ${d.last.line}`, o.columns - 8))])
+    if (d.active) info.push([dim('now   '), seg(d.active, undefined, { bold: true })])
+    if (d.next) info.push([dim('next  '), seg(d.next, undefined, { bold: true })])
+    if (d.last) info.push([dim('last  '), dim(clip(`${d.last.at} ${d.last.line}`, o.columns - 8))])
   }
   const lessons = tutorialLines(seatOf(d), o, !isBare(d) ? d.needs[0]?.ref : undefined)
-  if (lessons.length) below.push([], ...lessons)
+  return { side, info, lessons }
+}
+
+export type Card = { side: Line[]; info: Line[]; lessons: Line[] }
+
+/**
+ * Where a card's lines go beside art `artRows` tall: the info beside the art when the side has the width for it,
+ * since rows are what the band is short of; under it otherwise. A blank row parts each group, unless `tight`.
+ */
+export function placeCard(card: Card, artRows: number, sideColumns: number, tight = false): { side: Line[]; below: Line[] } {
+  const gap: Line[] = tight ? [] : [[]]
+  const lift = artRows > 0 && card.info.length > 0 && sideColumns >= 60
+  const side = lift ? [...card.side, ...gap, ...card.info] : card.side
+  const below: Line[] = []
+  if (!lift && card.info.length) below.push(...gap, ...card.info)
+  if (card.lessons.length) below.push(...gap, ...card.lessons)
   return { side, below }
 }
 
@@ -465,4 +506,4 @@ export function foldedOf(d: WelcomeData, columns: number): Line {
 }
 
 /** How many rows a card takes beside art of the given height, and below it. */
-export const cardRows = (card: { side: Line[]; below: Line[] }, artRows: number) => Math.max(card.side.length, artRows) + card.below.length
+export const cardRows = (card: { side: readonly Line[]; below: readonly Line[] }, artRows: number) => Math.max(card.side.length, artRows) + card.below.length

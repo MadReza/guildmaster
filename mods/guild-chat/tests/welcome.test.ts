@@ -1,9 +1,9 @@
-import type { On } from 'claude-code'
+import type { On, PromptEditInput } from 'claude-code'
 import { describe, expect, mock, test, type Engine } from 'claude-code/testing'
 
 import {
   ART, artCells, cardOf, commandsIn, COMMANDS, commandsFor, foldedOf, isLearned, LEARN_SESSIONS, LEARN_USES, MINI_ART,
-  parseArt, phaseRoad, pickArt, rankOf, recordUse, SEAT_ART, welcomeOf, type CardOptions, type GuildmasterData,
+  parseArt, phaseRoad, pickArt, placeCard, rankOf, recordUse, SEAT_ART, welcomeOf, type CardOptions, type GuildmasterData,
   type Line, type PartyLeaderData, type Usage,
 } from '../lib/welcome'
 
@@ -146,7 +146,7 @@ describe('the card', () => {
     expect(side[2]).toBe(' ⚜ 1 needs you ')
     expect(card.side[2]![0]!.badge).toBe(true)
     expect(side[3]).toBe('  appt-v2#12  Open the merge request to integration?')
-    const below = lines(card.below)
+    const below = lines(card.info)
     expect(below.some(l => /^⛨ appt-v2 +dev-test +waiting on you$/.test(l))).toBe(true)
     expect(below.some(l => /^⛨ crm-1234 +build +working$/.test(l))).toBe(true)
   })
@@ -167,7 +167,7 @@ describe('the card', () => {
     expect(side[2]).toBe('●─●─◆─○─○─○─○─○  build 3/8')
     expect(side[3]).toBe('⎇ feature/CRM-1234  4 ahead of origin/main')
     expect(side[4]).toBe('1 active · 2 queued · 0 needs you · 0 parked')
-    expect(lines(card.below).slice(1, 4)).toEqual(['now   #6 retry-on-timeout', 'next  #7 owner-empty-after-save', 'last  09:12 crm-1234#5 done'])
+    expect(lines(card.info)).toEqual(['now   #6 retry-on-timeout', 'next  #7 owner-empty-after-save', 'last  09:12 crm-1234#5 done'])
   })
 
   test('a fresh focus asks for work; a question for the patron comes before the counts', () => {
@@ -178,28 +178,31 @@ describe('the card', () => {
   })
 
   test("a novice's panel: every command with its pips, the spyglass's tabs, a sentence to try and the sigils", () => {
-    const below = lines(cardOf(GUILD, opts({ usage: recordUse({}, 'veil', 's1') })).below)
+    const below = lines(cardOf(GUILD, opts({ usage: recordUse({}, 'veil', 's1') })).lessons)
     expect(below).toContain('── What you can type ── ▱▱▱▱▱▱▱▱▱ 0/9 learned · novice')
     expect(below.some(l => /^ {2}\/veil +●○○○○ {2}hide the deeds, keep the talk$/.test(l))).toBe(true)
     expect(below.some(l => l.includes('tabs: /spyglass board · deeds · codex · lantern'))).toBe(true)
     expect(below).toContain('  try: "appt-v2#12 yes, go ahead"')
-    expect(lines(cardOf({ ...GUILD, needs: [] }, opts()).below)).toContain('  try: "appt-v2#12 yes, go ahead"')
-    expect(lines(cardOf({ ...GUILD, needs: [{ ref: 'crm-9#2', question: '?' }] }, opts()).below)).toContain('  try: "crm-9#2 yes, go ahead"')
+    expect(lines(cardOf({ ...GUILD, needs: [] }, opts()).lessons)).toContain('  try: "appt-v2#12 yes, go ahead"')
+    expect(lines(cardOf({ ...GUILD, needs: [{ ref: 'crm-9#2', question: '?' }] }, opts()).lessons)).toContain('  try: "crm-9#2 yes, go ahead"')
     expect(below.at(-1)).toBe('  ⚜ you  ⚔ guildmaster  ⚔ party leader  ⛨ adventurer')
   })
 
   test("a journeyman's: one line of what is left to learn; a master's: nothing but a command new to them", () => {
-    const journeyman = lines(cardOf(FOCUS, opts({ columns: 130, usage: learnedAllBut('party-leader', 'park', 'art', 'tutorial', 'close') })).below)
+    const journeyman = lines(cardOf(FOCUS, opts({ columns: 130, usage: learnedAllBut('party-leader', 'park', 'art', 'tutorial', 'close') })).lessons)
     expect(journeyman.at(-1)).toMatch(/^try {2}"park #3 until Monday" · "use the guildhall art" · "turn the tutorial off" · "close this focus" {3}▰+▱{4}$/)
-    expect(lines(cardOf(FOCUS, opts({ usage: learnedAllBut('party-leader') })).below).some(l => l.startsWith('try'))).toBe(false)
-    const master = cardOf(FOCUS, opts({ usage: learnedAllBut('party-leader'), unseen: new Set(['art']) })).below.at(-1)!
+    expect(lines(cardOf(FOCUS, opts({ usage: learnedAllBut('party-leader') })).lessons).some(l => l.startsWith('try'))).toBe(false)
+    const master = cardOf(FOCUS, opts({ usage: learnedAllBut('party-leader'), unseen: new Set(['art']) })).lessons.at(-1)!
     expect(text(master)).toBe('try  "use the guildhall art" new ')
+    const narrow = text(cardOf({ ...FOCUS, needs: [] }, opts({ columns: 60, usage: learnedAllBut('party-leader', 'park', 'art', 'tutorial', 'close') })).lessons.at(-1)!)
+    expect(narrow.length).toBeLessThanOrEqual(60)
+    expect(narrow).toMatch(/\+\d more {3}▰+▱+$/)
   })
 
   test('tutorial: on keeps the full panel at any rank, and off never shows it', () => {
     const master = learnedAllBut('guildmaster')
-    expect(lines(cardOf(GUILD, opts({ usage: master, tutorial: 'on' })).below).some(l => l.includes('What you can type'))).toBe(true)
-    expect(lines(cardOf(GUILD, opts({ tutorial: 'off' })).below).some(l => l.includes('What you can type') || l.startsWith('try'))).toBe(false)
+    expect(lines(cardOf(GUILD, opts({ usage: master, tutorial: 'on' })).lessons).some(l => l.includes('What you can type'))).toBe(true)
+    expect(lines(cardOf(GUILD, opts({ tutorial: 'off' })).lessons).some(l => l.includes('What you can type') || l.startsWith('try'))).toBe(false)
   })
 
   test('folded, it is one rule naming the seat and what needs the patron', () => {
@@ -208,13 +211,25 @@ describe('the card', () => {
     expect(text(foldedOf(GUILD, 60)).length).toBe(60)
   })
 
-  test('a band too short for the panel gets the commands left to learn as one line', () => {
-    const below = lines(cardOf(GUILD, opts({ compact: true, columns: 120 })).below)
-    expect(below.some(l => l.includes('What you can type'))).toBe(false)
-    expect(below.at(-1)).toMatch(/^try {2}appt-v2#12 · "open CRM-1234 in ~\/src\/crm" · \/spyglass · \/veil/)
-    const narrow = text(cardOf({ ...GUILD, needs: [] }, opts({ compact: true, columns: 60 })).below.at(-1)!)
-    expect(narrow).toBe('try  appt-v2#12 +8 more   ▱▱▱▱▱▱▱▱▱')
-    expect(narrow.length).toBeLessThanOrEqual(60)
+  test('a wide band takes the commands in two columns, and the sentence to try, the tabs and the sigils on one row', () => {
+    const lessons = lines(cardOf(GUILD, opts({ columns: 120, wide: 160 })).lessons)
+    expect(lessons).toHaveLength(1 + 5 + 1)
+    expect(lessons[1]).toMatch(/^ {2}appt-v2#12 … +○{5} {2}add to a posting, or answer it +turn the sprites off +○{5} {2}change a guild setting$/)
+    expect(lessons.at(-1)).toBe('  try: "appt-v2#12 yes, go ahead"    tabs: /spyglass board · deeds · codex · lantern    ⚜ you  ⚔ guildmaster  ⚔ party leader  ⛨ adventurer')
+    expect(Math.max(...lessons.map(l => l.length))).toBeLessThanOrEqual(160)
+  })
+
+  test("the roster goes beside the art when the side has the width, under it when not; the lessons always under", () => {
+    const card = cardOf(GUILD, opts())
+    const beside = placeCard(card, 8, 70)
+    expect(lines(beside.side).some(l => l.startsWith('⛨ appt-v2'))).toBe(true)
+    expect(lines(beside.below)[1]).toMatch(/What you can type/)
+    const under = placeCard(card, 8, 50)
+    expect(lines(under.side).some(l => l.startsWith('⛨'))).toBe(false)
+    expect(lines(under.below)[1]).toMatch(/^⛨ appt-v2/)
+    const tight = placeCard(card, 8, 70, true)
+    expect([...tight.side, ...tight.below].some(l => !l.length)).toBe(false)
+    expect(tight.side.length + tight.below.length).toBe(beside.side.length + beside.below.length - 2)
   })
 
   test('every command the card teaches belongs to a seat', () => {
@@ -328,16 +343,47 @@ describe('the welcome on screen', () => {
     expect(await drawn($)).toEqual([STOCK])
   })
 
-  test('a short band takes the commands as one line, then the small piece', async ($, on) => {
+  test('a short band takes the small piece and keeps the whole panel, which the band scrolls', async ($, on) => {
     world(on, 'chat: banners\nsprites: off\n', GUILD)
     await $.session.start(sessionStart)
     await settle()
     const tall = await drawn($, band(100, 40))
-    expect(tall).toContain('── What you can type ── ▱▱▱▱▱▱▱▱▱ 0/9 learned · novice')
+    expect(tall[0]).toBe('[art 16×8]')
     const short = await drawn($, band(100, 12))
     expect(short[0]).toBe('[art 10×3]')
-    expect(short.some(l => l.includes('What you can type'))).toBe(false)
-    expect(short.at(-1)).toMatch(/^try {2}appt-v2#12/)
+    expect(short).toContain('── What you can type ── ▱▱▱▱▱▱▱▱▱ 0/9 learned · novice')
+    expect(short.some(l => l.startsWith('try  '))).toBe(false)
+  })
+
+  test('a slash command is no message: /spyglass leaves the card up, and counts', async ($, on) => {
+    const kept = world(on, 'chat: banners\nsprites: off\n', GUILD)
+    on('command.run', { command: 'spyglass' }, async () => ({}))
+    await $.session.start(sessionStart)
+    await settle()
+    await $.command.run({ command: 'spyglass', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 100 } })
+    expect(await drawn($)).toContain('── What you can type ── ▱▱▱▱▱▱▱▱▱ 0/9 learned · novice')
+    expect(kept.get('tutorial-usage')).toEqual({ spyglass: { uses: 1, sessions: ['session-1'] } })
+  })
+
+  test("the card steps aside while Claude Code's typeahead is up, and comes back", async ($, on) => {
+    world(on, 'chat: banners\nsprites: off\n', GUILD)
+    on('prompt.edit', async (_$, e) => {
+      const text = e.text.slice(0, e.start) + e.inputText + e.text.slice(e.end)
+      return { text, cursor: e.start + e.inputText.length }
+    })
+    await $.session.start(sessionStart)
+    await settle()
+    // The kit raises prompt.edit as the editor does, though its types leave it off the test's $.
+    const raise = ($.prompt as unknown as { edit: (e: PromptEditInput) => Promise<unknown> }).edit
+    const edit = (text: string, inputText: string) => raise({ origin: { kind: 'composer' }, text, cursor: text.length, start: 0, end: text.length, inputText })
+    await edit('', '/sp')
+    expect(await drawn($)).toEqual([STOCK])
+    await edit('/sp', '')
+    expect((await drawn($))[1]).toMatch(/━━ ⚔ GUILDMASTER/)
+    await edit('', 'look at @src')
+    expect(await drawn($)).toEqual([STOCK])
+    await edit('look at @src', 'look at it')
+    expect((await drawn($))[1]).toMatch(/━━ ⚔ GUILDMASTER/)
   })
 
   test('a gm that cannot say still names the seat, and why the board is missing', async ($, on) => {
