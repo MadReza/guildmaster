@@ -334,6 +334,69 @@ t_list_json_is_what_the_spyglass_reads() {
     assert_contains "$(gm list --json --all)" "owner-empty" "and in with --all"
 }
 
+t_welcome_json_is_what_the_card_shows() {
+  setup welcome-json
+  local f=$WORK/welcome-json/out.json
+  # A field of the object, read back by sqlite3.
+  field() { json "SELECT $1 FROM (SELECT json(readfile('$f')) AS j);"; }
+  export GM_FOCUS=appt-v2
+  gm welcome --json >"$f" || fail "gm welcome failed" || return 1
+  assert_eq "$(field "j->>'seat'||' '||(j->>'focus')||' '||(j->>'kind')||' '||(j->>'tickets')")" 'party-leader appt-v2 ticket ["CRM-8965"]' \
+    "a Party Leader's seat, focus, kind and tickets" &&
+    assert_eq "$(field "j->>'branch'||' | '||json_array_length(j->'phases')||' | '||(j->>'counts')||' | '||(j->>'needs')")" \
+      'feature/CRM-8965 | 8 | {} | []' "its branch, the playbook's phases, an empty board"
+  gm post --slug grey-button "The save button is grey on Safari" >/dev/null
+  gm post --slug owner-empty "The owner is empty after save" >/dev/null
+  gm post --slug merge "Open the merge request" >/dev/null
+  gm notice 1 started >/dev/null
+  gm notice 2 queued >/dev/null
+  gm notice 3 needs-you "Open the merge request to integration?" >/dev/null
+  gm phase build >/dev/null
+  gm welcome --json >"$f"
+  assert_eq "$(field "(j->'counts'->>'active')||(j->'counts'->>'queued')||(j->'counts'->>'needs-you')")" 111 "the board counted by state" &&
+    assert_eq "$(field "(j->>'active')||' | '||(j->>'next')||' | '||(j->>'phase')")" '#1 grey-button | #2 owner-empty | build' "now, next and the phase" &&
+    assert_eq "$(field "j->'needs'->0->>'ref'||' '||(j->'needs'->0->>'question')")" '#3 Open the merge request to integration?' \
+      "the question that waits on the patron" &&
+    assert_eq "$(field "j->'last'->>'line'")" 'appt-v2 phase: build (3/8)' "the last notice"
+  # At the front desk, the whole guild: what needs the patron in every focus, and each Party Leader's state.
+  unset GM_FOCUS
+  (cd "$WORK" && gm welcome --json) >"$f" || fail "gm welcome at the front desk failed"
+  assert_eq "$(field "j->>'seat'||' '||(j->'needs'->0->>'ref')||' '||(j->'roster'->0->>'focus')||' '||(j->'roster'->0->>'state')")" \
+    'guildmaster appt-v2#3 appt-v2 waiting' "the guild's needs and roster" &&
+    assert_eq "$(field "j->>'trouble'")" '[]' "no trouble"
+  db "UPDATE focus SET held_at='2026-01-01T00:00:00Z', start_attempts=3;"
+  (cd "$WORK" && gm welcome --json) >"$f"
+  assert_eq "$(field "j->'roster'->0->>'state'||' | '||(j->'trouble'->0->>'what')||' | '||(j->'trouble'->0->>'fix')")" \
+    'held | appt-v2 is held after 3 failed starts | say "reopen appt-v2"' "a held Party Leader is trouble, with what to say"
+  gm welcome >/dev/null 2>&1 && fail "gm welcome without --json was taken"
+  return 0
+}
+
+t_config_welcome() {
+  export GM_HALL=$WORK/conf-welcome/hall
+  local out
+  out=$(gm config)
+  assert_contains "$out" "  welcome                 on        default" "the welcome is on" &&
+    assert_contains "$out" "  welcome-art-guildmaster rotate    default" "the art rotates" &&
+    assert_contains "$out" "  welcome-fold            rule      default" "it folds to a rule" &&
+    assert_contains "$out" "  tutorial                auto      default" "the tutorial fades by rank"
+  out=$(gm config set welcome-art-guildmaster hall)
+  assert_eq "$(conf welcome-art-guildmaster)" hall "a piece named" &&
+    assert_contains "$out" "welcome-art-guildmaster is hall: the Guildmaster and Party Leaders show it from their next start" "says when"
+  gm config set welcome-art-party-leader "$GM_HALL/art/dragon.txt" >/dev/null
+  assert_eq "$(conf welcome-art-party-leader)" "$GM_HALL/art/dragon.txt" "a file of the patron's own"
+  gm config set welcome-fold disappear >/dev/null
+  assert_eq "$(conf welcome-fold)" vanish "disappear is vanish"
+  gm config set tutorial yes >/dev/null
+  assert_eq "$(conf tutorial)" on "yes is on"
+  out=$(gm config set welcome-art-guildmaster dragon 2>&1) && fail "a piece gm does not have was taken"
+  assert_contains "$out" "welcome-art-guildmaster cannot be 'dragon' (rotate | crest | robed | hall | helm | bearer | tent | none | <file>)" \
+    "refused, naming the pieces"
+  out=$(gm config set welcome-art-size huge 2>&1) && fail "a size gm does not have was taken"
+  grep -q '^# tutorial: auto | on | off, default auto$' "$GM_HALL/guild.conf" || fail "guild.conf documents tutorial"
+  return 0
+}
+
 t_phase_follows_the_playbook() {
   setup phase
   export GM_FOCUS=appt-v2
@@ -2534,7 +2597,8 @@ t_config_file_is_documented_and_read() {
   assert_contains "$out" "collector-port is 4999" "it says what it set"
   [ -f "$GM_HALL/guild.conf" ] || fail "no guild.conf" || return 1
   for k in collector collector-port telemetry chat veil veil-hides sprites sprites-guildmaster sprites-party-leader \
-    idle-guildmaster idle-party-leader autostart autostart-every muster-before-commands attach herdr-session \
+    idle-guildmaster idle-party-leader welcome welcome-art-guildmaster welcome-art-party-leader welcome-art-size welcome-fold \
+    tutorial autostart autostart-every muster-before-commands attach herdr-session \
     herdr-workspace launch-grace start-tries repo-roots editor; do
     grep -q "^# $k: " "$GM_HALL/guild.conf" || fail "guild.conf does not document $k"
   done

@@ -103,6 +103,8 @@ Where a term replaces one from Firstmate, the Firstmate column records the origi
 | **Deed** | A tool call as the chat shows it: the call, its result, or a group of them. | tool call |
 | **Veil** | The chat's quiet view: deeds, adventurers and short notes drawn out of the chat while it is on, and back when it is lifted. Hides from the screen only, never from the record. | Calm |
 | **Working Sprite** | The two-row figure drawn while a session works (a fight, a craft, the Guildmaster's quill), or above the prompt while it waits (the campfire). Drawn on the screen only: it never enters the chat. | working ship |
+| **Welcome** | The card above the prompt when the Guildmaster or a Party Leader starts: who answers, what needs the patron, where the work stands, and the commands left to learn, beside a piece of guild art. Folded to one rule at the patron's first message; the model never reads it. | (none) |
+| **Rank** | How far the patron has come with the guild's commands, which the welcome's commands panel fades with: a **Novice** has learned fewer than four, a **Journeyman** four or more, a **Master** every one. A command is learned at 5 uses in 3 separate sessions. | (none) |
 | **Spyglass** | The pane beside the chat, opened and closed with `/spyglass`, whose tabs show the party's work and the guild's settings: the Board (the quest board), the Satchel, the Deeds, the Codex and the Lantern. | (none) |
 | **Satchel** | The spyglass's tab of every file the party changed, the camp's and each adventurer's worktree. | (none) |
 | **Codex** | The spyglass's tab of the guild's settings, `guild.conf`, read and changed there. | (none) |
