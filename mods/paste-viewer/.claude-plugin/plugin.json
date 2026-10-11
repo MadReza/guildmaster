@@ -1,0 +1,6 @@
+{
+  "name": "paste-viewer",
+  "version": "0.1.0",
+  "description": "Guildmaster's paste viewer: a click on a pasted text opens it whole in a pane beside the chat, a click on a pasted image opens it in Quick Look.",
+  "types": "./types/index.d.ts"
+}
