@@ -61,14 +61,16 @@ export function stateMark(state: string): { glyph: string; color?: string; isDim
 }
 
 export type PostingsView = { board: SpyglassPostings; focus: string | undefined; all: boolean; open: string; now: number }
-export type PostingsActions = { toggleAll: () => void; refresh: () => void; toggle: (ref: string) => void }
+// At the front desk a click goes to the posting's Party Leader in herdr (visit); in a Party Leader's own board it opens
+// the posting in place (toggle).
+export type PostingsActions = { toggleAll: () => void; refresh: () => void; toggle: (ref: string) => void; visit: (focus: string) => void }
 
 export function postingsTab(els: Els, v: PostingsView, act: PostingsActions): RenderChildren {
   const { Box, Text, Button } = els
   const actions = foot(els, [
     { key: 'postings:refresh', label: 'refresh', run: act.refresh },
     { key: 'postings:all', label: v.all ? 'hide done' : 'show done', run: act.toggleAll },
-  ], 'click a posting to open it')
+  ], v.focus ? 'click a posting to open it' : 'click a posting to go to its Party Leader')
   if (!v.board.isLoaded) return <Box flexDirection="column"><Text dimColor>Reading the quest board…</Text>{actions}</Box>
   if (v.board.why) return <Box flexDirection="column"><Text color={CRIMSON}>gm cannot list the postings: {v.board.why}</Text>{actions}</Box>
   const rows = v.board.rows
@@ -86,7 +88,7 @@ export function postingsTab(els: Els, v: PostingsView, act: PostingsActions): Re
           return (
             <Box key={`row:${r.ref}`} flexDirection="column">
               {row(els, `line:${r.ref}`,
-                <Button key={`posting:${r.ref}`} plain onPress={() => act.toggle(r.ref)}>
+                <Button key={`posting:${r.ref}`} plain onPress={() => (v.focus ? act.toggle(r.ref) : act.visit(r.focus))}>
                   <Text color={mark.color} bold={!mark.isDim}>{mark.glyph}</Text> <Text bold={!mark.isDim} dimColor={mark.isDim}>{name}</Text>
                 </Button>,
                 <Text dimColor>{when(r.updated, v.now)}</Text>)}

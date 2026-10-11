@@ -45,6 +45,7 @@ async function body($: EngineInterface, e: RenderInput<'Pane'>, id: string): Pro
         toggleAll: () => void update($, showAll, v => !v),
         refresh: () => void refreshPostings($, focus),
         toggle: ref => void update($, opened, v => (v === ref ? '' : ref)),
+        visit: f => void visitFocus($, f),
       })
     }
     case 'files':
@@ -157,6 +158,12 @@ const opened = atom({ plugin: 'guild-spyglass', key: 'postingOpen' } as const, '
 // The guild's gm before gm list --json and gm config --json says only that it does not know them: the tab says why.
 const OLD_GM = 'the guild\'s gm (~/.local/bin/gm) is older than the spyglass: it learns --json when the change that brings the spyglass is merged'
 const whyNot = (why: string) => (/unknown option --json|gm config \[get <key>/.test(why) ? OLD_GM : why)
+
+// Brings a focus's Party Leader to the front in herdr through the guild's gm, and says what gm said.
+async function visitFocus($: EngineInterface, focus: string): Promise<void> {
+  const got = await runGm($, ['visit', focus])
+  $.ui.toast('why' in got ? `Cannot go to ${focus}: ${whyNot(got.why)}` : got.out.trim().split('\n')[0] ?? '')
+}
 
 async function refreshPostings($: EngineInterface, focus: string | undefined): Promise<void> {
   const got = await runGm($, listArgs(focus))
