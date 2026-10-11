@@ -19,12 +19,13 @@ This step removes step 1's deliberate shortfall: the Party Leader stops doing th
 
 ## What the patron settled
 
-Answered on 2026-10-11; questions 6 and 7 are still open below.
+Answered on 2026-10-11; question 7 is still open below.
 
 <!-- patron: begin -->
 
 "1. Ok. 2. That is fine until there is a list of tasks that can be picked up. So Patron still asks for tasks, tasks might be queued after those 3 or merged into one depending on judgement call. [...] 4. Claude Code's commit attribution is completly turned off. User can overwrite it if they want or think it's necessary. This would be the way it currently works. GM doesn't need to check for this. I don't see why it would ? 5. Sounds good. [...] 8. yes."
 "3. Okay with the new recommendation."
+"6. Herald maybe ? Watch could be good. Whatever you pick, add it to the terminology list. The terms could also be in different context mean different things. Until the ai doesn't get confused or the user."
 
 <!-- patron: end -->
 
@@ -35,13 +36,14 @@ Answered on 2026-10-11; questions 6 and 7 are still open below.
 | Commit identity and AI trailers | The patron's own git identity, as the camp has it. Claude Code's commit attribution is off for every Adventurer, from a `guild.conf` setting (`commit-attribution: off`) that the patron can turn on. `gm` does not check commits for it. |
 | GitLab credentials | Only the patron's SSH key, through the running ssh-agent, for `git fetch` and the pushes slice 2 allows. No `glab` token: an Adventurer never opens, approves or merges a merge request. |
 | Q14 models | Contracts on the Party Leader's own model at medium effort; surveys on Sonnet 5.5 at medium. Each kind's model and effort are `guild.conf` settings (`contract-model`, `contract-effort`, `survey-model`, `survey-effort`), and the Party Leader can override them per dispatch with `--model` and `--effort`. A kind moves to a cheaper model when its recorded outcomes ([below](#a-runs-outcome-for-judging-models-and-prompts)) show it holds. A **contract** changes the project, in the ticket's camp, one at a time per focus; a **survey** only finds things out, read-only, in a throwaway worktree, ending in a field report. |
+| The words | **Summons** for the event and **the watch** for the process, both already in TERMINOLOGY.md and widened there to any supervisor; **run** and **keeper** added. Herald was not needed: a new term is added only for a concept with no name yet, and both concepts had one. |
 | Correction runs | A failed check dispatches one correction run at once; a second failure on the same posting goes to the patron as `needs-you`. |
 
 ## The slices
 
 | Slice | What | Needs from the patron |
 | --- | --- | --- |
-| 1 | `gm dispatch` runs one headless `claude -p` Adventurer in the camp; its result lands in the register and wakes the Party Leader. With it, the wake for a posting added from outside (issue #41) | questions 6 and 7 (the words, a nudge) |
+| 1 | `gm dispatch` runs one headless `claude -p` Adventurer in the camp; its result lands in the register and wakes the Party Leader. With it, the wake for a posting added from outside (issue #41) | question 7 (a nudge) |
 | 2 | `PreToolUse` push rules in every camp, from the playbook | settled |
 | 3 | `gm check` after every run, reopening a posting that broke a rule | settled |
 | 4 | Parallel surveys and the dispatch cap | settled |
@@ -108,7 +110,7 @@ A **summons** is one event that needs a Party Leader's attention now. There are 
 - a posting of its focus that is `received`, was not made from one of the patron's own messages in its chat, and has not been summoned before (issue #41);
 - a run of its focus that finished and has not been summoned before.
 
-TERMINOLOGY.md defines a summons as an event needing "the guildmaster's attention"; this widens it to "the Guildmaster's or a Party Leader's" (question 6).
+[TERMINOLOGY.md](../TERMINOLOGY.md) now defines both words for any supervisor, the Guildmaster or a Party Leader, along with **run** and **keeper**.
 
 **The watch** is the one background process per Party Leader that waits for a summons and wakes it: `gm hook watch`, a command hook with `asyncRewake: true` in the camp's settings.
 Claude Code runs such a hook in the background, and when it "exits with code 2 [it] wakes Claude immediately even when the session is idle", showing its stderr to Claude as a system reminder (<https://code.claude.com/docs/en/hooks>, Run hooks in the background; checked on Claude Code 2.1.296).
@@ -191,11 +193,8 @@ The run's own record (slice 1) does not wait for this slice: the run row already
 
 ## Questions for the patron
 
-Questions 1 to 5 and 8 are settled ([above](#what-the-patron-settled)); these two are open, numbered as first asked.
+Questions 1 to 6 and 8 are settled ([above](#what-the-patron-settled)); this one is open, numbered as first asked.
 
-6. **The words for the wake.** The design needs two names. One for the *event*: something landed in the register that a Party Leader must act on, a run that finished or a posting added from outside. One for the *process*: the background hook in each Party Leader's session that waits for such an event and wakes it.
-   TERMINOLOGY.md already has a word for each, both written for the Guildmaster: **Summons**, "one event that requires the guildmaster's attention now. Durable until handled and acknowledged", and **The Watch**, "the single live supervision cycle. Exactly one runs while any work is under way". Each Party Leader would have its own watch, and its summonses would be its own.
-   *Recommended:* widen both: a summons "requires the Guildmaster's or a Party Leader's attention", and a watch is "one per supervisor, exactly one while it is idle". The alternative is two new words used only for Party Leaders.
 7. **Who summons, and who nudges.** No model does either; both are `gm`'s code.
    *The summons* is the normal way: a run's keeper records the run's end, or `gm post` records a posting from outside. The Party Leader's watch, a background hook started by Claude Code at its session start and every turn end, sees the new row within 2 seconds and exits with code 2. Claude Code then shows the summons to the Party Leader and starts a turn. Nothing is typed.
    *A nudge* is only for when that has failed: the watch is not running (Claude Code did not re-arm it, its timeout ran out, it crashed), so a summons sits unheard while the Party Leader is idle. The muster, which already runs every 5 minutes from launchd and checks every Party Leader, is the only thing that could notice. It could then type a short line into the Party Leader's herdr pane, as `gm close` types `/exit` today. That always reaches it, but anything you had half-typed in that pane is lost (Firstmate's #4664), and the line arrives in the chat as if you had typed it.
