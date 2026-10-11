@@ -479,15 +479,19 @@ async function loadWelcome($: EngineInterface, w: Welcome): Promise<void> {
 }
 
 // At the session's start: what the tutorial counted so far, and the card's data, asked of gm without holding up the
-// start. A session that resumes, or a reload, finds the patron has spoken already, so its card starts folded.
-// Whatever fails here leaves the band to the idle sprite.
-async function startWelcome($: EngineInterface, e: { isInteractive: boolean; surface: string | null }): Promise<void> {
+// start. A session that resumes, or a reload, finds the patron has spoken already, so its card starts folded; a
+// /clear starts the conversation afresh, so its card is shown again, read anew. Whatever fails here leaves the band to
+// the idle sprite.
+let cleared = false
+let startedOn = { isInteractive: false, surface: null as string | null }
+async function startWelcome($: EngineInterface, e: { isInteractive: boolean; surface: string | null }, fresh = false): Promise<void> {
+  startedOn = { isInteractive: e.isInteractive, surface: e.surface }
   welcomeData = undefined
   welcomeArt = undefined
   folded = false
   typeahead = false
   try {
-    folded = (await $.session.turns()) > 0
+    folded = !fresh && (await $.session.turns()) > 0
     sessionId = await $.session.id()
     usage = ((await $.store.get(USAGE_KEY)) ?? {}) as Usage
     const known = new Set(((await $.store.get(KNOWN_KEY)) ?? []) as CommandId[])
@@ -506,6 +510,8 @@ async function startWelcome($: EngineInterface, e: { isInteractive: boolean; sur
 // One use of a command the card teaches, kept across sessions.
 async function used($: EngineInterface, ids: readonly CommandId[]): Promise<void> {
   if (!ids.length) return
+  // A /clear goes on under a new session id, which counts as another session.
+  sessionId = await $.session.id()
   for (const id of ids) usage = recordUse(usage, id, sessionId)
   await $.store.set(USAGE_KEY, usage)
 }
@@ -603,6 +609,14 @@ export const register: Register = on => {
       })
     }
     await startWelcome($, e)
+    return next(e)
+  })
+
+  // A /clear raises no session.start: the old session ends with reason clear and the process goes on under a new one.
+  // The welcome is shown again for the fresh conversation, read anew with another piece of art at its first drawing,
+  // whose $ is the new session's.
+  on('session.end', async ($, e, next) => {
+    if (e.reason === 'clear') cleared = true
     return next(e)
   })
 
@@ -730,6 +744,10 @@ export const register: Register = on => {
   // Above the prompt: the welcome until the patron's first message, then its rule; and while the session waits, the
   // idle sprite, under the rule. A survey, or an agent's transcript, keeps the band.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (cleared) {
+      cleared = false
+      await startWelcome($, startedOn, true)
+    }
     const { sprites, welcome } = await veil($)
     const free = e.surface === 'terminal' && !e.props.hasSurvey && !e.props.view.agentId
     const data = free && welcome.on ? welcomeData : undefined
