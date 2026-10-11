@@ -123,7 +123,7 @@ Firstmate wakes its Claude supervisors the same way, and its tickets show where 
 - **Exactly one per focus**: the watch writes its pid to `watch.<focus>.pid` in the Guildhall and exits 0 when the file no longer holds its own pid, so a new arm replaces the old one without killing it. The capture hook removes the file, so a turn started by the patron retires the armed watch and that turn's Stop arms a new one.
 - **Plain code while it waits**: one indexed register query every 2 seconds, no model, no herdr call.
 - **Each thing summoned once**: a `summoned` event per posting or run. A Party Leader that wakes and leaves it unsorted is not woken again in a loop; the Stop guard and the muster's check below deal with it.
-- **Never typed into the pane.**
+- **Nothing typed into the pane**, except the muster's last-resort nudge below, and only when that is safe.
 
 On a summons it records the events, prints the summons and exits 2. For example:
 
@@ -136,7 +136,45 @@ Review the run and sort the posting as your charter says; show the patron each n
 
 Claude Code enforces `timeout` on an `asyncRewake` hook, so the watch gets a long one (`GM_WATCH_TIMEOUT`, 86400 seconds) and exits 0 just before it.
 
-**The check that does not depend on the hook chain.** The muster (`gm up`, at every terminal command and every 5 minutes from launchd) already reads every Party Leader's state. For an alive, idle Party Leader with a summons older than 2 minutes and no live watch, it records `unheard` once, and `gm roster` shows it on that Party Leader's row (`idle · unheard: run 7, #13 since 01:09`), so the front desk can tell the patron. It does not type into the pane (question 7).
+Claude Code delivers the summons as a `<task-notification>` prompt through `UserPromptSubmit`, which the capture hook already records without making it a posting, and the chat shows it as "Stop hook feedback". The capture hook also retires the armed watch when such a notification arrives, as it does for the patron's messages.
+
+**When the watch has died: the muster's nudge.** The watch can die without anyone seeing it: Claude Code kills it silently when its timeout runs out, and the session then stays unwatched (seen in the lab, below), as it would after a crash of the hook. The muster (`gm up`, at every terminal command and every 5 minutes from launchd) already reads every Party Leader's state. For an alive Party Leader with a summons older than 2 minutes and no live watch (its pid file empty or its pid gone), it nudges, in plain code:
+
+1. herdr says the Party Leader is `idle` or `done`, twice, a second apart.
+2. Its input line, read twice from the screen 1.5 seconds apart (`herdr pane read --source visible --ansi`), has not changed, so nobody is typing in it.
+3. Then, by what that line holds:
+   - **empty** (nothing, or only Claude Code's faint suggestion or placeholder text): it types `/summons` and Enter;
+   - **a draft, and no stash** (no "› stashed" mark): it presses Ctrl+S, which stashes the draft, checks the line is now empty, and types `/summons` and Enter; Claude Code puts the draft back when that turn is submitted;
+   - **a draft and a stash**: it types nothing, since a second Ctrl+S would replace the patron's stash.
+4. Whenever it types nothing, it records `unheard` once, and `gm roster` shows it on that Party Leader's row (`idle · unheard: run 7, #13 since 01:09`), so the front desk can tell the patron; it tries again at the next muster.
+
+`/summons` is a command of the guild-chat mod, loaded with every session. Its text says gm typed it, not the patron, and runs `gm summons`, which lists what is waiting and records it as summoned. The capture hook records `/summons` as a command, never a posting. The nudged turn's own Stop arms a new watch, so one nudge repairs the chain.
+
+### What the lab showed
+
+Tested on 2026-10-11 with Claude Code 2.1.296 and herdr, in a throwaway herdr session (`wakelab`) with Haiku sessions and stand-in hooks, at the patron's request ("Do a thorough test before giving a recommendation. Try variations to get the best result."):
+
+| Test | Result |
+| --- | --- |
+| The watch fires while the session is idle, never prompted | Woken in under a second; the summons arrives as a `<task-notification>` prompt and shows as "Stop hook feedback". |
+| A second summons after that wake turn | The wake turn's Stop armed a new watch, which woke it again. Firstmate's #4439 did not reproduce. |
+| A summons while the patron has a half-typed draft | The draft stays in the input, untouched. |
+| A summons while a turn is running (a 15-second tool call) | Delivered inside that same turn after the tool call; no extra turn. |
+| The session starts with a summons already waiting | The `SessionStart` watch woke it at once. |
+| `timeout: 86400` | The watch was alive after 687 seconds (past the 600-second default) and still woke the session. |
+| A short timeout (20 seconds) running out | The watch was killed silently: no wake, no message, and the session stayed unwatched; a later summons was never delivered. |
+| A turn ending in an API error | `StopFailure` ran instead of `Stop`; the watch it armed woke the session, and the failed wake turn armed another. |
+| A newer watch | The older one saw the pid file change and exited. |
+| Nudge with `herdr agent prompt` over a draft | The nudge was appended to the draft and both were submitted: the patron's half-written message sent early. Rejected. |
+| Ctrl+S, then the nudge, over a one-line or a multi-line draft | The draft was stashed, the nudge delivered, and the draft restored ("Draft restored"). |
+| Ctrl+S on an empty input while the patron has a stash | It brings the stash back into the input, so a nudge would merge with it: never Ctrl+S on an empty input. |
+| Ctrl+S over a draft while a stash exists | The stash is replaced and the older one lost: no nudge then. |
+| A stash and an empty input | Typed directly; the stash came back after the nudge. |
+| Telling a draft from a suggestion | With ANSI, Claude Code's suggestion and placeholder are faint (`ESC[2m`) and a draft is plain; "› stashed" shows for as long as a stash exists. A real Party Leader with the guild-chat mod draws the same input line. |
+| `/summons` as the nudge | Recorded as a slash command; the model got its expanded text. A command file added after the session started was not loaded ("Unknown command"), so it ships in the mod. |
+| The patron typing while the nudge runs | With one read, Ctrl+S caught the first keystrokes and the typing ended up split between the stash and the input. With two reads 1.5 seconds apart, the nudge saw the change and typed nothing. |
+
+What is left: someone starting to type in the few milliseconds between the last read and the nudge, and the nudge's reliance on Claude Code drawing its input line as it does today, which gm's suite cannot see; `gm doctor` can check the Claude Code version it was tested on.
 
 **A first job for a new focus.** `gm open <focus> --repo <path> --brief "<words>"` (or `--brief -` from standard input, with `--slug`) records the words as posting #1 before the Party Leader starts; its `SessionStart` watch summons it within seconds. `gm post` gains `--focus <name>`, so the front desk no longer needs `GM_FOCUS=` before it.
 The front desk's charter gains: when the patron gives a new focus its job in the same breath, pass their words verbatim with `--brief`; when the patron asks to hand an existing focus a job, `gm post --focus`. Both happen at the patron's request, so "never talk to a Party Leader on your own initiative" still holds.
@@ -195,10 +233,7 @@ The run's own record (slice 1) does not wait for this slice: the run row already
 
 Questions 1 to 6 and 8 are settled ([above](#what-the-patron-settled)); this one is open, numbered as first asked.
 
-7. **Who summons, and who nudges.** No model does either; both are `gm`'s code.
-   *The summons* is the normal way: a run's keeper records the run's end, or `gm post` records a posting from outside. The Party Leader's watch, a background hook started by Claude Code at its session start and every turn end, sees the new row within 2 seconds and exits with code 2. Claude Code then shows the summons to the Party Leader and starts a turn. Nothing is typed.
-   *A nudge* is only for when that has failed: the watch is not running (Claude Code did not re-arm it, its timeout ran out, it crashed), so a summons sits unheard while the Party Leader is idle. The muster, which already runs every 5 minutes from launchd and checks every Party Leader, is the only thing that could notice. It could then type a short line into the Party Leader's herdr pane, as `gm close` types `/exit` today. That always reaches it, but anything you had half-typed in that pane is lost (Firstmate's #4664), and the line arrives in the chat as if you had typed it.
-   *Recommended:* the muster records it as unheard and `gm roster` shows it, so the front desk can tell you; it types nothing. Or: it types the nudge, but only when it can see the pane's input line is empty (`herdr pane read` shows the screen; whether that is reliable is untested).
+7. **The nudge, after testing.** Who summons: nobody's model; `gm` records the event and the Party Leader's watch wakes it. Who nudges: the muster, plain code, only when the watch has died and a summons has waited 2 minutes. *Recommended, from [the lab](#what-the-lab-showed):* the safe nudge [above](#the-wake-and-issue-41): `/summons` typed only when the input is empty, or after stashing a draft when there is no stash already, never while someone is typing; otherwise nothing is typed and the roster shows it as unheard. Do you agree?
 
 ## How it will be checked
 
@@ -211,7 +246,8 @@ Questions 1 to 6 and 8 are settled ([above](#what-the-patron-settled)); this one
 - Slice 4: surveys beside a contract run, in worktrees removed afterwards, with their field reports kept; the cap holds runs waiting and starts them as others finish; a rate limit pauses dispatch.
 - Slice 5: `gm trace` shows the dispatch, the Adventurer's run under it and the check, with the writ hash on each.
 - By hand, in a lab herdr session, the done-when: dispatch a contract, keep talking to the Party Leader while it runs, and see the result wake it; then send a follow-up bug on the same ticket and see its commit land on the same feature branch, with a `git checkout -b` tried by the Adventurer denied. And issue #41's own steps: `gm open demo --repo <repo>`, then `gm post --focus demo "say hello"`, and the idle Party Leader takes it up with nobody in its tab; again after that turn ends, to see the Stop re-arm after a rewake turn; and once with `gm open demo2 --brief "say hello"`.
-- By hand, once: Claude Code accepts a `timeout` of 86400 on an `asyncRewake` hook.
+- By hand, once per Claude Code upgrade: the lab tests above.
+- gm's suite: the muster's nudge against recorded screens (empty, suggestion, draft, multi-line draft, stash, draft and stash, a changing input), checking what it would type, with the herdr stub.
 
 ## Not in this step
 
