@@ -189,7 +189,7 @@ gm_conf_carried() {
   case $GM_CONF_VARS in *" $1 "*) return 1 ;; esac
   return 0
 }
-GM_SCHEMA_VERSION=7
+GM_SCHEMA_VERSION=8
 GM_STOP_BUDGET=${GM_STOP_BUDGET:-3}
 GM_NOW="strftime('%Y-%m-%dT%H:%M:%fZ','now')"
 GM_NOW_MS="CAST(ROUND((julianday('now')-2440587.5)*86400000) AS INTEGER)"
@@ -448,6 +448,15 @@ PRAGMA user_version=7;
 SQL
 }
 
+# Schema 7 to 8: an Adventurer's pane is the first of a herdr workspace of its own, placed under its Party Leader's,
+# so the Party Leader's pane stays whole; the run records the workspace, which the review closes. Only adds.
+gm_schema8_sql() {
+  cat <<'SQL'
+ALTER TABLE run ADD COLUMN pane_workspace TEXT;
+PRAGMA user_version=8;
+SQL
+}
+
 gm_db_init() {
   mkdir -p "$GM_HALL"
   local tmp=$GM_DB.init.$$
@@ -462,6 +471,7 @@ $(gm_schema4_sql)
 $(gm_schema5_sql)
 $(gm_schema6_sql)
 $(gm_schema7_sql)
+$(gm_schema8_sql)
 COMMIT;
 SQL
   # ln refuses an existing target, so exactly one concurrent first caller installs its register.
@@ -474,12 +484,13 @@ SQL
 gm_db_migrate() {
   local from=$1 sql err
   case $from in
-    1) sql="$(gm_schema2_sql) $(gm_schema3_sql) $(gm_schema4_sql) $(gm_schema5_sql) $(gm_schema6_sql) $(gm_schema7_sql)" ;;
-    2) sql="$(gm_schema3_sql) $(gm_schema4_sql) $(gm_schema5_sql) $(gm_schema6_sql) $(gm_schema7_sql)" ;;
-    3) sql="$(gm_schema4_sql) $(gm_schema5_sql) $(gm_schema6_sql) $(gm_schema7_sql)" ;;
-    4) sql="$(gm_schema5_sql) $(gm_schema6_sql) $(gm_schema7_sql)" ;;
-    5) sql="$(gm_schema6_sql) $(gm_schema7_sql)" ;;
-    6) sql=$(gm_schema7_sql) ;;
+    1) sql="$(gm_schema2_sql) $(gm_schema3_sql) $(gm_schema4_sql) $(gm_schema5_sql) $(gm_schema6_sql) $(gm_schema7_sql) $(gm_schema8_sql)" ;;
+    2) sql="$(gm_schema3_sql) $(gm_schema4_sql) $(gm_schema5_sql) $(gm_schema6_sql) $(gm_schema7_sql) $(gm_schema8_sql)" ;;
+    3) sql="$(gm_schema4_sql) $(gm_schema5_sql) $(gm_schema6_sql) $(gm_schema7_sql) $(gm_schema8_sql)" ;;
+    4) sql="$(gm_schema5_sql) $(gm_schema6_sql) $(gm_schema7_sql) $(gm_schema8_sql)" ;;
+    5) sql="$(gm_schema6_sql) $(gm_schema7_sql) $(gm_schema8_sql)" ;;
+    6) sql="$(gm_schema7_sql) $(gm_schema8_sql)" ;;
+    7) sql=$(gm_schema8_sql) ;;
   esac
   if ! err=$(sqlite3 -bail -batch -cmd '.timeout 15000' "$GM_DB" "BEGIN IMMEDIATE; $sql COMMIT;" 2>&1 >/dev/null); then
     [ "$(gm_sql 'PRAGMA user_version;')" = "$GM_SCHEMA_VERSION" ] || gm_die "could not migrate the register at $GM_DB to schema $GM_SCHEMA_VERSION: $err"
@@ -492,8 +503,8 @@ gm_db_ensure() {
   local v
   v=$(gm_sql 'PRAGMA user_version;')
   case $v in
-    7) ;;
-    1 | 2 | 3 | 4 | 5 | 6) gm_db_migrate "$v" ;;
+    8) ;;
+    1 | 2 | 3 | 4 | 5 | 6 | 7) gm_db_migrate "$v" ;;
     *) gm_die "the register at $GM_DB is schema $v; this gm knows schema $GM_SCHEMA_VERSION" ;;
   esac
   GM_DB_READY=1
@@ -736,11 +747,11 @@ They are for advanced use, and for the Guildmaster.
                           but in its own Party Leader's session is summoned to it by its watch
   dispatch <posting>... [--brief TEXT|-] [--model M] [--effort E]
                           hand started postings to one Adventurer: claude in the camp, on the feature branch,
-                          with a writ from prompts/adventurer/contract.md in the Guildhall, in a herdr pane split
-                          under the Party Leader's and titled with the run (claude -p, unseen, when the Party
-                          Leader has no herdr pane); returns at once, and the Party Leader's watch summons it when
-                          the run finishes. The pane stays open until a notice on its posting, or another
-                          dispatch, reviews the run. One contract run at a time per focus
+                          with a writ from prompts/adventurer/contract.md in the Guildhall, in a herdr workspace
+                          of its own under the Party Leader's, titled with the run (claude -p, unseen, when the
+                          Party Leader has no herdr pane); returns at once, and the Party Leader's watch summons
+                          it when the run finishes. The workspace stays open until a notice on its posting, or
+                          another dispatch, reviews the run. One contract run at a time per focus
   runs [--all]            the focus's runs: postings, how each ended, model and effort, result, outcome
   summons                 what is waiting for this Party Leader (a finished run, a posting added from outside its
                           chat), recorded as heard; what gm types as /guild-chat:summons when its watch died
@@ -4461,7 +4472,7 @@ gm_cmd_hook() {
 
 # ---- Adventurers: a run, its keeper, and the summons (vision/step-3-design.md, slice 1) ----
 # gm dispatch hands started postings to one Adventurer, claude in the camp, and returns at once; the run's keeper,
-# gm run, starts it in a herdr pane under the Party Leader's, where the patron can read and talk to it (or headless,
+# gm run, starts it in a herdr workspace under the Party Leader's, where the patron can read and talk to it (or headless,
 # claude -p, when the Party Leader has no herdr pane), waits for it in its own process group, and records its result. A Party Leader hears of a run
 # that finished, or of a posting added from outside its chat, from its watch: a background hook (asyncRewake) armed
 # at every start and turn end, which wakes the idle session. When the watch has died, the muster types
@@ -5201,12 +5212,17 @@ gm_run_args() {
   [ "$mode" = - ] || GM_RUN_ARGS+=(--permission-mode "$mode")
 }
 
-# gm_run_pane_open <run> <focus> <camp>: the Adventurer's own herdr pane, split under its Party Leader's pane and
-# titled with the run, running gm adventurer there; prints session<TAB>pane. Under the herdr lock, so no muster
-# relaunches the Party Leader's pane meanwhile. Fails, and the keeper runs claude -p instead, when the Party Leader has
-# no pane herdr still has (the tests, or a Party Leader outside herdr) or herdr will not split it.
+# An Adventurer's workspace label: one step deeper than its Party Leader's (└ <focus>) in herdr's sidebar.
+gm_run_label() { printf '  └ %s' "$1"; }
+
+# gm_run_pane_open <run> <focus> <camp>: the Adventurer's own herdr workspace on the camp, labelled with the run one
+# step under its Party Leader's and placed right after it, never focused, its pane titled with the run and running gm
+# adventurer; prints session<TAB>pane. The Party Leader's pane stays whole, for the patron to talk to it. Under the
+# herdr lock, so no muster relaunches the Party Leader's pane meanwhile. Fails, and the keeper runs claude -p instead,
+# when the Party Leader has no pane herdr still has (the tests, or a Party Leader outside herdr) or herdr will not
+# make the workspace.
 gm_run_pane_open() {
-  local id=$1 focus=$2 camp=$3 s ws pane out new title line v val
+  local id=$1 focus=$2 camp=$3 s ws pane out new nws title line v val
   command -v "$GM_HERDR" >/dev/null 2>&1 || return 1
   IFS=$'\t' read -r s ws _ pane _ _ <<<"$(gm_endpoint "party-leader:$focus")"
   [ -n "$pane" ] && gm_herdr_running "$s" || return 1
@@ -5215,20 +5231,21 @@ gm_run_pane_open() {
     gm_herdr_unlock
     return 1
   fi
-  out=$(gm_herdr "$s" pane split "$pane" --direction down --cwd "$camp" --no-focus)
-  new=$(gm_hj "$out" '$.result.pane.pane_id')
-  if [ -z "$new" ]; then
+  title=$(gm_run_title "$id")
+  out=$(gm_herdr "$s" workspace create --cwd "$camp" --label "$(gm_run_label "$title")" --no-focus)
+  IFS=$'\t' read -r nws new <<<"$(gm_hj "$out" '$.result.workspace.workspace_id' '$.result.root_pane.pane_id')"
+  if [ -z "$nws" ] || [ -z "$new" ]; then
     gm_herdr_unlock
-    printf 'herdr would not split pane %s: %s; running claude -p instead\n' "$pane" "${out:-no answer}" >&2
+    printf 'herdr would not make a workspace for run %s: %s; running claude -p instead\n' "$id" "${out:-no answer}" >&2
     return 1
   fi
-  title=$(gm_run_title "$id")
   gm_herdr "$s" pane rename "$new" "$title" >/dev/null
   gm_run_settings "$id" "$focus" "$(gm_rules_path "$(gm_focus_field "$focus" repo)")" "$(gm_run_dir "$id")/settings.json" pane
   gm_sql "BEGIN IMMEDIATE;
-UPDATE run SET pane_session=$(gm_q "$s"), pane_id=$(gm_q "$new") WHERE id=$id;
-INSERT INTO event(at, actor, kind, focus_id, detail) SELECT $GM_NOW, 'keeper', 'run.pane', focus_id, $(gm_q "run $id in herdr pane $new, under the Party Leader's $pane: $title") FROM run WHERE id=$id;
+UPDATE run SET pane_session=$(gm_q "$s"), pane_workspace=$(gm_q "$nws"), pane_id=$(gm_q "$new") WHERE id=$id;
+INSERT INTO event(at, actor, kind, focus_id, detail) SELECT $GM_NOW, 'keeper', 'run.pane', focus_id, $(gm_q "run $id in herdr pane $new, in workspace $nws under the Party Leader's $ws: $title") FROM run WHERE id=$id;
 COMMIT;"
+  gm_herdr_place "$s" "$ws" "$nws" "SELECT pane_workspace AS id FROM run WHERE focus_id=(SELECT focus_id FROM run WHERE id=$id) AND pane_session=$(gm_q "$s") AND pane_workspace IS NOT NULL AND pane_closed_at IS NULL"
   line="cd $(gm_shq "$camp") && env"
   for v in GM_HALL GM_CLAUDE; do
     gm_conf_carried "$v" || continue
@@ -5273,20 +5290,25 @@ gm_run_pane_wait() {
   done
 }
 
-# gm_run_panes_close <focus id>: each Adventurer's pane whose run the Party Leader has reviewed (a notice on its
-# posting, or another dispatch) is closed; until then it stays open for the patron to read.
+# gm_run_panes_close <focus id>: each Adventurer's workspace whose run the Party Leader has reviewed (a notice on its
+# posting, or another dispatch) is closed; until then it stays open for the patron to read. A run from before each had
+# a workspace of its own has only its pane, split under the Party Leader's, closed.
 gm_run_panes_close() {
-  local id s pane
+  local id s ws pane
   command -v "$GM_HERDR" >/dev/null 2>&1 || return 0
-  while IFS=$'\t' read -r id s pane; do
+  while IFS=$'\t' read -r id s ws pane; do
     [ -n "$pane" ] || continue
-    gm_herdr "$s" pane close "$pane" >/dev/null
+    if [ "$ws" != - ]; then
+      gm_herdr "$s" workspace close "$ws" >/dev/null
+    else
+      gm_herdr "$s" pane close "$pane" >/dev/null
+    fi
     gm_sql "BEGIN IMMEDIATE; UPDATE run SET pane_closed_at=$GM_NOW WHERE id=$id; COMMIT;"
-  done <<<"$(gm_sql "SELECT id, pane_session, pane_id FROM run WHERE focus_id=$1 AND pane_id IS NOT NULL AND pane_closed_at IS NULL AND reviewed_at IS NOT NULL;")"
+  done <<<"$(gm_sql "SELECT id, pane_session, COALESCE(pane_workspace,'-'), pane_id FROM run WHERE focus_id=$1 AND pane_id IS NOT NULL AND pane_closed_at IS NULL AND reviewed_at IS NOT NULL;")"
 }
 
 # gm adventurer <run> --pane ID: what an Adventurer's herdr pane runs: claude in the camp, a session the patron can
-# read and type in, with the run's own settings and its writ as the first prompt. Only in the pane the keeper split
+# read and type in, with the run's own settings and its writ as the first prompt. Only in the pane the keeper opened
 # for that run, and only while the run is live. When claude ends before its turn did, the run is lost.
 gm_cmd_adventurer() {
   local id='' pane='' camp rpane ended dir title rc=0 claude=${GM_CLAUDE:-claude}
@@ -5348,10 +5370,10 @@ SQL
   return 0
 }
 
-# gm run <run>: the keeper, started by gm dispatch. Runs the Adventurer where the patron can see it, in a herdr pane
-# split under its Party Leader's (gm_run_pane_open), and waits for its turn to end; or, when the Party Leader has no
-# herdr pane, headless: claude -p in the camp with the run's own settings, the writ on its standard input and its
-# stream-json transcript kept. Then records how it ended.
+# gm run <run>: the keeper, started by gm dispatch. Runs the Adventurer where the patron can see it, in a herdr
+# workspace of its own under its Party Leader's (gm_run_pane_open), and waits for its turn to end; or, when the Party
+# Leader has no herdr pane, headless: claude -p in the camp with the run's own settings, the writ on its standard input
+# and its stream-json transcript kept. Then records how it ended.
 gm_cmd_run() {
   local id=${1:-} camp ended dir rc args focus visible s pane claude=${GM_CLAUDE:-claude}
   [[ $id =~ ^[0-9]+$ ]] || gm_die "run: gm run <run> is the keeper gm dispatch starts"
@@ -5695,17 +5717,21 @@ gm_herdr_request() {
   fi
 }
 
-# gm_herdr_place <session> <guild workspace> <workspace>: herdr's sidebar is one flat list, so a Party Leader's
-# workspace is shown under the guild by its label (└ <focus>) and its place: moved to the end of the block of the
-# guild's own workspaces right after the guild's. Only the order changes; a failure leaves it where herdr put it.
+# gm_herdr_place <session> <guild workspace> <workspace> [<SQL selecting the block's workspace ids, as id>]: herdr's
+# sidebar is one flat list, so a Party Leader's workspace is shown under the guild by its label (└ <focus>) and its
+# place: moved to the end of the block of the guild's own workspaces right after the guild's, its Party Leaders' and
+# their Adventurers'. An Adventurer's is placed the same way under its Party Leader's, whose block is that Party
+# Leader's other open runs. Only the order changes; a failure leaves it where herdr put it.
 gm_herdr_place() {
-  local s=$1 guild=$2 ws=$3 list params
+  local s=$1 guild=$2 ws=$3 block=${4:-} list params
+  [ -n "$block" ] || block="SELECT workspace_id AS id FROM endpoint WHERE session=$(gm_q "$s")
+    UNION SELECT pane_workspace FROM run WHERE pane_session=$(gm_q "$s") AND pane_workspace IS NOT NULL AND pane_closed_at IS NULL"
   list=$(gm_herdr "$s" workspace list)
   params=$(gm_sql "WITH w AS (
   SELECT CAST(key AS INTEGER) AS i, json_extract(value,'\$.workspace_id') AS id
   FROM json_each(CASE WHEN json_valid($(gm_q "$list")) THEN $(gm_q "$list") ELSE '{}' END, '\$.result.workspaces')),
 o AS (SELECT id, row_number() OVER (ORDER BY i) - 1 AS j FROM w WHERE id IS NOT $(gm_q "$ws")),
-mine AS (SELECT workspace_id AS id FROM endpoint WHERE session=$(gm_q "$s") AND workspace_id NOT IN ($(gm_q "$guild"), $(gm_q "$ws"))),
+mine AS (SELECT id FROM ($block) WHERE id NOT IN ($(gm_q "$guild"), $(gm_q "$ws"))),
 g AS (SELECT j FROM o WHERE id=$(gm_q "$guild"))
 SELECT json_object('workspace_id', $(gm_q "$ws"), 'insert_index', d) FROM (
   SELECT COALESCE((SELECT min(j) FROM o WHERE j > (SELECT j FROM g) AND id NOT IN (SELECT id FROM mine)), (SELECT count(*) FROM o)) AS d)

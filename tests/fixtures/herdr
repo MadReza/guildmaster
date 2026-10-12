@@ -103,6 +103,13 @@ case "${1:-} ${2:-}" in
     label=$(field workspaces "$3" 2)
     [ -n "$label" ] || err workspace_not_found "workspace $3 not found"
     printf '{"result":{"type":"workspace_info","workspace":{"workspace_id":"%s","label":"%s"}}}\n' "$3" "$label" ;;
+  "workspace close")
+    up
+    [ -n "$(field workspaces "$3" 1)" ] || err workspace_not_found "workspace $3 not found"
+    awk -F '\t' -v w="$3" '$1 != w' "$D/workspaces" >"$D/workspaces.new" && mv "$D/workspaces.new" "$D/workspaces"
+    awk -F '\t' -v w="$3" '$2 != w' "$D/tabs" >"$D/tabs.new" && mv "$D/tabs.new" "$D/tabs"
+    awk -F '\t' -v w="$3" '$3 != w' "$D/panes" >"$D/panes.new" && mv "$D/panes.new" "$D/panes"
+    printf '{"result":{"type":"ok"}}\n' ;;
   "tab create")
     up
     w=$(opt workspace "$@")

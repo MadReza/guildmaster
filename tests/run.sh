@@ -121,7 +121,7 @@ t_schema_created_on_first_use() {
   [ ! -e "$GM_HALL" ] || return 1
   gm list >/dev/null || fail "first gm call failed"
   assert_eq "$(db 'PRAGMA journal_mode;')" wal "journal mode" &&
-    assert_eq "$(db 'PRAGMA user_version;')" 7 "schema version" &&
+    assert_eq "$(db 'PRAGMA user_version;')" 8 "schema version" &&
     assert_eq "$(db "SELECT group_concat(name, ' ') FROM (SELECT name FROM sqlite_master WHERE type='table' ORDER BY name);")" \
       "endpoint event focus guard message model_sample open_span posting prompt_version run run_posting span span_link ticket" "tables"
 }
@@ -958,7 +958,7 @@ t_migration_keeps_schema1_data() {
   for i in 1 2 3 4 5 6; do gm list --all >/dev/null 2>"$WORK/migrate/err$i" & done
   wait
   for i in 1 2 3 4 5 6; do assert_eq "$(cat "$WORK/migrate/err$i")" "" "migration $i ran clean"; done
-  assert_eq "$(db 'PRAGMA user_version;')" 7 "migrated to schema 7" &&
+  assert_eq "$(db 'PRAGMA user_version;')" 8 "migrated to schema 8" &&
     assert_eq "$(for t in $tables; do db "SELECT $(db "SELECT group_concat(name, ',') FROM pragma_table_info('$t') WHERE name NOT IN ('trace_id','span_id','span_start_ms','follows_id','closed_at','start_attempts','held_at','held_told','close_requested_at','origin','summoned_at','unheard_at');") FROM $t ORDER BY rowid;"; done)" "$before" "every schema-1 row kept as it was" &&
     assert_eq "$(db "SELECT count(*) FROM posting WHERE trace_id IS NULL;")" 2 "old postings have no trace" &&
     assert_eq "$(db "SELECT group_concat(name, ' ') FROM (SELECT name FROM sqlite_master WHERE type='table' AND name IN ('span','span_link','open_span','prompt_version','model_sample') ORDER BY name);")" \
@@ -3022,9 +3022,9 @@ fake_stream() {
 
 run_ended() { wait_for "SELECT ended_at IS NOT NULL FROM run WHERE id=$1;" 1; }
 
-# ---- The visible Adventurer: a herdr pane under its Party Leader's ----
+# ---- The visible Adventurer: a herdr workspace of its own, under its Party Leader's ----
 
-# run_pane <run>: the keeper has split a pane for the run.
+# run_pane <run>: the keeper has opened a pane for the run.
 run_pane() { wait_for "SELECT pane_id IS NOT NULL FROM run WHERE id=$1;" 1; }
 
 # run_pane_line <pane>: the line the keeper typed into that pane.
@@ -3058,18 +3058,29 @@ run_stop() {
 t_dispatch_opens_the_adventurer_under_its_party_leader() {
   setup visible
   gm open appt-v2 >/dev/null 2>&1
+  gm open bravo --repo "$REPO" >/dev/null 2>&1 || fail "open bravo failed"
   export GM_FOCUS=appt-v2 GM_RUN_POLL=1 GM_WATCH_TIMEOUT=40
   fake_run "$WORK/visible/run"
   : >"$GM_FAKE_RUN/hold"
   gm post "the owner field is empty after save" >/dev/null && gm notice 1 started >/dev/null
-  local out pl pane line dir=$GM_HALL/runs/1 sid
+  local out pl pane ws line dir=$GM_HALL/runs/1 sid
+  : >"$HERDR_STUB/focused"
   out=$(gm dispatch 1 --model sonnet 2>&1) || fail "dispatch failed: $out"
   run_pane 1 || fail "the run got no pane"
   pl=$(pl_pane appt-v2)
+  ws=$(db "SELECT pane_workspace FROM run WHERE id=1;")
   pane=$(db "SELECT pane_id FROM run WHERE id=1;")
-  assert_eq "$(cat "$HERDR_STUB/splits")" "$pl	$pane	down" "split under the Party Leader's pane" &&
-    assert_eq "$(cat "$HERDR_STUB/titles")" "$pane	run 1 · #1 owner-field-empty-after" "titled with the run and its posting" &&
-    assert_eq "$(awk -F '\t' -v p="$pane" '$1 == p { print $3 }' "$HERDR_STUB/panes")" "$(awk -F '\t' -v p="$pl" '$1 == p { print $3 }' "$HERDR_STUB/panes")" "in the Party Leader's workspace" || return 1
+  # Its own workspace, one step under its Party Leader's in the sidebar, right after it: the Party Leader's pane
+  # stays whole, for the patron to talk to it.
+  [ ! -s "$HERDR_STUB/splits" ] || fail "the Party Leader's pane was split" || return 1
+  assert_eq "$(awk -F '\t' -v p="$pane" '$1 == p { print $3 }' "$HERDR_STUB/panes")" "$ws" "its pane is in the run's workspace" &&
+    assert_eq "$(sidebar | tr '\n' '|')" "guild|└ appt-v2|  └ run 1 · #1 owner-field-empty-after|└ bravo|" "labelled one step under its Party Leader's, right after it" &&
+    assert_eq "$(cat "$HERDR_STUB/titles")" "$pane	run 1 · #1 owner-field-empty-after" "its pane titled with the run and its posting" &&
+    assert_eq "$(cat "$HERDR_STUB/focused")" "" "never focused" &&
+    assert_contains "$(cat "$HERDR_STUB/calls")" "workspace create --cwd $CAMP --label   └ run 1 · #1 owner-field-empty-after --no-focus" "on the camp" || return 1
+  # A Party Leader opened later goes after the run's workspace, not between it and its own Party Leader's.
+  gm open charlie --repo "$REPO" >/dev/null 2>&1 || fail "open charlie failed"
+  assert_eq "$(sidebar | tr '\n' '|')" "guild|└ appt-v2|  └ run 1 · #1 owner-field-empty-after|└ bravo|└ charlie|" "the run stays under its Party Leader" || return 1
   line=$(run_pane_line "$pane")
   assert_contains "$line" "cd '$CAMP' && env GM_HALL='$GM_HALL'" "started in the camp" &&
     assert_contains "$line" "adventurer 1 --pane '$pane'" "runs gm adventurer for the run" || return 1
@@ -3113,11 +3124,22 @@ t_dispatch_opens_the_adventurer_under_its_party_leader() {
   rm -f "$GM_FAKE_RUN/hold"
   wait "$shell"
   assert_eq "$(db "SELECT result_subtype FROM run WHERE id=1;")" success "claude ending after its turn loses nothing" || return 1
-  # The Party Leader's review closes it.
+  # The Party Leader's review closes its workspace.
   gm notice 1 'done' abc123 >/dev/null
-  assert_eq "$(awk -F '\t' -v p="$pane" '$1 == p' "$HERDR_STUB/panes" | grep -c .)" 0 "the review closes the pane" &&
+  assert_contains "$(cat "$HERDR_STUB/calls")" "workspace close $ws --session gm-test" "the review closes the run's workspace" &&
+    assert_eq "$(awk -F '\t' -v p="$pane" '$1 == p' "$HERDR_STUB/panes" | grep -c .)" 0 "and its pane" &&
     assert_eq "$(db "SELECT pane_closed_at IS NOT NULL FROM run WHERE id=1;")" 1 "recorded" &&
-    assert_eq "$(awk -F '\t' -v p="$pl" '$1 == p' "$HERDR_STUB/panes" | grep -c .)" 1 "and only that pane"
+    assert_eq "$(sidebar | tr '\n' '|')" "guild|└ appt-v2|└ bravo|└ charlie|" "and only that workspace" &&
+    assert_eq "$(awk -F '\t' -v p="$pl" '$1 == p' "$HERDR_STUB/panes" | grep -c .)" 1 "the Party Leader's pane stays" || return 1
+  # A run from before each had a workspace of its own: only its pane, split under the Party Leader's, is closed.
+  local row
+  row=$(awk -F '\t' -v OFS='\t' -v p="$pl" '$1 == p { print "old-pane", $2, $3, "claude" }' "$HERDR_STUB/panes")
+  printf '%s\n' "$row" >>"$HERDR_STUB/panes"
+  db "INSERT INTO run(focus_id, kind, session_id, started_at, ended_at, reviewed_at, pane_session, pane_id)
+        VALUES (1, 'contract', 'old', '2026-01-01T00:00:00Z', '2026-01-01T00:10:00Z', '2026-01-01T00:20:00Z', 'gm-test', 'old-pane');"
+  gm notice 1 update "looked again" >/dev/null || fail "the notice failed"
+  assert_eq "$(grep -c '^old-pane' "$HERDR_STUB/panes")" 0 "its pane closed" &&
+    assert_eq "$(awk -F '\t' -v p="$pl" '$1 == p' "$HERDR_STUB/panes" | grep -c .)" 1 "the Party Leader's pane with it"
 }
 
 t_run_stop_reads_the_transcript() {

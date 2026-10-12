@@ -89,7 +89,7 @@ feature/saved-views
 
 - **One workspace for the guild.** Its first tab is renamed `guildmaster`. It is the front desk, where the Guildmaster session sits, kept running by the muster like a Party Leader ([zero-touch-start.md](zero-touch-start.md); until then it was a shell in the Guildhall). The Guildmaster always lives in this tab: `claude` started in the clone outside it sets the guild up, starts the Guildmaster here, and points the patron to it.
 - **One workspace per Party Leader** (since 2026-10-08; until then one tab per Party Leader in `guild`), labelled `└ <focus>`, made on the camp with `workspace create --cwd <camp>`, and placed under the guild's workspace. The patron switches workspaces to talk to a Party Leader, but never opens them by hand. herdr's sidebar is one flat list, so the nesting is the label and the place, which is how Firstmate shows its crew (below).
-- **Adventurers and Scouts** (step 3, the patron's rule, not built): each one runs in a workspace of its own on its camp, labelled `  └ <job>` and placed right under its Party Leader's workspace, so the sidebar shows every Party Leader with its crew under it; the patron prefers seeing everything in the sidebar to tabs or panes inside the Party Leader's workspace (2026-10-08). Each is recorded in the same `endpoint` table under `adventurer:<focus>#<n>` or `scout:<focus>#<n>`. A worker is not relaunched by the muster: it is ephemeral, so a dead one ends its run and its posting is reported instead. Step 3 settles that rule with the patron.
+- **Adventurers and Scouts** (the patron's rule; built for an Adventurer, [step-3-design.md](step-3-design.md#its-own-workspace-and-a-party-leader-that-answers-it)): each one runs in a workspace of its own on its camp, labelled `  └ run <n> · #<num> <slug>` and placed right under its Party Leader's workspace, so the sidebar shows every Party Leader with its Adventurers under it; the patron prefers seeing everything in the sidebar to tabs or panes inside the Party Leader's workspace (2026-10-08). The run records its workspace and pane, not the `endpoint` table: a worker is not relaunched by the muster; it is ephemeral, so a dead one ends its run as lost and its Party Leader is summoned instead.
 
 ### The record, in the register
 
@@ -224,8 +224,9 @@ Checked against herdr 0.9.1 (`herdr <group> help`) in an isolated lab session. E
 | `pane process-info --pane <pane>` | `.result.process_info.shell_pid`, `.foreground_processes[].{name, argv0}` |
 | `agent get <pane>` | `.result.agent.agent_status`, or `agent_not_found` |
 | `pane run <pane> <line>` | types the line and submits it |
-| `pane close <pane>` | only for a dead focus's husk, at `gm close` and when a dead Party Leader moves out of `guild`, and for an Adventurer's pane once its run is reviewed; closing a workspace's last pane closes the workspace |
-| `pane split <pane> --direction down --cwd <camp> --no-focus` | `.result.pane.pane_id`: an Adventurer's pane under its Party Leader's ([step-3-design.md](step-3-design.md#what-the-visible-adventurer-changed)); not yet checked against real herdr, and without a pane id the keeper runs `claude -p` instead |
+| `pane close <pane>` | only for a dead focus's husk, at `gm close` and when a dead Party Leader moves out of `guild`, and for an Adventurer's pane split under its Party Leader's before each had a workspace of its own, once its run is reviewed; closing a workspace's last pane closes the workspace |
+| `workspace create --cwd <camp> --label '  └ run <n> · …' --no-focus` | an Adventurer's own workspace, placed after its Party Leader's with `workspace.move` ([step-3-design.md](step-3-design.md#its-own-workspace-and-a-party-leader-that-answers-it)); without a workspace or pane id the keeper runs `claude -p` instead |
+| `workspace close <workspace>` | an Adventurer's workspace, once its run is reviewed |
 | `pane rename <pane> <title>` | titles an Adventurer's pane with its run; not yet checked against real herdr, and its answer is not read |
 
 Errors such as `pane_not_found` come back as JSON with exit status 1, so gm reads the JSON, not the status.
