@@ -5179,8 +5179,59 @@ gm_dispatch_permission_mode() {
   case $GM_CONF_VAL in bypass) printf bypassPermissions ;; *) printf '%s' "$GM_CONF_VAL" ;; esac
 }
 
+# gm_claude_trust <camp>: Claude Code will not ask whether to trust the camp when an Adventurer starts there, as
+# Firstmate registers each crewmate's worktree before launch (bin/fm-claude-trust.sh). In a pane the question would
+# stop the Adventurer before it reads its writ, and --dangerously-skip-permissions does not skip it. The camp is
+# trusted when projects in Claude Code's own store (${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json) says
+# hasTrustDialogAccepted for the camp, a folder above it, or the clone it is a worktree of, which is where Claude Code
+# looks first. Otherwise gm records it for the camp alone, keeping every other key, by an atomic replacement of a
+# file that is this user's own, and then reads it back. Prints why, and fails, when it cannot; never a guess.
+gm_claude_trust() {
+  local camp dir cfg common gitdir keys='' k tmp
+  camp=$(cd "$1" 2>/dev/null && pwd -P) || { printf 'the camp %s is not there' "$1"; return 1; }
+  dir=${CLAUDE_CONFIG_DIR:-$HOME}
+  case $dir in /*) ;; *) printf 'CLAUDE_CONFIG_DIR is %s, not an absolute path' "$dir"; return 1 ;; esac
+  cfg=$dir/.claude.json
+  if [ -L "$cfg" ] || [ ! -f "$cfg" ] || [ ! -O "$cfg" ]; then
+    printf "%s is not a file of this user's own (has Claude Code run here yet?)" "$cfg"
+    return 1
+  fi
+  case $camp in *'"'*) printf 'the camp %s has a double quote in its path' "$camp"; return 1 ;; esac
+  k=$camp
+  while :; do
+    keys="$keys${keys:+, }($(gm_q "$k"))"
+    [ "$k" != / ] || break
+    k=$(dirname "$k")
+  done
+  common=$(cd "$camp" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR git rev-parse --git-common-dir 2>/dev/null) &&
+    gitdir=$(cd "$camp" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR git rev-parse --git-dir 2>/dev/null) &&
+    common=$(cd "$camp" && cd "$common" && pwd -P) && gitdir=$(cd "$camp" && cd "$gitdir" && pwd -P) &&
+    [ "$common" != "$gitdir" ] && [ "${common##*/}" = .git ] && keys="$keys, ($(gm_q "${common%/.git}"))"
+  # gm_claude_trusted: 1 when one of keys is trusted in the store, 0 when none is, nothing when it is not JSON.
+  gm_claude_trusted() {
+    sqlite3 -batch :memory: "WITH c(j) AS (SELECT CAST(readfile($(gm_q "$cfg")) AS TEXT)), k(k) AS (VALUES $keys)
+SELECT EXISTS (SELECT 1 FROM c, json_each(c.j, '\$.projects') p JOIN k ON k.k = p.key
+               WHERE json_type(p.value, '\$.hasTrustDialogAccepted') = 'true') FROM c WHERE json_valid(c.j);" 2>/dev/null
+  }
+  case $(gm_claude_trusted) in
+    1) return 0 ;;
+    0) ;;
+    *) printf '%s is not JSON gm can read' "$cfg"; return 1 ;;
+  esac
+  tmp=$(mktemp "$cfg.gm.XXXXXX") || { printf 'gm could not write beside %s' "$cfg"; return 1; }
+  if ! sqlite3 -batch :memory: "SELECT writefile($(gm_q "$tmp"), json_set(CAST(readfile($(gm_q "$cfg")) AS TEXT),
+         $(gm_q "\$.projects.\"$camp\".hasTrustDialogAccepted"), json('true')));" >/dev/null 2>&1 ||
+    [ "$(sqlite3 -batch :memory: "SELECT json_valid(CAST(readfile($(gm_q "$tmp")) AS TEXT));" 2>/dev/null)" != 1 ] ||
+    ! mv -f "$tmp" "$cfg"; then
+    rm -f "$tmp"
+    printf 'gm could not record the camp as trusted in %s' "$cfg"
+    return 1
+  fi
+  [ "$(gm_claude_trusted)" = 1 ] || { printf 'the camp is still not trusted in %s after gm recorded it' "$cfg"; return 1; }
+}
+
 gm_cmd_dispatch() {
-  local refs=() model='' effort='' mode brief='' r pid pf st num canon focus fid ids='' live
+  local refs=() model='' effort='' mode why brief='' r pid pf st num canon focus fid ids='' live
   while [ $# -gt 0 ]; do
     case $1 in
       --model) model=${2:?--model needs a model}; shift 2 ;;
@@ -5216,6 +5267,8 @@ gm_cmd_dispatch() {
     model=$(gm_dispatch_model "$focus")
   fi
   mode=$(gm_dispatch_permission_mode) || exit 1
+  why=$(gm_claude_trust "$(gm_focus_field "$focus" camp)") ||
+    gm_die "dispatch: Claude Code would ask an Adventurer whether to trust the camp, and gm could not record that it is trusted: $why. Open claude in the camp once and say yes, then dispatch again"
   gm_runs_reap
   live=$(gm_sql "SELECT id FROM run WHERE focus_id=$fid AND kind='contract' AND ended_at IS NULL ORDER BY id LIMIT 1;")
   [ -z "$live" ] || gm_die "dispatch: run $live is still working in $focus's camp, and only one contract at a time changes it; keep the posting queued (gm notice <n> queued) and dispatch it when run $live ends"
@@ -5327,7 +5380,8 @@ INSERT INTO event(at, actor, kind, focus_id, detail) SELECT $GM_NOW, 'keeper', '
 COMMIT;"
   gm_herdr_place "$s" "$ws" "$nws" "SELECT pane_workspace AS id FROM run WHERE focus_id=(SELECT focus_id FROM run WHERE id=$id) AND pane_session=$(gm_q "$s") AND pane_workspace IS NOT NULL AND pane_closed_at IS NULL"
   line="cd $(gm_shq "$camp") && env"
-  for v in GM_HALL GM_CLAUDE; do
+  # CLAUDE_CONFIG_DIR too: the Adventurer reads the same Claude Code store gm recorded its camp's trust in.
+  for v in GM_HALL GM_CLAUDE CLAUDE_CONFIG_DIR; do
     gm_conf_carried "$v" || continue
     eval "val=\${$v:-}"
     [ -z "$val" ] || line="$line $v=$(gm_shq "$val")"

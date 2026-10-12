@@ -267,7 +267,7 @@ A first run of this check, with panes running the operator's own zsh, found the 
 
 - Telemetry for the Guildmaster's own session; it runs without the collector's environment.
 - A real `otelcol-contrib` in the lab check of the collector kept running: a stand-in answered for it (above). The suite runs the real one, through `gm collector`, only where it is installed.
-- Trusting folders ahead of time: Claude Code asks once for the front desk's folder and once for each new camp, and `gm` does not edit Claude Code's own configuration to skip that.
+- Trusting folders ahead of time: Claude Code asks once for the front desk's folder and once for each new camp, and `gm` does not edit Claude Code's own configuration to skip that. (Since step 3's #49, `gm dispatch` does, for an Adventurer's camp only: [step 3](step-3-design.md#starting-as-firstmates-crew-starts).)
 - Editing a shell startup file to put `~/.local/bin` on the `PATH`, or adding an alias: the README says how, for those who want it.
 - `gm tell` and any talking to a Party Leader (Q22), phase-change digests, and `gm history`: the rest of step 4.
 - A systemd timer on Linux, where autostart is reported as not available.

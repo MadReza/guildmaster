@@ -22,6 +22,9 @@ export HOME=$WORK/home
 mkdir -p "$HOME"
 # The suite may itself run inside Claude Code, whose session variables would join gm's spans to it.
 unset CLAUDE_CODE_SESSION_ID CLAUDE_CODE_ENABLE_TELEMETRY CLAUDE_EFFORT TRACEPARENT GM_FOCUS GM_RUN CLAUDECODE GM_HERDR_WORKSPACE GM_HERDR_AUTO GM_CHAT GM_CHAT_FOCUS
+# Claude Code's own store is the suite's home's, never the real one: gm dispatch records a camp's trust there.
+unset CLAUDE_CONFIG_DIR
+printf '{"projects":{}}\n' >"$HOME/.claude.json"
 # gm never asks a question or looks for the real Claude Code unless a test says so.
 export GM_INTERACTIVE=0 GM_CLAUDE=$ROOT/tests/fixtures/fake-claude GM_HERDR=$ROOT/tests/fixtures/herdr GM_HERDR_SOCKET_CMD=$ROOT/tests/fixtures/herdr-socket
 # No test reaches a real herdr or launchd: the stubs in tests/fixtures come first on PATH; the herdr stub keeps its
@@ -3479,6 +3482,76 @@ t_adventurer_permission_mode() {
   assert_contains "$out" "adventurer-permission-mode: yolo, which is not auto, bypass or acceptEdits" "names the setting" &&
     assert_eq "$(db "SELECT count(*) FROM run;")" 4 "no run recorded" &&
     assert_contains "$(cat "$GM_HALL/guild.conf")" "# adventurer-permission-mode: auto | bypass | acceptEdits, default bypass" "guild.conf documents it"
+}
+
+# Claude Code never asks an Adventurer whether to trust its camp, as Firstmate registers each crewmate's worktree:
+# gm dispatch records the camp as trusted in Claude Code's own store when nothing there trusts it yet, keeping every
+# other key, and refuses the dispatch, recording no run, when it cannot.
+t_dispatch_trusts_the_camp() {
+  setup trust
+  export GM_FOCUS=appt-v2 HOME=$WORK/trust/home
+  fake_run "$WORK/trust/run"
+  mkdir -p "$HOME"
+  local cfg=$HOME/.claude.json out camp repo n=0 before
+  camp=$(cd "$CAMP" && pwd -P)
+  repo=$(cd "$REPO" && pwd -P)
+  # dispatched <words>: a new posting dispatched and its run ended; fails with what gm said.
+  dispatched() {
+    n=$((n + 1))
+    gm post "$1" >/dev/null && gm notice "$n" started >/dev/null
+    out=$(gm dispatch "$n" 2>&1) || return 1
+    run_ended "$(db "SELECT max(id) FROM run;")" || fail "the run never ended"
+    gm notice "$n" 'done' >/dev/null
+  }
+  trusted() { json "SELECT COALESCE(json_type(CAST(readfile($(sqlq "${2:-$cfg}")) AS TEXT), $(sqlq "\$.projects.\"$1\".hasTrustDialogAccepted")), 'absent');"; }
+  # Nothing trusts it yet: recorded for the camp, merged into its entry, every other key kept.
+  json "SELECT writefile($(sqlq "$cfg"), json_object('numStartups', 7, 'theme', 'dark', 'projects', json_object(
+    '/elsewhere', json_object('hasTrustDialogAccepted', json('true')),
+    $(sqlq "$camp"), json_object('allowedTools', json_array('Bash(ls)'), 'hasTrustDialogAccepted', json('false')))));" >/dev/null
+  dispatched "job one" || fail "dispatch failed: $out" || return 1
+  assert_eq "$(trusted "$camp")" true "the camp recorded as trusted" &&
+    assert_eq "$(json "SELECT json_extract(CAST(readfile($(sqlq "$cfg")) AS TEXT), '\$.projects.\"$camp\".allowedTools[0]')")" 'Bash(ls)' "its entry's other keys kept" &&
+    assert_eq "$(json "SELECT json_extract(j,'\$.numStartups')||' '||json_extract(j,'\$.theme')||' '||json_extract(j,'\$.projects./elsewhere.hasTrustDialogAccepted') FROM (SELECT CAST(readfile($(sqlq "$cfg")) AS TEXT) AS j);")" "7 dark 1" "every other key kept" &&
+    assert_eq "$(find "$HOME" -name '.claude.json.gm.*' | head -n 1)" "" "no temporary file left" || return 1
+  # The clone it is a worktree of is trusted, which is where Claude Code looks first: nothing is written.
+  json "SELECT writefile($(sqlq "$cfg"), json_object('projects', json_object($(sqlq "$repo"), json_object('hasTrustDialogAccepted', json('true')))));" >/dev/null
+  before=$(cat "$cfg")
+  dispatched "job two" || fail "dispatch with the clone trusted failed: $out" || return 1
+  assert_eq "$(cat "$cfg")" "$before" "nothing written when the clone is trusted" || return 1
+  # So is a folder above the camp.
+  json "SELECT writefile($(sqlq "$cfg"), json_object('projects', json_object($(sqlq "$(dirname "$camp")"), json_object('hasTrustDialogAccepted', json('true')))));" >/dev/null
+  before=$(cat "$cfg")
+  dispatched "job three" || fail "dispatch with a folder above trusted failed: $out" || return 1
+  assert_eq "$(cat "$cfg")" "$before" "nothing written when a folder above is trusted" || return 1
+  # CLAUDE_CONFIG_DIR names the store, as for Claude Code.
+  mkdir -p "$WORK/trust/config"
+  printf '{}\n' >"$WORK/trust/config/.claude.json"
+  CLAUDE_CONFIG_DIR=$WORK/trust/config dispatched "job four" || fail "dispatch with CLAUDE_CONFIG_DIR failed: $out" || return 1
+  assert_eq "$(trusted "$camp" "$WORK/trust/config/.claude.json")" true "recorded in CLAUDE_CONFIG_DIR's store" &&
+    assert_eq "$(cat "$cfg")" "$before" "and not in the home's" || return 1
+  # What gm cannot read or write refuses the dispatch, records no run and leaves the file as it was.
+  local runs bad
+  runs=$(db "SELECT count(*) FROM run;")
+  for bad in 'missing' 'not json' 'a link' 'relative'; do
+    rm -f "$cfg"
+    case $bad in
+      'not json') printf '{"projects": \n' >"$cfg" ;;
+      'a link') printf '{}\n' >"$WORK/trust/real.json" && ln -s "$WORK/trust/real.json" "$cfg" ;;
+      relative) printf '{}\n' >"$cfg" ;;
+    esac
+    gm post "job $bad" >/dev/null && n=$((n + 1)) && gm notice "$n" started >/dev/null
+    if [ "$bad" = relative ]; then
+      out=$(CLAUDE_CONFIG_DIR=config gm dispatch "$n" 2>&1) && fail "dispatched with a relative CLAUDE_CONFIG_DIR"
+    else
+      out=$(gm dispatch "$n" 2>&1) && fail "dispatched with a store that is $bad"
+    fi
+    assert_contains "$out" "Claude Code would ask an Adventurer whether to trust the camp, and gm could not record that it is trusted" "says why when the store is $bad" &&
+      assert_contains "$out" "Open claude in the camp once and say yes" "and what to do" &&
+      assert_eq "$(db "SELECT count(*) FROM run;")" "$runs" "no run recorded when the store is $bad" || return 1
+    gm notice "$n" closed >/dev/null
+  done
+  assert_eq "$(cat "$WORK/trust/real.json")" "{}" "a linked store is never written" &&
+    assert_contains "$out" "CLAUDE_CONFIG_DIR is config, not an absolute path" "names a relative CLAUDE_CONFIG_DIR"
 }
 
 t_lost_run_is_reaped() {

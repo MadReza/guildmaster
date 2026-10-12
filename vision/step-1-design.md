@@ -140,7 +140,7 @@ The last row needed a test, because a camp is a linked worktree.
 On 2.1.286, in a throwaway repository, a `claude -p` run started in a linked worktree ran the `SessionStart` and `UserPromptSubmit` hooks from the worktree's own `.claude/settings.local.json`, and a hook in the main checkout's `settings.local.json` ran as well, alongside it.
 So the camp's file works, and a patron's own local hooks in the clone are not displaced. Where both files set the same single-valued key, the documentation says the root's value wins; a `statusLine` in the clone's own `.claude/settings.local.json` would therefore replace the camp's.
 
-Claude Code asks once whether to trust each new camp folder; `gm` does not pre-answer that, since doing so means editing the patron's global `~/.claude.json`.
+Claude Code asks once whether to trust each new camp folder; `gm` does not pre-answer that for a Party Leader, since doing so means editing the patron's global `~/.claude.json`. An Adventurer, which nobody may be watching when it starts, is the exception: since step 3's #49, `gm dispatch` records its camp as trusted there when nothing yet trusts it ([step 3](step-3-design.md#starting-as-firstmates-crew-starts)).
 
 ## What changed from the consultation
 
