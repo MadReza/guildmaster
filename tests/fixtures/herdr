@@ -9,6 +9,8 @@
 #   runs         pane<TAB>the line typed into it by pane run
 #   splits       pane split<TAB>the new pane<TAB>its --direction
 #   titles       pane<TAB>the title pane rename gave it
+#   fg/<pane>    when present, the pane's foreground processes as process-info lists them (JSON objects, comma-
+#                separated; its shell is added), in place of what the panes file says it runs
 #   run-proc     what a pane runs after pane run (default claude)
 #   run-proc-collector  what the collector's pane runs after pane run (default otelcol-contrib)
 #   typed        pane<TAB>the text sent to it by pane send-text, or <key> for pane send-keys
@@ -134,7 +136,12 @@ case "${1:-} ${2:-}" in
     p=$(opt pane "$@")
     proc=$(field panes "$p" 4)
     [ -n "$proc" ] || err pane_not_found "pane not found"
+    if [ -f "$D/fg/$p" ]; then
+      proc='fg'
+      fg="$(cat "$D/fg/$p"),{\"name\":\"zsh\",\"argv0\":\"zsh\",\"argv\":[\"-zsh\"],\"pid\":999991}"
+    fi
     case $proc in
+      fg) ;;
       shell) fg='{"name":"zsh","argv0":"zsh","argv":["-zsh"],"pid":999991}' ;;
       claude) fg='{"name":"claude","argv0":"claude","argv":["claude","--name","x"],"pid":999992},{"name":"zsh","argv0":"zsh","argv":["-zsh"],"pid":999991}' ;;
       *) fg="{\"name\":\"$proc\",\"argv0\":\"$proc\",\"argv\":[\"$proc\"],\"pid\":999993},{\"name\":\"zsh\",\"argv0\":\"zsh\",\"argv\":[\"-zsh\"],\"pid\":999991}" ;;

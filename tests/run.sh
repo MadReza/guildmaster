@@ -3387,6 +3387,63 @@ t_camp_settings_arm_the_watch() {
   done
 }
 
+t_watch_ends_with_its_session() {
+  setup watchsession
+  gm open appt-v2 >/dev/null 2>&1
+  local pidf=$GM_HALL/watch.appt-v2.pid c w i
+  # A session named claude (bash under that name) arms the watch, then ends without a word.
+  ln -s "$(command -v bash)" "$WORK/watchsession/claude"
+  # shellcheck disable=SC2016 # $0 is for the inner shell
+  as_watch "$WORK/watchsession/claude" -c 'printf "{}" | bash "$0" hook watch; true' "$GM" >/dev/null 2>&1 & c=$!
+  for i in 1 2 3 4 5 6 7 8 9 10; do [ ! -s "$pidf" ] || break; sleep 0.2; done
+  w=$(cat "$pidf" 2>/dev/null)
+  [ -n "$w" ] && kill -0 "$w" 2>/dev/null || fail "the watch did not arm" || return 1
+  sleep 1
+  kill -0 "$w" 2>/dev/null || fail "the watch ended while its session lives" || return 1
+  kill -9 "$(ps -o ppid= -p "$w" | tr -d ' ')"
+  wait "$c" 2>/dev/null || true
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do kill -0 "$w" 2>/dev/null || break; sleep 0.2; done
+  if kill -0 "$w" 2>/dev/null; then kill "$w"; fail "the watch outlived its session"; fi
+  [ ! -e "$pidf" ] || fail "it left its pid file"
+}
+
+t_open_restarts_a_party_leader_whose_watch_outlived_it() {
+  setup deadwatch
+  gm open appt-v2 >/dev/null 2>&1 || fail "open failed"
+  local pane out w kids k other
+  pane=$(pl_pane appt-v2)
+  # Its session has ended; its watch, and what the watch runs, are still in the pane.
+  mkdir -p "$WORK/deadwatch/bin" "$HERDR_STUB/fg"
+  printf 'sleep 60 &\nsleep 60 &\nwait\n' >"$WORK/deadwatch/bin/gm"
+  bash "$WORK/deadwatch/bin/gm" hook watch & w=$!
+  sleep 0.5
+  kids=$(pgrep -P "$w" | tr '\n' ' ')
+  [ -n "$kids" ] || fail "the stand-in watch has no children" || return 1
+  out=''
+  for k in $kids; do out="${out:+$out,}{\"name\":\"tail\",\"argv0\":\"tail\",\"argv\":[\"tail\"],\"pid\":$k}"; done
+  printf '%s' "$out" >"$HERDR_STUB/fg/$pane"
+  : >"$HERDR_STUB/runs"
+  out=$(gm open appt-v2 2>&1) || fail "the second open failed: $out"
+  rm -f "$HERDR_STUB/fg/$pane"
+  assert_contains "$out" "appt-v2: Party Leader started in herdr pane $pane (dead: the pane held only an ended Party Leader's watch, now stopped)" "the first open starts it" &&
+    assert_eq "$(runs_in "$pane")" 1 "in its own pane"
+  sleep 0.2
+  if kill -0 "$w" 2>/dev/null; then kill "$w"; fail "the watch was not ended"; fi
+  for k in $kids; do
+    if kill -0 "$k" 2>/dev/null; then kill "$k"; fail "what the watch ran was not ended"; fi
+  done
+  # A pane running anything else is still left alone.
+  sleep 60 & other=$!
+  printf '{"name":"vim","argv0":"vim","argv":["vim"],"pid":%s}' "$other" >"$HERDR_STUB/fg/$pane"
+  : >"$HERDR_STUB/runs"
+  out=$(gm open appt-v2 2>&1) || fail "the third open failed: $out"
+  rm -f "$HERDR_STUB/fg/$pane"
+  kill -0 "$other" 2>/dev/null || fail "gm ended a process that was not a watch"
+  kill "$other" 2>/dev/null
+  assert_contains "$out" "appt-v2: unknown (the pane runs vim, not a Party Leader); left alone" "something else: unknown" &&
+    assert_eq "$(runs_in "$pane")" 0 "nothing typed"
+}
+
 # nudge_ready: a Party Leader alive in herdr with a run finished long ago that nobody summoned, and no watch.
 nudge_ready() {
   setup "$1"

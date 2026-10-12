@@ -5460,6 +5460,45 @@ gm_cmd_summons() {
 
 gm_watch_pidfile() { printf '%s/watch.%s.pid' "$GM_HALL" "$1"; }
 
+# The pid of the Claude Code session that armed this watch: its nearest ancestor named claude, GM_CLAUDE's name, or
+# a version (2.1.288); nothing when there is none, and the watch then does not look.
+gm_watch_session() {
+  ps -axo pid=,ppid=,comm= 2>/dev/null | awk -v me="$$" -v c="$(basename "${GM_CLAUDE:-claude}")" '
+    { n = split($3, parts, "/"); name[$1] = parts[n]; parent[$1] = $2 }
+    END {
+      q = parent[me]
+      for (i = 0; i < 64 && q > 1; i++) {
+        if (name[q] == "claude" || name[q] == c || name[q] ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) { print q; exit }
+        q = parent[q]
+      }
+    }'
+}
+
+# gm_dead_watch <process-info json>: when every process the pane runs but its shells is a Party Leader's watch (gm
+# hook watch) or a child of one, those watches' pids and the processes' pids; nothing otherwise. Only asked of a
+# pane where no claude runs, so such a watch has outlived its session.
+gm_dead_watch() {
+  local pids
+  pids=$(sqlite3 -batch :memory: "
+WITH j(j) AS (SELECT $(gm_q "$1"))
+SELECT json_extract(value,'\$.pid') FROM j, json_each(CASE WHEN json_valid(j.j) THEN j.j ELSE '{}' END, '\$.result.process_info.foreground_processes')
+WHERE ltrim(COALESCE(json_extract(value,'\$.name'),''),'-') NOT IN ($GM_SHELLS);" 2>/dev/null | tr '\n' ' ')
+  case $pids in '' | *[!0-9\ ]*) return 0 ;; esac
+  ps -axo pid=,ppid=,args= 2>/dev/null | awk -v want="$pids" '
+    { pid = $1; parent[pid] = $2; $1 = ""; $2 = ""; if ($0 ~ /(^|[ \/])gm hook watch *$/) watch[pid] = 1 }
+    END {
+      n = split(want, w, " ")
+      for (i = 1; i <= n; i++) {
+        q = w[i]; found = ""
+        for (j = 0; j < 64 && q > 1; j++) { if (q in watch) { found = q; break }; q = parent[q] }
+        if (found == "") exit 1
+        out[found] = 1
+      }
+      for (k in out) printf "%s ", k
+      printf "%s", want
+    }' || true
+}
+
 # Focus $1's Party Leader has a live watch.
 gm_watch_alive() {
   local pid
@@ -5478,18 +5517,24 @@ gm_watch_retire() {
 # gm hook watch: the Party Leader's watch, armed by SessionStart, Stop and StopFailure with asyncRewake. Only in that
 # Party Leader's own session; exactly one per focus (the newest pid in the pid file; an older watch sees it changed
 # and exits); a register query every GM_WATCH_POLL seconds, no model and no herdr. On a summons it records it and
-# exits 2, its stderr shown to the woken Party Leader. It exits 0 before Claude Code's timeout would kill it.
+# exits 2, its stderr shown to the woken Party Leader. It exits 0 before Claude Code's timeout would kill it, and
+# once the Claude Code session that armed it has ended, which leaves it running in the pane otherwise (#55).
 gm_hook_watch() {
-  local focus=${GM_FOCUS:-} pidf out waited=0 limit reaped=0
+  local focus=${GM_FOCUS:-} pidf out waited=0 limit reaped=0 session
   cat >/dev/null 2>&1 || true
   [ -n "$focus" ] && [ -s "$GM_DB" ] && [ -n "$(gm_focus_id "$focus" 2>/dev/null)" ] || return 0
   gm_close_self "$focus" 2>/dev/null || return 0
   pidf=$(gm_watch_pidfile "$focus")
   printf '%s' "$$" >"$pidf"
+  session=$(gm_watch_session)
   limit=$((GM_WATCH_TIMEOUT - 30))
   [ "$limit" -gt 0 ] || limit=$GM_WATCH_TIMEOUT
   while [ "$waited" -lt "$limit" ]; do
     [ "$(cat "$pidf" 2>/dev/null || true)" = "$$" ] || return 0
+    if [ -n "$session" ] && ! kill -0 "$session" 2>/dev/null; then
+      rm -f "$pidf"
+      return 0
+    fi
     if [ "$reaped" -le 0 ]; then
       gm_runs_reap
       reaped=30
@@ -5815,7 +5860,7 @@ gm_herdr_pane_process() {
 # A Party Leader's state, with a detail: alive; dead (its pane holds only a shell); missing (no pane recorded, or
 # the pane is gone); starting (launched moments ago); or unknown. Only dead and missing are ever relaunched.
 gm_endpoint_state() {
-  local key=$1 row s ws pane fresh verdict status
+  local key=$1 row s ws pane fresh verdict status watch
   row=$(gm_endpoint "$key")
   if [ -z "$row" ]; then
     printf 'missing\tno pane recorded'
@@ -5848,6 +5893,12 @@ gm_endpoint_state() {
         printf 'starting\tlaunched moments ago'
       elif [ "$verdict" = shell ]; then
         printf 'dead\tthe pane holds only a shell'
+      elif [ "${key%%:*}" = party-leader ] && watch=$(gm_dead_watch "$(gm_herdr "$s" pane process-info --pane "$pane")") && [ -n "$watch" ]; then
+        # A Party Leader's session ended, and its watch is still running (#55): the watch is ended, and the pane
+        # holds only a shell again.
+        # shellcheck disable=SC2086 # a list of pids
+        kill $watch 2>/dev/null || true
+        printf "dead\tthe pane held only an ended Party Leader's watch, now stopped"
       else
         printf 'unknown\tthe pane runs %s, not %s' "${verdict#other:}" "$([ "$key" = collector ] && printf 'the collector' || printf 'a Party Leader')"
       fi ;;
