@@ -3074,13 +3074,13 @@ t_dispatch_opens_the_adventurer_under_its_party_leader() {
   # stays whole, for the patron to talk to it.
   [ ! -s "$HERDR_STUB/splits" ] || fail "the Party Leader's pane was split" || return 1
   assert_eq "$(awk -F '\t' -v p="$pane" '$1 == p { print $3 }' "$HERDR_STUB/panes")" "$ws" "its pane is in the run's workspace" &&
-    assert_eq "$(sidebar | tr '\n' '|')" "guild|└ appt-v2|  └ run 1 · #1 owner-field-empty-after|└ bravo|" "labelled one step under its Party Leader's, right after it" &&
+    assert_eq "$(sidebar | tr '\n' '|')" "guild|└ appt-v2|  └ #1 owner-field-empty-after|└ bravo|" "labelled one step under its Party Leader's, right after it" &&
     assert_eq "$(cat "$HERDR_STUB/titles")" "$pane	run 1 · #1 owner-field-empty-after" "its pane titled with the run and its posting" &&
     assert_eq "$(cat "$HERDR_STUB/focused")" "" "never focused" &&
-    assert_contains "$(cat "$HERDR_STUB/calls")" "workspace create --cwd $CAMP --label   └ run 1 · #1 owner-field-empty-after --no-focus" "on the camp" || return 1
+    assert_contains "$(cat "$HERDR_STUB/calls")" "workspace create --cwd $CAMP --label   └ #1 owner-field-empty-after --no-focus" "on the camp" || return 1
   # A Party Leader opened later goes after the run's workspace, not between it and its own Party Leader's.
   gm open charlie --repo "$REPO" >/dev/null 2>&1 || fail "open charlie failed"
-  assert_eq "$(sidebar | tr '\n' '|')" "guild|└ appt-v2|  └ run 1 · #1 owner-field-empty-after|└ bravo|└ charlie|" "the run stays under its Party Leader" || return 1
+  assert_eq "$(sidebar | tr '\n' '|')" "guild|└ appt-v2|  └ #1 owner-field-empty-after|└ bravo|└ charlie|" "the run stays under its Party Leader" || return 1
   line=$(run_pane_line "$pane")
   assert_contains "$line" "cd '$CAMP' && env GM_HALL='$GM_HALL'" "started in the camp" &&
     assert_contains "$line" "adventurer 1 --pane '$pane'" "runs gm adventurer for the run" || return 1

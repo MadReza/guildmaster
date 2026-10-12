@@ -5276,10 +5276,12 @@ gm_run_args() {
   esac
 }
 
-# An Adventurer's workspace label: one step deeper than its Party Leader's (└ <focus>) in herdr's sidebar.
-gm_run_label() { printf '  └ %s' "$1"; }
+# gm_run_label <run> <title>: an Adventurer's workspace label, one step deeper than its Party Leader's (└ <focus>) in
+# herdr's sidebar: its postings without the run number ("  └ #28 visible-adventurer-pane"). A posting never has two live
+# runs, and gm finds a run's workspace by the id recorded on the run, never by its label.
+gm_run_label() { printf '  └ %s' "${2#"run $1 · "}"; }
 
-# gm_run_pane_open <run> <focus> <camp>: the Adventurer's own herdr workspace on the camp, labelled with the run one
+# gm_run_pane_open <run> <focus> <camp>: the Adventurer's own herdr workspace on the camp, labelled with its postings one
 # step under its Party Leader's and placed right after it, never focused, its pane titled with the run and running gm
 # adventurer; prints session<TAB>pane. The Party Leader's pane stays whole, for the patron to talk to it. Under the
 # herdr lock, so no muster relaunches the Party Leader's pane meanwhile. Fails, and the keeper runs claude -p instead,
@@ -5296,7 +5298,7 @@ gm_run_pane_open() {
     return 1
   fi
   title=$(gm_run_title "$id")
-  out=$(gm_herdr "$s" workspace create --cwd "$camp" --label "$(gm_run_label "$title")" --no-focus)
+  out=$(gm_herdr "$s" workspace create --cwd "$camp" --label "$(gm_run_label "$id" "$title")" --no-focus)
   IFS=$'\t' read -r nws new <<<"$(gm_hj "$out" '$.result.workspace.workspace_id' '$.result.root_pane.pane_id')"
   if [ -z "$nws" ] || [ -z "$new" ]; then
     gm_herdr_unlock
