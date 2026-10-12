@@ -63,7 +63,7 @@ start-tries	GM_START_TRIES	3	count	Starts in a row never seen alive before a Par
 repo-roots	-	-	text	Folders, separated by spaces, where gm repos looks for clones instead of the usual source folders.
 contract-model	-	party-leader	model	The model an Adventurer works a contract on: party-leader is the model its Party Leader runs on now; otherwise a Claude Code model name (sonnet, opus, claude-sonnet-5-5). gm dispatch --model overrides it once.
 contract-effort	-	medium	effort	The effort an Adventurer works a contract at: low, medium, high, xhigh or max. gm dispatch --effort overrides it once.
-adventurer-permission-mode	-	auto	permission	How every Adventurer gm starts meets Claude Code's permission prompts, as Firstmate starts its crew: auto lets Claude Code's auto mode answer them (--permission-mode auto); bypass skips them all (--dangerously-skip-permissions); acceptEdits accepts edits and leaves the rest to its Party Leader. In every mode the rules hook still denies a forbidden push, a new branch or a merge request. A run keeps the mode it was dispatched with.
+adventurer-permission-mode	-	bypass	permission	How every Adventurer gm starts meets Claude Code's permission prompts, as Firstmate starts its crew: bypass skips them all (--dangerously-skip-permissions); auto lets Claude Code's auto mode answer them (--permission-mode auto); acceptEdits accepts edits and leaves the rest to its Party Leader. In every mode the rules hook still denies a forbidden push, a new branch or a merge request. A run keeps the mode it was dispatched with.
 commit-attribution	-	off	onoff	Claude Code's attribution in an Adventurer's commits and pull requests: off leaves them as the patron's own; on puts Claude Code's back.
 editor	-	open	command	The command the spyglass opens a changed file with, the file's path given after it: open is the app the Mac opens its kind with; for one editor, open -a Zed, or code -g."
 GM_CONF_ENV=' '
@@ -5169,9 +5169,9 @@ gm_keeper_spawn() {
 gm_dispatch_permission_mode() {
   local v
   v=$(gm_conf_get adventurer-permission-mode)
-  [ -n "$v" ] || v=auto
+  [ -n "$v" ] || v=bypass
   gm_conf_norm permission "$v" ||
-    gm_die "dispatch: guild.conf says adventurer-permission-mode: $v, which is not auto, bypass or acceptEdits; set one (gm config set adventurer-permission-mode auto), then dispatch again"
+    gm_die "dispatch: guild.conf says adventurer-permission-mode: $v, which is not auto, bypass or acceptEdits; set one (gm config set adventurer-permission-mode bypass), then dispatch again"
   case $GM_CONF_VAL in bypass) printf bypassPermissions ;; *) printf '%s' "$GM_CONF_VAL" ;; esac
 }
 

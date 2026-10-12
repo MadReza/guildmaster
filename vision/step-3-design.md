@@ -264,10 +264,24 @@ The patron, on 2026-10-12, in the Party Leader of `adventurers` (posting #41):
 
 Firstmate starts every Claude crewmate with the flag `config/claude-permission-mode` names, `bypass` by default or `auto`, re-read on every launch, and refuses an unknown value ([its launch](../firstmate/components/crew/launch.html)). An Adventurer started in `acceptEdits` stops at every command its allow-list does not name, and each stop now summons its Party Leader. So this changes the fixed `--permission-mode acceptEdits` of [slice 1](#permissions-in-slice-1):
 
-- **`adventurer-permission-mode` in `guild.conf`**: `auto` (the default) starts claude with `--permission-mode auto`, Claude Code's own classifier answering its prompts; `bypass` with `--dangerously-skip-permissions`; `acceptEdits` as before. It applies to every Adventurer gm starts, in its herdr workspace and in the `claude -p` fallback alike.
+- **`adventurer-permission-mode` in `guild.conf`**: `auto` (the default until [#49](#starting-as-firstmates-crew-starts), now `bypass`) starts claude with `--permission-mode auto`, Claude Code's own classifier answering its prompts; `bypass` with `--dangerously-skip-permissions`; `acceptEdits` as before. It applies to every Adventurer gm starts, in its herdr workspace and in the `claude -p` fallback alike.
 - **Read at every dispatch, recorded on the run.** `gm dispatch` reads the setting and writes Claude Code's mode name on the run (`permission_mode`: `auto`, `bypassPermissions`, `acceptEdits`), and the keeper starts claude from the run, so a run keeps the mode it was dispatched with. A value the setting cannot take refuses the dispatch, naming the setting, rather than starting an Adventurer in a mode the patron did not choose; elsewhere gm ignores such a value and keeps the default.
 - **The guard rails stay in every mode.** The rules hook (`gm hook rules`) is in the run's settings whatever the mode, and so are the denied merges, rebases, new branches and merge requests: a `PreToolUse` hook's deny and a deny rule hold in `bypass` too. The suite checks the settings carry them in each mode.
-- Firstmate's default is `bypass`; the guild's is `auto`, the safer of the two the patron named, since the rules hook is a guard rail, not a sandbox.
+- Firstmate's default is `bypass`; the guild's was `auto`, the safer of the two the patron named, since the rules hook is a guard rail, not a sandbox, until the patron chose `bypass` ([below](#starting-as-firstmates-crew-starts)).
+
+### Starting as Firstmate's crew starts
+
+The patron, on 2026-10-12, in the Party Leader of `adventurers` (posting #49):
+
+<!-- patron: begin -->
+
+"Then you need to make sure that when an adventure starts they start and bypass permission or on auto mode based on the ones you could control correctly. Check out how First Mate does it for its crews."
+
+<!-- patron: end -->
+
+What Firstmate does at a Claude crewmate's launch, besides the permission flag ([its launch](../firstmate/components/crew/launch.html), [its dispatch](../firstmate/components/crew/dispatch.html)), and what gm now does the same way:
+
+- **`bypass` is the default**, as Firstmate's: the patron chose it. `auto` and `acceptEdits` stay, and a run still keeps the mode it was dispatched with.
 
 ## Slice 2: push rules in every camp
 

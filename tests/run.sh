@@ -3094,7 +3094,7 @@ t_dispatch_opens_the_adventurer_under_its_party_leader() {
   sid=$(db "SELECT session_id FROM run WHERE id=1;")
   assert_eq "$(cat "$GM_FAKE_RUN/stdin")" "$(cat "$dir/writ.md")" "the writ is its first prompt" &&
     assert_eq "$(cat "$GM_FAKE_RUN/pwd")" "$CAMP" "in the camp" &&
-    assert_eq "$(head -n 14 "$GM_FAKE_RUN/args" | tr '\n' ' ')" "--name run 1 · #1 owner-field-empty-after --session-id $sid --setting-sources user,project --settings $dir/settings.json --model sonnet --effort medium --permission-mode auto " "its command line, without -p" &&
+    assert_eq "$(head -n 13 "$GM_FAKE_RUN/args" | tr '\n' ' ')" "--name run 1 · #1 owner-field-empty-after --session-id $sid --setting-sources user,project --settings $dir/settings.json --model sonnet --effort medium --dangerously-skip-permissions " "its command line, without -p" &&
     assert_eq "$(grep -c '^CLAUDECODE=\|^GM_FOCUS=' "$GM_FAKE_RUN/env")" 0 "not as a session inside Claude Code, nor as the Party Leader" || return 1
   local f="CAST(readfile('$dir/settings.json') AS TEXT)"
   assert_eq "$(json "SELECT group_concat(key) FROM json_each(json_extract($f,'\$.hooks'))")" "PreToolUse,Stop,StopFailure" "the rules hook, and the Stop hooks that record its end" &&
@@ -3308,7 +3308,7 @@ t_dispatch_hands_a_posting_to_an_adventurer() {
   [ -f "$GM_HALL/prompts/adventurer/contract.md" ] || fail "the template was not copied into the Guildhall"
   sid=$(db "SELECT session_id FROM run WHERE id=1;")
   assert_eq "$(cat "$GM_FAKE_RUN/pwd")" "$CAMP" "it runs in the camp" &&
-    assert_eq "$(tr '\n' ' ' <"$GM_FAKE_RUN/args")" "-p --session-id $sid --output-format stream-json --verbose --setting-sources user,project --settings $dir/settings.json --model sonnet --effort medium --permission-mode auto " "its command line" &&
+    assert_eq "$(tr '\n' ' ' <"$GM_FAKE_RUN/args")" "-p --session-id $sid --output-format stream-json --verbose --setting-sources user,project --settings $dir/settings.json --model sonnet --effort medium --dangerously-skip-permissions " "its command line" &&
     assert_eq "$(grep -c '^CLAUDECODE=' "$GM_FAKE_RUN/env")" 0 "not as a session inside Claude Code" || return 1
   local settings s
   settings=$(cat "$dir/settings.json")
@@ -3426,8 +3426,8 @@ t_dispatch_several_postings_and_settings() {
 }
 
 # An Adventurer starts as Firstmate's crew does: adventurer-permission-mode in guild.conf, read at every dispatch,
-# auto by default. The rules hook and the denied merges, branches and merge requests are in its settings whatever
-# the mode.
+# bypass by default, as Firstmate's. The rules hook and the denied merges, branches and merge requests are in its
+# settings whatever the mode.
 t_adventurer_permission_mode() {
   setup permmode
   export GM_FOCUS=appt-v2
@@ -3440,13 +3440,13 @@ t_adventurer_permission_mode() {
     out=$(gm dispatch "$n" 2>&1) || fail "dispatch in mode ${mode:-default} failed: $out"
     run_ended "$n" || fail "run $n never ended"
     case $mode in
-      '' | auto) flag='--permission-mode auto' ;;
-      bypass) flag='--dangerously-skip-permissions' ;;
+      auto) flag='--permission-mode auto' ;;
+      '' | bypass) flag='--dangerously-skip-permissions' ;;
       *) flag="--permission-mode $mode" ;;
     esac
     assert_contains "$(tr '\n' ' ' <"$GM_FAKE_RUN/args")" "--effort medium $flag " "${mode:-the default} starts claude with $flag" &&
       assert_eq "$(grep -c -e '--permission-mode' -e '--dangerously-skip-permissions' "$GM_FAKE_RUN/args")" 1 "and with no other mode" &&
-      assert_eq "$(db "SELECT permission_mode FROM run WHERE id=$n;")" "$(case $mode in '') echo auto ;; bypass) echo bypassPermissions ;; *) echo "$mode" ;; esac)" "the run records ${mode:-auto}" || return 1
+      assert_eq "$(db "SELECT permission_mode FROM run WHERE id=$n;")" "$(case $mode in '' | bypass) echo bypassPermissions ;; *) echo "$mode" ;; esac)" "the run records ${mode:-bypass}" || return 1
     s="CAST(readfile('$GM_HALL/runs/$n/settings.json') AS TEXT)"
     assert_contains "$(json "SELECT json_extract($s,'\$.hooks.PreToolUse[0].hooks[0].command')")" "GM_RUN='$n' bash" "the rules hook as run $n in ${mode:-the default}" &&
       assert_contains "$(json "SELECT json_extract($s,'\$.hooks.PreToolUse[0].hooks[0].command')")" " hook rules" "gm hook rules in ${mode:-the default}" &&
@@ -3463,7 +3463,7 @@ t_adventurer_permission_mode() {
   out=$(gm dispatch 5 2>&1) && fail "dispatched with an unknown permission mode"
   assert_contains "$out" "adventurer-permission-mode: yolo, which is not auto, bypass or acceptEdits" "names the setting" &&
     assert_eq "$(db "SELECT count(*) FROM run;")" 4 "no run recorded" &&
-    assert_contains "$(cat "$GM_HALL/guild.conf")" "# adventurer-permission-mode: auto | bypass | acceptEdits, default auto" "guild.conf documents it"
+    assert_contains "$(cat "$GM_HALL/guild.conf")" "# adventurer-permission-mode: auto | bypass | acceptEdits, default bypass" "guild.conf documents it"
 }
 
 t_lost_run_is_reaped() {
