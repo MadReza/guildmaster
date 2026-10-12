@@ -4,13 +4,23 @@
 # .args and .pwd in whatever folder it ran in.
 # As an Adventurer (-p, with GM_FAKE_RUN set to a directory) it records the same there, with the writ it read on
 # standard input, waits while GM_FAKE_RUN/hold exists, prints GM_FAKE_RUN/stream.jsonl as its transcript when there
-# is one, and exits with the code in GM_FAKE_RUN/exit (default 0).
+# is one, and exits with the code in GM_FAKE_RUN/exit (default 0). Before it exits, in both forms, it runs the first
+# GM_FAKE_RUN/act.<n> script there is, in the camp, and removes it: what one run of the Adventurer does in git.
+fake_act() {
+  for a in "$GM_FAKE_RUN"/act.*; do
+    [ -f "$a" ] || continue
+    sh "$a" >>"$GM_FAKE_RUN/act.log" 2>&1
+    rm -f "$a"
+    break
+  done
+}
 if [ "${1:-}" = -p ] && [ -n "${GM_FAKE_RUN:-}" ]; then
   env >"$GM_FAKE_RUN/env"
   printf '%s\n' "$@" >"$GM_FAKE_RUN/args"
   pwd -P >"$GM_FAKE_RUN/pwd"
   cat >"$GM_FAKE_RUN/stdin"
   while [ -e "$GM_FAKE_RUN/hold" ]; do sleep 0.1; done
+  fake_act
   [ ! -f "$GM_FAKE_RUN/stream.jsonl" ] || cat "$GM_FAKE_RUN/stream.jsonl"
   exit "$(cat "$GM_FAKE_RUN/exit" 2>/dev/null || echo 0)"
 fi
@@ -26,6 +36,7 @@ case " $* " in
       for a in "$@"; do last=$a; done
       printf '%s' "$last" >"$GM_FAKE_RUN/stdin"
       while [ -e "$GM_FAKE_RUN/hold" ]; do sleep 0.1; done
+      fake_act
       exit "$(cat "$GM_FAKE_RUN/exit" 2>/dev/null || echo 0)"
     fi ;;
 esac
