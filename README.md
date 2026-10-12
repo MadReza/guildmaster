@@ -92,6 +92,7 @@ The status line shows the focus, phase, and posting counts.
 A Stop guard keeps the turn going until every posting has a recorded state.
 
 Work that changes the project goes to an Adventurer: the Party Leader runs `gm dispatch`, and a Claude Code session, in a herdr workspace of its own, listed right under the Party Leader's in the sidebar and titled with its run (so you can click into it, read its chat and type to it, while the Party Leader's pane stays whole), works the posting in the camp, on the feature branch, and commits there as you, with Claude Code's attribution off (`commit-attribution` in `guild.conf`).
+It starts as Firstmate starts its crew, in Claude Code's auto mode, so it seldom stops at a permission prompt: `adventurer-permission-mode` in `guild.conf` chooses `auto`, `bypass` or `acceptEdits`, read at every dispatch, and in every mode gm's rules hook still denies a forbidden push, a new branch or a merge request.
 The Party Leader stays free while it works, so keep talking to it.
 When the run finishes, gm wakes the Party Leader, which reviews the result and the commit and tells you:
 
@@ -180,6 +181,7 @@ Settings, from /Users/you/.guildmaster/guild.conf (gm config set <key> <value> c
 | `launch-grace` | seconds a fresh start may hold only a shell | 60 | `GM_LAUNCH_GRACE` |
 | `start-tries` | starts in a row before something is held | 3 | `GM_START_TRIES` |
 | `repo-roots` | folders where `gm repos` looks | the usual source folders | |
+| `adventurer-permission-mode` | `auto` (`--permission-mode auto`), `bypass` (`--dangerously-skip-permissions`), `acceptEdits`; a value gm cannot take refuses `gm dispatch` instead of being ignored | auto | |
 | `editor` | the command the spyglass opens a changed file with (see The spyglass, below) | `open` | |
 
 An environment variable overrides its setting for the command it is set on, and `gm config` says so; a value gm cannot take is ignored, and `gm config` and `gm doctor` say that too.

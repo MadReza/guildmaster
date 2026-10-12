@@ -63,6 +63,7 @@ start-tries	GM_START_TRIES	3	count	Starts in a row never seen alive before a Par
 repo-roots	-	-	text	Folders, separated by spaces, where gm repos looks for clones instead of the usual source folders.
 contract-model	-	party-leader	model	The model an Adventurer works a contract on: party-leader is the model its Party Leader runs on now; otherwise a Claude Code model name (sonnet, opus, claude-sonnet-5-5). gm dispatch --model overrides it once.
 contract-effort	-	medium	effort	The effort an Adventurer works a contract at: low, medium, high, xhigh or max. gm dispatch --effort overrides it once.
+adventurer-permission-mode	-	auto	permission	How every Adventurer gm starts meets Claude Code's permission prompts, as Firstmate starts its crew: auto lets Claude Code's auto mode answer them (--permission-mode auto); bypass skips them all (--dangerously-skip-permissions); acceptEdits accepts edits and leaves the rest to its Party Leader. In every mode the rules hook still denies a forbidden push, a new branch or a merge request. A run keeps the mode it was dispatched with.
 commit-attribution	-	off	onoff	Claude Code's attribution in an Adventurer's commits and pull requests: off leaves them as the patron's own; on puts Claude Code's back.
 editor	-	open	command	The command the spyglass opens a changed file with, the file's path given after it: open is the app the Mac opens its kind with; for one editor, open -a Zed, or code -g."
 GM_CONF_ENV=' '
@@ -153,6 +154,7 @@ gm_conf_norm() {
     text | command) [ -n "$v" ] || return 1 ;;
     model) [[ $v =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}(\[1m\])?$ ]] || return 1 ;;
     effort) case $v in low | medium | high | xhigh | max) ;; *) return 1 ;; esac ;;
+    permission) case $v in auto | bypass | acceptEdits) ;; *) return 1 ;; esac ;;
     *) return 1 ;;
   esac
   GM_CONF_VAL=$v
@@ -2678,6 +2680,7 @@ gm_conf_header() {
       artsize) vals='auto | full | mini' ;;
       fold) vals='rule | vanish' ;;
       tutorial) vals='auto | on | off' ;;
+      permission) vals='auto | bypass | acceptEdits' ;;
       text) vals='<folder> <folder> ...' ;;
       count) vals='<number>' ;;
       *) vals="<$kind>" ;;
@@ -3169,6 +3172,7 @@ gm_conf_json() {
       collector) choices='on off later' ;;
       chat) choices='banners off' ;;
       effort) choices='low medium high xhigh max' ;;
+      permission) choices='auto bypass acceptEdits' ;;
       veilhides) choices='deeds adventurers notes progress' multi=true ;;
       sprites) choices='skirmish delve boss siege forge wall quill campfire none' multi=true ;;
       *) choices='' ;;
@@ -5158,8 +5162,21 @@ gm_keeper_spawn() {
   )
 }
 
+# The permission mode an Adventurer's claude starts in, as its run records it, from adventurer-permission-mode in
+# guild.conf, read at every dispatch: Claude Code's own mode name (auto, acceptEdits), or bypassPermissions for bypass,
+# which gm_run_args gives as --dangerously-skip-permissions. A value the setting cannot take refuses the dispatch,
+# rather than starting an Adventurer in a mode the patron did not choose.
+gm_dispatch_permission_mode() {
+  local v
+  v=$(gm_conf_get adventurer-permission-mode)
+  [ -n "$v" ] || v=auto
+  gm_conf_norm permission "$v" ||
+    gm_die "dispatch: guild.conf says adventurer-permission-mode: $v, which is not auto, bypass or acceptEdits; set one (gm config set adventurer-permission-mode auto), then dispatch again"
+  case $GM_CONF_VAL in bypass) printf bypassPermissions ;; *) printf '%s' "$GM_CONF_VAL" ;; esac
+}
+
 gm_cmd_dispatch() {
-  local refs=() model='' effort='' brief='' r pid pf st num canon focus fid ids='' live
+  local refs=() model='' effort='' mode brief='' r pid pf st num canon focus fid ids='' live
   while [ $# -gt 0 ]; do
     case $1 in
       --model) model=${2:?--model needs a model}; shift 2 ;;
@@ -5194,6 +5211,7 @@ gm_cmd_dispatch() {
   else
     model=$(gm_dispatch_model "$focus")
   fi
+  mode=$(gm_dispatch_permission_mode) || exit 1
   gm_runs_reap
   live=$(gm_sql "SELECT id FROM run WHERE focus_id=$fid AND kind='contract' AND ended_at IS NULL ORDER BY id LIMIT 1;")
   [ -z "$live" ] || gm_die "dispatch: run $live is still working in $focus's camp, and only one contract at a time changes it; keep the posting queued (gm notice <n> queued) and dispatch it when run $live ends"
@@ -5209,7 +5227,7 @@ BEGIN IMMEDIATE;
 UPDATE run SET reviewed_at=COALESCE(reviewed_at,$GM_NOW), outcome=COALESCE(outcome,'redispatched')
   WHERE ended_at IS NOT NULL AND id IN (SELECT run_id FROM run_posting WHERE posting_id IN ($ids));
 INSERT INTO run(focus_id, kind, model, effort, permission_mode, template_sha256, brief, session_id, started_at)
-  VALUES ($fid, 'contract', $(gm_qn "$model"), $(gm_qn "$effort"), 'acceptEdits', $(gm_qn "$(gm_sha256_file "$template")"),
+  VALUES ($fid, 'contract', $(gm_qn "$model"), $(gm_qn "$effort"), $(gm_q "$mode"), $(gm_qn "$(gm_sha256_file "$template")"),
           $(gm_qn "$brief"), $(gm_q "$sid"), $GM_NOW);
 INSERT INTO run_posting(run_id, posting_id) SELECT (SELECT id FROM run WHERE session_id=$(gm_q "$sid")), id FROM posting WHERE id IN ($ids);
 SELECT max(id) FROM run WHERE session_id=$(gm_q "$sid");
@@ -5243,7 +5261,7 @@ gm_run_title() {
 
 # gm_run_args <run>: the Adventurer's claude options into GM_RUN_ARGS, for claude -p and for its pane alike: its
 # session id, its own settings beside the user's and the project's (never the camp's local ones, the Party Leader's),
-# its model, effort and permission mode.
+# its model, effort and permission mode (bypassPermissions as --dangerously-skip-permissions).
 GM_RUN_ARGS=()
 gm_run_args() {
   local sid model effort mode
@@ -5251,7 +5269,11 @@ gm_run_args() {
   GM_RUN_ARGS=(--session-id "$sid" --setting-sources 'user,project' --settings "$(gm_run_dir "$1")/settings.json")
   [ "$model" = - ] || GM_RUN_ARGS+=(--model "$model")
   [ "$effort" = - ] || GM_RUN_ARGS+=(--effort "$effort")
-  [ "$mode" = - ] || GM_RUN_ARGS+=(--permission-mode "$mode")
+  case $mode in
+    -) ;;
+    bypassPermissions) GM_RUN_ARGS+=(--dangerously-skip-permissions) ;;
+    *) GM_RUN_ARGS+=(--permission-mode "$mode") ;;
+  esac
 }
 
 # An Adventurer's workspace label: one step deeper than its Party Leader's (└ <focus>) in herdr's sidebar.

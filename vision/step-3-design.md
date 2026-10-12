@@ -252,6 +252,23 @@ So a blocked Adventurer waits for its Party Leader, not the patron. This changes
 - **The writ asks.** The contract template no longer says nobody answers: when something is unclear the Adventurer asks in its session with a question that waits for the answer, not by ending its turn (the first turn's end is the run's end), and only when no answer can come chooses the safer reading. The Guildhall's copy is the patron's and is not changed.
 - **Not yet checked against real herdr:** that Claude Code's permission prompt and its question tool both read as `blocked`, and the `--lines` count `pane read` takes. `send-keys` takes several keys in one call, by its help.
 
+### The permission mode, as Firstmate starts its crew
+
+The patron, on 2026-10-12, in the Party Leader of `adventurers` (posting #41):
+
+<!-- patron: begin -->
+
+"I think adventurers should start the same way as crews from Firstmate ? Auto-mode or something similar ?"
+
+<!-- patron: end -->
+
+Firstmate starts every Claude crewmate with the flag `config/claude-permission-mode` names, `bypass` by default or `auto`, re-read on every launch, and refuses an unknown value ([its launch](../firstmate/components/crew/launch.html)). An Adventurer started in `acceptEdits` stops at every command its allow-list does not name, and each stop now summons its Party Leader. So this changes the fixed `--permission-mode acceptEdits` of [slice 1](#permissions-in-slice-1):
+
+- **`adventurer-permission-mode` in `guild.conf`**: `auto` (the default) starts claude with `--permission-mode auto`, Claude Code's own classifier answering its prompts; `bypass` with `--dangerously-skip-permissions`; `acceptEdits` as before. It applies to every Adventurer gm starts, in its herdr workspace and in the `claude -p` fallback alike.
+- **Read at every dispatch, recorded on the run.** `gm dispatch` reads the setting and writes Claude Code's mode name on the run (`permission_mode`: `auto`, `bypassPermissions`, `acceptEdits`), and the keeper starts claude from the run, so a run keeps the mode it was dispatched with. A value the setting cannot take refuses the dispatch, naming the setting, rather than starting an Adventurer in a mode the patron did not choose; elsewhere gm ignores such a value and keeps the default.
+- **The guard rails stay in every mode.** The rules hook (`gm hook rules`) is in the run's settings whatever the mode, and so are the denied merges, rebases, new branches and merge requests: a `PreToolUse` hook's deny and a deny rule hold in `bypass` too. The suite checks the settings carry them in each mode.
+- Firstmate's default is `bypass`; the guild's is `auto`, the safer of the two the patron named, since the rules hook is a guard rail, not a sandbox.
+
 ## Slice 2: push rules in every camp
 
 `gm hook rules`, a `PreToolUse` hook on `Bash`, in the Party Leader's settings and in every Adventurer's.
