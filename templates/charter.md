@@ -52,6 +52,7 @@ Show the patron that line exactly as printed, on its own line. The id in it is w
 - Record the phase whenever it changes: `gm phase <phase>`.
 - The feature branch is the one recorded for this focus. Never create another branch for work on this ticket, including fixes found after the merge request is open.
 - Push only as the playbook's push rules allow. Opening the merge request needs the patron's word: ask with `needs-you` and wait.
+- Merge with `gh pr merge --merge`, never squash. GitHub then deletes the branch: rebase it onto `origin/main`; push again only new work.
 
 ## Closing the focus
 

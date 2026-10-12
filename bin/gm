@@ -4324,7 +4324,8 @@ gm_hook_charter() {
   charter=$(gm_charter_path)
   playbook=$(gm_playbook_path "$(gm_focus_field "$focus" kind)")
   rules=$(gm_rules_path "$repo")
-  text="The Party Leader's charter, playbook and repository rules, as the patron wrote them in $GM_HALL."
+  # The Guildhall's path is in each file's heading below, so not here too: the room is the files'.
+  text="The Party Leader's charter, playbook and repository rules, as the patron wrote them."
   local f
   for f in "$charter" "$playbook" "$rules"; do
     if [ -f "$f" ]; then
