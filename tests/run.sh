@@ -1211,7 +1211,9 @@ $ROOT/mods/guild-chat
 --plugin-dir
 $ROOT/mods/guild-spyglass
 --plugin-dir
-$ROOT/mods/paste-viewer" "claude --name <focus>, with the chat's mod (chat: banners, the default), the spyglass and the paste viewer" &&
+$ROOT/mods/paste-viewer
+--plugin-dir
+$ROOT/mods/guild-lexicon" "claude --name <focus>, with the chat's mod (chat: banners, the default), the spyglass, the paste viewer and the lexicon" &&
     assert_eq "$(cat "$f.pwd")" "$CAMP" "in the camp"
 }
 
@@ -2698,7 +2700,9 @@ $ROOT/mods/guild-chat
 --plugin-dir
 $ROOT/mods/guild-spyglass
 --plugin-dir
-$ROOT/mods/paste-viewer" "claude --name <focus> --plugin-dir <each mod>" &&
+$ROOT/mods/paste-viewer
+--plugin-dir
+$ROOT/mods/guild-lexicon" "claude --name <focus> --plugin-dir <each mod>" &&
     assert_contains "$(cat "$f")" "GM_CHAT=banners" "the mod is told the style" &&
     assert_contains "$(cat "$f")" "GM_CHAT_FOCUS=appt-v2" "and the focus, not a stray one"
   line=$(grep "start 'guildmaster'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)
@@ -2720,7 +2724,9 @@ $ROOT/mods/guild-chat
 --plugin-dir
 $ROOT/mods/guild-spyglass
 --plugin-dir
-$ROOT/mods/paste-viewer" "chat: off starts a Party Leader with the mod too" &&
+$ROOT/mods/paste-viewer
+--plugin-dir
+$ROOT/mods/guild-lexicon" "chat: off starts a Party Leader with the mod too" &&
     assert_contains "$(cat "$f.off")" "GM_CHAT=off" "told to draw Claude Code's own chat" &&
     assert_contains "$(cat "$f.off")" "GM_CHAT_FOCUS=appt-v2" "with its focus"
   env GM_FAKE_CLAUDE_ENV="$f.desk-off" sh -c "$(grep "start 'guildmaster'" "$HERDR_STUB/runs" | tail -n 1 | cut -f 2)" </dev/null >/dev/null 2>&1
@@ -2728,7 +2734,7 @@ $ROOT/mods/paste-viewer" "chat: off starts a Party Leader with the mod too" &&
   out=$(gm config set chat on)
   assert_eq "$(conf chat)" banners "on is the one style there is: banners" &&
     assert_contains "$out" "chat is banners: the Guildmaster and Party Leaders started from now on draw their chat under heraldic banners" "and back"
-  for mod in guild-chat guild-spyglass paste-viewer; do
+  for mod in guild-chat guild-spyglass paste-viewer guild-lexicon; do
     [ -f "$ROOT/mods/$mod/.claude-plugin/plugin.json" ] && [ -f "$ROOT/mods/$mod/hooks/register.tsx" ] &&
       [ -f "$ROOT/.claude/skills/$mod/.claude-plugin/plugin.json" ] || fail "the mod $mod gm loads is not in the clone"
   done
