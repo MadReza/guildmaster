@@ -16,6 +16,9 @@ import {
 // guild.conf says of chat: (off keeps Claude Code's own drawing), and names in GM_CHAT_FOCUS the Party Leader's focus
 // (none at the front desk). A claude started by hand in a checkout of Guildmaster loads it too, from
 // .claude/skills/guild-chat, and asks guild.conf itself; in a camp, the GM_FOCUS its settings set names the Party Leader.
+// An Adventurer's own settings set GM_RUN beside its Party Leader's GM_FOCUS, and GM_RUN_TITLE (run 7 · #39 slug): it
+// answers under a banner of its own, never its Party Leader's, and gets no welcome card, which is the patron's and
+// its Party Leader's.
 //
 // The veil (vision/veil-design.md): while guild.conf says veil: on, the kinds of row veil-hides names draw at zero
 // height, banner and all, and come back when it is lifted. It hides from the screen only: nothing stored changes.
@@ -502,7 +505,7 @@ async function startWelcome($: EngineInterface, e: { isInteractive: boolean; sur
     unseen = new Set()
   }
   const { welcome } = await veil($)
-  if (welcome.on && e.isInteractive && e.surface === 'terminal') {
+  if (welcome.on && e.isInteractive && e.surface === 'terminal' && !(await $.env.get('GM_RUN'))) {
     void loadWelcome($, welcome).then(() => $.ui.invalidate('ui.render'), () => undefined)
   }
 }
@@ -816,6 +819,11 @@ export const register: Register = on => {
     const note = e.props.isSummary === true || (notes.has(key) && !replies.has(key))
     if (note && (await hides($, 'notes'))) return hidden($, e)
     if (!e.props.isFirstOfReply) return next(e)
+    const run = await $.env.get('GM_RUN')
+    if (run) {
+      const title = (await $.env.get('GM_RUN_TITLE')) || `run ${run}`
+      return draw($, e, next, { sigil: '⛨', name: `ADVENTURER · ${title}`, color: GREEN, heavy: true })
+    }
     const focus = (await $.env.get('GM_CHAT_FOCUS')) || (await $.env.get('GM_FOCUS'))
     return draw($, e, next, focus
       ? { sigil: '⚔', name: `PARTY LEADER · ${focus}`, color: ROYAL, heavy: true }

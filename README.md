@@ -101,6 +101,9 @@ appt-v2#1 fix-owner-empty run 1 finished: exit 0, 14 turns, $0.22 ("the owner fi
 appt-v2#1 fix-owner-empty done: fixed in 6b6a581 ("the owner field is empty…")
 ```
 
+An Adventurer that stops at a permission prompt or a question waits for its Party Leader, not you: gm wakes the Party Leader with the prompt's last lines, and it answers what is safe and in the posting's scope from its own pane (`gm runner <run> --keys 1`, or `--text` for words), asking you only what is yours to decide.
+Each answer is recorded before it is sent.
+
 A job the Guildmaster hands a focus for you (`gm post --focus`, or `gm open --brief` for a new focus) wakes its Party Leader the same way, with nobody in its workspace.
 An Adventurer may edit, read and commit; to let it run the repository's build and tests, add `adventurer-allow:` lines to the repository's rules file in the Guildhall.
 Pushes, in the Party Leader's camp and every Adventurer's, are answered by the playbook's `push:` lines and the rules file's `development-branch:`, `integration-branch:` and `protected-branch:` lines; until those are there every push is denied ([the lines to add](vision/step-3-design.md#the-lines-the-patron-adds)).
@@ -199,7 +202,7 @@ The Guildmaster and every Party Leader that gm starts load the mod in `mods/guil
   The three modules are small, and the server only serves /health.
 ```
 
-The patron's banner is gold and hangs on the right; the Guildmaster's is crimson; a Party Leader's is royal blue and names its focus (`⚔ PARTY LEADER · guild-chat`); tool calls (deeds) are steel grey and adventurers (Claude Code's subagents) green, each under a light rule.
+The patron's banner is gold and hangs on the right; the Guildmaster's is crimson; a Party Leader's is royal blue and names its focus (`⚔ PARTY LEADER · guild-chat`); a dispatched Adventurer's is green and names its run (`⛨ ADVENTURER · run 7 · #39 why-open-pane-right`), and it gets no welcome card; tool calls (deeds) are steel grey and adventurers (Claude Code's subagents) green, each under a light rule.
 Only the drawing changes: what the model reads, and the stored conversation, stay as they were.
 A `claude` started by hand at the clone's root gets the same chat from its first message: the clone's `.claude/skills/guild-chat` entry (a link to `mods/guild-chat`) makes Claude Code load the mod in a trusted checkout, as Firstmate does with its Calm mod, and the mod reads `chat:` from `guild.conf` itself.
 Nothing is installed and no settings file is written; a session gm starts is told the chat's style by gm instead (`GM_CHAT`), and gets the mod by `--plugin-dir` only where its folder does not load it already. Someone without a Guildhall keeps Claude Code's own chat.

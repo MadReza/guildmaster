@@ -221,7 +221,7 @@ The patron, on 2026-10-12, in the Party Leader of `adventurers` (posting #40):
 
 <!-- patron: begin -->
 
-"Don't forget, I want these to be opened right under you on the machine part, not on the bottom half the screen. Patron needs to be able to interact with you."
+"Don't forget, I want these to be opened right under you on the machine part, not on the bottom half the screen. Patron needs to be able to interact with you. [Image #3] [Image #4]"
 
 <!-- patron: end -->
 
@@ -230,6 +230,27 @@ The split pane took the bottom half of the Party Leader's own pane, where the pa
 - **A workspace of its own.** The keeper, under the herdr lock, makes a workspace on the camp (`herdr workspace create --cwd <camp> --label '  └ run 3 · #28 visible-adventurer-pane' --no-focus`), one step deeper than its Party Leader's `└ <focus>`, and places it right after the Party Leader's workspace in the sidebar with the same `workspace.move` as a Party Leader's under the guild's (after any other open run of that Party Leader). It is never focused. Its first pane is titled and runs `gm adventurer` as before; the run records the workspace beside the pane (schema 8: `pane_workspace`). A Party Leader placed later goes after the open runs' workspaces, so a run stays under its own Party Leader.
 - **The review closes the workspace** (`herdr workspace close`), not only the pane. A run recorded before schema 8 has only its split pane closed.
 - Everything else is as the visible Adventurer built it: the fallback to `claude -p`, the Stop hook, a lost pane.
+
+The patron, the same day (posting #39), on an Adventurer that had waited a long while at a permission prompt:
+
+<!-- patron: begin -->
+
+"Why did you open it in a pane, right under you ? It needs to be a Pane in Herdr so you can see if the agent is blocked or not.
+
+For example, your agent has been blocked for a while waiting on input. [Image #2]
+As party leader, you are supposed to answer these. Think of firstmate and 2ndmate, you would need to manage your adventurers (crew)"
+
+<!-- patron: end -->
+
+So a blocked Adventurer waits for its Party Leader, not the patron. This changes "A permission prompt now waits for the patron" above:
+
+- **Blocked is a summons.** While a run lives in a pane, the Party Leader's watch asks herdr at each poll what the pane is doing (`agent get`). The first time it says `blocked`, the run records it (schema 9: `blocked_at`, `blocked_summoned_at`) with the pane's last lines (`pane read --source recent`, trailing blank lines dropped, 15 kept, in `runs/<run>/blocked.txt`), and the watch summons the Party Leader with those lines and how to answer. Once per block: herdr saying anything else clears it, and so does an answer, so the next block summons again. The muster asks the same of each alive Party Leader's runs, so with the watch dead the nudge types `/guild-chat:summons` for it. `gm runs`, `gm where` and the Adventurer's status line say it is blocked.
+- **`gm runner <run>`** is how the Party Leader answers: alone it shows the pane's last 40 lines; `--keys "down enter"` sends key presses, `--text` types words and Enter. A runner is recorded in the ledger before it is sent, and only to a live run of the focus with a pane open. The name is the glossary's: a message carried to a worker, recorded before it is delivered.
+- **The charter** says it in its summons line: a blocked run is the Party Leader's to answer when it is safe and in scope; the summons itself adds that only the patron's decisions go to `needs-you`. The charter, playbook and rules still load whole: 9,290 characters for `~/.guildmaster` with the template files (the hook's first line is shorter to make room).
+- **Fewer prompts to answer.** The run's settings allow what an Adventurer predictably reads: the rules file and the playbooks in the Guildhall, the issue and pull request views of `gh` and `gh-axi`, `ps`, `shellcheck` (git status, diff, log and show were already allowed), and its own scratchpad. `gh` is no longer denied whole: only a pull request's create, merge and review, as `glab` still is.
+- **Its own name.** The run's settings set `GM_RUN_TITLE` and a status line of its own (`⛨ adventurer · run 7 · #39 … · for <focus> on <branch>`); the guild chat mod draws its replies under `⛨ ADVENTURER · run 7 · …` and gives it no welcome card, where it drew its Party Leader's `PARTY LEADER · <focus>` from the `GM_FOCUS` its settings carry.
+- **The writ asks.** The contract template no longer says nobody answers: when something is unclear the Adventurer asks in its session with a question that waits for the answer, not by ending its turn (the first turn's end is the run's end), and only when no answer can come chooses the safer reading. The Guildhall's copy is the patron's and is not changed.
+- **Not yet checked against real herdr:** that Claude Code's permission prompt and its question tool both read as `blocked`, and the `--lines` count `pane read` takes. `send-keys` takes several keys in one call, by its help.
 
 ## Slice 2: push rules in every camp
 

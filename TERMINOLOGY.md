@@ -68,11 +68,11 @@ Where a term replaces one from Firstmate, the Firstmate column records the origi
 | Term | Definition | Firstmate |
 | --- | --- | --- |
 | **The Watch** | The one process that waits for a supervisor's summons and wakes it, run by code, never a model. Each supervisor has its own: the Guildmaster's, and one per Party Leader, a background hook in its session armed at every start and turn end. Exactly one runs per supervisor at a time. Said alone in a camp it is that Party Leader's watch. | watcher |
-| **Summons** | One event that requires a supervisor's attention now: the Guildmaster's, or a Party Leader's (a run that finished, or a posting added from outside its chat). Durable until handled and acknowledged; delivered by that supervisor's watch. A patron's own message is never a summons: it starts a turn by itself. | wake |
+| **Summons** | One event that requires a supervisor's attention now: the Guildmaster's, or a Party Leader's (a run that finished, or a posting added from outside its chat). Durable until handled and acknowledged; delivered by that supervisor's watch. A Party Leader's also names a run whose Adventurer is blocked on an answer, once per block. A patron's own message is never a summons: it starts a turn by itself. | wake |
 | **Muster** | The once-per-session roll call that reconciles durable records with reality before any work starts. | session start |
 | **Round** | A periodic whole-roster review with no specific trigger. | heartbeat |
 | **Gone Quiet** | A worker that has stopped producing signs of life and must be inspected. | stale |
-| **Runner** | A message carried to a worker, recorded durably before it is delivered. | steer |
+| **Runner** | A message carried to a worker, recorded durably before it is delivered: `gm runner` carries a Party Leader's answer to its blocked Adventurer. | steer |
 | **Seal** | The exclusive claim one session holds over a guildhall. Without it, nothing may change. | session lock |
 
 ## Delivery

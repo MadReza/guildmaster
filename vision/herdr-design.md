@@ -222,7 +222,9 @@ Checked against herdr 0.9.1 (`herdr <group> help`) in an isolated lab session. E
 | `tab rename <tab> guildmaster` | |
 | `pane get <pane>` | `.result.pane.workspace_id`, or `.error.code` `pane_not_found` |
 | `pane process-info --pane <pane>` | `.result.process_info.shell_pid`, `.foreground_processes[].{name, argv0}` |
-| `agent get <pane>` | `.result.agent.agent_status`, or `agent_not_found` |
+| `agent get <pane>` | `.result.agent.agent_status`, or `agent_not_found`; for a live run's pane, `blocked` summons its Party Leader |
+| `pane read <pane> --source recent --lines <n>` | plain text: a blocked Adventurer's last lines, for its summons and `gm runner` |
+| `pane send-keys <pane> <key>...` and `pane send-text <pane> <text>` | `gm runner`'s answer to an Adventurer |
 | `pane run <pane> <line>` | types the line and submits it |
 | `pane close <pane>` | only for a dead focus's husk, at `gm close` and when a dead Party Leader moves out of `guild`, and for an Adventurer's pane split under its Party Leader's before each had a workspace of its own, once its run is reviewed; closing a workspace's last pane closes the workspace |
 | `workspace create --cwd <camp> --label '  └ run <n> · …' --no-focus` | an Adventurer's own workspace, placed after its Party Leader's with `workspace.move` ([step-3-design.md](step-3-design.md#its-own-workspace-and-a-party-leader-that-answers-it)); without a workspace or pane id the keeper runs `claude -p` instead |

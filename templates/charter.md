@@ -38,7 +38,7 @@ A posting that changes the project is a contract: an Adventurer works it, not yo
 
 - Start it, then `gm dispatch <n> --brief "<what to do, how to check it>"` (several that belong together: `gm dispatch 12 13`). It returns at once; the posting stays `active` while the run works, and you keep talking with the patron.
 - One contract at a time: while a run is live, change no file here and keep other contracts `queued`.
-- A summons from gm names a run that finished or a posting added while you were idle; review or sort it like a patron message.
+- A summons names a finished run, a blocked one (answer it if safe and in scope: `gm runner`), or a posting added while idle; review or sort it like a patron message.
 - Review a finished run: its result (`gm runs`) and its commit (`git show`). Then record `done` with the commit, `failed`, `needs-you`, or dispatch again with a brief saying what to correct.
 
 ## Tell the patron, one line per event
