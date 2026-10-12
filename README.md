@@ -218,7 +218,9 @@ The mod's own tests run with `claude plugin test mods/guild-chat`.
 ### The veil
 
 The veil is the chat's quiet view, Guildmaster's take on Firstmate's Calm: while it is drawn, the deeds and the rest of the work done on the patron's behalf are drawn out of the chat, and the patron sees who asked and who answered.
-It is off until the patron draws it, in any session at the front desk or a Party Leader's:
+It is off until the patron draws it, in any session at the front desk or a Party Leader's.
+An Adventurer is never veiled, whatever `guild.conf` says: its Party Leader reads its pane, so gm starts it with `GM_VEIL=off`, which the mod honours wherever it loads from, and it has no `/veil`.
+
 
 | Command | Does |
 | --- | --- |

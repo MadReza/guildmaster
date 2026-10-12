@@ -39,7 +39,7 @@ GM_CONF_TABLE="collector	GM_COLLECTOR	off	collector	Keep the local OpenTelemetry
 collector-port	GM_OTEL_PORT	4318	port	The port on 127.0.0.1 the collector listens on, and Party Leaders send their telemetry to.
 telemetry	GM_TELEMETRY	on	onoff	Party Leaders that gm starts send Claude Code's telemetry to the collector.
 chat	GM_CHAT	banners	chat	How the chat of the Guildmaster and the Party Leaders gm starts looks: off is Claude Code's own, banners sets each message under a heraldic banner (mods/guild-chat). A running session keeps what it started with.
-veil	-	off	onoff	The veil: while on, every session's chat draws what veil-hides names out of sight, the record unchanged; /veil in any session turns it. A running session follows a change at its next turn, or at /veil refresh.
+veil	-	off	onoff	The veil: while on, every session's chat but an Adventurer's draws what veil-hides names out of sight, the record unchanged; /veil in any session turns it. A running session follows a change at its next turn, or at /veil refresh.
 veil-hides	-	deeds adventurers notes progress	veilhides	What the veil hides, any of: deeds (tool calls and their results), adventurers (their calls and returns), notes (short narration between deeds), progress (the hint under a running deed).
 sprites	-	on	onoff	The working sprites: while on, every session's chat draws a two-row sprite while a turn runs, one at random from the ones named for its role, and one above the prompt while it waits; neither stays in the chat. A running session follows a change at its next turn.
 sprites-guildmaster	-	quill	sprites	The sprites the Guildmaster draws one of while a turn runs.
@@ -5371,8 +5371,11 @@ gm_run_title() {
 GM_RUN_ARGS=()
 # What every Adventurer's claude starts with in its environment, as Firstmate's crew does: no predicted next prompt
 # in its composer, which reads like typed input in its pane, and no model-drafted feedback (its settings' feedbackDrafts
-# too: a managed policy can turn the setting back on, never this).
-GM_RUN_ENV=(CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false CLAUDE_CODE_SEND_FEEDBACK=0)
+# too: a managed policy can turn the setting back on, never this); and never the veil, whatever guild.conf says, since
+# its Party Leader supervises it by reading its pane, and the veil would draw the deeds and notes out of it. GM_VEIL is
+# in the environment, not its settings, so guild-chat honours it wherever it loads from, gm's --plugin-dir or a
+# Guildmaster camp's own .claude/skills/guild-chat.
+GM_RUN_ENV=(CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false CLAUDE_CODE_SEND_FEEDBACK=0 GM_VEIL=off)
 # What an Adventurer is told about whom to trust, adapted from Firstmate's crew: its writ arrives as file-shaped
 # content, otherwise indistinguishable from an injected prompt. It raises the writ and its Party Leader's runners to
 # first-party standing, grants no authority the writ does not, and keeps everything else untrusted.

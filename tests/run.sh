@@ -3076,6 +3076,7 @@ t_dispatch_opens_the_adventurer_under_its_party_leader() {
   export GM_FOCUS=appt-v2 GM_RUN_POLL=1 GM_WATCH_TIMEOUT=40
   fake_run "$WORK/visible/run"
   : >"$GM_FAKE_RUN/hold"
+  gm config set veil on >/dev/null || fail "config set veil on"
   gm post "the owner field is empty after save" >/dev/null && gm notice 1 started >/dev/null
   local out pl pane ws line dir=$GM_HALL/runs/1 sid
   : >"$HERDR_STUB/focused"
@@ -3110,7 +3111,8 @@ t_dispatch_opens_the_adventurer_under_its_party_leader() {
     assert_eq "$(cat "$GM_FAKE_RUN/pwd")" "$CAMP" "in the camp" &&
     assert_eq "$(head -n 15 "$GM_FAKE_RUN/args" | tr '\n' ' ')" "--name run 1 · #1 owner-field-empty-after --session-id $sid --setting-sources user,project --settings $dir/settings.json --model sonnet --effort medium --dangerously-skip-permissions --append-system-prompt $(trust_statement) " "its command line, without -p" &&
     assert_eq "$(grep -c '^CLAUDECODE=\|^GM_FOCUS=' "$GM_FAKE_RUN/env")" 0 "not as a session inside Claude Code, nor as the Party Leader" &&
-    assert_eq "$(grep -e '^CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=' -e '^CLAUDE_CODE_SEND_FEEDBACK=' "$GM_FAKE_RUN/env" | sort | tr '\n' ' ')" "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false CLAUDE_CODE_SEND_FEEDBACK=0 " "no prompt suggestions in its composer, no feedback drafts" || return 1
+    assert_eq "$(grep -e '^CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=' -e '^CLAUDE_CODE_SEND_FEEDBACK=' "$GM_FAKE_RUN/env" | sort | tr '\n' ' ')" "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false CLAUDE_CODE_SEND_FEEDBACK=0 " "no prompt suggestions in its composer, no feedback drafts" &&
+    assert_eq "$(grep '^GM_VEIL=' "$GM_FAKE_RUN/env")" "GM_VEIL=off" "never veiled, though guild.conf draws the veil: its Party Leader reads its pane" || return 1
   local f="CAST(readfile('$dir/settings.json') AS TEXT)"
   assert_eq "$(json "SELECT group_concat(key) FROM json_each(json_extract($f,'\$.hooks'))")" "PreToolUse,Stop,StopFailure" "the rules hook, and the Stop hooks that record its end" &&
     assert_contains "$(json "SELECT json_extract($f,'\$.hooks.Stop[0].hooks[0].command')")" "GM_RUN='1' bash" "as run 1" &&
@@ -3447,6 +3449,7 @@ t_adventurer_permission_mode() {
   setup permmode
   export GM_FOCUS=appt-v2
   fake_run "$WORK/permmode/run"
+  gm config set veil on >/dev/null || fail "config set veil on"
   local n=0 mode flag out rule s
   for mode in '' auto bypass acceptEdits; do
     n=$((n + 1))
@@ -3469,7 +3472,8 @@ t_adventurer_permission_mode() {
       assert_eq "$(json "SELECT json_extract($s,'\$.hooks.PreToolUse[0].matcher')")" Bash "on every Bash command" &&
       assert_eq "$(json "SELECT json_type($s,'\$.skipDangerousModePermissionPrompt')")" true "never stops on the bypass confirmation in ${mode:-the default}" &&
       assert_eq "$(json "SELECT json_extract($s,'\$.feedbackDrafts')")" off "no feedback drafts in ${mode:-the default}" &&
-      assert_eq "$(grep -e '^CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=' -e '^CLAUDE_CODE_SEND_FEEDBACK=' "$GM_FAKE_RUN/env" | sort | tr '\n' ' ')" "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false CLAUDE_CODE_SEND_FEEDBACK=0 " "no prompt suggestions or feedback in ${mode:-the default}" || return 1
+      assert_eq "$(grep -e '^CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=' -e '^CLAUDE_CODE_SEND_FEEDBACK=' "$GM_FAKE_RUN/env" | sort | tr '\n' ' ')" "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false CLAUDE_CODE_SEND_FEEDBACK=0 " "no prompt suggestions or feedback in ${mode:-the default}" &&
+      assert_eq "$(grep '^GM_VEIL=' "$GM_FAKE_RUN/env")" "GM_VEIL=off" "never veiled in ${mode:-the default}, though guild.conf draws the veil" || return 1
     for rule in 'Bash(git merge*)' 'Bash(git checkout -b*)' 'Bash(git branch*)' 'Bash(gh pr create*)' 'Bash(gh-axi pr create*)' 'Bash(glab *)'; do
       assert_eq "$(json "SELECT count(*) FROM json_each(json_extract($s,'\$.permissions.deny')) WHERE value=$(sqlq "$rule")")" 1 "${mode:-the default} denies $rule" || return 1
     done

@@ -190,6 +190,49 @@ describe('the veil lifted', () => {
   })
 })
 
+// gm starts every Adventurer with GM_VEIL=off: its Party Leader reads its pane. In a camp of Guildmaster the mod loads
+// from the camp's .claude/skills/guild-chat, so the session is told nothing but its environment: no GM_CHAT.
+describe('an Adventurer, started with GM_VEIL=off', () => {
+  const adventurer = { HOME, GM_FOCUS: 'appt-v2', GM_RUN: '7', GM_RUN_TITLE: 'run 7 · #39 slug', GM_VEIL: 'off' }
+
+  test('is never veiled, whatever guild.conf says, and has no /veil', async ($, on) => {
+    const w = world(on, 'veil: on\n', adventurer)
+    await $.session.start(sessionStart)
+    expect(w.journal.commands).toEqual([])
+    for (const [, row] of rows) expect(isHidden(await $.ui.render(row as never))).toBe(false)
+    expect(await $.command.run(veil('on'))).toEqual({})
+    expect(w.journal.runs).toEqual([])
+    expect(isHidden(await $.ui.render(toolUse()))).toBe(false)
+  })
+
+  test('keeps its notes in sight', async ($, on) => {
+    world(on, 'veil: on\n', adventurer)
+    await stepper(on)($, ['Looking at the config.'], ['t1'], 'tool_use')
+    expect(isHidden(await $.ui.render(said('Looking at the config.')))).toBe(false)
+    expect(isHidden(await $.ui.render(toolUse()))).toBe(false)
+  })
+
+  test('stays unveiled when another session draws the veil', async ($, on) => {
+    const w = world(on, 'veil: off\n', adventurer)
+    await $.session.start(sessionStart)
+    w.write('veil: on\n')
+    await $.turn.start({ text: 'next', turnId: 'turn-2' })
+    for (const [, row] of rows) expect(isHidden(await $.ui.render(row as never))).toBe(false)
+  })
+
+  for (const value of ['no', 'false']) {
+    test(`takes GM_VEIL=${value} as off`, async ($, on) => {
+      world(on, 'veil: on\n', { ...adventurer, GM_VEIL: value })
+      expect(isHidden(await $.ui.render(toolUse()))).toBe(false)
+    })
+  }
+
+  test('a Party Leader, without GM_VEIL, is veiled as guild.conf says', async ($, on) => {
+    world(on, 'veil: on\n', { HOME, GM_FOCUS: 'appt-v2' })
+    expect(isHidden(await $.ui.render(toolUse()))).toBe(true)
+  })
+})
+
 describe('veil and veil-hides read as gm reads them', () => {
   test('veil is on only for on, yes or true', () => {
     for (const v of ['on', 'yes', 'true']) expect(veilOf(`veil: ${v}`).on).toBe(true)

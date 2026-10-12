@@ -23,6 +23,8 @@ import {
 // The veil (vision/veil-design.md): while guild.conf says veil: on, the kinds of row veil-hides names draw at zero
 // height, banner and all, and come back when it is lifted. It hides from the screen only: nothing stored changes.
 // /veil sets it through the guild's one gm; every other session follows at its next turn, or at /veil refresh.
+// A session started with GM_VEIL=off is never veiled, whatever guild.conf says, and has no /veil: gm starts every
+// Adventurer so, since its Party Leader supervises it by reading its pane, and the veil would draw its deeds out of it.
 //
 // The working sprites (../lib/sprites.ts): while sprites: is on, the row Claude Code animates while a turn runs gets a
 // two-row sprite in place of its words, the turn's time and tokens beside it, drawn at random each turn from the ones guild.conf names for this session's role, the
@@ -173,12 +175,18 @@ const LIFTED: Veil = { on: false, hides: new Set() }
 const NO_WELCOME: Welcome = { ...welcomeOf(() => undefined), on: false }
 let held: Promise<Held> | undefined
 
+// GM_VEIL=off (or no, or false) in the session's environment: the veil stays lifted whatever guild.conf says.
+async function unveiled($: EngineInterface): Promise<boolean> {
+  return ['off', 'no', 'false'].includes((await $.env.get('GM_VEIL'))?.trim() ?? '')
+}
+
 // Reads guild.conf; a file it cannot read leaves the veil lifted and draws no sprite.
 async function readConf($: EngineInterface, conf: string): Promise<{ veil: Veil; sprites: Sprites; welcome: Welcome; mtimeMs?: number }> {
   try {
     const { mtimeMs } = await $.fs.stat(conf)
     const text = await $.fs.read(conf)
-    return { veil: veilOf(text), sprites: spritesOf(text), welcome: welcomeOf(k => confValue(text, k)), mtimeMs }
+    const v = (await unveiled($)) ? LIFTED : veilOf(text)
+    return { veil: v, sprites: spritesOf(text), welcome: welcomeOf(k => confValue(text, k)), mtimeMs }
   } catch {
     return { veil: LIFTED, sprites: NO_SPRITES, welcome: NO_WELCOME }
   }
@@ -603,7 +611,7 @@ export const register: Register = on => {
     turnSprite = undefined
     idlePick = undefined
     if ((await relearn($)) && (await veil($)).veil.on) $.ui.invalidate('ui.render')
-    if ((await veil($)).conf) {
+    if ((await veil($)).conf && !(await unveiled($))) {
       await $.command.register({
         name: 'veil',
         description: 'Draw the deeds out of the chat, or back in: /veil turns it, /veil on|off sets it, /veil refresh reads guild.conf again',
@@ -626,7 +634,7 @@ export const register: Register = on => {
   // Answers with a toast under the prompt and leaves no row in the transcript.
   on('command.run', { command: 'veil' }, async ($, e) => {
     const h = await veil($)
-    if (!h.conf) return {}
+    if (!h.conf || (await unveiled($))) return {}
     if (e.origin.kind === 'composer' || e.origin.kind === 'bridge') {
       await used($, ['veil']).catch(() => undefined)
     }
