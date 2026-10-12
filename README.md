@@ -16,6 +16,7 @@ This repository is at its beginning. The vocabulary comes first, because every l
 - `.claude/settings.json` makes `claude`, started at the clone's root, start the guild and the Guildmaster in herdr: its start-up hook and tool guard act only in the patron's plain clone (or a folder marked `.gm-front-desk`) and do nothing in a linked worktree, where agents that change Guildmaster work. `CLAUDE.md` is their guidance, not the Guildmaster's charter.
 - `mods/guild-chat/` is the Claude Code mod that draws the chat under heraldic banners while `guild.conf` says `chat: banners`, draws the veil over the deeds while it says `veil: on`, and draws the working sprites while it says `sprites: on`.
 - `mods/guild-spyglass/` is the Claude Code mod of the spyglass, the pane `/spyglass` opens beside the chat.
+- `mods/paste-viewer/` is the Claude Code mod that opens a pasted text or image at a click.
 - `bin/gm` is the `gm` command; `templates/` holds the Guildmaster's charter (`guildmaster.md`), the Party Leader's charter, the ticket playbook and the repository rules it copies into the Guildhall, and the local OpenTelemetry Collector's configuration (`otelcol.yaml`); `tests/` holds its test suite (with the redaction cases, a schema-1 register to migrate, and recorded Claude Code telemetry under `tests/fixtures/telemetry/`, and stand-ins for herdr and launchctl so no test touches the real ones, nor your `~/.local/bin`) and an end-to-end demonstration.
 
 ## Getting started
@@ -277,7 +278,7 @@ The roster, or a Party Leader's now, next and last, sits beside the art when the
 
 The patron's first message folds the card to one rule naming the seat and what needs the patron (`welcome-fold: rule`), or takes it away (`vanish`); either way the idle sprite has the band again while the session waits.
 A slash command (`/spyglass`, `/veil`) is no message to the model, so the card stays up through it, and while Claude Code's typeahead is up (a draft starting with `/`, or a word at the cursor starting with `@`) the card steps aside, since the typeahead draws over the band.
-A session that resumes starts folded. The card is drawn on the screen only: the model never reads it, and it costs no tokens.
+A session that resumes starts folded; a `/clear` shows the card again, read anew from the board, with another piece of art. The card is drawn on the screen only: the model never reads it, and it costs no tokens.
 
 The art rotates by default, a different piece at every start: the Guildmaster's crowned shield, robed Guildmaster and guildhall, a Party Leader's plumed helm, banner bearer and camp tent.
 Files of the patron's own in `art/guildmaster/` or `art/party-leader/` of the Guildhall join that seat's rotation: one row of palette letters a line, `.` for an empty pixel, at most 16 by 16, a line starting with `#` a comment.
@@ -316,6 +317,21 @@ It is drawn as a quiet ledger: the tabs as words, a gold rule under the chosen o
 While the pane is up it reads what its tabs show again every 5 seconds, and at once after a `gm` command of its own session's, so a change made in any session shows soon; it stops when the pane closes.
 It runs the guild's own `gm` (`~/.local/bin/gm`, only when that is a link to a gm), never a camp's draft of it, so a tab says why when that `gm` cannot answer.
 The mod's own tests run with `claude plugin test mods/guild-spyglass`.
+
+### The paste viewer
+
+Claude Code folds a long paste into `[Pasted text #1 +42 lines]` and a pasted picture into `[Image #1]`, and shows neither again. The mod in `mods/paste-viewer/` makes both clickable:
+
+| Where | What shows | A click |
+| --- | --- | --- |
+| above the prompt, while the draft holds a paste | one row for each: a text's line count and first line, an image's size | a text opens whole in a pane beside the chat (↑↓ scroll, Esc closes); an image opens in macOS Quick Look, brought in front of the terminal (Esc or space closes it) |
+| under a sent prompt | the prompt with each pasted text folded back to its tag, and a dim chip for each paste and image | the same; ctrl+o still shows the prompt whole |
+
+In a terminal that draws pictures (kitty, Ghostty, not under a multiplexer) and in the desktop app, each image above the prompt is a small picture instead of a row, its number under it to click. iTerm2 and herdr draw no pictures; `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` tells the mod that a terminal under herdr does.
+
+A paste reaches no hook while it is in the draft, so the mod reads the draft four times a second and takes a new text from the clipboard as its tag appears, keeping it only when its lines match the tag's count; a paste whose clipboard has already changed says *no preview*. A sent prompt carries its pasted texts whole, so its chips always have them. Images are read from where Claude Code saves them (`/tmp/claude-<uid>/<project>/<session>/images/`), Claude Code's own layout rather than an API.
+Every session gm starts loads the mod, as it does guild-chat, and a `claude` started by hand in the clone loads it from `.claude/skills/paste-viewer`.
+The mod's own tests run with `claude plugin test mods/paste-viewer`.
 
 ### The front desk from any terminal: `gm`
 
