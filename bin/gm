@@ -4649,7 +4649,8 @@ SQL
 # outweigh its allow. Claude Code's commit attribution is off unless guild.conf says commit-attribution: on. Its
 # status line names its run and postings (gm statusline with GM_RUN), never its Party Leader's. In bypass it never
 # stops on Claude Code's confirmation of that mode, whatever the user's own settings say: Claude Code reads
-# skipDangerousModePermissionPrompt from --settings too.
+# skipDangerousModePermissionPrompt from --settings too. Its model-drafted feedback is off (feedbackDrafts), as
+# CLAUDE_CODE_SEND_FEEDBACK=0 also turns it off where gm starts it, so it never drafts a bug report for the patron.
 # With pane (an Adventurer in a herdr pane, not claude -p), Stop and StopFailure run gm hook run-stop, which records
 # the run's end, since no result event comes.
 gm_run_settings() {
@@ -4690,7 +4691,7 @@ gm_run_settings() {
   'hooks', json_object('PreToolUse', json_array(json_object('matcher', 'Bash', 'hooks', json_array(
     json_object('type','command','command', $(gm_q "$env rules"), 'timeout', 10))))$stop),
   'statusLine', json_object('type','command','command', $(gm_q "${env% hook} statusline"), 'refreshInterval', 5),
-  'skipDangerousModePermissionPrompt', json('true')$attribution));" >/dev/null
+  'skipDangerousModePermissionPrompt', json('true'), 'feedbackDrafts', 'off'$attribution));" >/dev/null
 }
 
 # ---- The rules hook: the playbook's push rules in every camp (vision/step-3-design.md, slice 2) ----
@@ -5266,6 +5267,10 @@ gm_run_title() {
 # session id, its own settings beside the user's and the project's (never the camp's local ones, the Party Leader's),
 # its model, effort and permission mode (bypassPermissions as --dangerously-skip-permissions).
 GM_RUN_ARGS=()
+# What every Adventurer's claude starts with in its environment, as Firstmate's crew does: no predicted next prompt
+# in its composer, which reads like typed input in its pane, and no model-drafted feedback (its settings' feedbackDrafts
+# too: a managed policy can turn the setting back on, never this).
+GM_RUN_ENV=(CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false CLAUDE_CODE_SEND_FEEDBACK=0)
 gm_run_args() {
   local sid model effort mode
   IFS=$'\t' read -r sid model effort mode <<<"$(gm_sql "SELECT session_id, COALESCE(model,'-'), COALESCE(effort,'-'), COALESCE(permission_mode,'-') FROM run WHERE id=$1;")"
@@ -5399,7 +5404,7 @@ gm_cmd_adventurer() {
   gm_run_args "$id"
   cd "$camp"
   env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_SESSION_ID -u TRACEPARENT -u GM_FOCUS -u GM_CHAT_FOCUS \
-    GM_HALL="$GM_HALL" "$claude" --name "$title" "${GM_RUN_ARGS[@]}" "$(cat "$dir/writ.md")" || rc=$?
+    GM_HALL="$GM_HALL" "${GM_RUN_ENV[@]}" "$claude" --name "$title" "${GM_RUN_ARGS[@]}" "$(cat "$dir/writ.md")" || rc=$?
   gm_run_lost "$id" "claude ended (exit $rc)"
 }
 
@@ -5461,7 +5466,7 @@ gm_cmd_run() {
   args=(-p "${GM_RUN_ARGS[@]:0:2}" --output-format stream-json --verbose "${GM_RUN_ARGS[@]:2}")
   rc=0
   (cd "$camp" && exec env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_SESSION_ID -u TRACEPARENT -u GM_CHAT_FOCUS \
-    GM_HALL="$GM_HALL" "$claude" "${args[@]}" <"$dir/writ.md" >"$dir/stream.jsonl" 2>"$dir/stderr.txt") || rc=$?
+    GM_HALL="$GM_HALL" "${GM_RUN_ENV[@]}" "$claude" "${args[@]}" <"$dir/writ.md" >"$dir/stream.jsonl" 2>"$dir/stderr.txt") || rc=$?
   # The result event is the stream's last line with a top-level "type":"result"; inside a message's text the same
   # words would be escaped.
   { grep '"type":"result"' "$dir/stream.jsonl" || true; } | tail -n 1 >"$dir/result.json"
