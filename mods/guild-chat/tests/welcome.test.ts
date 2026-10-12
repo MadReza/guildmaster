@@ -318,7 +318,7 @@ describe('the welcome on screen', () => {
     await settle()
     await $.prompt.submit(submit('#7 start on this one'))
     const rows = await drawn($)
-    expect(rows).toEqual([expect.stringMatching(/^━━ ⚔ PARTY LEADER · crm-1234 ━ build 3\/8 · nothing needs you ━+$/)])
+    expect(rows).toEqual([expect.stringMatching(/^━━ ⚔ PARTY LEADER · crm-1234 ━ build 3\/8 · nothing needs you ━+$/), STOCK])
     expect(kept.get('tutorial-usage')).toEqual({ ref: { uses: 1, sessions: ['session-1'] } })
   })
 
@@ -362,6 +362,21 @@ describe('the welcome on screen', () => {
     await $.session.start(sessionStart)
     await settle()
     expect((await drawn($))[0]).toMatch(/^━━ ⚔ GUILDMASTER ━ ⚜ 1 needs you/)
+  })
+
+  test("a mod beneath keeps its rows above the prompt: under the card, and under the rule and the campfire", async ($, on) => {
+    world(on, 'chat: banners\n', GUILD)
+    on('ui.blit', async () => ({ value: {} }))
+    await $.session.start(sessionStart)
+    await settle()
+    const card = await drawn($)
+    expect(card[0]).toBe('[art 16×8]')
+    expect(card.at(-1)).toBe(STOCK)
+    await $.prompt.submit(submit('hello'))
+    const folded = await drawn($)
+    expect(folded[0]).toMatch(/^━━ ⚔ GUILDMASTER ━ ⚜ 1 needs you/)
+    expect(folded[1]).toMatch(/^\[art /)
+    expect(folded.at(-1)).toBe(STOCK)
   })
 
   test('welcome: off draws no card', async ($, on) => {

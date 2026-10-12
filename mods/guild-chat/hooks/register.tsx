@@ -742,7 +742,8 @@ export const register: Register = on => {
   })
 
   // Above the prompt: the welcome until the patron's first message, then its rule; and while the session waits, the
-  // idle sprite, under the rule. A survey, or an agent's transcript, keeps the band.
+  // idle sprite, under the rule. A survey, or an agent's transcript, keeps the band. What the mods beneath draw there,
+  // such as paste-viewer's pasted rows, stays under guild-chat's own.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (cleared) {
       cleared = false
@@ -752,16 +753,20 @@ export const register: Register = on => {
     const free = e.surface === 'terminal' && !e.props.hasSurvey && !e.props.view.agentId
     const data = free && welcome.on ? welcomeData : undefined
     const { Box } = $.ui.resolve(e)
+    const over = async (top: unknown, under?: unknown) => {
+      const beneath = await next(e)
+      return <Box flexDirection="column">{top}{under}{beneath ?? null}</Box>
+    }
     if (data && !folded) {
       forget(e.requestId)
-      return typeahead ? next(e) : welcomeCard($, e, welcome, data)
+      return typeahead ? next(e) : over(await welcomeCard($, e, welcome, data))
     }
     const rule = data && welcome.fold === 'rule' ? lineOf($, e, foldedOf(data, e.props.bodyColumns), 0) : undefined
     const sprite = sprites.on && free && !e.props.isWorking ? await idleSprite($) : undefined
     const raster = sprite ? await spriteRaster($, e, sprite, { keep: true }) : undefined
     if (!raster) forget(e.requestId)
     if (!rule && !raster) return next(e)
-    return <Box flexDirection="column">{rule}{raster}</Box>
+    return over(rule, raster)
   })
 
   // Learns which text blocks are notes, and what a step that hit a limit carried. Subagents' steps never draw here.
