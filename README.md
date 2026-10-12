@@ -17,6 +17,7 @@ This repository is at its beginning. The vocabulary comes first, because every l
 - `mods/guild-chat/` is the Claude Code mod that draws the chat under heraldic banners while `guild.conf` says `chat: banners`, draws the veil over the deeds while it says `veil: on`, and draws the working sprites while it says `sprites: on`.
 - `mods/guild-spyglass/` is the Claude Code mod of the spyglass, the pane `/spyglass` opens beside the chat.
 - `mods/paste-viewer/` is the Claude Code mod that opens a pasted text or image at a click.
+- `mods/guild-lexicon/` is the Claude Code mod of the lexicon: a word of a reply the patron may not know, explained at a click.
 - `bin/gm` is the `gm` command; `templates/` holds the Guildmaster's charter (`guildmaster.md`), the Party Leader's charter, the ticket playbook and the repository rules it copies into the Guildhall, and the local OpenTelemetry Collector's configuration (`otelcol.yaml`); `tests/` holds its test suite (with the redaction cases, a schema-1 register to migrate, and recorded Claude Code telemetry under `tests/fixtures/telemetry/`, and stand-ins for herdr and launchctl so no test touches the real ones, nor your `~/.local/bin`) and an end-to-end demonstration.
 
 ## Getting started
@@ -344,6 +345,23 @@ In a terminal that draws pictures (kitty, Ghostty, not under a multiplexer) and 
 A paste reaches no hook while it is in the draft, so the mod reads the draft four times a second and takes a new text from the clipboard as its tag appears, keeping it only when its lines match the tag's count; a paste whose clipboard has already changed says *no preview*. A sent prompt carries its pasted texts whole, so its chips always have them. Images are read from where Claude Code saves them (`/tmp/claude-<uid>/<project>/<session>/images/`), Claude Code's own layout rather than an API.
 Every session gm starts loads the mod, as it does guild-chat, and a `claude` started by hand in the clone loads it from `.claude/skills/paste-viewer`.
 The mod's own tests run with `claude plugin test mods/paste-viewer`.
+
+### The lexicon
+
+A reply leans on words the patron may not have at hand: a guild term, a posting, a run, a rule of the charter. The mod in `mods/guild-lexicon/` marks them in each reply of the Guildmaster or a Party Leader as links, drawn in the reply's own markdown, and a click on one opens a small popup with a TL;DR of it (2 to 4 lines) and where that came from:
+
+| Marked | Explained from |
+| --- | --- |
+| a term of `TERMINOLOGY.md`, bold in its Term column (*veil*, *Party Leaders*) | `TERMINOLOGY.md` |
+| a named rule of the session's charter, a bullet's lead or a heading (*the one-contract-at-a-time rule*) | the charter (`charter.md` for a Party Leader, the front desk's `CLAUDE.md` for the Guildmaster) |
+| a posting reference (`#49`, `context-bar#1`) | `gm show`: its slug, state and the first line of the patron's words |
+| a run reference (`run 13`, *Runs 11, 12 and 13*) | `gm runs --all` |
+| a code span that names something (`GM_VEIL`, `guild.conf`) | the records above when they know it |
+
+What the records do not know is asked of the model over the session's own transcript (`$.model.fork`, one short question with no tools), the popup saying it is looking it up meanwhile, and the answer is kept in the mod's store by focus and phrase, so the next click on it asks nothing: it says *AI, from this session*. Each thing is marked once in each block of a reply, a common word (*run*, *contract*) only where the reply capitalises it, and nothing in a code block, a link or a summary row; ctrl+o shows the reply as written.
+A click is a plain click where Claude Code reports clicks (the fullscreen layout); elsewhere select a phrase with the mouse and type `/what`, or type `/what <phrase>`. Links take the colour Claude Code gives a reply's links: the mod draws the reply with Claude Code's own markdown, which has no dim underline for a link.
+Every session gm starts loads the mod, and a `claude` started by hand in the clone loads it from `.claude/skills/guild-lexicon`.
+The mod's own tests run with `claude plugin test mods/guild-lexicon`.
 
 ### The front desk from any terminal: `gm`
 
