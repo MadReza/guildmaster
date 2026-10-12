@@ -30,6 +30,14 @@ phase: closed — the ticket is finished and its camp can be removed.
 
 ## Push rules
 
+`gm` answers pushes from these: `allow`, `merge` (forward only) or `deny`; the first that applies wins.
+
+push: feature merge in merge-request fix-loop sealed closed
+push: feature allow
+push: development merge
+push: integration deny
+push: protected deny
+
 - The feature branch: push freely. Never force-push it once a merge request is open.
 - The shared development branch: allowed, by merging the feature branch into it, so the change can be validated on the development domains and APIs. Never rebase it and never force-push it.
 - Integration: only through a merge request, never a direct push.

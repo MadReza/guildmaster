@@ -957,7 +957,9 @@ SELECT json_object(
     'SessionEnd', json_array(json_object('hooks', json_array(
       json_object('type','command','command', $(gm_q "$prefix hook session-end"), 'timeout', 5)))),
     'PreToolUse', json_array(json_object('hooks', json_array(
-      json_object('type','command','command', $(gm_q "$prefix hook pre-tool"), 'timeout', 10)))),
+      json_object('type','command','command', $(gm_q "$prefix hook pre-tool"), 'timeout', 10))),
+      json_object('matcher', 'Bash|Edit|Write|MultiEdit|NotebookEdit', 'hooks', json_array(
+      json_object('type','command','command', $(gm_q "$prefix hook rules"), 'timeout', 10)))),
     'PostToolUse', json_array(json_object('hooks', json_array(
       json_object('type','command','command', $(gm_q "$prefix hook post-tool"), 'timeout', 10)))),
     'PostToolUseFailure', json_array(json_object('hooks', json_array(
@@ -4426,6 +4428,7 @@ gm_cmd_hook() {
     stop) gm_hook_stop ;;
     precompact) gm_hook_precompact ;;
     watch) gm_hook_watch ;;
+    rules) gm_hook_rules ;;
     # --clone is what the committed settings pass; a Guildhall's settings from before the front desk moved into the
     # clone pass nothing, and get the same hook.
     front-desk) gm_hook_clone ;;
@@ -4574,8 +4577,9 @@ SQL
 # gm_run_settings <run> <focus> <rules file> <out>: an Adventurer's own settings, passed with --settings while
 # --setting-sources user,project leaves the camp's (the Party Leader's) out: no charter, capture, Stop guard or status
 # line. Slice 1's permissions: edits, the read-only and local git commands, and each adventurer-allow: rule in the
-# repository's rules file (its build and test commands); never a push, merge, rebase, new branch or merge request.
-# Claude Code's commit attribution is off unless guild.conf says commit-attribution: on.
+# repository's rules file (its build and test commands); never a merge, rebase, new branch or merge request. A push
+# is the rules hook's to answer (slice 2): it allows what the playbook allows, and denies the rest; a deny rule here
+# would outweigh its allow. Claude Code's commit attribution is off unless guild.conf says commit-attribution: on.
 gm_run_settings() {
   local id=$1 focus=$2 rules=$3 out=$4 allow='' rule attribution=''
   for rule in 'Bash(git status*)' 'Bash(git diff*)' 'Bash(git log*)' 'Bash(git show*)' 'Bash(git add*)' 'Bash(git commit*)' \
@@ -4586,14 +4590,474 @@ gm_run_settings() {
     [ -z "$rule" ] || allow="$allow, $(gm_q "$rule")"
   done <<<"$(sed -n 's/^adventurer-allow:[[:space:]]*\(.*[^[:space:]]\)[[:space:]]*$/\1/p' "$rules" 2>/dev/null)"
   local deny=''
-  for rule in 'Bash(git push*)' 'Bash(git merge*)' 'Bash(git rebase*)' 'Bash(git reset --hard*)' 'Bash(git checkout -b*)' \
+  for rule in 'Bash(git merge*)' 'Bash(git rebase*)' 'Bash(git reset --hard*)' 'Bash(git checkout -b*)' \
     'Bash(git checkout -B*)' 'Bash(git switch*)' 'Bash(git branch*)' 'Bash(git worktree*)' 'Bash(git tag*)' 'Bash(glab *)' 'Bash(gh *)'; do
     deny="$deny${deny:+, }$(gm_q "$rule")"
   done
   [ "$(gm_conf_value commit-attribution)" = on ] || attribution=", 'attribution', json_object('commit', '', 'pr', ''), 'includeCoAuthoredBy', json('false')"
   sqlite3 -batch :memory: "SELECT writefile($(gm_q "$out"), json_object(
   'env', json_object('GM_HALL', $(gm_q "$GM_HALL"), 'GM_FOCUS', $(gm_q "$focus"), 'GM_RUN', $(gm_q "$id")),
-  'permissions', json_object('allow', json_array($allow), 'deny', json_array($deny))$attribution));" >/dev/null
+  'permissions', json_object('allow', json_array($allow), 'deny', json_array($deny)),
+  'hooks', json_object('PreToolUse', json_array(json_object('matcher', 'Bash', 'hooks', json_array(
+    json_object('type','command','command', $(gm_q "GM_HALL=$(gm_shq "$GM_HALL") GM_FOCUS=$(gm_shq "$focus") GM_RUN=$(gm_shq "$id") bash $(gm_shq "$GM_SELF") hook rules"), 'timeout', 10)))))$attribution));" >/dev/null
+}
+
+# ---- The rules hook: the playbook's push rules in every camp (vision/step-3-design.md, slice 2) ----
+# gm hook rules is a PreToolUse hook on Bash in the Party Leader's camp settings and in every Adventurer's run
+# settings (GM_RUN set), and on Edit and Write in the Party Leader's. It answers for the playbook so nothing stalls on
+# a permission prompt: allow what the playbook permits, deny with the rule quoted what it forbids, and nothing (Claude
+# Code's own permissions) for anything else. The rules are machine-readable lines above the prose: development-branch:,
+# integration-branch: and protected-branch: in rules/<repository>.md, push: lines in the playbook. Until they are
+# there, every push is denied, naming the line missing. A guard rail, not a sandbox: slice 3 checks the facts.
+
+GM_RULES_SEP=$'\x1f'
+GM_RULES_CLASSES='feature development integration protected'
+
+# gm_rules_tokens <command>: the command's words into GM_TOKS, with GM_RULES_SEP between its simple commands (split
+# on ; & && || | newlines and parentheses). Quotes are removed, $(...) and `...` kept whole and unread, redirections
+# and their targets dropped, here-document bodies and comments skipped.
+gm_rules_tokens() {
+  local s=$1 n=${#1} i=0 c d w='' inw=0 redir=0 hd=0 j depth line delim
+  local heredocs=()
+  GM_TOKS=()
+  # The helpers share this function's variables.
+  # shellcheck disable=SC2329 # called below
+  gm_rules_tok_flush() {
+    if [ "$inw" = 1 ]; then
+      if [ "$redir" = 1 ]; then redir=0
+      elif [ "$hd" = 1 ]; then heredocs+=("$w"); hd=0
+      else GM_TOKS+=("$w"); fi
+    fi
+    w='' inw=0
+  }
+  # shellcheck disable=SC2329 # called below
+  gm_rules_tok_sep() { gm_rules_tok_flush; redir=0 hd=0; GM_TOKS+=("$GM_RULES_SEP"); }
+  # shellcheck disable=SC2329 # called below
+  gm_rules_tok_subst() { # $( at i: the whole substitution into w, i after it
+    depth=0
+    while [ "$i" -lt "$n" ]; do
+      d=${s:i:1}
+      w+=$d
+      i=$((i + 1))
+      case $d in
+        '(') depth=$((depth + 1)) ;;
+        ')') depth=$((depth - 1)); [ "$depth" -gt 0 ] || return 0 ;;
+      esac
+    done
+  }
+  # shellcheck disable=SC2329 # called below
+  gm_rules_tok_backtick() { # ` at i
+    w+='`'
+    i=$((i + 1))
+    while [ "$i" -lt "$n" ] && [ "${s:i:1}" != '`' ]; do w+=${s:i:1}; i=$((i + 1)); done
+    w+='`'
+    i=$((i + 1))
+  }
+  while [ "$i" -lt "$n" ]; do
+    c=${s:i:1}
+    case $c in
+      \\)
+        d=${s:i+1:1}
+        [ "$d" = $'\n' ] || { w+=$d; inw=1; }
+        i=$((i + 2)) ;;
+      "'")
+        j=$((i + 1))
+        while [ "$j" -lt "$n" ] && [ "${s:j:1}" != "'" ]; do j=$((j + 1)); done
+        w+=${s:i+1:j-i-1}
+        inw=1
+        i=$((j + 1)) ;;
+      '"')
+        inw=1
+        i=$((i + 1))
+        while [ "$i" -lt "$n" ]; do
+          d=${s:i:1}
+          case $d in
+            '"') i=$((i + 1)); break ;;
+            \\) w+=${s:i+1:1}; i=$((i + 2)) ;;
+            '$') if [ "${s:i+1:1}" = '(' ]; then gm_rules_tok_subst; else w+=$d; i=$((i + 1)); fi ;;
+            '`') gm_rules_tok_backtick ;;
+            *) w+=$d; i=$((i + 1)) ;;
+          esac
+        done ;;
+      '$')
+        inw=1
+        if [ "${s:i+1:1}" = '(' ]; then gm_rules_tok_subst; else w+=$c; i=$((i + 1)); fi ;;
+      '`') inw=1; gm_rules_tok_backtick ;;
+      ' ' | $'\t') gm_rules_tok_flush; i=$((i + 1)) ;;
+      $'\n')
+        gm_rules_tok_sep
+        i=$((i + 1))
+        for delim in "${heredocs[@]+"${heredocs[@]}"}"; do
+          while [ "$i" -lt "$n" ]; do
+            line=${s:i}
+            line=${line%%$'\n'*}
+            i=$((i + ${#line} + 1))
+            line=${line#"${line%%[!$'\t']*}"}
+            [ "$line" != "$delim" ] || break
+          done
+        done
+        heredocs=() ;;
+      ';' | '(' | ')') gm_rules_tok_sep; i=$((i + 1)) ;;
+      '|') gm_rules_tok_sep; i=$((i + 1)); [ "${s:i:1}" != '|' ] || i=$((i + 1)) ;;
+      '&')
+        if [ "${s:i+1:1}" = '>' ]; then
+          gm_rules_tok_flush; redir=1; i=$((i + 2)); [ "${s:i:1}" != '>' ] || i=$((i + 1))
+        else
+          gm_rules_tok_sep; i=$((i + 1)); [ "${s:i:1}" != '&' ] || i=$((i + 1))
+        fi ;;
+      '<' | '>')
+        # A file descriptor number before it belongs to the redirection.
+        case $w in *[!0-9]*) gm_rules_tok_flush ;; *) w='' inw=0 ;; esac
+        if [ "${s:i:3}" = '<<<' ]; then
+          redir=1; i=$((i + 3))
+        elif [ "${s:i:2}" = '<<' ]; then
+          hd=1; i=$((i + 2)); [ "${s:i:1}" != - ] || i=$((i + 1))
+        else
+          redir=1; i=$((i + 1))
+          case ${s:i:1} in '>' | '&' | '|') i=$((i + 1)) ;; esac
+        fi ;;
+      '#')
+        if [ "$inw" = 0 ]; then
+          while [ "$i" -lt "$n" ] && [ "${s:i:1}" != $'\n' ]; do i=$((i + 1)); done
+        else
+          w+=$c; i=$((i + 1))
+        fi ;;
+      *) w+=$c; inw=1; i=$((i + 1)) ;;
+    esac
+  done
+  gm_rules_tok_flush
+}
+
+# gm_rules_dir <base> <dir>: dir resolved against base, or base when dir cannot be read without running anything.
+gm_rules_dir() {
+  case $2 in
+    '' | *[\$\`~]*) printf '%s' "$1" ;;
+    /*) printf '%s' "$2" ;;
+    *) printf '%s/%s' "$1" "$2" ;;
+  esac
+}
+
+gm_rules_current_branch() { git -C "$1" symbolic-ref --short -q HEAD 2>/dev/null || true; }
+
+# The focus's rules, read once a call: GM_R_* for the branch names, the files, and what is missing from them.
+gm_rules_load() {
+  local rules=$1 playbook=$2 key cls missing=''
+  GM_R_PLAYBOOK=$playbook
+  GM_R_DEV=$(gm_setting "$rules" development-branch)
+  GM_R_INT=$(gm_setting "$rules" integration-branch)
+  GM_R_PROT=$(sed -n 's/^protected-branch:[[:space:]]*\(.*[^[:space:]]\)[[:space:]]*$/\1/p' "$rules" 2>/dev/null | tr ',' ' ' | tr '\n' ' ' || true)
+  GM_R_PUSH=$(sed -n 's/^push:[[:space:]]*\(.*[^[:space:]]\)[[:space:]]*$/\1/p' "$playbook" 2>/dev/null || true)
+  for key in development-branch integration-branch protected-branch; do
+    [ -n "$(gm_setting "$rules" "$key")" ] || missing="$missing${missing:+; }$key: in $rules"
+  done
+  for cls in $GM_RULES_CLASSES; do
+    printf '%s\n' "$GM_R_PUSH" | grep -q "^${cls}[[:space:]]" || missing="$missing${missing:+; }push: $cls in $playbook"
+  done
+  GM_R_MISSING=$missing
+}
+
+# gm_rules_class <branch>: feature, development, integration, protected, or other.
+gm_rules_class() {
+  local b=$1 p
+  for p in $GM_R_PROT; do [ "$b" != "$p" ] || { printf protected; return; }; done
+  if [ "$b" = "$GM_R_INT" ]; then printf integration
+  elif [ "$b" = "$GM_R_DEV" ]; then printf development
+  elif [ "$b" = "$GM_R_FEATURE" ]; then printf feature
+  else printf other; fi
+}
+
+# gm_rules_push_line <class>: the first push: line for the class that applies in the focus's phase, as
+# "verdict<TAB>line". A line may end its phases with "in <phase>..."; prose after the words is ignored.
+gm_rules_push_line() {
+  local cls=$1 l c v rest word phases applies words
+  while IFS= read -r l; do
+    read -r c v rest <<<"$l"
+    [ "$c" = "$cls" ] || continue
+    applies=1
+    if [ "${rest%% *}" = in ]; then
+      applies=0 phases=0
+      read -ra words <<<"${rest#in}"
+      for word in "${words[@]+"${words[@]}"}"; do
+        case $word in *[!a-z0-9-]* | - | '') break ;; esac
+        phases=1
+        [ "$word" != "$GM_R_PHASE" ] || applies=1
+      done
+      [ "$phases" = 1 ] || applies=1
+    fi
+    [ "$applies" = 1 ] || continue
+    printf '%s\t%s' "$v" "$l"
+    return
+  done <<<"$GM_R_PUSH"
+}
+
+# The result of one simple command: GM_RV (allow, deny, ask, cd, or nothing) and GM_RW, why.
+gm_rules_set() {
+  case $GM_RV/$1 in
+    deny/* | ask/allow | ask/cd | ask/) return 0 ;;
+  esac
+  GM_RV=$1 GM_RW=$2
+}
+
+# gm_rules_push <dir> <args after push>
+gm_rules_push() {
+  local dir=$1 a force=0 del=0 every='' tags=0 remote='' skip=0 ref plus src dst cls vl v line cur t
+  local refs=()
+  shift
+  if [ -n "$GM_R_MISSING" ]; then
+    gm_rules_set deny "gm rules: every push is denied until the patron adds what the rules hook reads, and these are missing: $GM_R_MISSING. Tell the patron; the lines are in $GM_ROOT/vision/step-3-design.md, slice 2."
+    return
+  fi
+  for a in "$@"; do
+    if [ "$skip" = 1 ]; then skip=0; continue; fi
+    case $a in
+      --force | --force-with-lease | --force-with-lease=*) force=1 ;;
+      --delete) del=1 ;;
+      --mirror | --all | --branches | --prune) every=$a ;;
+      --tags) tags=1 ;;
+      --repo=*) remote=${a#--repo=} ;;
+      -o | --push-option | --receive-pack | --exec | --repo) skip=1 ;;
+      --*) ;;
+      -?*)
+        case $a in *f*) force=1 ;; esac
+        case $a in *d*) del=1 ;; esac
+        case $a in *o) skip=1 ;; esac ;;
+      *) if [ -z "$remote" ]; then remote=$a; else refs+=("$a"); fi ;;
+    esac
+  done
+  if [ -n "$every" ]; then
+    gm_rules_set deny "gm rules: git push $every pushes or deletes every branch at once, the protected ones too; push one branch by name."
+    return
+  fi
+  cur=$(gm_rules_current_branch "$dir")
+  if [ "${#refs[@]}" = 0 ]; then
+    if [ "$tags" = 1 ]; then gm_rules_set '' ''; return; fi
+    case $remote in *[\$\`]*) gm_rules_set deny "gm rules: gm cannot tell where this push goes; name the remote and the branch plainly."; return ;; esac
+    refs=(HEAD)
+  fi
+  for ref in "${refs[@]}"; do
+    plus=0
+    case $ref in +*) plus=1; ref=${ref#+} ;; esac
+    case $ref in
+      *[\$\`]*) gm_rules_set deny "gm rules: gm cannot tell which branch '$ref' pushes; name it plainly."; return ;;
+      *\**) gm_rules_set deny "gm rules: a pattern ('$ref') pushes many branches at once; push one branch by name."; return ;;
+    esac
+    if [ "$del" = 1 ]; then src='' dst=${ref#*:}
+    elif [[ $ref == *:* ]]; then src=${ref%%:*} dst=${ref#*:}
+    else src=$ref dst=$ref; fi
+    [ "$dst" != HEAD ] && [ -n "$dst" ] || dst=$cur
+    case $dst in refs/heads/*) dst=${dst#refs/heads/} ;; refs/*) continue ;; esac
+    # A tag is not a branch: the push rules leave it to Claude Code's own permissions.
+    case $src in refs/tags/*) continue ;; esac
+    if [ -n "$src" ] && [ "$src" = "$dst" ] && git -C "$dir" show-ref -q --verify "refs/tags/$src" 2>/dev/null &&
+      ! git -C "$dir" show-ref -q --verify "refs/heads/$src" 2>/dev/null; then
+      continue
+    fi
+    if [ -z "$dst" ]; then
+      gm_rules_set deny "gm rules: gm cannot tell which branch this pushes (HEAD is not on a branch); name it plainly."
+      return
+    fi
+    cls=$(gm_rules_class "$dst")
+    if [ "$cls" = other ]; then
+      gm_rules_set deny "gm rules: $dst has no push rule: the playbook lets this focus push only $GM_R_FEATURE and the branches its push: lines name. A push anywhere else is the patron's to make."
+      return
+    fi
+    vl=$(gm_rules_push_line "$cls")
+    v=${vl%%$'\t'*} line=${vl#*$'\t'}
+    if [ -z "$src" ]; then t='deleting'
+    elif [ "$force" = 1 ] || [ "$plus" = 1 ]; then t='a forced push to'
+    else t='a push to'; fi
+    case ${vl:+$v} in
+      '') gm_rules_set deny "gm rules: no push: $cls line in $GM_R_PLAYBOOK applies in phase $GM_R_PHASE, so $t $dst ($cls) is denied."; return ;;
+      allow) ;;
+      merge)
+        if [ -z "$src" ] || [ "$force" = 1 ] || [ "$plus" = 1 ]; then
+          gm_rules_set deny "gm rules: $t $dst is denied: the playbook lets the $cls branch move only forward, never forced or deleted (\"push: $line\" in $GM_R_PLAYBOOK)."
+          return
+        fi ;;
+      deny) gm_rules_set deny "gm rules: $t $dst is denied by the playbook (\"push: $line\" in $GM_R_PLAYBOOK)."; return ;;
+      *) gm_rules_set deny "gm rules: \"push: $line\" in $GM_R_PLAYBOOK says $v, which is not allow, merge or deny; $t $dst is denied until it is."; return ;;
+    esac
+    gm_rules_set allow "gm rules: the playbook allows it (\"push: $line\")."
+  done
+}
+
+gm_rules_new_branch() {
+  gm_rules_set deny "gm rules: no new branch: this focus's work stays on $GM_R_FEATURE, the branch of its ticket (the repository's rules: no new branch for work that belongs to an open ticket)."
+}
+
+# gm_rules_git <dir> <args after git>
+gm_rules_git() {
+  local dir=$1 sub a skip=0 cur pos=0 b
+  shift
+  while [ $# -gt 0 ]; do
+    case $1 in
+      -C) dir=$(gm_rules_dir "$dir" "${2:-}"); shift 2 || shift ;;
+      -c | --git-dir | --work-tree | --namespace | --config-env) shift 2 || shift ;;
+      -*) shift ;;
+      *) break ;;
+    esac
+  done
+  sub=${1:-}
+  [ $# = 0 ] || shift
+  case $sub in
+    push) gm_rules_push "$dir" "$@" ;;
+    checkout)
+      for a in "$@"; do case $a in -b | -B | --orphan | -b?* | -B?*) gm_rules_new_branch; return ;; esac; done ;;
+    switch)
+      for a in "$@"; do case $a in -c | -C | --create | --create=* | --force-create | --force-create=* | --orphan | -c?* | -C?*) gm_rules_new_branch; return ;; esac; done ;;
+    worktree)
+      [ "${1:-}" = add ] || return 0
+      for a in "$@"; do case $a in -b | -B | -b?* | -B?*) gm_rules_new_branch; return ;; esac; done ;;
+    branch)
+      for a in "$@"; do
+        if [ "$skip" = 1 ]; then skip=0; continue; fi
+        case $a in
+          -d | -D | --delete | -l | --list | -a | --all | -r | --remotes | -v | -vv | --verbose | --show-current | \
+            --contains* | --no-contains* | --merged* | --no-merged* | --points-at* | --format* | --sort* | --column* | \
+            --edit-description | -u | --set-upstream-to* | --unset-upstream) return 0 ;;
+          -m | -M | --move | -c | -C | --copy | -f | --force) pos=1 ;;
+          -t | --track | --no-track | --create-reflog | -q | --quiet) ;;
+          -*) ;;
+          *) pos=1 ;;
+        esac
+      done
+      [ "$pos" = 0 ] || gm_rules_new_branch ;;
+    rebase | reset)
+      [ -n "$GM_R_DEV" ] || return 0
+      if [ "$sub" = reset ]; then
+        b=''
+        for a in "$@"; do [ "$a" != --hard ] || b=1; done
+        [ -n "$b" ] || return 0
+      else
+        for a in "$@"; do case $a in --abort | --quit | --show-current-patch | --edit-todo) return 0 ;; esac; done
+      fi
+      cur=$(gm_rules_current_branch "$dir")
+      # git rebase <upstream> <branch> checks out <branch> first.
+      b='' pos=0
+      [ "$sub" = reset ] || for a in "$@"; do case $a in -*) ;; *) b=$a pos=$((pos + 1)) ;; esac; done
+      if [ "$cur" = "$GM_R_DEV" ] || { [ "$pos" -ge 2 ] && [ "$b" = "$GM_R_DEV" ]; }; then
+        b='git rebase'
+        [ "$sub" = rebase ] || b='git reset --hard'
+        gm_rules_set deny "gm rules: $b rewrites the shared development branch $GM_R_DEV, which the rules never allow: it only ever moves forward, by a merge."
+      fi ;;
+    commit)
+      if [ -n "$GM_R_LIVE" ] && [ "$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)" = "$GM_R_CAMP" ]; then
+        gm_rules_set deny "gm rules: run $GM_R_LIVE is working in this camp, and only it commits here until it ends; gm summons you then."
+      fi ;;
+  esac
+}
+
+# gm_rules_command <command> <cwd>: GM_RV and GM_RW for the whole command, one simple command at a time: any deny
+# denies, then any ask asks; it is allowed only when every simple command is an allowed one or a plain cd.
+gm_rules_command() {
+  local dir=$2 seg=() t toks=() rv='' rw='' none=0 any=0
+  # bash -c and eval are read inside, a few levels deep.
+  [ "${GM_RULES_DEPTH:-0}" -lt 4 ] || return 0
+  GM_RULES_DEPTH=$((${GM_RULES_DEPTH:-0} + 1))
+  gm_rules_tokens "$1"
+  toks=("${GM_TOKS[@]+"${GM_TOKS[@]}"}" "$GM_RULES_SEP")
+  for t in "${toks[@]}"; do
+    if [ "$t" != "$GM_RULES_SEP" ]; then seg+=("$t"); continue; fi
+    [ "${#seg[@]}" -gt 0 ] || continue
+    GM_RV='' GM_RW=''
+    gm_rules_simple "$dir" "${seg[@]}"
+    [ "$GM_RV" != cd ] || dir=$GM_RW
+    seg=()
+    case $GM_RV in
+      deny) rv=deny rw=$GM_RW; break ;;
+      ask) [ "$rv" = ask ] || { rv=ask rw=$GM_RW; } ;;
+      allow) any=1; [ -n "$rw" ] || rw=$GM_RW ;;
+      cd) ;;
+      *) none=1 ;;
+    esac
+  done
+  GM_RULES_DEPTH=$((GM_RULES_DEPTH - 1))
+  if [ -z "$rv" ]; then
+    if [ "$any" = 1 ] && [ "$none" = 0 ]; then rv=allow; else rv='' rw=''; fi
+  fi
+  GM_RV=$rv GM_RW=$rw
+}
+
+# gm_rules_simple <dir> <words>: one simple command.
+gm_rules_simple() {
+  local dir=$1 rv rw
+  shift
+  while [ $# -gt 0 ]; do
+    case $1 in
+      [A-Za-z_]*=*) shift ;;
+      env) shift; while [ $# -gt 0 ]; do case $1 in -u) shift 2 || shift ;; -* | [A-Za-z_]*=*) shift ;; *) break ;; esac; done ;;
+      command | exec | nohup | time | builtin | sudo | then | else | do | '{' | '!') shift ;;
+      *) break ;;
+    esac
+  done
+  [ $# -gt 0 ] || return 0
+  case ${1##*/} in
+    cd) GM_RV=cd GM_RW=$(gm_rules_dir "$dir" "${2:-}") ;;
+    git) shift; gm_rules_git "$dir" "$@" ;;
+    glab | gh)
+      case ${1##*/}/${2:-}/${3:-} in
+        glab/mr/create | glab/mr/merge | glab/mr/approve | gh/pr/create | gh/pr/merge)
+          if [ -n "${GM_RUN:-}" ]; then
+            gm_rules_set deny "gm rules: an Adventurer never opens, approves or merges a merge request; say in your report that the work is ready for one, and the Party Leader asks the patron."
+          else
+            gm_rules_set ask "gm rules: opening, approving or merging a merge request needs the patron's word (the playbook's gate)."
+          fi ;;
+      esac ;;
+    bash | sh | zsh | eval)
+      if [ "$1" = eval ]; then
+        shift
+        rv=$*
+      else
+        shift
+        rv=''
+        while [ $# -gt 0 ]; do [ "$1" != -c ] || { rv=${2:-}; break; }; shift; done
+      fi
+      [ -n "$rv" ] || return 0
+      gm_rules_command "$rv" "$dir"
+      rw=$GM_RW
+      rv=$GM_RV
+      [ -z "$rv" ] || gm_rules_set "$rv" "$rw" ;;
+  esac
+}
+
+# gm hook rules: reads the hook's JSON, prints its decision or nothing.
+gm_hook_rules() {
+  local input tool focus fid camp branch repo kind phase cmd cwd path
+  input=$(cat)
+  focus=${GM_FOCUS:-}
+  [ -n "$focus" ] && [ -s "$GM_DB" ] || return 0
+  tool=$(gm_guard_field "$input" tool_name)
+  case $tool in Bash | Edit | Write | MultiEdit | NotebookEdit) ;; *) return 0 ;; esac
+  IFS=$'\t' read -r fid camp branch repo kind phase <<<"$(gm_sql "SELECT id, camp, branch, repo, kind, COALESCE(phase,'') FROM focus WHERE name=$(gm_q "$focus");" 2>/dev/null || true)"
+  [ -n "$fid" ] || return 0
+  GM_R_FEATURE=$branch GM_R_PHASE=$phase GM_R_CAMP=$camp GM_R_LIVE=''
+  if [ -z "${GM_RUN:-}" ]; then
+    GM_R_LIVE=$(gm_sql "SELECT id FROM run WHERE focus_id=$fid AND kind='contract' AND ended_at IS NULL ORDER BY id LIMIT 1;" 2>/dev/null || true)
+    if [ -n "$GM_R_LIVE" ]; then
+      gm_runs_reap 2>/dev/null || true
+      GM_R_LIVE=$(gm_sql "SELECT id FROM run WHERE focus_id=$fid AND kind='contract' AND ended_at IS NULL ORDER BY id LIMIT 1;" 2>/dev/null || true)
+    fi
+  fi
+  cwd=$(gm_guard_field "$input" cwd)
+  [ -n "$cwd" ] || cwd=$PWD
+  case $tool in
+    Bash)
+      cmd=$(gm_guard_field "$input" tool_input.command)
+      case $cmd in *git* | *glab* | *gh\ *) ;; *) return 0 ;; esac
+      gm_rules_load "$(gm_rules_path "$repo")" "$(gm_playbook_path "$kind")"
+      GM_RV='' GM_RW=''
+      gm_rules_command "$cmd" "$cwd"
+      [ -z "$GM_RV" ] || gm_guard_json "$GM_RV" "$GM_RW" ;;
+    *)
+      [ -n "${GM_R_LIVE:-}" ] && [ -z "${GM_RUN:-}" ] || return 0
+      path=$(gm_guard_field "$input" tool_input.file_path)
+      [ -n "$path" ] || path=$(gm_guard_field "$input" tool_input.notebook_path)
+      case $path in /*) ;; *) path=$cwd/$path ;; esac
+      case $path/ in
+        "$camp"/*) gm_guard_json deny "gm rules: run $GM_R_LIVE is working in this camp; change no file in it until the run ends. gm summons you then." ;;
+      esac ;;
+  esac
+  return 0
 }
 
 # Starts run $1's keeper in its own process group, away from this command's output, so neither the Party Leader's

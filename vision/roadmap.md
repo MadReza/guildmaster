@@ -62,7 +62,7 @@ The Adventurer spans the design defines are built with step 3, where Adventurers
 | Slice | What | Status |
 | --- | --- | --- |
 | 1 | `gm dispatch`, one headless Adventurer, its result in the register, and the watch that summons the Party Leader (with issue #41) | In review |
-| 2 | `PreToolUse` push rules in every camp | Planned |
+| 2 | `PreToolUse` push rules in every camp. Until the patron adds `development-branch:`, `integration-branch:` and `protected-branch:` to each `rules/<repository>.md` and the `push: feature merge in merge-request fix-loop sealed closed`, `push: feature allow`, `push: development merge`, `push: integration deny` and `push: protected deny` lines to `playbooks/ticket.md` ([the lines](step-3-design.md#the-lines-the-patron-adds)), every push is denied | In review |
 | 3 | `gm check` after every run | Planned |
 | 4 | Parallel surveys and the dispatch cap | Planned |
 | 5 | Adventurer spans, `TRACEPARENT` and writ hashes | Planned |

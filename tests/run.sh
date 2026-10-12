@@ -21,7 +21,7 @@ trap suite_cleanup EXIT
 export HOME=$WORK/home
 mkdir -p "$HOME"
 # The suite may itself run inside Claude Code, whose session variables would join gm's spans to it.
-unset CLAUDE_CODE_SESSION_ID CLAUDE_EFFORT TRACEPARENT GM_FOCUS CLAUDECODE GM_HERDR_WORKSPACE GM_HERDR_AUTO GM_CHAT GM_CHAT_FOCUS
+unset CLAUDE_CODE_SESSION_ID CLAUDE_CODE_ENABLE_TELEMETRY CLAUDE_EFFORT TRACEPARENT GM_FOCUS GM_RUN CLAUDECODE GM_HERDR_WORKSPACE GM_HERDR_AUTO GM_CHAT GM_CHAT_FOCUS
 # gm never asks a question or looks for the real Claude Code unless a test says so.
 export GM_INTERACTIVE=0 GM_CLAUDE=$ROOT/tests/fixtures/fake-claude GM_HERDR=$ROOT/tests/fixtures/herdr GM_HERDR_SOCKET_CMD=$ROOT/tests/fixtures/herdr-socket
 # No test reaches a real herdr or launchd: the stubs in tests/fixtures come first on PATH; the herdr stub keeps its
@@ -3057,12 +3057,13 @@ t_dispatch_hands_a_posting_to_an_adventurer() {
   assert_eq "$(cat "$GM_FAKE_RUN/pwd")" "$CAMP" "it runs in the camp" &&
     assert_eq "$(tr '\n' ' ' <"$GM_FAKE_RUN/args")" "-p --session-id $sid --output-format stream-json --verbose --setting-sources user,project --settings $dir/settings.json --model sonnet --effort medium --permission-mode acceptEdits " "its command line" &&
     assert_eq "$(grep -c '^CLAUDECODE=' "$GM_FAKE_RUN/env")" 0 "not as a session inside Claude Code" || return 1
-  local settings
+  local settings s
   settings=$(cat "$dir/settings.json")
-  assert_eq "$(json "SELECT json_extract('$settings','\$.env.GM_RUN')||' '||json_extract('$settings','\$.env.GM_FOCUS')")" "1 appt-v2" "its own environment" &&
-    assert_eq "$(json "SELECT json_type('$settings','\$.hooks')||json_type('$settings','\$.statusLine')")" "" "no capture, charter, Stop guard or status line" &&
-    assert_eq "$(json "SELECT json_extract('$settings','\$.attribution.commit')||'|'||json_extract('$settings','\$.includeCoAuthoredBy')")" "|0" "commit attribution off" &&
-    assert_contains "$settings" '"Bash(git push*)"' "never a push" &&
+  s=$(sqlq "$settings")
+  assert_eq "$(json "SELECT json_extract($s,'\$.env.GM_RUN')||' '||json_extract($s,'\$.env.GM_FOCUS')")" "1 appt-v2" "its own environment" &&
+    assert_eq "$(json "SELECT group_concat(key)||'|'||COALESCE(json_type($s,'\$.statusLine'),'') FROM json_each(json_extract($s,'\$.hooks'))")" "PreToolUse|" "no capture, charter, Stop guard or status line: only the rules hook" &&
+    assert_eq "$(json "SELECT json_extract($s,'\$.attribution.commit')||'|'||json_extract($s,'\$.includeCoAuthoredBy')")" "|0" "commit attribution off" &&
+    assert_contains "$settings" '"Bash(git merge*)"' "never a merge" &&
     assert_contains "$settings" '"Bash(git commit*)"' "commits allowed" || return 1
   assert_eq "$(db "SELECT count(*) FROM message;")" "$messages" "the writ is never recorded as a patron message" &&
     assert_eq "$(cat "$dir/result.md")" "Fixed the owner field in abc123." "the result kept" &&
@@ -3135,7 +3136,7 @@ t_dispatch_several_postings_and_settings() {
   settings=$(cat "$GM_HALL/runs/1/settings.json")
   assert_contains "$(cat "$GM_HALL/runs/1/writ.md")" "# Writ: appt-v2#1 export-button, #2 export-format" "one writ for both" &&
     assert_contains "$settings" '"Bash(npm test*)"' "the rules file's build and test commands" &&
-    assert_eq "$(json "SELECT json_type('$settings','\$.attribution')")" "" "attribution left to Claude Code when on" &&
+    assert_eq "$(json "SELECT json_type($(sqlq "$settings"),'\$.attribution')")" "" "attribution left to Claude Code when on" &&
     assert_contains "$(gm show 2)" "run 1 finished" "both postings get the finish notice"
 }
 
@@ -3298,6 +3299,219 @@ t_nudge_types_nothing_when_unsafe() {
   # gm summons hears it, and the roster no longer shows it.
   GM_FOCUS=appt-v2 gm summons >/dev/null
   assert_not_contains "$(gm roster)" "unheard" "heard"
+}
+
+# ---- The rules hook: push rules in every camp (vision/step-3-design.md, slice 2) ----
+
+# rules <tool> <command, or the file for Edit and Write> [cwd]: gm hook rules' answer in appt-v2's camp.
+rules() {
+  local input
+  input=$(json "SELECT json_object('session_id','r1','hook_event_name','PreToolUse','cwd',$(sqlq "${3:-$CAMP}"),'tool_name',$(sqlq "$1"),
+    'tool_input', json_object('command',$(sqlq "$2"),'file_path',$(sqlq "$2"),'content','x'));")
+  printf '%s' "$input" | GM_FOCUS=appt-v2 bash "$GM" hook rules
+}
+
+reason() { json "SELECT json_extract($(sqlq "$1"),'\$.hookSpecificOutput.permissionDecisionReason');"; }
+
+# The branch names a hook can read, as the patron adds them to the rules file; the playbook has its push: lines.
+rules_lines() {
+  printf 'development-branch: development\nintegration-branch: integration\nprotected-branch: master, main\n' >>"$GM_HALL/rules/repo.md"
+}
+
+# check_rules <file>: each line "allow|deny|ask|-<TAB>command"; - is no answer, Claude Code's own permissions.
+check_rules() {
+  local want cmd out got
+  while IFS=$'\t' read -r want cmd; do
+    [ -n "$cmd" ] || continue
+    out=$(rules Bash "$cmd")
+    got=''
+    [ -z "$out" ] || got=$(decision "$out")
+    assert_eq "${got:--}" "$want" "$cmd" || return 1
+  done <"$1"
+}
+
+t_rules_deny_every_push_until_the_lines_exist() {
+  setup rulesmissing
+  local out
+  out=$(rules Bash 'git push origin feature/CRM-8965')
+  assert_eq "$(decision "$out")" deny "a push to the feature branch, with no branch names yet" &&
+    assert_contains "$(reason "$out")" "development-branch: in $GM_HALL/rules/repo.md; integration-branch: in $GM_HALL/rules/repo.md; protected-branch: in $GM_HALL/rules/repo.md" "naming each missing line" &&
+    assert_eq "$(decision "$(rules Bash 'git push')")" deny "a bare push too" &&
+    assert_eq "$(decision "$(rules Bash 'git push --tags')")" deny "every push" &&
+    assert_eq "$(rules Bash 'git status')" "" "anything else is left alone" || return 1
+  # The playbook's push: lines go missing the same way.
+  rules_lines
+  grep -v '^push: integration' "$GM_HALL/playbooks/ticket.md" >"$WORK/rulesmissing/pb" && cp "$WORK/rulesmissing/pb" "$GM_HALL/playbooks/ticket.md"
+  out=$(rules Bash 'git push origin feature/CRM-8965')
+  assert_eq "$(decision "$out")" deny "a playbook line missing" &&
+    assert_contains "$(reason "$out")" "push: integration in $GM_HALL/playbooks/ticket.md" "naming it" &&
+    assert_not_contains "$(reason "$out")" "development-branch" "and only what is missing"
+}
+
+t_rules_table_of_commands() {
+  setup rulestable
+  rules_lines
+  local t=$WORK/rulestable/table
+  # shellcheck disable=SC2016 # commands as an agent writes them, never expanded here
+  printf '%s\n' \
+    'allow	git push' \
+    'allow	git push origin feature/CRM-8965' \
+    'allow	git push -u origin HEAD' \
+    'allow	git push origin HEAD:refs/heads/feature/CRM-8965' \
+    'allow	git push --force origin feature/CRM-8965' \
+    'allow	git push origin development' \
+    'allow	git push origin feature/CRM-8965:development' \
+    'allow	git push origin feature/CRM-8965 2>&1' \
+    "allow	cd $CAMP && git push origin feature/CRM-8965" \
+    'allow	git push origin feature/CRM-8965 development' \
+    'deny	git push -f origin development' \
+    'deny	git push -uf origin development' \
+    'deny	git push origin +development' \
+    'deny	git push --force-with-lease origin development' \
+    'deny	git push origin --delete development' \
+    'deny	git push origin :development' \
+    'deny	git push origin integration' \
+    'deny	git push origin master' \
+    'deny	git push origin HEAD:main' \
+    'deny	git push origin feature/CRM-8965 master' \
+    'deny	git push --all origin' \
+    'deny	git push --mirror origin' \
+    'deny	git push origin feature/other' \
+    'deny	git push origin $(git branch --show-current)' \
+    'deny	git push origin "refs/heads/*"' \
+    'deny	git -C ../x push origin master' \
+    'deny	git -c push.default=current push origin master' \
+    'deny	git checkout -b other' \
+    'deny	git checkout -bother' \
+    'deny	git switch -c other' \
+    'deny	git switch --create other' \
+    'deny	git branch other' \
+    'deny	git branch -m renamed' \
+    'deny	git worktree add -b other ../x' \
+    'ask	glab mr create --fill --target-branch integration' \
+    'ask	gh pr create --fill' \
+    '-	git branch' \
+    '-	git branch -d old' \
+    '-	git branch --show-current' \
+    '-	git branch -u origin/feature/CRM-8965' \
+    '-	git checkout main' \
+    '-	git worktree list' \
+    '-	git status' \
+    '-	ls -la' \
+    '-	echo "git push origin master"' \
+    '-	git commit -m "fix; git push --force origin master"' \
+    '-	git log --grep="push origin master"' \
+    '-	glab mr list' \
+    '-	git rebase main' \
+    '-	git push --tags' \
+    '-	git add . && git commit -m x && git push' \
+    'deny	git status && git push origin master' \
+    'deny	git add . ; git push -f origin development' \
+    'deny	git log | git push origin integration' \
+    'deny	git status || git push origin master' \
+    'deny	(cd .. && git push origin master)' \
+    'deny	true & git push origin master' \
+    'deny	bash -c "git push origin master"' \
+    'deny	env GIT_TRACE=1 git push origin master' \
+    'deny	FOO=1 command git push origin master' \
+    "deny	git commit -m 'it is fine' && git push origin +feature/CRM-8965:development" >"$t"
+  check_rules "$t" || return 1
+  local out
+  out=$(rules Bash 'git push origin integration')
+  assert_contains "$(reason "$out")" "\"push: integration deny" "quotes the rule" &&
+    assert_contains "$(reason "$out")" "$GM_HALL/playbooks/ticket.md" "and where it is" &&
+    assert_contains "$(reason "$(rules Bash 'git push -f origin development')")" "only forward, never forced or deleted" "forward only" &&
+    assert_contains "$(reason "$(rules Bash 'git checkout -b other')")" "stays on feature/CRM-8965" "names the branch the work stays on" || return 1
+  # A here-document's body is not a command, nor is a comment.
+  assert_eq "$(rules Bash "git commit -F - <<'EOF'
+Fix the export
+git push --force origin master
+EOF")" "" "a commit message in a here-document" &&
+    assert_eq "$(rules Bash "git status # git push origin master")" "" "a comment" &&
+    assert_eq "$(decision "$(rules Bash "git commit -F - <<'EOF'
+x
+EOF
+git push origin master")")" deny "a push after the here-document" || return 1
+  # A long commit message is read well inside the hook's 10 seconds.
+  local long t0
+  # shellcheck disable=SC2016 # text for the hook to read, never expanded
+  long=$(seq 1 250 | awk '{ print "Line " $1 " of a long commit message, with \"quotes\" and $(subst) and a ; or two." }')
+  t0=$SECONDS
+  assert_eq "$(rules Bash "git commit -m \"\$(cat <<'EOF'
+$long
+EOF
+)\" && git push origin master" | grep -c '"deny"')" 1 "a push after a long message" || return 1
+  [ $((SECONDS - t0)) -le 5 ] || fail "a long command took $((SECONDS - t0)) seconds"
+  # A tag is not a branch.
+  git -C "$CAMP" tag v1.0
+  assert_eq "$(rules Bash 'git push origin v1.0')" "" "a tag is left alone" || return 1
+  # An Adventurer is denied the merge request outright.
+  assert_eq "$(decision "$(GM_RUN=1 rules Bash 'glab mr create --fill')")" deny "an Adventurer never opens a merge request" &&
+    assert_eq "$(decision "$(GM_RUN=1 rules Bash 'git push origin feature/CRM-8965')")" allow "and pushes as the playbook allows" || return 1
+  # Once a merge request is open, the playbook's phase-scoped line keeps the feature branch from a force-push.
+  db "UPDATE focus SET phase='fix-loop';"
+  out=$(rules Bash 'git push --force origin feature/CRM-8965')
+  assert_eq "$(decision "$out")" deny "no force-push in fix-loop" &&
+    assert_contains "$(reason "$out")" '"push: feature merge in merge-request fix-loop sealed closed' "quoting the phase's line" &&
+    assert_eq "$(decision "$(rules Bash 'git push origin feature/CRM-8965')")" allow "a plain push still goes"
+}
+
+t_rules_development_is_never_rewritten() {
+  setup rulesdev
+  rules_lines
+  git -C "$REPO" checkout -q -b development
+  assert_eq "$(decision "$(rules Bash 'git rebase main' "$REPO")")" deny "a rebase on the development branch" &&
+    assert_eq "$(decision "$(rules Bash 'git reset --hard HEAD~1' "$REPO")")" deny "a hard reset on it" &&
+    assert_contains "$(reason "$(rules Bash 'git reset --hard HEAD~1' "$REPO")")" "git reset --hard rewrites the shared development branch development" "says why" &&
+    assert_eq "$(rules Bash 'git rebase --abort' "$REPO")" "" "an abort is left alone" &&
+    assert_eq "$(rules Bash 'git reset --soft HEAD~1' "$REPO")" "" "a soft reset too" &&
+    assert_eq "$(rules Bash 'git rebase main')" "" "a rebase on the feature branch is left to the permissions" &&
+    assert_eq "$(decision "$(rules Bash 'git rebase main development')")" deny "a rebase that checks out development first" &&
+    assert_eq "$(decision "$(rules Bash "cd $REPO && git rebase main")")" deny "after a cd"
+}
+
+t_rules_hold_the_camp_while_a_contract_runs() {
+  setup ruleslive
+  export GM_FOCUS=appt-v2
+  rules_lines
+  fake_run "$WORK/ruleslive/run"
+  : >"$GM_FAKE_RUN/hold"
+  gm post "the export" >/dev/null && gm notice 1 started >/dev/null
+  assert_eq "$(rules Edit "$CAMP/app.js")" "" "no run, an edit is left alone" || return 1
+  gm dispatch 1 >/dev/null || fail "dispatch"
+  wait_for "SELECT pid IS NOT NULL FROM run WHERE id=1;" 1 || fail "no keeper pid"
+  local out
+  out=$(rules Edit "$CAMP/app.js")
+  assert_eq "$(decision "$out")" deny "an edit in the camp while run 1 works" &&
+    assert_contains "$(reason "$out")" "run 1 is working in this camp" "says which run" &&
+    assert_eq "$(decision "$(rules Write src/new.js)")" deny "a relative path in the camp" &&
+    assert_eq "$(decision "$(rules Bash 'git commit -m wip')")" deny "a commit in the camp" &&
+    assert_eq "$(decision "$(rules Bash "git -C $CAMP commit -m wip" "$WORK")")" deny "a commit with -C" &&
+    assert_eq "$(rules Edit "$GM_HALL/rules/repo.md")" "" "a file outside the camp" &&
+    assert_eq "$(rules Bash 'git status')" "" "reading the camp" &&
+    assert_eq "$(GM_RUN=1 rules Bash 'git commit -m fix')" "" "the Adventurer itself commits" || return 1
+  rm -f "$GM_FAKE_RUN/hold"
+  run_ended 1 || fail "the run never ended"
+  assert_eq "$(rules Edit "$CAMP/app.js")" "" "the run over, edits are the Party Leader's again"
+}
+
+t_rules_hook_in_every_camp() {
+  setup ruleshook
+  export GM_FOCUS=appt-v2
+  local s=$CAMP/.claude/settings.local.json q
+  q="SELECT value->>'matcher'||' '||(value->'hooks'->0->>'command') FROM json_each(json_extract(CAST(readfile('$s') AS TEXT),'\$.hooks.PreToolUse')) WHERE value->>'matcher' IS NOT NULL;"
+  assert_contains "$(json "$q")" "Bash|Edit|Write|MultiEdit|NotebookEdit GM_HALL=" "the Party Leader's camp settings" &&
+    assert_contains "$(json "$q")" "hook rules" "run the rules hook" || return 1
+  fake_run "$WORK/ruleshook/run"
+  gm post "x" >/dev/null && gm notice 1 started >/dev/null
+  gm dispatch 1 >/dev/null
+  run_ended 1 || fail "the run never ended"
+  local settings f="CAST(readfile('$GM_HALL/runs/1/settings.json') AS TEXT)"
+  settings=$(cat "$GM_HALL/runs/1/settings.json")
+  assert_eq "$(json "SELECT json_extract($f,'\$.hooks.PreToolUse[0].matcher')")" Bash "the Adventurer's, on Bash" &&
+    assert_contains "$(json "SELECT json_extract($f,'\$.hooks.PreToolUse[0].hooks[0].command')")" "GM_RUN='1' bash" "as run 1" &&
+    assert_contains "$(json "SELECT json_extract($f,'\$.hooks.PreToolUse[0].hooks[0].command')")" "hook rules" "the rules hook" &&
+    assert_not_contains "$settings" '"Bash(git push*)"' "no deny rule to outweigh the hook's allow"
 }
 
 t_shellcheck() {

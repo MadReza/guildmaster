@@ -103,6 +103,7 @@ appt-v2#1 fix-owner-empty done: fixed in 6b6a581 ("the owner field is empty…")
 
 A job the Guildmaster hands a focus for you (`gm post --focus`, or `gm open --brief` for a new focus) wakes its Party Leader the same way, with nobody in its workspace.
 An Adventurer may edit, read and commit; to let it run the repository's build and tests, add `adventurer-allow:` lines to the repository's rules file in the Guildhall.
+Pushes, in the Party Leader's camp and every Adventurer's, are answered by the playbook's `push:` lines and the rules file's `development-branch:`, `integration-branch:` and `protected-branch:` lines; until those are there every push is denied ([the lines to add](vision/step-3-design.md#the-lines-the-patron-adds)).
 
 #### Kill it and come back
 
