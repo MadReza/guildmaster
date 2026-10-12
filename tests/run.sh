@@ -3291,7 +3291,16 @@ t_dispatch_several_postings_and_settings() {
   assert_contains "$(cat "$GM_HALL/runs/1/writ.md")" "# Writ: appt-v2#1 export-button, #2 export-format" "one writ for both" &&
     assert_contains "$settings" '"Bash(npm test*)"' "the rules file's build and test commands" &&
     assert_eq "$(json "SELECT json_type($(sqlq "$settings"),'\$.attribution')")" "" "attribution left to Claude Code when on" &&
-    assert_contains "$(gm show 2)" "run 1 finished" "both postings get the finish notice"
+    assert_contains "$(gm show 2)" "run 1 finished" "both postings get the finish notice" || return 1
+  # The next run of two: run 2, while its postings' rows are the register's third and fourth, so a run id read
+  # from the last row inserted would give the second posting run 3, which does not exist.
+  gm notice 1 'done' >/dev/null && gm notice 2 'done' >/dev/null
+  gm post "the export header" >/dev/null && gm post "the export footer" >/dev/null
+  gm notice 3 started >/dev/null && gm notice 4 started >/dev/null
+  out=$(gm dispatch 3 4 2>&1) || fail "dispatching two postings again failed: $out"
+  run_ended 2 || fail "run 2 never ended"
+  assert_eq "$(db "SELECT group_concat(run_id||':'||posting_id, ' ') FROM (SELECT * FROM run_posting ORDER BY rowid);")" "1:1 1:2 2:3 2:4" "each posting in its own run" &&
+    assert_contains "$(gm show 4)" "run 2 finished" "the second posting's run"
 }
 
 t_lost_run_is_reaped() {

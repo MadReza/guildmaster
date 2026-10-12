@@ -5150,6 +5150,7 @@ gm_cmd_dispatch() {
   gm_writ_render "$template" "$ids" "$brief" "$writ" || { rm -f "$writ"; gm_die "dispatch: could not write the writ from $template"; }
   sid=$(gm_uuid)
   # The run is recorded with its postings; a finished run already on one of them is reviewed now, and was not enough.
+  # Its postings name it by its session id: last_insert_rowid() changes with each run_posting row inserted.
   out=$(gm_sql <<SQL
 BEGIN IMMEDIATE;
 UPDATE run SET reviewed_at=COALESCE(reviewed_at,$GM_NOW), outcome=COALESCE(outcome,'redispatched')
@@ -5157,7 +5158,7 @@ UPDATE run SET reviewed_at=COALESCE(reviewed_at,$GM_NOW), outcome=COALESCE(outco
 INSERT INTO run(focus_id, kind, model, effort, permission_mode, template_sha256, brief, session_id, started_at)
   VALUES ($fid, 'contract', $(gm_qn "$model"), $(gm_qn "$effort"), 'acceptEdits', $(gm_qn "$(gm_sha256_file "$template")"),
           $(gm_qn "$brief"), $(gm_q "$sid"), $GM_NOW);
-INSERT INTO run_posting(run_id, posting_id) SELECT last_insert_rowid(), id FROM posting WHERE id IN ($ids);
+INSERT INTO run_posting(run_id, posting_id) SELECT (SELECT id FROM run WHERE session_id=$(gm_q "$sid")), id FROM posting WHERE id IN ($ids);
 SELECT max(id) FROM run WHERE session_id=$(gm_q "$sid");
 COMMIT;
 SQL
