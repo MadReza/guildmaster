@@ -58,7 +58,8 @@ assert_not_contains() {
   case $1 in *"$2"*) fail "${3:-unexpected text}: [$2] in output" ;; esac
 }
 
-db() { sqlite3 -batch -noheader "$GM_HALL/register.db" "$@"; }
+# Waits for a lock as gm does: the last connection to close checkpoints the WAL under a lock for a moment.
+db() { sqlite3 -batch -noheader -cmd '.timeout 15000' "$GM_HALL/register.db" "$@"; }
 
 json() { sqlite3 -batch :memory: "$@"; }
 
@@ -120,9 +121,9 @@ t_schema_created_on_first_use() {
   [ ! -e "$GM_HALL" ] || return 1
   gm list >/dev/null || fail "first gm call failed"
   assert_eq "$(db 'PRAGMA journal_mode;')" wal "journal mode" &&
-    assert_eq "$(db 'PRAGMA user_version;')" 5 "schema version" &&
+    assert_eq "$(db 'PRAGMA user_version;')" 6 "schema version" &&
     assert_eq "$(db "SELECT group_concat(name, ' ') FROM (SELECT name FROM sqlite_master WHERE type='table' ORDER BY name);")" \
-      "endpoint event focus guard message model_sample open_span posting prompt_version span span_link ticket" "tables"
+      "endpoint event focus guard message model_sample open_span posting prompt_version run run_posting span span_link ticket" "tables"
 }
 
 t_home_is_configurable() {
@@ -957,8 +958,8 @@ t_migration_keeps_schema1_data() {
   for i in 1 2 3 4 5 6; do gm list --all >/dev/null 2>"$WORK/migrate/err$i" & done
   wait
   for i in 1 2 3 4 5 6; do assert_eq "$(cat "$WORK/migrate/err$i")" "" "migration $i ran clean"; done
-  assert_eq "$(db 'PRAGMA user_version;')" 5 "migrated to schema 5" &&
-    assert_eq "$(for t in $tables; do db "SELECT $(db "SELECT group_concat(name, ',') FROM pragma_table_info('$t') WHERE name NOT IN ('trace_id','span_id','span_start_ms','follows_id','closed_at','start_attempts','held_at','held_told','close_requested_at');") FROM $t ORDER BY rowid;"; done)" "$before" "every schema-1 row kept as it was" &&
+  assert_eq "$(db 'PRAGMA user_version;')" 6 "migrated to schema 6" &&
+    assert_eq "$(for t in $tables; do db "SELECT $(db "SELECT group_concat(name, ',') FROM pragma_table_info('$t') WHERE name NOT IN ('trace_id','span_id','span_start_ms','follows_id','closed_at','start_attempts','held_at','held_told','close_requested_at','origin','summoned_at','unheard_at');") FROM $t ORDER BY rowid;"; done)" "$before" "every schema-1 row kept as it was" &&
     assert_eq "$(db "SELECT count(*) FROM posting WHERE trace_id IS NULL;")" 2 "old postings have no trace" &&
     assert_eq "$(db "SELECT group_concat(name, ' ') FROM (SELECT name FROM sqlite_master WHERE type='table' AND name IN ('span','span_link','open_span','prompt_version','model_sample') ORDER BY name);")" \
       "model_sample open_span prompt_version span span_link" "the tracing tables" &&
@@ -2996,6 +2997,301 @@ t_autostart_interval_from_the_config() {
   [ -z "$(ls "$GM_LAUNCH_AGENTS"/com.guildmaster.up.*.plist 2>/dev/null)" ] || fail "the agent was left"
   gm config set autostart on >/dev/null
   assert_eq "$(interval)" 180 "on again, at the configured interval"
+}
+
+# ---- Adventurers: dispatch, the keeper, the summons and the watch (vision/step-3-design.md, slice 1) ----
+
+# fake_run <dir>: the fake claude acts as an Adventurer, recording what it was given in <dir>.
+fake_run() {
+  export GM_FAKE_RUN=$1
+  mkdir -p "$GM_FAKE_RUN"
+}
+
+# A result event as claude -p --output-format stream-json ends with, after a message whose text mentions it.
+fake_stream() {
+  printf '%s\n' '{"type":"system","subtype":"init","session_id":"x"}' \
+    '{"type":"assistant","message":{"content":[{"type":"text","text":"not this: {\"type\":\"result\"}"}]}}' \
+    "{\"duration_ms\":1200,\"type\":\"result\",\"subtype\":\"${2:-success}\",\"is_error\":false,\"num_turns\":22,\"result\":\"Fixed the owner field in abc123.\",\"total_cost_usd\":1.41,\"modelUsage\":{\"claude-sonnet-5-5\":{\"costUSD\":1.41}}}" >"$1/stream.jsonl"
+}
+
+run_ended() { wait_for "SELECT ended_at IS NOT NULL FROM run WHERE id=$1;" 1; }
+
+t_dispatch_hands_a_posting_to_an_adventurer() {
+  setup dispatch
+  export GM_FOCUS=appt-v2
+  fake_run "$WORK/dispatch/run"
+  fake_stream "$GM_FAKE_RUN"
+  gm post "the owner field is empty after save" >/dev/null
+  payload s1 "#1 and keep the old URL" | gm hook prompt >/dev/null
+  local out t0 messages
+  messages=$(db "SELECT count(*) FROM message;")
+  out=$(gm dispatch 1 2>&1) && fail "dispatched a posting nobody started"
+  assert_contains "$out" "appt-v2#1 owner-field-empty-after is received; start it first (gm notice 1 started)" "says to start it first" || return 1
+  gm notice 1 started >/dev/null
+  t0=$SECONDS
+  out=$(cd "$CAMP" && gm dispatch 1 --brief "Check it with the unit tests." --model sonnet 2>&1) || fail "dispatch failed: $out"
+  [ $((SECONDS - t0)) -lt 5 ] || fail "dispatch waited for the run"
+  assert_contains "$out" "appt-v2#1 owner-field-empty-after dispatched: contract, run 1 on sonnet at medium effort (\"the owner field is empty after save\")" "the notice line" &&
+    assert_contains "$out" "gm summons you when it finishes" "says what happens next" || return 1
+  run_ended 1 || fail "the run never ended"
+  local dir=$GM_HALL/runs/1 writ sid
+  writ=$(cat "$dir/writ.md")
+  assert_eq "$(cat "$GM_FAKE_RUN/stdin")" "$writ" "the writ is the Adventurer's prompt" &&
+    assert_contains "$writ" "# Writ: appt-v2#1 owner-field-empty-after" "{{posting}}" &&
+    assert_contains "$writ" "the owner field is empty after save" "{{original_words}}" &&
+    assert_contains "$writ" "#1 and keep the old URL" "with every addition, verbatim" &&
+    assert_contains "$writ" "Check it with the unit tests." "{{brief}}" &&
+    assert_contains "$writ" "feature branch \`feature/CRM-8965\`" "{{branch}}" &&
+    assert_contains "$writ" "$GM_HALL/rules/repo.md" "{{rules}}, a path" &&
+    assert_contains "$writ" "phase intake" "{{phase}}" &&
+    assert_not_contains "$writ" "{{" "every slot filled" &&
+    assert_not_contains "$writ" "This file is the patron's" "the template's own note stays out" || return 1
+  [ -f "$GM_HALL/prompts/adventurer/contract.md" ] || fail "the template was not copied into the Guildhall"
+  sid=$(db "SELECT session_id FROM run WHERE id=1;")
+  assert_eq "$(cat "$GM_FAKE_RUN/pwd")" "$CAMP" "it runs in the camp" &&
+    assert_eq "$(tr '\n' ' ' <"$GM_FAKE_RUN/args")" "-p --session-id $sid --output-format stream-json --verbose --setting-sources user,project --settings $dir/settings.json --model sonnet --effort medium --permission-mode acceptEdits " "its command line" &&
+    assert_eq "$(grep -c '^CLAUDECODE=' "$GM_FAKE_RUN/env")" 0 "not as a session inside Claude Code" || return 1
+  local settings
+  settings=$(cat "$dir/settings.json")
+  assert_eq "$(json "SELECT json_extract('$settings','\$.env.GM_RUN')||' '||json_extract('$settings','\$.env.GM_FOCUS')")" "1 appt-v2" "its own environment" &&
+    assert_eq "$(json "SELECT json_type('$settings','\$.hooks')||json_type('$settings','\$.statusLine')")" "" "no capture, charter, Stop guard or status line" &&
+    assert_eq "$(json "SELECT json_extract('$settings','\$.attribution.commit')||'|'||json_extract('$settings','\$.includeCoAuthoredBy')")" "|0" "commit attribution off" &&
+    assert_contains "$settings" '"Bash(git push*)"' "never a push" &&
+    assert_contains "$settings" '"Bash(git commit*)"' "commits allowed" || return 1
+  assert_eq "$(db "SELECT count(*) FROM message;")" "$messages" "the writ is never recorded as a patron message" &&
+    assert_eq "$(cat "$dir/result.md")" "Fixed the owner field in abc123." "the result kept" &&
+    assert_eq "$(db "SELECT kind||' '||model||' '||effort||' '||exit_code||' '||result_subtype||' '||turns||' '||cost_usd||' '||duration_ms FROM run WHERE id=1;")" \
+      "contract sonnet medium 0 success 22 1.41 1200" "the run's facts" &&
+    assert_contains "$(gm show 1)" "appt-v2#1 owner-field-empty-after run 1 finished: exit 0, 22 turns, \$1.41 (\"the owner field is empty after save\")" "the finish notice" &&
+    assert_contains "$(gm runs)" "run 1  contract  appt-v2#1 owner-field-empty-after  finished: exit 0, 22 turns, \$1.41" "gm runs" &&
+    assert_contains "$(gm where)" "run 1 for appt-v2#1 owner-field-empty-after finished: exit 0, 22 turns, \$1.41, not reviewed yet" "the resume summary names it"
+}
+
+t_one_contract_at_a_time() {
+  setup onecontract
+  export GM_FOCUS=appt-v2
+  fake_run "$WORK/onecontract/run"
+  : >"$GM_FAKE_RUN/hold"
+  gm post "first" >/dev/null && gm post "second" >/dev/null
+  gm notice 1 started >/dev/null && gm notice 2 started >/dev/null
+  gm dispatch 1 >/dev/null || fail "first dispatch"
+  wait_for "SELECT pid IS NOT NULL FROM run WHERE id=1;" 1 || fail "no keeper pid"
+  local out
+  out=$(gm dispatch 2 2>&1) && fail "a second contract ran beside the first"
+  assert_contains "$out" "run 1 is still working in appt-v2's camp" "says why" &&
+    assert_contains "$(gm where)" "an Adventurer is working in the camp" "the summary says a run works" || return 1
+  # While it works, the turn may end with the posting active; then a finished, unreviewed run holds it.
+  local stop
+  stop=$(json "SELECT json_object('session_id','s1','background_tasks',json_array());")
+  gm notice 2 queued >/dev/null
+  assert_eq "$(printf '%s' "$stop" | gm hook stop)" "" "a live run lets the turn end" || return 1
+  rm -f "$GM_FAKE_RUN/hold"
+  run_ended 1 || fail "the run never ended"
+  out=$(printf '%s' "$stop" | gm hook stop)
+  assert_contains "$out" '"decision":"block"' "an unreviewed run holds the turn" &&
+    assert_contains "$out" "run 1 for appt-v2#1 first finished: exit 0, no result, and no notice has reviewed it yet" "naming it" &&
+    assert_contains "$(cat "$GM_HALL/runs/1/result.md")" "without a result" "a run with no result says so" || return 1
+  gm notice 2 started >/dev/null
+  gm dispatch 2 >/dev/null || fail "the second contract once the first ended"
+  run_ended 2 || fail "run 2 never ended"
+  gm notice 1 'done' "abc123" >/dev/null
+  gm notice 2 needs-you "keep the old URL?" >/dev/null
+  assert_eq "$(printf '%s' "$stop" | gm hook stop)" "" "reviewed runs let it end" &&
+    assert_eq "$(db "SELECT group_concat(id||' '||outcome, ', ') FROM run;")" "1 accepted, 2 escalated" "outcomes from the notices" || return 1
+  # Another run on the same posting means the last one was not enough.
+  gm notice 2 started >/dev/null
+  gm dispatch 2 --brief "keep it" >/dev/null
+  run_ended 3 || fail "run 3 never ended"
+  assert_eq "$(db "SELECT outcome FROM run WHERE id=2;")" escalated "an outcome stands once recorded" || return 1
+  gm notice 2 started >/dev/null
+  gm dispatch 2 >/dev/null
+  run_ended 4 || fail "run 4 never ended"
+  assert_eq "$(db "SELECT outcome FROM run WHERE id=3;")" redispatched "a run followed by another is redispatched"
+}
+
+t_dispatch_several_postings_and_settings() {
+  setup severalruns
+  export GM_FOCUS=appt-v2
+  fake_run "$WORK/severalruns/run"
+  printf 'adventurer-allow: Bash(npm test*)\n' >>"$GM_HALL/rules/repo.md"
+  gm post "the export button" >/dev/null && gm post "the export format" >/dev/null
+  gm notice 1 started >/dev/null && gm notice 2 started >/dev/null
+  gm config set commit-attribution on >/dev/null
+  gm config set contract-model opus >/dev/null
+  gm config set contract-effort high >/dev/null
+  local out
+  out=$(gm dispatch 1 2 --effort extreme 2>&1) && fail "took an effort that does not exist"
+  out=$(gm dispatch 1 2)
+  assert_contains "$out" "appt-v2#1 export-button dispatched: contract, run 1 on opus at high effort" "the first posting" &&
+    assert_contains "$out" "appt-v2#2 export-format dispatched: contract, run 1 on opus at high effort" "the second, in the same run" || return 1
+  run_ended 1 || fail "the run never ended"
+  local settings
+  settings=$(cat "$GM_HALL/runs/1/settings.json")
+  assert_contains "$(cat "$GM_HALL/runs/1/writ.md")" "# Writ: appt-v2#1 export-button, #2 export-format" "one writ for both" &&
+    assert_contains "$settings" '"Bash(npm test*)"' "the rules file's build and test commands" &&
+    assert_eq "$(json "SELECT json_type('$settings','\$.attribution')")" "" "attribution left to Claude Code when on" &&
+    assert_contains "$(gm show 2)" "run 1 finished" "both postings get the finish notice"
+}
+
+t_lost_run_is_reaped() {
+  setup lostrun
+  export GM_FOCUS=appt-v2
+  gm post "something" >/dev/null && gm notice 1 started >/dev/null
+  db "INSERT INTO run(focus_id, kind, session_id, pid, started_at) VALUES (1, 'contract', 'sx', 999999, '2026-01-01T00:00:00Z');
+      INSERT INTO run_posting VALUES (1, 1);"
+  assert_contains "$(gm runs)" "run 1  contract  appt-v2#1 something  lost: its keeper ended without recording a result" "a keeper that is gone" &&
+    assert_eq "$(db "SELECT result_subtype FROM run;")" lost "recorded once"
+}
+
+t_open_brief_and_post_focus_reach_a_party_leader() {
+  export GM_HALL=$WORK/brief/hall
+  REPO=$(new_repo brief/repo)
+  local out
+  out=$(gm open demo --repo "$REPO" --no-launch --brief "say hello" --slug hello 2>&1) || fail "open --brief: $out"
+  assert_contains "$out" 'demo#1 hello received ("say hello")' "the first posting, before the launch" &&
+    assert_eq "$(db "SELECT origin FROM posting WHERE num=1;")" outside "from outside its chat" || return 1
+  out=$(printf 'the second job\nin two lines' | gm open demo --brief - 2>&1 >/dev/null; gm list demo)
+  assert_contains "$out" "#2 second-job-two-lines" "--brief - reads standard input" || return 1
+  out=$(gm post --focus demo "and a third" 2>&1)
+  assert_contains "$out" 'demo#3 third received ("and a third")' "gm post --focus from the front desk" &&
+    assert_eq "$(db "SELECT origin FROM posting WHERE num=3;")" outside "from outside" || return 1
+  payload s1 "a patron message" | GM_FOCUS=demo gm hook prompt >/dev/null
+  assert_eq "$(db "SELECT origin FROM posting WHERE num=4;")" patron "the patron's own message" || return 1
+  out=$(gm open demo2 --repo "$REPO" --no-launch --slug x 2>&1) && fail "--slug without --brief"
+  assert_contains "$out" "give --brief too" "says why"
+}
+
+# The watch hook's environment in appt-v2's Party Leader's own herdr pane, polling every second.
+as_watch() { HERDR_ENV=1 HERDR_PANE_ID="$(pl_pane appt-v2)" HERDR_SESSION=gm-test GM_FOCUS=appt-v2 GM_WATCH_POLL=1 "$@"; }
+
+t_watch_summons_an_idle_party_leader() {
+  setup watch
+  gm open appt-v2 >/dev/null 2>&1
+  export GM_WATCH_TIMEOUT=40
+  local out rc pidf=$GM_HALL/watch.appt-v2.pid
+  # Anywhere but the Party Leader's own pane, it does nothing.
+  rc=0; out=$(printf '{}' | GM_FOCUS=appt-v2 bash "$GM" hook watch 2>&1) || rc=$?
+  assert_eq "$rc" 0 "outside its pane: exit 0" && [ ! -e "$pidf" ] || fail "outside its pane it armed"
+  # A patron's own message, and a posting the Party Leader made and sorted itself, never summon.
+  payload s1 "the patron's own words" | GM_FOCUS=appt-v2 gm hook prompt >/dev/null
+  as_pl gm post --from 1 "a split item" >/dev/null
+  assert_eq "$(db "SELECT group_concat(origin, ' ') FROM posting ORDER BY num;")" "patron party-leader" "where each came from" || return 1
+  printf '{}' | as_watch bash "$GM" hook watch >/dev/null 2>&1 & local w1=$! p1
+  sleep 1
+  p1=$(cat "$pidf" 2>/dev/null)
+  if [ -z "$p1" ] || ! kill -0 "$p1" 2>/dev/null; then fail "not armed, or its pid not recorded"; fi
+  # A newer watch replaces it, and the older one stands down.
+  printf '{}' | as_watch bash "$GM" hook watch >"$WORK/watch/out" 2>&1 & local w2=$!
+  sleep 2
+  kill -0 "$p1" 2>/dev/null && fail "the older watch did not stand down"
+  rc=0; wait "$w1" || rc=$?
+  assert_eq "$rc" 0 "it exits 0" || return 1
+  # A job posted from the front desk wakes it within a poll.
+  gm post --focus appt-v2 "add a CSV export" >/dev/null
+  rc=0; wait "$w2" || rc=$?
+  out=$(cat "$WORK/watch/out")
+  assert_eq "$rc" 2 "exit 2 wakes the session" &&
+    assert_contains "$out" "gm: while you were idle:" "says why" &&
+    assert_contains "$out" '- appt-v2#3 add-csv-export was posted from outside your chat (received): "add a CSV export"' "names the posting" &&
+    assert_eq "$(db "SELECT count(*) FROM event WHERE kind='summoned';")" 1 "a summoned event" || return 1
+  [ ! -e "$pidf" ] || fail "the pid file was left"
+  # Never twice for the same thing: the next watch finds nothing, and times out quietly.
+  rc=0; out=$(printf '{}' | as_watch env GM_WATCH_TIMEOUT=33 bash "$GM" hook watch 2>&1) || rc=$?
+  assert_eq "$rc" 0 "nothing new: exit 0 at its time" && assert_eq "$out" "" "and says nothing" || return 1
+  # A finished run wakes it the same way; the patron's turn retires an armed watch.
+  printf '{}' | as_watch bash "$GM" hook watch >/dev/null 2>&1 & local w3=$!
+  sleep 1
+  payload s2 "#3 one more detail" | as_pl gm hook prompt >/dev/null
+  sleep 2
+  kill -0 "$w3" 2>/dev/null && fail "the patron's message did not retire the watch"
+  [ ! -e "$pidf" ] || fail "the capture hook left the pid file"
+  GM_FOCUS=appt-v2 gm notice 3 started >/dev/null
+  fake_run "$WORK/watch/run"
+  fake_stream "$GM_FAKE_RUN"
+  GM_FOCUS=appt-v2 gm dispatch 3 >/dev/null
+  run_ended 1 || fail "the run never ended"
+  rc=0; out=$(printf '{}' | as_watch bash "$GM" hook watch 2>&1) || rc=$?
+  assert_eq "$rc" 2 "a finished run wakes it, even at start" &&
+    assert_contains "$out" "- run 1 for appt-v2#3 add-csv-export finished: exit 0, 22 turns, \$1.41. Its result: $GM_HALL/runs/1/result.md" "names the run and its result" &&
+    assert_contains "$(GM_FOCUS=appt-v2 gm summons)" "Nothing is waiting for you" "gm summons finds it heard"
+}
+
+t_camp_settings_arm_the_watch() {
+  setup watchsettings
+  local s ev
+  s="CAST(readfile($(sqlq "$CAMP/.claude/settings.local.json")) AS TEXT)"
+  for ev in SessionStart Stop StopFailure; do
+    assert_eq "$(json "SELECT count(*) FROM json_each($s,'\$.hooks.${ev}[0].hooks') WHERE json_extract(value,'\$.command') LIKE '%hook watch' AND json_extract(value,'\$.asyncRewake')=1 AND json_extract(value,'\$.timeout')=86400;")" 1 "$ev arms the watch" || return 1
+  done
+}
+
+# nudge_ready: a Party Leader alive in herdr with a run finished long ago that nobody summoned, and no watch.
+nudge_ready() {
+  setup "$1"
+  initialized
+  gm open appt-v2 >/dev/null 2>&1
+  GM_FOCUS=appt-v2 gm post "fix it" >/dev/null
+  db "UPDATE posting SET state='active' WHERE num=1;
+      INSERT INTO run(focus_id, kind, session_id, started_at, ended_at, exit_code, result_subtype, turns, cost_usd)
+        VALUES (1, 'contract', 'sx', '2026-01-01T00:00:00Z', '2026-01-01T00:10:00Z', 0, 'success', 3, 0.2);
+      INSERT INTO run_posting VALUES (1, 1);"
+  mkdir -p "$HERDR_STUB/screens"
+  export GM_NUDGE_IDLE_GAP=0 GM_NUDGE_SETTLE=0
+}
+
+screen() { printf '%s\n' '────────────────' "$2" '────────────────' "  ${3:-? for shortcuts}" >"$HERDR_STUB/screens/$1"; }
+
+typed_summons() { grep -c "	/guild-chat:summons$" "$HERDR_STUB/typed" 2>/dev/null || true; }
+
+t_nudge_types_summons_into_an_empty_input() {
+  nudge_ready nudgeempty
+  screen 1 $'❯ \e[2mTry "fix lint errors"\e[0m'
+  local out
+  out=$(gm up 2>&1)
+  assert_contains "$out" "appt-v2: summoned its Party Leader (run 1), whose watch was not running" "says it" &&
+    assert_eq "$(typed_summons)" 1 "typed /guild-chat:summons" &&
+    assert_eq "$(grep -c '<ctrl+s>' "$HERDR_STUB/typed")" 0 "no Ctrl+S on an empty input" &&
+    assert_eq "$(tail -n 1 "$HERDR_STUB/typed" | cut -f 2)" "<enter>" "then Enter" || return 1
+  # Not while a turn runs, nor with a live watch.
+  : >"$HERDR_STUB/typed"
+  printf 'working' >"$HERDR_STUB/agent-status"
+  gm up >/dev/null 2>&1
+  assert_eq "$(typed_summons)" 0 "not while it works" || return 1
+  printf 'idle' >"$HERDR_STUB/agent-status"
+  sleep 30 & local live=$!
+  printf '%s' "$live" >"$GM_HALL/watch.appt-v2.pid"
+  gm up >/dev/null 2>&1
+  kill "$live"
+  assert_eq "$(typed_summons)" 0 "not while its watch lives"
+}
+
+t_nudge_stashes_a_draft_first() {
+  nudge_ready nudgedraft
+  screen 1 '❯ half a sentence the patron'
+  screen after-stash '❯ '
+  gm up >/dev/null 2>&1
+  assert_eq "$(cut -f 2 "$HERDR_STUB/typed" | tr '\n' ' ')" "<ctrl+s> /guild-chat:summons <enter> " "Ctrl+S, then the command"
+}
+
+t_nudge_types_nothing_when_unsafe() {
+  nudge_ready nudgeunsafe
+  screen 1 '❯ a draft'
+  printf '%s\n' '────' '❯ a draft' '────' '  › stashed' >"$HERDR_STUB/screens/2"
+  gm up >/dev/null 2>&1
+  assert_eq "$(cat "$HERDR_STUB/typed" 2>/dev/null)" "" "a draft and a stash: nothing typed" &&
+    assert_eq "$(db "SELECT count(*) FROM event WHERE kind='unheard';")" 1 "recorded unheard" &&
+    assert_contains "$(gm roster)" "unheard: run 1 since 00:10" "the roster shows it" || return 1
+  gm up >/dev/null 2>&1
+  assert_eq "$(db "SELECT count(*) FROM event WHERE kind='unheard';")" 1 "once" || return 1
+  # Someone typing: the input changes between the two reads.
+  rm -rf "$HERDR_STUB/screens" && mkdir -p "$HERDR_STUB/screens"
+  screen 1 '❯ hel'
+  screen 2 '❯ hello th'
+  gm up >/dev/null 2>&1
+  assert_eq "$(cat "$HERDR_STUB/typed" 2>/dev/null)" "" "nothing typed over typing" || return 1
+  # gm summons hears it, and the roster no longer shows it.
+  GM_FOCUS=appt-v2 gm summons >/dev/null
+  assert_not_contains "$(gm roster)" "unheard" "heard"
 }
 
 t_shellcheck() {

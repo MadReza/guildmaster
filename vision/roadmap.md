@@ -11,7 +11,7 @@ Vocabulary is [TERMINOLOGY.md](../TERMINOLOGY.md)'s.
 | --- | --- | --- |
 | 1 | One ticket that never forgets | Done |
 | 2 | Tracing and audit | In progress |
-| 3 | Adventurers and enforced rules | Planned |
+| 3 | Adventurers and enforced rules | In progress (design proposed) |
 | 4 | Several Party Leaders and the Guildmaster lobby | In progress (the front desk built early) |
 | 5 | The other kinds | Planned |
 | 6 | Hardening | Planned |
@@ -34,7 +34,7 @@ In this step the Party Leader still does the work itself, one posting at a time:
 | Slice | What | Status |
 | --- | --- | --- |
 | 1 | Spans in the register, `gm trace`, `gm stats` with `--follows`, `--by-prompt` and `--compare` | Done. Merged in <https://github.com/MadReza/guildmaster/pull/18> |
-| 2 | Claude Code's telemetry through a local collector | Done. Merged in <https://github.com/MadReza/guildmaster/pull/20>; kept running by the muster with `collector: on`, in review in <https://github.com/MadReza/guildmaster/pull/26> |
+| 2 | Claude Code's telemetry through a local collector | Done. Merged in <https://github.com/MadReza/guildmaster/pull/20>; kept running by the muster with `collector: on`, merged in <https://github.com/MadReza/guildmaster/pull/26> |
 | 3 | Adventurer spans (with step 3) | Planned |
 | 4 | A local Jaeger beside `gm trace` | Planned |
 | 5 | Follow-up suggestions from a local model | Planned |
@@ -51,13 +51,21 @@ The Adventurer spans the design defines are built with step 3, where Adventurers
 
 **Setup.** A quick first run: the first `gm` command in a terminal checks bash, sqlite3, git, Claude Code, herdr and the collector, says what is missing and what that costs, and asks the patron to install the collector, skip it or decide later, recording the answer in `setup.conf` in the Guildhall; `gm init` runs it again and `gm doctor` keeps reporting it. Herdr is required; the integration itself is built elsewhere. Merged in <https://github.com/MadReza/guildmaster/pull/21>; since [zero-touch-start.md](zero-touch-start.md) the Guildmaster runs it at every start, without questions, and offers the collector in chat.
 
-**Configuration, and the collector kept running.** At the patron's request of 2026-10-04 ("If the collector is turned on than guildmaster will take care of keeping the collector running"): one documented file, `guild.conf`, holds every setting (moved in place from `setup.conf`; `GM_` variables still override it), `gm config` shows and changes them and the Guildmaster changes them when asked; with `collector: on`, the muster keeps the tracing collector running in its own herdr tab, quietly and never as a second copy ([tracing-design.md](tracing-design.md#kept-running-since-2026-10-04)). In review: <https://github.com/MadReza/guildmaster/pull/26>.
+**Configuration, and the collector kept running.** At the patron's request of 2026-10-04 ("If the collector is turned on than guildmaster will take care of keeping the collector running"): one documented file, `guild.conf`, holds every setting (moved in place from `setup.conf`; `GM_` variables still override it), `gm config` shows and changes them and the Guildmaster changes them when asked; with `collector: on`, the muster keeps the tracing collector running in its own herdr tab, quietly and never as a second copy ([tracing-design.md](tracing-design.md#kept-running-since-2026-10-04)). Merged in <https://github.com/MadReza/guildmaster/pull/26>.
 
 **Party Leaders in herdr.** Herdr is required, and every Party Leader runs in its own tab of the herdr workspace `guild` (`gm open`), stays there, and comes back on its own: `gm up`, run before any `gm` command in a terminal, at the end of `gm init`, and by a launchd agent at login and every 5 minutes (`gm autostart on`), starts again only the dead and the missing, in plain code with no model, telling no one unless one fails to start 3 times in a row; `gm roster` and `gm close` come with it. This moves part of step 4 (`gm roster`, one tab per Party Leader) and of step 6 (a muster at every start) forward, at the patron's request of 2026-10-03. Design in [herdr-design.md](herdr-design.md). Merged in <https://github.com/MadReza/guildmaster/pull/22>; since [zero-touch-start.md](zero-touch-start.md) autostart is always on unless the patron turns it off.
 
 ## Step 3: Adventurers and enforced rules
 
-**Status:** Planned. No PR yet. It was the next step until the patron moved tracing ahead of it on 2026-09-30.
+**Status:** In progress. Design agreed on 2026-10-11 in [step-3-design.md](step-3-design.md), in five build slices; it takes in issue <https://github.com/MadReza/guildmaster/issues/41> with slice 1's wake. It was the next step until the patron moved tracing ahead of it on 2026-09-30.
+
+| Slice | What | Status |
+| --- | --- | --- |
+| 1 | `gm dispatch`, one headless Adventurer, its result in the register, and the watch that summons the Party Leader (with issue #41) | In review |
+| 2 | `PreToolUse` push rules in every camp | Planned |
+| 3 | `gm check` after every run | Planned |
+| 4 | Parallel surveys and the dispatch cap | Planned |
+| 5 | Adventurer spans, `TRACEPARENT` and writ hashes | Planned |
 
 **Goal.** The Party Leader stays answerable while Adventurers do the work, and the rules the playbook states are enforced, not only asked for.
 
@@ -71,7 +79,7 @@ With it come the Adventurer spans of [tracing-design.md](tracing-design.md#how-t
 **Status:** In progress. `gm roster` (minimal) and one herdr tab per Party Leader, with the `guildmaster` front-desk tab, were built early with herdr ([herdr-design.md](herdr-design.md)).
 The Guildmaster session at the front desk was pulled forward at the patron's request of 2026-10-03 ("User should know the least amount. So user starts Claude."), and is done in [zero-touch-start.md](zero-touch-start.md): the Guildmaster's start runs the first-run check, keeps autostart on and brings every Party Leader up with no patron action, and the Guildmaster opens a focus's Party Leader in a new herdr tab when asked in plain words. Merged in <https://github.com/MadReza/guildmaster/pull/23>, with `gm` as the patron's one command.
 Then, at the patron's request of the same day ("Can we not set that at the initialization of claude ? ... I would like the commands to only be used by advanced users."), the patron's only action became starting `claude` in the clone's `front-desk/` folder: its committed settings link `gm` into `~/.local/bin`, offer to install a missing herdr, and do the rest; that session is the front desk wherever it runs, so the muster no longer needs one in herdr, and every `gm` command moved to the README's Advanced section. Merged in <https://github.com/MadReza/guildmaster/pull/24>.
-The front desk then moved to the clone's root ("switch it"): `claude` right after `cd guildmaster`, with Firstmate's plain-clone-or-marker check keeping the hooks out of every linked worktree, and the front desk's denied edits enforced by a guard that binds it alone; and, at the patron's word ("the guildmaster should also be in the herdr. It shouldn't run outside of it."), the Guildmaster always lives in herdr's `guildmaster` tab, kept running like a Party Leader, while `claude` started anywhere else sets the guild up and points there. In review: <https://github.com/MadReza/guildmaster/pull/25>.
+The front desk then moved to the clone's root ("switch it"): `claude` right after `cd guildmaster`, with Firstmate's plain-clone-or-marker check keeping the hooks out of every linked worktree, and the front desk's denied edits enforced by a guard that binds it alone; and, at the patron's word ("the guildmaster should also be in the herdr. It shouldn't run outside of it."), the Guildmaster always lives in herdr's `guildmaster` tab, kept running like a Party Leader, while `claude` started anywhere else sets the guild up and points there. Merged in <https://github.com/MadReza/guildmaster/pull/25>.
 Still to build: phase-change digests, history questions answered from events, the guild line in every status line, and talking to a Party Leader (Q22).
 
 **Goal.** More than one focus at once, with a quiet front desk that knows everything and says little.

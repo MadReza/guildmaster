@@ -11,6 +11,8 @@
 #   run-proc-collector  what the collector's pane runs after pane run (default otelcol-contrib)
 #   typed        pane<TAB>the text sent to it by pane send-text, or <key> for pane send-keys
 #   agent-status what agent get says a claude pane is doing (default idle)
+#   screens/     what pane read shows, a screen a file (1, 2, ...): each read shows the next, then the last one again;
+#                a pane send-keys ctrl+s moves to the file after-stash when there is one
 #   exit-ignored present while a claude pane ignores /exit; otherwise /exit and Enter leave it holding a shell
 #   focused      each workspace or tab focused, one a line
 #   attached     present once a client attached (herdr with no command)
@@ -139,6 +141,7 @@ case "${1:-} ${2:-}" in
     [ -n "$(field panes "$3" 1)" ] || err pane_not_found "pane $3 not found"
     last=$(awk -F '\t' -v k="$3" '$1 == k { t = $2 } END { print t }' "$D/typed" 2>/dev/null)
     printf '%s\t<%s>\n' "$3" "$4" >>"$D/typed"
+    [ "$4" != ctrl+s ] || [ ! -d "$D/screens" ] || : >"$D/screens/stashed"
     if [ "$4" = enter ] && [ "$last" = /exit ] && [ "$(field panes "$3" 4)" = claude ] && [ ! -e "$D/exit-ignored" ]; then
       awk -F '\t' -v OFS='\t' -v k="$3" '$1 == k { $4 = "shell" } { print }' "$D/panes" >"$D/panes.new" && mv "$D/panes.new" "$D/panes"
     fi
@@ -153,6 +156,16 @@ case "${1:-} ${2:-}" in
       awk -F '\t' -v w="$w" '$2 != w' "$D/tabs" >"$D/tabs.new" && mv "$D/tabs.new" "$D/tabs"
     fi
     printf '{"result":{"type":"ok"}}\n' ;;
+  "pane read")
+    up
+    [ -n "$(field panes "$3" 1)" ] || err pane_not_found "pane $3 not found"
+    n=$(cat "$D/screens/at" 2>/dev/null || echo 0)
+    if [ -e "$D/screens/stashed" ] && [ -f "$D/screens/after-stash" ]; then
+      cat "$D/screens/after-stash"
+    else
+      [ ! -f "$D/screens/$((n + 1))" ] || { n=$((n + 1)); printf '%s' "$n" >"$D/screens/at"; }
+      [ ! -f "$D/screens/$n" ] || cat "$D/screens/$n"
+    fi ;;
   "agent get")
     up
     [ "$(field panes "$3" 4)" = claude ] || err agent_not_found "agent target $3 not found"
