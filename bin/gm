@@ -46,6 +46,12 @@ sprites-guildmaster	-	quill	sprites	The sprites the Guildmaster draws one of whi
 sprites-party-leader	-	skirmish delve boss siege forge wall	sprites	The sprites a Party Leader draws one of while a turn runs.
 idle-guildmaster	-	campfire	sprites	The sprite drawn above the Guildmaster's prompt while it waits.
 idle-party-leader	-	none	sprites	The sprite drawn above a Party Leader's prompt while it waits.
+welcome	-	on	onoff	The welcome: while on, the Guildmaster and every Party Leader start with a card above the prompt saying who answers, what needs the patron and what to type, folded at the patron's first message; the model never reads it. A session follows a change at its next start.
+welcome-art-guildmaster	-	rotate	art	The art beside the Guildmaster's welcome: rotate draws a different piece at every start, from the guild's own and the files in art/guildmaster/ of the Guildhall; a piece's name, or a file, pins it.
+welcome-art-party-leader	-	rotate	art	The art beside a Party Leader's welcome, rotating the same way through its own pieces and art/party-leader/.
+welcome-art-size	-	auto	artsize	How large the welcome's art is: full (16 columns by 8 rows), mini (10 by 3), or auto, full until the patron has learned a few commands.
+welcome-fold	-	rule	fold	What the welcome becomes after the patron's first message: rule keeps one line naming the seat, vanish leaves the band to the idle sprite.
+tutorial	-	auto	tutorial	The welcome's commands panel: auto fades it as the patron learns each command (5 uses in 3 separate sessions), on always shows it, off never does.
 autostart	-	on	onoff	A launchd agent (macOS) runs the muster at login and every autostart-every minutes.
 autostart-every	-	5	minutes	Minutes between the launchd agent's musters.
 muster-before-commands	GM_HERDR_AUTO	on	onoff	A gm command typed at a terminal first brings back, quietly, whatever is dead or missing.
@@ -55,6 +61,9 @@ herdr-workspace	GM_HERDR_WORKSPACE	guild	name	The herdr workspace holding the gu
 launch-grace	GM_LAUNCH_GRACE	60	seconds	Seconds after a start during which a pane holding only a shell is starting, not dead.
 start-tries	GM_START_TRIES	3	count	Starts in a row never seen alive before a Party Leader, the Guildmaster or the collector is held.
 repo-roots	-	-	text	Folders, separated by spaces, where gm repos looks for clones instead of the usual source folders.
+contract-model	-	party-leader	model	The model an Adventurer works a contract on: party-leader is the model its Party Leader runs on now; otherwise a Claude Code model name (sonnet, opus, claude-sonnet-5-5). gm dispatch --model overrides it once.
+contract-effort	-	medium	effort	The effort an Adventurer works a contract at: low, medium, high, xhigh or max. gm dispatch --effort overrides it once.
+commit-attribution	-	off	onoff	Claude Code's attribution in an Adventurer's commits and pull requests: off leaves them as the patron's own; on puts Claude Code's back.
 editor	-	open	command	The command the spyglass opens a changed file with, the file's path given after it: open is the app the Mac opens its kind with; for one editor, open -a Zed, or code -g."
 GM_CONF_ENV=' '
 GM_CONF_VARS=' '
@@ -117,11 +126,33 @@ gm_conf_norm() {
       [ -n "$v" ] || return 1
       # none stands alone: it is no sprite at all.
       case " $v " in *" none "*) [ "$v" = none ] || return 1 ;; esac ;;
+    art)
+      case $v in
+        rotate | none | crest | robed | hall | helm | bearer | tent) ;;
+        /* | \~/*) ;;
+        *) return 1 ;;
+      esac ;;
+    artsize) case $v in auto | full | mini) ;; *) return 1 ;; esac ;;
+    fold)
+      case $v in
+        rule | shrink) v=rule ;;
+        vanish | disappear) v=vanish ;;
+        *) return 1 ;;
+      esac ;;
+    tutorial)
+      case $v in
+        auto) ;;
+        on | yes | true) v=on ;;
+        off | no | false) v=off ;;
+        *) return 1 ;;
+      esac ;;
     port) [[ $v =~ ^[0-9]{1,5}$ ]] && [ "$v" -ge 1 ] && [ "$v" -le 65535 ] || return 1 ;;
     minutes | count) [[ $v =~ ^[0-9]{1,6}$ ]] && [ "$v" -ge 1 ] || return 1 ;;
     seconds) [[ $v =~ ^[0-9]{1,6}$ ]] || return 1 ;;
     name) [[ $v =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || return 1 ;;
     text | command) [ -n "$v" ] || return 1 ;;
+    model) [[ $v =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}(\[1m\])?$ ]] || return 1 ;;
+    effort) case $v in low | medium | high | xhigh | max) ;; *) return 1 ;; esac ;;
     *) return 1 ;;
   esac
   GM_CONF_VAL=$v
@@ -158,7 +189,7 @@ gm_conf_carried() {
   case $GM_CONF_VARS in *" $1 "*) return 1 ;; esac
   return 0
 }
-GM_SCHEMA_VERSION=5
+GM_SCHEMA_VERSION=6
 GM_STOP_BUDGET=${GM_STOP_BUDGET:-3}
 GM_NOW="strftime('%Y-%m-%dT%H:%M:%fZ','now')"
 GM_NOW_MS="CAST(ROUND((julianday('now')-2440587.5)*86400000) AS INTEGER)"
@@ -360,6 +391,51 @@ PRAGMA user_version=5;
 SQL
 }
 
+# Schema 5 to 6: Adventurers (vision/step-3-design.md, slice 1). A run is one Adventurer on one writ, holding one or
+# more postings; a posting records where it came from, so only one added from outside its Party Leader's chat is
+# summoned; a focus records when the muster first found its summons unheard. Only adds.
+gm_schema6_sql() {
+  cat <<'SQL'
+ALTER TABLE posting ADD COLUMN origin TEXT;
+ALTER TABLE posting ADD COLUMN summoned_at TEXT;
+ALTER TABLE focus ADD COLUMN unheard_at TEXT;
+CREATE TABLE run(
+  id INTEGER PRIMARY KEY,
+  focus_id INTEGER NOT NULL REFERENCES focus(id),
+  kind TEXT NOT NULL CHECK (kind IN ('contract','survey')),
+  model TEXT,
+  effort TEXT,
+  permission_mode TEXT,
+  writ TEXT,
+  template_sha256 TEXT,
+  brief TEXT,
+  session_id TEXT NOT NULL,
+  pid INTEGER,
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  exit_code INTEGER,
+  result_subtype TEXT,
+  is_error INTEGER,
+  cost_usd REAL,
+  turns INTEGER,
+  duration_ms INTEGER,
+  usage TEXT,
+  check_result TEXT,
+  summoned_at TEXT,
+  reviewed_at TEXT,
+  outcome TEXT CHECK (outcome IN ('accepted','redispatched','corrected','failed','escalated'))
+);
+CREATE TABLE run_posting(
+  run_id INTEGER NOT NULL REFERENCES run(id),
+  posting_id INTEGER NOT NULL REFERENCES posting(id),
+  PRIMARY KEY (run_id, posting_id)
+);
+CREATE INDEX run_focus ON run(focus_id, ended_at);
+CREATE INDEX run_posting_posting ON run_posting(posting_id);
+PRAGMA user_version=6;
+SQL
+}
+
 gm_db_init() {
   mkdir -p "$GM_HALL"
   local tmp=$GM_DB.init.$$
@@ -372,6 +448,7 @@ $(gm_schema2_sql)
 $(gm_schema3_sql)
 $(gm_schema4_sql)
 $(gm_schema5_sql)
+$(gm_schema6_sql)
 COMMIT;
 SQL
   # ln refuses an existing target, so exactly one concurrent first caller installs its register.
@@ -384,10 +461,11 @@ SQL
 gm_db_migrate() {
   local from=$1 sql err
   case $from in
-    1) sql="$(gm_schema2_sql) $(gm_schema3_sql) $(gm_schema4_sql) $(gm_schema5_sql)" ;;
-    2) sql="$(gm_schema3_sql) $(gm_schema4_sql) $(gm_schema5_sql)" ;;
-    3) sql="$(gm_schema4_sql) $(gm_schema5_sql)" ;;
-    4) sql=$(gm_schema5_sql) ;;
+    1) sql="$(gm_schema2_sql) $(gm_schema3_sql) $(gm_schema4_sql) $(gm_schema5_sql) $(gm_schema6_sql)" ;;
+    2) sql="$(gm_schema3_sql) $(gm_schema4_sql) $(gm_schema5_sql) $(gm_schema6_sql)" ;;
+    3) sql="$(gm_schema4_sql) $(gm_schema5_sql) $(gm_schema6_sql)" ;;
+    4) sql="$(gm_schema5_sql) $(gm_schema6_sql)" ;;
+    5) sql=$(gm_schema6_sql) ;;
   esac
   if ! err=$(sqlite3 -bail -batch -cmd '.timeout 15000' "$GM_DB" "BEGIN IMMEDIATE; $sql COMMIT;" 2>&1 >/dev/null); then
     [ "$(gm_sql 'PRAGMA user_version;')" = "$GM_SCHEMA_VERSION" ] || gm_die "could not migrate the register at $GM_DB to schema $GM_SCHEMA_VERSION: $err"
@@ -400,8 +478,8 @@ gm_db_ensure() {
   local v
   v=$(gm_sql 'PRAGMA user_version;')
   case $v in
-    5) ;;
-    1 | 2 | 3 | 4) gm_db_migrate "$v" ;;
+    6) ;;
+    1 | 2 | 3 | 4 | 5) gm_db_migrate "$v" ;;
     *) gm_die "the register at $GM_DB is schema $v; this gm knows schema $GM_SCHEMA_VERSION" ;;
   esac
   GM_DB_READY=1
@@ -604,11 +682,13 @@ They are for advanced use, and for the Guildmaster.
                           Guildmaster and keeps it running; it checks the setup, keeps autostart on and brings
                           every Party Leader up. Without a terminal it only starts the Guildmaster and says where
   open <focus> --repo <path> [--ticket KEY]... [--branch NAME] [--base REF] [--kind ticket] [--no-launch]
+       [--brief <words|-> [--slug S]]
                           record a focus, make its camp, install its Claude Code hooks, and start its Party
                           Leader in a herdr workspace of its own on the camp (└ <focus>, shown under workspace
                           guild), where it stays; never takes over the terminal it runs in, and needs none.
                           With --ticket, the focus name may be left out: it is the first ticket key in lower case
-                          (crm-1234)
+                          (crm-1234). --brief records the patron's words as the focus's first posting before
+                          its Party Leader starts, which its watch then summons
   open <focus>            the same for an existing focus: a running Party Leader is left as it is, a dead or
                           missing one starts again (a fresh session resumes from records); reopens a closed focus
   up [--quiet]            the muster, plain code with no model: start the front desk's Guildmaster, every open
@@ -637,8 +717,18 @@ They are for advanced use, and for the Guildmaster.
                           start guildmaster --pane ID is what the front desk's pane runs
   repos [<word>]          repositories gm knows (from focuses) and git clones under the usual source folders
                           (guild.conf repo-roots: overrides them) whose folder name contains the word
-  post [--slug S] [--from REF] [--follows REF] <words|->
-                          add a posting to the current focus (state received)
+  post [--focus F] [--slug S] [--from REF] [--follows REF] <words|->
+                          add a posting to the current focus, or focus F (state received); one made anywhere
+                          but in its own Party Leader's session is summoned to it by its watch
+  dispatch <posting>... [--brief TEXT|-] [--model M] [--effort E]
+                          hand started postings to one Adventurer: claude -p in the camp, on the feature branch,
+                          with a writ from prompts/adventurer/contract.md in the Guildhall; returns at once, and
+                          the Party Leader's watch summons it when the run finishes. One contract run at a time
+                          per focus
+  runs [--all]            the focus's runs: postings, how each ended, model and effort, result, outcome
+  summons                 what is waiting for this Party Leader (a finished run, a posting added from outside its
+                          chat), recorded as heard; what gm types as /guild-chat:summons when its watch died
+  run <run>               the keeper gm dispatch starts; never run by hand
   resolve <ref>           print the one record a reference names: 12, #12, focus#12, focus#slug, focus, KEY-123
   list [--all] [--state S] [--json] [focus]
                           postings of the current focus (or every focus at the front desk); --json prints them
@@ -652,6 +742,8 @@ They are for advanced use, and for the Guildmaster.
                           set a posting aside, visibly, with a reason
   phase [focus] [phase]   show or set the focus's playbook phase
   where [focus]           the resume summary, built from the register
+  welcome --json [focus]  what the welcome card shows, as JSON: a focus's Party Leader, or with none the
+                          Guildmaster's guild (needs, roster, trouble); the guild-chat mod reads it at start-up
   statusline              the Claude Code status line (reads the session JSON on stdin)
   trace [posting|focus]   a posting's trace as a text waterfall (a focus: every posting and session)
   trace import            fold Claude Code's telemetry from the local collector into the register
@@ -686,9 +778,15 @@ EOF
 }
 
 gm_cmd_open() {
-  local focus='' repo='' branch='' base='' kind=ticket launch=1 tickets=''
+  local focus='' repo='' branch='' base='' kind=ticket launch=1 tickets='' brief='' slug=''
   while [ $# -gt 0 ]; do
     case $1 in
+      --brief)
+        brief=${2:?--brief needs the job in the patron\'s words, or - to read them from standard input}
+        [ "$brief" != - ] || brief=$(cat)
+        [ -n "$brief" ] || gm_die "open: --brief - read nothing"
+        shift 2 ;;
+      --slug) slug=${2:?--slug needs a value}; shift 2 ;;
       --repo) repo=${2:?--repo needs a path}; shift 2 ;;
       --ticket) tickets="$tickets $(printf '%s' "${2:?--ticket needs a key}" | tr '[:lower:]' '[:upper:]')"; shift 2 ;;
       --branch) branch=${2:?--branch needs a name}; shift 2 ;;
@@ -710,6 +808,8 @@ gm_cmd_open() {
   [ "$focus" != "$GM_FRONT_DESK" ] || gm_die "open: $GM_FRONT_DESK is the front desk's name; choose another focus name"
   [ "$focus" != "$GM_COLLECTOR_TAB" ] || gm_die "open: $GM_COLLECTOR_TAB is the tracing collector's tab; choose another focus name"
   [ "$kind" = ticket ] || gm_die "open: step 1 knows only the ticket kind"
+  [ -z "$slug" ] || [ -n "$brief" ] || gm_die "open: --slug names the posting --brief makes; give --brief too"
+  [ -z "$slug" ] || gm_valid_slug "$slug" || gm_die "open: a slug is up to 40 lowercase letters, digits and dashes"
   gm_telemetry_refuse
   [ "$launch" = 0 ] || gm_herdr_require open
   gm_db_ensure
@@ -811,6 +911,10 @@ SQL
   fi
   printf '%s is open: camp %s on branch %s\n' "$focus" "$camp" "$branch"
   gm_reopen_focus "$focus"
+  # The focus's first job, recorded before its Party Leader starts: its watch, armed at start, summons it.
+  if [ -n "$brief" ]; then
+    if [ -n "$slug" ]; then (gm_cmd_post --focus "$focus" --slug "$slug" "$brief"); else (gm_cmd_post --focus "$focus" "$brief"); fi
+  fi
   if [ "$launch" = 1 ]; then
     gm_party_leader_up "$focus"
     gm_party_leader_where "$focus"
@@ -841,11 +945,13 @@ SELECT json_object(
   'hooks', json_object(
     'SessionStart', json_array(json_object('hooks', json_array(
       json_object('type','command','command', $(gm_q "$prefix hook session-start")),
-      json_object('type','command','command', $(gm_q "$prefix hook charter"))))),
+      json_object('type','command','command', $(gm_q "$prefix hook charter")),
+      json_object('type','command','command', $(gm_q "$prefix hook watch"), 'asyncRewake', json('true'), 'timeout', $GM_WATCH_TIMEOUT)))),
     'UserPromptSubmit', json_array(json_object('hooks', json_array(
       json_object('type','command','command', $(gm_q "$prefix hook prompt"))))),
     'Stop', json_array(json_object('hooks', json_array(
-      json_object('type','command','command', $(gm_q "$prefix hook stop"))))),
+      json_object('type','command','command', $(gm_q "$prefix hook stop")),
+      json_object('type','command','command', $(gm_q "$prefix hook watch"), 'asyncRewake', json('true'), 'timeout', $GM_WATCH_TIMEOUT)))),
     'PreCompact', json_array(json_object('hooks', json_array(
       json_object('type','command','command', $(gm_q "$prefix hook precompact"))))),
     'SessionEnd', json_array(json_object('hooks', json_array(
@@ -861,7 +967,8 @@ SELECT json_object(
     'SubagentStop', json_array(json_object('hooks', json_array(
       json_object('type','command','command', $(gm_q "$prefix hook subagent-stop"), 'timeout', 10)))),
     'StopFailure', json_array(json_object('hooks', json_array(
-      json_object('type','command','command', $(gm_q "$prefix hook stop-failure"), 'timeout', 10))))
+      json_object('type','command','command', $(gm_q "$prefix hook stop-failure"), 'timeout', 10),
+      json_object('type','command','command', $(gm_q "$prefix hook watch"), 'asyncRewake', json('true'), 'timeout', $GM_WATCH_TIMEOUT))))
   ),
   'statusLine', json_object('type','command','command', $(gm_q "$prefix statusline"), 'refreshInterval', 5)
 );
@@ -1184,14 +1291,15 @@ gm_front_desk_way() {
 }
 
 gm_new_posting_sql() {
-  # $1 focus name, $2 slug base, $3 SQL expression for the words, $4 actor, $5 session, $6 message id SQL or NULL
+  # $1 focus name, $2 slug base, $3 SQL expression for the words, $4 actor, $5 session, $6 message id SQL or NULL,
+  # $7 where it came from: patron (the capture hook), party-leader (gm post in its own session) or outside
   local f
   f=$(gm_q "$1")
   cat <<SQL
-INSERT INTO posting(focus_id, num, slug, words, state, message_id, created_at, updated_at, trace_id, span_id, span_start_ms)
+INSERT INTO posting(focus_id, num, slug, words, state, message_id, created_at, updated_at, trace_id, span_id, span_start_ms, origin)
   SELECT f.id, n.n,
          CASE WHEN EXISTS (SELECT 1 FROM posting WHERE focus_id=f.id AND slug=$(gm_q "$2")) THEN $(gm_q "$2")||'-'||n.n ELSE $(gm_q "$2") END,
-         $3, 'received', $6, $GM_NOW, $GM_NOW, lower(hex(randomblob(16))), lower(hex(randomblob(8))), $GM_NOW_MS
+         $3, 'received', $6, $GM_NOW, $GM_NOW, lower(hex(randomblob(16))), lower(hex(randomblob(8))), $GM_NOW_MS, $(gm_qn "${7:-}")
   FROM focus f, (SELECT COALESCE(MAX(p.num),0)+1 AS n FROM posting p JOIN focus g ON g.id=p.focus_id WHERE g.name=$f) n
   WHERE f.name=$f;
 INSERT INTO v VALUES ('posting', last_insert_rowid());
@@ -1203,10 +1311,11 @@ SQL
 }
 
 gm_cmd_post() {
-  local slug='' from='' words='' focus follows='' t0
+  local slug='' from='' words='' focus='' follows='' t0 origin=outside actor=gm
   t0=$(gm_now_ms)
   while [ $# -gt 0 ]; do
     case $1 in
+      --focus) focus=${2:?--focus needs a focus name}; shift 2 ;;
       --slug) slug=${2:?--slug needs a value}; shift 2 ;;
       --from) from=${2:?--from needs a reference}; shift 2 ;;
       --follows) follows=${2:?--follows needs a reference}; shift 2 ;;
@@ -1217,7 +1326,10 @@ gm_cmd_post() {
   done
   [ -n "$words" ] || gm_die "post: give the posting's words"
   gm_db_ensure
-  focus=$(gm_require_focus)
+  focus=$(gm_require_focus "$focus")
+  # Made by the focus's own Party Leader, it is sorted in that turn; from anywhere else (the front desk, gm open
+  # --brief, a terminal) its Party Leader's watch summons it.
+  if gm_close_self "$focus"; then origin=party-leader actor=party-leader; fi
   if [ -n "$slug" ]; then
     gm_valid_slug "$slug" || gm_die "post: a slug is up to 40 lowercase letters, digits and dashes"
   else
@@ -1228,7 +1340,7 @@ gm_cmd_post() {
     from_id=$(gm_resolve_posting "$from")
     msg_sql="(SELECT message_id FROM posting WHERE id=$from_id)"
     from_sql="INSERT INTO event(at, actor, kind, focus_id, posting_id, detail, line)
-      SELECT $GM_NOW, 'party-leader', 'posting.split', p.focus_id, p.id, 'from posting '||$from_id,
+      SELECT $GM_NOW, $(gm_q "$actor"), 'posting.split', p.focus_id, p.id, 'from posting '||$from_id,
              f.name||'#'||p.num||' '||p.slug||' split from '||(SELECT g.name||'#'||o.num FROM posting o JOIN focus g ON g.id=o.focus_id WHERE o.id=$from_id)
       FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.id=(SELECT id FROM v WHERE k='posting');"
   fi
@@ -1240,7 +1352,7 @@ gm_cmd_post() {
   out=$(gm_sql <<SQL
 CREATE TEMP TABLE v(k TEXT PRIMARY KEY, id INTEGER);
 BEGIN IMMEDIATE;
-$(gm_new_posting_sql "$focus" "$slug" "$(gm_q "$words")" party-leader "" "$msg_sql")
+$(gm_new_posting_sql "$focus" "$slug" "$(gm_q "$words")" "$actor" "" "$msg_sql" "$origin")
 $from_sql
 $follows_sql
 SELECT id FROM v WHERE k='posting';
@@ -1312,6 +1424,9 @@ gm_record_notice() {
 BEGIN IMMEDIATE;
 UPDATE posting SET $state_sql $slug_sql $park_sql updated_at=$GM_NOW WHERE id=$pid;
 UPDATE message SET sorted_at=$GM_NOW WHERE posting_id=$pid AND sorted_at IS NULL;
+UPDATE run SET reviewed_at=COALESCE(reviewed_at,$GM_NOW),
+  outcome=COALESCE(outcome, CASE $(gm_q "$verb") WHEN 'done' THEN 'accepted' WHEN 'failed' THEN 'failed' WHEN 'needs-you' THEN 'escalated' END)
+  WHERE ended_at IS NOT NULL AND id IN (SELECT run_id FROM run_posting WHERE posting_id=$pid);
 $extra
 INSERT INTO event(at, actor, kind, focus_id, posting_id, session_id, verb, detail, line)
   SELECT $GM_NOW, $(gm_q "$actor"), 'notice', p.focus_id, p.id, NULL, $(gm_q "$verb"), $(gm_qn "$detail"),
@@ -1530,6 +1645,11 @@ SELECT '- #'||num||' '||slug||', the patron''s words ('||created_at||'): "'||sub
                FROM (SELECT at, words FROM message WHERE posting_id=p.id AND disposition='addition' ORDER BY id)),'')
   ||COALESCE(char(10)||'  last notice: '||(SELECT line FROM event WHERE posting_id=p.id AND kind='notice' ORDER BY id DESC LIMIT 1),'')
 FROM posting p WHERE focus_id=$fid AND state='active' ORDER BY num;
+SELECT char(10)||'Runs (gm runs lists them all):' WHERE EXISTS (SELECT 1 FROM run WHERE focus_id=$fid AND (ended_at IS NULL OR reviewed_at IS NULL));
+SELECT '- run '||r.id||' for '||$(gm_run_postings_sql r.id)||CASE WHEN r.ended_at IS NULL
+    THEN ': an Adventurer is working in the camp since '||r.started_at||'; change no file there until it finishes, and gm summons you then'
+    ELSE ' '||$(gm_run_end_sql r)||', not reviewed yet: read '||$(gm_q "$GM_HALL/runs/")||r.id||'/result.md, then record what you decided on its posting' END
+FROM run r WHERE r.focus_id=$fid AND (r.ended_at IS NULL OR r.reviewed_at IS NULL) ORDER BY r.id;
 SELECT char(10)||'Needs the patron:' WHERE EXISTS (SELECT 1 FROM posting WHERE focus_id=$fid AND state='needs-you');
 SELECT '- #'||num||' '||slug||': '||COALESCE((SELECT detail FROM event WHERE posting_id=p.id AND verb='needs-you' ORDER BY id DESC LIMIT 1),'')
   ||char(10)||'  the patron''s words ('||created_at||'): "'||substr(words,1,500)||CASE WHEN length(words)>500 THEN '…' ELSE '' END||'"'
@@ -1580,6 +1700,84 @@ gm_cmd_where() {
   gm_db_ensure
   focus=$(gm_require_focus "${1:-}")
   gm_where "$focus"
+}
+
+# What the welcome card shows, as one JSON object: a Party Leader's focus (named, or this camp's) or, with none, the
+# Guildmaster's whole guild. The guild-chat mod runs it once at a session's start; it changes nothing.
+gm_cmd_welcome() {
+  local json=0 focus=''
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --json) json=1; shift ;;
+      -*) gm_die "welcome: unknown option $1" ;;
+      *) focus=$1; shift ;;
+    esac
+  done
+  [ "$json" = 1 ] || gm_die "welcome: gm welcome --json [focus]"
+  [ -n "$focus" ] || focus=$(gm_context_focus)
+  if [ -n "$focus" ]; then
+    gm_welcome_party_leader "$(gm_require_focus "$focus")"
+  else
+    gm_welcome_guildmaster
+  fi
+}
+
+# The question a needs-you posting asks: its last needs-you notice's detail.
+gm_welcome_question_sql() {
+  printf "COALESCE((SELECT e.detail FROM event e WHERE e.posting_id=%s.id AND e.verb='needs-you' ORDER BY e.id DESC LIMIT 1),'')" "$1"
+}
+
+gm_welcome_party_leader() {
+  local focus=$1 fid camp kind phases='' p upstream='' ahead=''
+  fid=$(gm_focus_id "$focus")
+  camp=$(gm_focus_field "$focus" camp)
+  kind=$(gm_focus_field "$focus" kind)
+  for p in $(gm_phases "$(gm_playbook_path "$kind")"); do phases="${phases:+$phases, }$(gm_q "$p")"; done
+  if [ -d "$camp" ]; then
+    upstream=$(git -C "$camp" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || true)
+    [ -z "$upstream" ] || ahead=$(git -C "$camp" rev-list --count '@{upstream}..HEAD' 2>/dev/null || true)
+  fi
+  [[ $ahead =~ ^[0-9]+$ ]] || ahead=NULL
+  gm_sql <<SQL
+SELECT json_object(
+  'seat', 'party-leader', 'focus', f.name, 'kind', f.kind,
+  'tickets', json((SELECT COALESCE(json_group_array(key), '[]') FROM (SELECT key FROM ticket WHERE focus_id=f.id ORDER BY key))),
+  'phase', f.phase, 'phases', json_array($phases), 'branch', f.branch,
+  'upstream', $(gm_qn "$upstream"), 'ahead', $ahead,
+  'counts', json((SELECT COALESCE(json_group_object(state, n), '{}') FROM (SELECT state, count(*) n FROM posting
+    WHERE focus_id=f.id AND state NOT IN ('done','closed') GROUP BY state))),
+  'needs', json((SELECT COALESCE(json_group_array(json_object('ref', '#'||p.num, 'question', $(gm_welcome_question_sql p))), '[]')
+    FROM (SELECT * FROM posting WHERE focus_id=f.id AND state='needs-you' ORDER BY num) p)),
+  'active', (SELECT '#'||num||' '||slug FROM posting WHERE focus_id=f.id AND state='active' ORDER BY num LIMIT 1),
+  'next', (SELECT '#'||num||' '||slug FROM posting WHERE focus_id=f.id AND state='queued' ORDER BY num LIMIT 1),
+  'last', json((SELECT json_object('at', substr(at,12,5), 'line', line) FROM event WHERE focus_id=f.id AND line IS NOT NULL ORDER BY id DESC LIMIT 1)))
+FROM focus f WHERE f.id=$fid;
+SQL
+}
+
+gm_welcome_guildmaster() {
+  local patron
+  patron=$(git config --global user.name 2>/dev/null || true)
+  patron=${patron%% *}
+  gm_sql <<SQL
+SELECT json_object(
+  'seat', 'guildmaster', 'patron', $(gm_qn "$patron"),
+  'needs', json((SELECT COALESCE(json_group_array(json_object('ref', p.name||'#'||p.num, 'question', $(gm_welcome_question_sql p))), '[]')
+    FROM (SELECT p.*, f.name FROM posting p JOIN focus f ON f.id=p.focus_id
+          WHERE p.state='needs-you' AND f.closed_at IS NULL ORDER BY f.name, p.num) p)),
+  'roster', json((SELECT COALESCE(json_group_array(json_object('focus', f.name, 'phase', f.phase, 'state',
+      CASE WHEN f.held_at IS NOT NULL THEN 'held'
+           WHEN EXISTS (SELECT 1 FROM posting WHERE focus_id=f.id AND state='needs-you') THEN 'waiting'
+           WHEN EXISTS (SELECT 1 FROM posting WHERE focus_id=f.id AND state='active') THEN 'working'
+           ELSE 'idle' END)), '[]')
+    FROM (SELECT * FROM focus WHERE closed_at IS NULL ORDER BY name) f)),
+  'trouble', json((SELECT COALESCE(json_group_array(json_object('what', what, 'fix', fix)), '[]') FROM (
+    SELECT name||' is held after '||start_attempts||' failed starts' AS what, 'say "reopen '||name||'"' AS fix
+      FROM focus WHERE closed_at IS NULL AND held_at IS NOT NULL
+    UNION ALL
+    SELECT 'the collector is held after '||start_attempts||' failed starts', 'gm tries again in a day'
+      FROM endpoint WHERE key='collector' AND held_at IS NOT NULL))))
+SQL
 }
 
 gm_cmd_statusline() {
@@ -2420,6 +2618,10 @@ gm_conf_header() {
       chat) vals='off | banners' ;;
       veilhides) vals='deeds adventurers notes progress, any of them' ;;
       sprites) vals='skirmish delve boss siege forge wall quill campfire, any of them, or none' ;;
+      art) vals='rotate | crest | robed | hall | helm | bearer | tent | none | <file>' ;;
+      artsize) vals='auto | full | mini' ;;
+      fold) vals='rule | vanish' ;;
+      tutorial) vals='auto | on | off' ;;
       text) vals='<folder> <folder> ...' ;;
       count) vals='<number>' ;;
       *) vals="<$kind>" ;;
@@ -2910,6 +3112,7 @@ gm_conf_json() {
       onoff) choices='on off' ;;
       collector) choices='on off later' ;;
       chat) choices='banners off' ;;
+      effort) choices='low medium high xhigh max' ;;
       veilhides) choices='deeds adventurers notes progress' multi=true ;;
       sprites) choices='skirmish delve boss siege forge wall quill campfire none' multi=true ;;
       *) choices='' ;;
@@ -3027,6 +3230,7 @@ gm_conf_apply() {
     sprites) printf 'sprites is %s: %s; running sessions follow at their next turn.\n' "$shown" \
       "$([ "$val" = off ] && printf 'no session draws a working sprite' || printf 'every session draws its working sprites')" ;;
     sprites-* | idle-*) printf '%s is %s: running sessions follow at their next turn.\n' "$key" "$shown" ;;
+    welcome | welcome-* | tutorial) printf '%s is %s: the Guildmaster and Party Leaders show it from their next start.\n' "$key" "$shown" ;;
     editor) printf 'editor is %s: the spyglass opens a changed file with it, in every session from now on.\n' "$shown" ;;
     repo-roots) printf 'repo-roots is %s: gm repos looks for clones %s.\n' "$shown" "$([ -n "$val" ] && printf 'there' || printf 'in the usual source folders')" ;;
     *) printf '%s is %s; it takes effect at the next muster.\n' "$key" "$shown" ;;
@@ -3961,6 +4165,7 @@ SQL
 gm_hook_prompt() {
   local tmp out spill t0 mid
   t0=$(gm_now_ms)
+  gm_watch_retire
   tmp=$(gm_tmp)
   cat >"$tmp"
   if out=$(gm_hook_prompt_record "$tmp") && [ -n "$out" ]; then
@@ -4007,7 +4212,7 @@ gm_hook_prompt_record() {
   local sql
   case $disposition in
     posting)
-      sql="$(gm_new_posting_sql "$focus" "$(gm_slugify "$words")" "$wsql" patron "$sid" "NULL")
+      sql="$(gm_new_posting_sql "$focus" "$(gm_slugify "$words")" "$wsql" patron "$sid" "NULL" patron)
 UPDATE posting SET message_id=(SELECT id FROM v WHERE k='message') WHERE id=(SELECT id FROM v WHERE k='posting');
 UPDATE message SET posting_id=(SELECT id FROM v WHERE k='posting') WHERE id=(SELECT id FROM v WHERE k='message');
 SELECT 'gm recorded this patron message verbatim as posting '||f.name||'#'||p.num||' '||p.slug||' (state received). Its notice line: '||(SELECT line FROM event WHERE posting_id=p.id AND verb='received')
@@ -4150,7 +4355,10 @@ gm_hook_stop_guard() {
 SELECT '- '||f.name||'#'||p.num||' '||p.slug||' is received and has no recorded state yet.'
 FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.focus_id=$fid AND p.state='received' ORDER BY p.num;
 SELECT '- '||f.name||'#'||p.num||' '||p.slug||' is active (claimed) and its outcome is not recorded.'
-FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.focus_id=$fid AND p.state='active' AND $bg=0 ORDER BY p.num;
+FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.focus_id=$fid AND p.state='active' AND $bg=0
+  AND NOT EXISTS (SELECT 1 FROM run_posting rp JOIN run r ON r.id=rp.run_id WHERE rp.posting_id=p.id AND r.ended_at IS NULL) ORDER BY p.num;
+SELECT '- run '||r.id||' for '||$(gm_run_postings_sql r.id)||' '||$(gm_run_end_sql r)||', and no notice has reviewed it yet: read '||$(gm_q "$GM_HALL/runs/")||r.id||'/result.md, then record done, failed, needs-you or update on its posting, or dispatch it again.'
+FROM run r WHERE r.focus_id=$fid AND r.ended_at IS NOT NULL AND r.reviewed_at IS NULL ORDER BY r.id;
 SELECT '- the patron''s addition to '||f.name||'#'||p.num||' '||p.slug||' ('||m.at||') is not acknowledged by a notice yet.'
 FROM message m JOIN posting p ON p.id=m.posting_id JOIN focus f ON f.id=p.focus_id
 WHERE m.focus_id=$fid AND m.disposition='addition' AND m.sorted_at IS NULL ORDER BY m.id;
@@ -4169,7 +4377,7 @@ SQL
 $pending"
     return 0
   fi
-  local reason="These postings in $focus need a recorded state before the turn ends:
+  local reason="These in $focus need a recorded notice before the turn ends:
 $pending
 Record each with gm notice <n> <queued|started|needs-you|done|failed|closed> [detail] or gm park <n> --why TEXT, then show the patron each notice line."
   local f
@@ -4217,6 +4425,7 @@ gm_cmd_hook() {
     charter) gm_hook_charter ;;
     stop) gm_hook_stop ;;
     precompact) gm_hook_precompact ;;
+    watch) gm_hook_watch ;;
     # --clone is what the committed settings pass; a Guildhall's settings from before the front desk moved into the
     # clone pass nothing, and get the same hook.
     front-desk) gm_hook_clone ;;
@@ -4224,6 +4433,497 @@ gm_cmd_hook() {
     session-end | pre-tool | post-tool | post-tool-failure | subagent-start | subagent-stop | stop-failure) gm_record_hook "$which" ;;
     *) gm_die "hook: unknown hook '$which'" ;;
   esac
+}
+
+# ---- Adventurers: a run, its keeper, and the summons (vision/step-3-design.md, slice 1) ----
+# gm dispatch hands started postings to one headless Adventurer, claude -p in the camp, and returns at once; the
+# run's keeper, gm run, waits for it in its own process group and records its result. A Party Leader hears of a run
+# that finished, or of a posting added from outside its chat, from its watch: a background hook (asyncRewake) armed
+# at every start and turn end, which wakes the idle session. When the watch has died, the muster types
+# /guild-chat:summons into the Party Leader's pane, only when that is safe; otherwise the roster shows the summons
+# as unheard.
+
+GM_WATCH_TIMEOUT=${GM_WATCH_TIMEOUT:-86400}
+GM_WATCH_POLL=${GM_WATCH_POLL:-2}
+GM_NUDGE_AFTER=${GM_NUDGE_AFTER:-120}
+GM_NUDGE_IDLE_GAP=${GM_NUDGE_IDLE_GAP:-1}
+GM_NUDGE_SETTLE=${GM_NUDGE_SETTLE:-1.5}
+GM_SUMMONS_COMMAND=/guild-chat:summons
+
+# gm_conf_value <key>: a setting as gm uses it: guild.conf's value when gm can take it, otherwise its default.
+gm_conf_value() {
+  local env def kind desc v
+  IFS=$'\t' read -r env def kind desc <<<"$(gm_conf_row "$1")"
+  [ "$def" != - ] || def=''
+  v=$(gm_conf_get "$1")
+  if [ -n "$v" ] && gm_conf_norm "$kind" "$v"; then printf '%s' "$GM_CONF_VAL"; else printf '%s' "$def"; fi
+}
+
+gm_run_dir() { printf '%s/runs/%s' "$GM_HALL" "$1"; }
+
+gm_uuid() {
+  if command -v uuidgen >/dev/null 2>&1; then
+    uuidgen | tr '[:upper:]' '[:lower:]'
+  else
+    sqlite3 -batch :memory: "SELECT lower(hex(randomblob(4))||'-'||hex(randomblob(2))||'-4'||substr(hex(randomblob(2)),2)||'-'||substr('89ab',1+abs(random())%4,1)||substr(hex(randomblob(2)),2)||'-'||hex(randomblob(6)));"
+  fi
+}
+
+# The keeper of run $2 still runs as pid $1: the process is there and is that keeper, not a pid reused since.
+gm_keeper_alive() {
+  case $1 in '' | *[!0-9]*) return 1 ;; esac
+  kill -0 "$1" 2>/dev/null && ps -p "$1" -o command= 2>/dev/null | grep -q " run $2\$"
+}
+
+# The postings of run $1 (an SQL expression), as "appt-v2#12 fix-owner-empty, #13 add-export".
+gm_run_postings_sql() {
+  printf "(SELECT group_concat(CASE WHEN n=1 THEN f.name ELSE '' END||'#'||p.num||' '||p.slug, ', ') FROM (SELECT rp.posting_id, row_number() OVER (ORDER BY rp.posting_id) n FROM run_posting rp WHERE rp.run_id=%s) x JOIN posting p ON p.id=x.posting_id JOIN focus f ON f.id=p.focus_id)" "$1"
+}
+
+# How a finished run ended, in a few words: "exit 0, 22 turns, \$1.41", or why it has no result.
+gm_run_end_sql() {
+  printf "CASE WHEN %s.result_subtype='lost' THEN 'lost: its keeper ended without recording a result' ELSE 'finished: '||CASE WHEN COALESCE(%s.result_subtype,'success')<>'success' THEN %s.result_subtype||', ' ELSE '' END||'exit '||COALESCE(%s.exit_code,'?')||COALESCE(', '||%s.turns||' turns','')||COALESCE(', '||%s,'')||CASE WHEN %s.result_subtype IS NULL THEN ', no result' ELSE '' END END" \
+    "$1" "$1" "$1" "$1" "$1" "$(gm_usd_sql "$1.cost_usd")" "$1"
+}
+
+# gm_run_end <run> <exit code or ''> <result.json or ''>: the run's end, recorded once, with a notice on each of its
+# postings. A result.json is the last result event of its stream; without one the run ended before reporting, or
+# (with no exit code) its keeper is gone.
+gm_run_end() {
+  local id=$1 rc=$2 res=$3 set r
+  if [ -n "$res" ] && [ -s "$res" ]; then
+    r="json(CAST(readfile($(gm_q "$res")) AS TEXT))"
+    set="result_subtype=json_extract($r,'\$.subtype'), is_error=json_extract($r,'\$.is_error'),
+      cost_usd=json_extract($r,'\$.total_cost_usd'), turns=json_extract($r,'\$.num_turns'),
+      duration_ms=json_extract($r,'\$.duration_ms'), usage=json_extract($r,'\$.modelUsage'),"
+  elif [ -z "$rc" ]; then
+    set="result_subtype='lost',"
+  else
+    set=''
+  fi
+  gm_sql <<SQL
+CREATE TEMP TABLE ended(n INTEGER);
+BEGIN IMMEDIATE;
+UPDATE run SET $set ended_at=$GM_NOW, exit_code=$(gm_qn "$rc") WHERE id=$id AND ended_at IS NULL;
+INSERT INTO ended VALUES (changes());
+INSERT INTO event(at, actor, kind, focus_id, posting_id, verb, detail, line)
+  SELECT $GM_NOW, 'keeper', 'notice', p.focus_id, p.id, 'run-ended', 'run '||r.id||' '||$(gm_run_end_sql r),
+         f.name||'#'||p.num||' '||p.slug||' run '||r.id||' '||$(gm_run_end_sql r)||' ("'||$(gm_summary_sql p.words)||'")'
+  FROM run r JOIN run_posting rp ON rp.run_id=r.id JOIN posting p ON p.id=rp.posting_id JOIN focus f ON f.id=p.focus_id
+  WHERE r.id=$id AND (SELECT n FROM ended)>0 ORDER BY p.num;
+SELECT line FROM event WHERE verb='run-ended' AND detail LIKE 'run '||$id||' %' AND (SELECT n FROM ended)>0 ORDER BY id;
+COMMIT;
+SQL
+}
+
+# A run whose keeper is gone without recording its end (the machine restarted, the keeper was killed) is ended as
+# lost, so it neither blocks the next contract nor waits for ever; its summons then reaches the Party Leader. A run
+# whose keeper has not yet written its pid gets 30 seconds.
+gm_runs_reap() {
+  local id pid
+  [ -s "$GM_DB" ] || return 0
+  while IFS=$'\t' read -r id pid; do
+    [ -n "$id" ] || continue
+    ! gm_keeper_alive "$pid" "$id" || continue
+    gm_run_end "$id" '' '' >/dev/null
+  done <<<"$(gm_sql "SELECT id, COALESCE(pid,'') FROM run WHERE ended_at IS NULL AND (pid IS NOT NULL OR started_at<strftime('%Y-%m-%dT%H:%M:%fZ','now','-30 seconds'));" 2>/dev/null || true)"
+}
+
+# The model a contract runs on: --model, else contract-model; party-leader is the model the focus's Party Leader ran
+# on last (from its status line), or Claude Code's own default when gm has not seen one.
+gm_dispatch_model() {
+  local focus=$1 m
+  m=$(gm_conf_value contract-model)
+  [ "$m" = party-leader ] || { printf '%s' "$m"; return; }
+  gm_sql "SELECT model FROM model_sample WHERE model IS NOT NULL AND session_id IN (
+    SELECT session_id FROM event WHERE focus_id=(SELECT id FROM focus WHERE name=$(gm_q "$focus")) AND kind='session.start' AND session_id IS NOT NULL)
+    ORDER BY id DESC LIMIT 1;"
+}
+
+# gm_writ_render <template> <posting ids, comma-separated> <brief> <out>: the writ, the patron's template with its
+# slots filled and nothing added: {{posting}}, {{original_words}} (each posting's words and every addition,
+# verbatim), {{branch}}, {{phase}}, {{rules}} and {{playbook}} (paths), {{brief}}. A comment the template starts
+# with is the patron's note on the file, and stays out of the writ.
+gm_writ_render() {
+  local template=$1 ids=$2 brief=$3 out=$4 bf
+  bf=$(gm_tmp)
+  printf '%s' "${brief:-(none)}" >"$bf"
+  gm_sql >/dev/null <<SQL
+WITH f AS (SELECT f.* FROM focus f WHERE f.id=(SELECT focus_id FROM posting WHERE id IN ($ids) LIMIT 1)),
+words AS (SELECT group_concat(block, char(10)||char(10)) AS t FROM (
+  SELECT '### '||g.name||'#'||p.num||' '||p.slug||char(10)||char(10)||p.words
+    ||COALESCE((SELECT group_concat(char(10)||char(10)||'The patron added, '||m.at||':'||char(10)||char(10)||m.words, '')
+                FROM (SELECT at, words FROM message WHERE posting_id=p.id AND disposition='addition' ORDER BY id) m),'') AS block
+  FROM posting p JOIN focus g ON g.id=p.focus_id WHERE p.id IN ($ids) ORDER BY p.num))
+SELECT writefile($(gm_q "$out"),
+  replace(replace(replace(replace(replace(replace(replace((SELECT CASE WHEN t GLOB '<!--*-->*' THEN ltrim(substr(t,instr(t,'-->')+3),char(10)) ELSE t END
+    FROM (SELECT CAST(readfile($(gm_q "$template")) AS TEXT) AS t)),
+    '{{posting}}', (SELECT group_concat(CASE WHEN n=1 THEN g.name ELSE '' END||'#'||p.num||' '||p.slug, ', ') FROM
+      (SELECT id, row_number() OVER (ORDER BY num) n FROM posting WHERE id IN ($ids)) x JOIN posting p ON p.id=x.id JOIN focus g ON g.id=p.focus_id)),
+    '{{original_words}}', (SELECT t FROM words)),
+    '{{branch}}', (SELECT branch FROM f)),
+    '{{phase}}', (SELECT COALESCE(phase,'unset') FROM f)),
+    '{{rules}}', $(gm_q "$(gm_rules_path "$(gm_sql "SELECT repo FROM focus WHERE id=(SELECT focus_id FROM posting WHERE id IN ($ids) LIMIT 1);")")")),
+    '{{playbook}}', $(gm_q "$(gm_playbook_path "$(gm_sql "SELECT kind FROM focus WHERE id=(SELECT focus_id FROM posting WHERE id IN ($ids) LIMIT 1);")")")),
+    '{{brief}}', CAST(readfile($(gm_q "$bf")) AS TEXT)));
+SQL
+  rm -f "$bf"
+  [ -s "$out" ]
+}
+
+# gm_run_settings <run> <focus> <rules file> <out>: an Adventurer's own settings, passed with --settings while
+# --setting-sources user,project leaves the camp's (the Party Leader's) out: no charter, capture, Stop guard or status
+# line. Slice 1's permissions: edits, the read-only and local git commands, and each adventurer-allow: rule in the
+# repository's rules file (its build and test commands); never a push, merge, rebase, new branch or merge request.
+# Claude Code's commit attribution is off unless guild.conf says commit-attribution: on.
+gm_run_settings() {
+  local id=$1 focus=$2 rules=$3 out=$4 allow='' rule attribution=''
+  for rule in 'Bash(git status*)' 'Bash(git diff*)' 'Bash(git log*)' 'Bash(git show*)' 'Bash(git add*)' 'Bash(git commit*)' \
+    'Bash(git rev-parse*)' 'Bash(git ls-files*)' 'Bash(git grep*)' 'Bash(git blame*)'; do
+    allow="$allow${allow:+, }$(gm_q "$rule")"
+  done
+  while IFS= read -r rule; do
+    [ -z "$rule" ] || allow="$allow, $(gm_q "$rule")"
+  done <<<"$(sed -n 's/^adventurer-allow:[[:space:]]*\(.*[^[:space:]]\)[[:space:]]*$/\1/p' "$rules" 2>/dev/null)"
+  local deny=''
+  for rule in 'Bash(git push*)' 'Bash(git merge*)' 'Bash(git rebase*)' 'Bash(git reset --hard*)' 'Bash(git checkout -b*)' \
+    'Bash(git checkout -B*)' 'Bash(git switch*)' 'Bash(git branch*)' 'Bash(git worktree*)' 'Bash(git tag*)' 'Bash(glab *)' 'Bash(gh *)'; do
+    deny="$deny${deny:+, }$(gm_q "$rule")"
+  done
+  [ "$(gm_conf_value commit-attribution)" = on ] || attribution=", 'attribution', json_object('commit', '', 'pr', ''), 'includeCoAuthoredBy', json('false')"
+  sqlite3 -batch :memory: "SELECT writefile($(gm_q "$out"), json_object(
+  'env', json_object('GM_HALL', $(gm_q "$GM_HALL"), 'GM_FOCUS', $(gm_q "$focus"), 'GM_RUN', $(gm_q "$id")),
+  'permissions', json_object('allow', json_array($allow), 'deny', json_array($deny))$attribution));" >/dev/null
+}
+
+# Starts run $1's keeper in its own process group, away from this command's output, so neither the Party Leader's
+# tool call nor a \$(...) waits for it, and it outlives the session that dispatched it.
+gm_keeper_spawn() {
+  local id=$1 dir
+  dir=$(gm_run_dir "$id")
+  (
+    set -m
+    cd /
+    env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_SESSION_ID -u TRACEPARENT GM_HALL="$GM_HALL" \
+      nohup bash "$GM_SELF" run "$id" </dev/null >>"$dir/keeper.log" 2>&1 &
+    gm_sql "BEGIN IMMEDIATE; UPDATE run SET pid=$! WHERE id=$id AND pid IS NULL; COMMIT;" >/dev/null 2>&1 || true
+  )
+}
+
+gm_cmd_dispatch() {
+  local refs=() model='' effort='' brief='' r pid pf st num canon focus fid ids='' live
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --model) model=${2:?--model needs a model}; shift 2 ;;
+      --effort) effort=${2:?--effort needs low, medium, high, xhigh or max}; shift 2 ;;
+      --brief)
+        brief=${2:?--brief needs your instructions, or - to read them from standard input}
+        [ "$brief" != - ] || brief=$(cat)
+        shift 2 ;;
+      --survey) gm_die "dispatch: surveys come with a later slice of step 3 (vision/step-3-design.md, slice 4); find it out yourself for now" ;;
+      -*) gm_die "dispatch: unknown option $1" ;;
+      *) refs+=("$1"); shift ;;
+    esac
+  done
+  [ "${#refs[@]}" -gt 0 ] || gm_die "dispatch: gm dispatch <posting>... [--brief TEXT|-] [--model M] [--effort E]"
+  gm_db_ensure
+  focus=$(gm_require_focus)
+  fid=$(gm_focus_id "$focus")
+  for r in "${refs[@]}"; do
+    pid=$(gm_resolve_posting "$r")
+    IFS=$'\t' read -r pf st num canon <<<"$(gm_sql "SELECT p.focus_id, p.state, p.num, f.name||'#'||p.num||' '||p.slug FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.id=$pid;")"
+    [ "$pf" = "$fid" ] || gm_die "dispatch: $canon is not a posting of $focus"
+    [ "$st" = active ] || gm_die "dispatch: $canon is $st; start it first (gm notice $num started), then dispatch it"
+    case ",$ids," in *",$pid,"*) ;; *) ids=${ids:+$ids,}$pid ;; esac
+  done
+  if [ -n "$effort" ]; then
+    gm_conf_norm effort "$effort" || gm_die "dispatch: --effort is low, medium, high, xhigh or max"
+  else
+    effort=$(gm_conf_value contract-effort)
+  fi
+  if [ -n "$model" ]; then
+    gm_conf_norm model "$model" || gm_die "dispatch: '$model' is not a model name"
+  else
+    model=$(gm_dispatch_model "$focus")
+  fi
+  gm_runs_reap
+  live=$(gm_sql "SELECT id FROM run WHERE focus_id=$fid AND kind='contract' AND ended_at IS NULL ORDER BY id LIMIT 1;")
+  [ -z "$live" ] || gm_die "dispatch: run $live is still working in $focus's camp, and only one contract at a time changes it; keep the posting queued (gm notice <n> queued) and dispatch it when run $live ends"
+  local template writ id dir sid out
+  template=$(gm_hall_file prompts/adventurer/contract.md "$GM_TEMPLATES/prompts/adventurer/contract.md")
+  writ=$(gm_tmp)
+  gm_writ_render "$template" "$ids" "$brief" "$writ" || { rm -f "$writ"; gm_die "dispatch: could not write the writ from $template"; }
+  sid=$(gm_uuid)
+  # The run is recorded with its postings; a finished run already on one of them is reviewed now, and was not enough.
+  out=$(gm_sql <<SQL
+BEGIN IMMEDIATE;
+UPDATE run SET reviewed_at=COALESCE(reviewed_at,$GM_NOW), outcome=COALESCE(outcome,'redispatched')
+  WHERE ended_at IS NOT NULL AND id IN (SELECT run_id FROM run_posting WHERE posting_id IN ($ids));
+INSERT INTO run(focus_id, kind, model, effort, permission_mode, template_sha256, brief, session_id, started_at)
+  VALUES ($fid, 'contract', $(gm_qn "$model"), $(gm_qn "$effort"), 'acceptEdits', $(gm_qn "$(gm_sha256_file "$template")"),
+          $(gm_qn "$brief"), $(gm_q "$sid"), $GM_NOW);
+INSERT INTO run_posting(run_id, posting_id) SELECT last_insert_rowid(), id FROM posting WHERE id IN ($ids);
+SELECT max(id) FROM run WHERE session_id=$(gm_q "$sid");
+COMMIT;
+SQL
+) || { rm -f "$writ"; exit 1; }
+  id=$out
+  dir=$(gm_run_dir "$id")
+  mkdir -p "$dir"
+  mv "$writ" "$dir/writ.md"
+  gm_run_settings "$id" "$focus" "$(gm_rules_path "$(gm_focus_field "$focus" repo)")" "$dir/settings.json"
+  gm_sql <<SQL
+BEGIN IMMEDIATE;
+UPDATE run SET writ=$(gm_q "$dir/writ.md") WHERE id=$id;
+INSERT INTO event(at, actor, kind, focus_id, posting_id, verb, detail, line)
+  SELECT $GM_NOW, 'party-leader', 'notice', p.focus_id, p.id, 'dispatched', 'run '||$id,
+         f.name||'#'||p.num||' '||p.slug||' dispatched: contract, run '||$id||COALESCE(' on '||$(gm_qn "$model"),'')||' at '||$(gm_q "$effort")||' effort ("'||$(gm_summary_sql p.words)||'")'
+  FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.id IN ($ids) ORDER BY p.num;
+SELECT line FROM event WHERE verb='dispatched' AND detail='run '||$id ORDER BY id;
+COMMIT;
+SQL
+  gm_keeper_spawn "$id"
+  printf 'Run %s works in the camp now; its writ is %s. gm summons you when it finishes: until then the posting stays active, and you can talk with the patron, but change no file in the camp.\n' "$id" "$dir/writ.md"
+}
+
+# gm run <run>: the keeper, started by gm dispatch. Runs the Adventurer, claude -p in the camp with the run's own
+# settings, the writ on its standard input and its stream-json transcript kept, then records how it ended.
+gm_cmd_run() {
+  local id=${1:-} camp sid model effort mode ended dir rc args claude=${GM_CLAUDE:-claude}
+  [[ $id =~ ^[0-9]+$ ]] || gm_die "run: gm run <run> is the keeper gm dispatch starts"
+  gm_db_ensure
+  IFS=$'\t' read -r camp sid model effort mode ended <<<"$(gm_sql "SELECT f.camp, r.session_id, COALESCE(r.model,'-'), COALESCE(r.effort,'-'), COALESCE(r.permission_mode,'-'), COALESCE(r.ended_at,'-') FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
+  [ -n "$sid" ] || gm_die "run: no run $id"
+  [ "$ended" = - ] || gm_die "run: run $id ended at $ended"
+  dir=$(gm_run_dir "$id")
+  gm_sql "BEGIN IMMEDIATE; UPDATE run SET pid=$$ WHERE id=$id; COMMIT;"
+  args=(-p --session-id "$sid" --output-format stream-json --verbose --setting-sources 'user,project' --settings "$dir/settings.json")
+  [ "$model" = - ] || args+=(--model "$model")
+  [ "$effort" = - ] || args+=(--effort "$effort")
+  [ "$mode" = - ] || args+=(--permission-mode "$mode")
+  rc=0
+  (cd "$camp" && exec env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_SESSION_ID -u TRACEPARENT -u GM_CHAT_FOCUS \
+    GM_HALL="$GM_HALL" "$claude" "${args[@]}" <"$dir/writ.md" >"$dir/stream.jsonl" 2>"$dir/stderr.txt") || rc=$?
+  # The result event is the stream's last line with a top-level "type":"result"; inside a message's text the same
+  # words would be escaped.
+  { grep '"type":"result"' "$dir/stream.jsonl" || true; } | tail -n 1 >"$dir/result.json"
+  [ "$(gm_json_field "$dir/result.json" type)" = result ] || : >"$dir/result.json"
+  if [ -s "$dir/result.json" ]; then
+    sqlite3 -batch :memory: "SELECT writefile($(gm_q "$dir/result.md"), COALESCE(json_extract(CAST(readfile($(gm_q "$dir/result.json")) AS TEXT),'\$.result'),''));" >/dev/null
+  else
+    rm -f "$dir/result.json"
+    printf 'The Adventurer ended (exit %s) without a result. Its transcript is %s and what it printed is %s.\n' "$rc" "$dir/stream.jsonl" "$dir/stderr.txt" >"$dir/result.md"
+  fi
+  gm_run_end "$id" "$rc" "$dir/result.json"
+}
+
+# gm runs [--all]: the focus's runs, newest first.
+gm_cmd_runs() {
+  local all=0 focus fid lim='LIMIT 10'
+  case ${1:-} in
+    '') ;;
+    --all) all=1 ;;
+    *) gm_die "runs: gm runs [--all]" ;;
+  esac
+  [ "$all" = 0 ] || lim=''
+  gm_db_ensure
+  focus=$(gm_require_focus)
+  fid=$(gm_focus_id "$focus")
+  gm_runs_reap
+  gm_sql <<SQL
+SELECT 'run '||r.id||'  '||r.kind||'  '||$(gm_run_postings_sql r.id)||'  '
+  ||CASE WHEN r.ended_at IS NULL THEN 'working since '||replace(substr(r.started_at,1,16),'T',' ')
+    ELSE $(gm_run_end_sql r)||' at '||replace(substr(r.ended_at,1,16),'T',' ') END
+  ||'  '||COALESCE(r.model||' · ','')||COALESCE(r.effort||' effort','')
+  ||CASE WHEN r.ended_at IS NOT NULL AND r.reviewed_at IS NULL THEN '  · not reviewed' ELSE '' END
+  ||COALESCE('  · '||r.outcome,'')
+  ||char(10)||'        '||CASE WHEN r.ended_at IS NULL THEN COALESCE(r.writ,'') ELSE $(gm_q "$GM_HALL/runs/")||r.id||'/result.md' END
+FROM run r WHERE r.focus_id=$fid ORDER BY r.id DESC $lim;
+SELECT 'No runs yet in '||$(gm_q "$focus")||'.' WHERE NOT EXISTS (SELECT 1 FROM run WHERE focus_id=$fid);
+SQL
+}
+
+# The summons waiting for focus $1's Party Leader: a run that finished and no notice has reviewed, and a posting
+# added from outside its chat that is still received, each not summoned before. With mark, they are recorded as
+# summoned and printed; without, only counted.
+gm_summons_sql() {
+  local fid=$1
+  cat <<SQL
+SELECT 'run' AS kind, r.id AS id, r.ended_at AS at FROM run r WHERE r.focus_id=$fid AND r.ended_at IS NOT NULL AND r.summoned_at IS NULL AND r.reviewed_at IS NULL
+UNION ALL
+SELECT 'posting', p.id, p.created_at FROM posting p WHERE p.focus_id=$fid AND p.state='received' AND p.origin='outside' AND p.summoned_at IS NULL
+SQL
+}
+
+# gm_summons_take <focus>: prints the summons and records each as summoned (one ledger row each), or prints nothing.
+gm_summons_take() {
+  local focus=$1 fid
+  fid=$(gm_focus_id "$focus")
+  gm_sql <<SQL
+CREATE TEMP TABLE s(kind TEXT, id INTEGER, at TEXT);
+BEGIN IMMEDIATE;
+INSERT INTO s $(gm_summons_sql "$fid");
+SELECT '- run '||r.id||' for '||$(gm_run_postings_sql r.id)||' '||$(gm_run_end_sql r)||'. Its result: '||$(gm_q "$GM_HALL/runs/")||r.id||'/result.md'
+FROM s JOIN run r ON r.id=s.id WHERE s.kind='run' ORDER BY r.id;
+SELECT '- '||f.name||'#'||p.num||' '||p.slug||' was posted from outside your chat (received): "'||$(gm_summary_sql p.words)||'"'
+FROM s JOIN posting p ON p.id=s.id JOIN focus f ON f.id=p.focus_id WHERE s.kind='posting' ORDER BY p.num;
+UPDATE run SET summoned_at=$GM_NOW WHERE id IN (SELECT id FROM s WHERE kind='run');
+UPDATE posting SET summoned_at=$GM_NOW WHERE id IN (SELECT id FROM s WHERE kind='posting');
+UPDATE focus SET unheard_at=NULL WHERE id=$fid AND EXISTS (SELECT 1 FROM s);
+INSERT INTO event(at, actor, kind, focus_id, posting_id, detail)
+  SELECT $GM_NOW, 'gm', 'summoned', $fid, CASE WHEN s.kind='posting' THEN s.id END, s.kind||' '||s.id FROM s;
+COMMIT;
+SQL
+}
+
+gm_summons_tail="Review each finished run (its result, and its commit in git log) and record what you decided on its postings; sort each posting as your charter says; show the patron each notice line."
+
+# gm summons: what is waiting for this Party Leader, recorded as heard. What /guild-chat:summons runs.
+gm_cmd_summons() {
+  local focus out
+  [ $# -eq 0 ] || gm_die "summons: gm summons"
+  gm_db_ensure
+  focus=$(gm_require_focus)
+  gm_runs_reap
+  out=$(gm_summons_take "$focus")
+  if [ -z "$out" ]; then
+    printf 'Nothing is waiting for you in %s: gm where shows the board.\n' "$focus"
+    return 0
+  fi
+  printf 'gm: waiting for you:\n%s\n%s\n' "$out" "$gm_summons_tail"
+}
+
+gm_watch_pidfile() { printf '%s/watch.%s.pid' "$GM_HALL" "$1"; }
+
+# Focus $1's Party Leader has a live watch.
+gm_watch_alive() {
+  local pid
+  pid=$(cat "$(gm_watch_pidfile "$1")" 2>/dev/null || true)
+  case $pid in '' | *[!0-9]*) return 1 ;; esac
+  kill -0 "$pid" 2>/dev/null
+}
+
+# A turn has started in the Party Leader's own session: its watch stands down, and that turn's end arms a new one.
+gm_watch_retire() {
+  local focus=${GM_FOCUS:-}
+  [ -n "$focus" ] && gm_close_self "$focus" 2>/dev/null || return 0
+  rm -f "$(gm_watch_pidfile "$focus")"
+}
+
+# gm hook watch: the Party Leader's watch, armed by SessionStart, Stop and StopFailure with asyncRewake. Only in that
+# Party Leader's own session; exactly one per focus (the newest pid in the pid file; an older watch sees it changed
+# and exits); a register query every GM_WATCH_POLL seconds, no model and no herdr. On a summons it records it and
+# exits 2, its stderr shown to the woken Party Leader. It exits 0 before Claude Code's timeout would kill it.
+gm_hook_watch() {
+  local focus=${GM_FOCUS:-} pidf out waited=0 limit reaped=0
+  cat >/dev/null 2>&1 || true
+  [ -n "$focus" ] && [ -s "$GM_DB" ] && [ -n "$(gm_focus_id "$focus" 2>/dev/null)" ] || return 0
+  gm_close_self "$focus" 2>/dev/null || return 0
+  pidf=$(gm_watch_pidfile "$focus")
+  printf '%s' "$$" >"$pidf"
+  limit=$((GM_WATCH_TIMEOUT - 30))
+  [ "$limit" -gt 0 ] || limit=$GM_WATCH_TIMEOUT
+  while [ "$waited" -lt "$limit" ]; do
+    [ "$(cat "$pidf" 2>/dev/null || true)" = "$$" ] || return 0
+    if [ "$reaped" -le 0 ]; then
+      gm_runs_reap
+      reaped=30
+    fi
+    if [ -n "$(gm_sql "$(gm_summons_sql "$(gm_focus_id "$focus")") LIMIT 1;" 2>/dev/null || true)" ]; then
+      out=$(gm_summons_take "$focus" 2>/dev/null || true)
+      if [ -n "$out" ]; then
+        [ "$(cat "$pidf" 2>/dev/null || true)" != "$$" ] || rm -f "$pidf"
+        printf 'gm: while you were idle:\n%s\n%s\n' "$out" "$gm_summons_tail" >&2
+        exit 2
+      fi
+    fi
+    sleep "$GM_WATCH_POLL"
+    waited=$((waited + GM_WATCH_POLL))
+    reaped=$((reaped - GM_WATCH_POLL))
+  done
+  [ "$(cat "$pidf" 2>/dev/null || true)" != "$$" ] || rm -f "$pidf"
+  return 0
+}
+
+# ---- The nudge: the muster's last resort when a Party Leader's watch has died ----
+
+# gm_input_line <screen>: the Party Leader's input line as Claude Code draws it, after its prompt mark, with ANSI.
+gm_input_line() {
+  local line
+  line=$(printf '%s\n' "$1" | grep -a '^❯' | tail -n 1) || true
+  line=${line#❯}
+  printf '%s' "$line" | sed $'s/^[ \xc2\xa0]*//' | tr -d '\r'
+}
+
+# What an input line holds: empty (nothing, or only Claude Code's faint suggestion or placeholder), or draft.
+gm_input_kind() {
+  case $1 in
+    '' | $'\e[0m' | $'\e[2m'* | $'\e[0m\e[2m'*) printf 'empty' ;;
+    *)
+      if [ -z "$(printf '%s' "$1" | sed $'s/\e\\[[0-9;]*m//g' | tr -d ' \t')" ]; then printf 'empty'; else printf 'draft'; fi ;;
+  esac
+}
+
+# The pane's visible screen, with ANSI, as herdr reads it: plain text, not herdr's JSON.
+gm_pane_screen() { "$GM_HERDR" pane read "$2" --source visible --ansi --session "$1" </dev/null 2>/dev/null || true; }
+
+# gm_nudge <focus>: for an alive Party Leader with a summons waiting GM_NUDGE_AFTER seconds and no live watch, types
+# /guild-chat:summons, only when that cannot touch the patron's words: herdr says it is idle or done twice, its input
+# line has not changed for GM_NUDGE_SETTLE seconds, and the line is empty, or holds a draft and no stash (the draft
+# is stashed with Ctrl+S first, and Claude Code puts it back after the turn). Otherwise it types nothing, records
+# the summons as unheard once, and tries again at the next muster. Prints one line when it acts.
+gm_nudge() {
+  local focus=$1 fid s pane st1 st2 scr1 scr2 line kind stashed why='' waiting
+  fid=$(gm_focus_id "$focus")
+  waiting=$(gm_sql "SELECT group_concat(CASE kind WHEN 'run' THEN 'run '||id ELSE '#'||(SELECT num FROM posting WHERE posting.id=s.id) END, ', ') FROM ($(gm_summons_sql "$fid")) s
+    WHERE (julianday('now')-julianday(at))*86400 >= $GM_NUDGE_AFTER;")
+  [ -n "$waiting" ] || return 0
+  ! gm_watch_alive "$focus" || return 0
+  IFS=$'\t' read -r s _ _ pane _ _ <<<"$(gm_endpoint "party-leader:$focus")"
+  [ -n "$pane" ] || return 0
+  st1=$(gm_hj "$(gm_herdr "$s" agent get "$pane")" '$.result.agent.agent_status')
+  sleep "$GM_NUDGE_IDLE_GAP"
+  st2=$(gm_hj "$(gm_herdr "$s" agent get "$pane")" '$.result.agent.agent_status')
+  case $st1/$st2 in
+    idle/idle | idle/done | done/idle | done/done) ;;
+    *) why="it is ${st2:-busy}" ;;
+  esac
+  if [ -z "$why" ]; then
+    scr1=$(gm_pane_screen "$s" "$pane")
+    sleep "$GM_NUDGE_SETTLE"
+    scr2=$(gm_pane_screen "$s" "$pane")
+    line=$(gm_input_line "$scr2")
+    if ! printf '%s\n' "$scr2" | grep -aq '^❯'; then
+      why="its input line could not be read"
+    elif [ "$(gm_input_line "$scr1")" != "$line" ]; then
+      why="someone is typing in it"
+    else
+      kind=$(gm_input_kind "$line")
+      stashed=$(printf '%s\n' "$scr2" | grep -ac '› stashed' || true)
+      if [ "$kind" = draft ] && [ "$stashed" -gt 0 ]; then
+        why="it holds a draft and a stash"
+      elif [ "$kind" = draft ]; then
+        gm_herdr "$s" pane send-keys "$pane" ctrl+s >/dev/null
+        sleep 0.3
+        [ "$(gm_input_kind "$(gm_input_line "$(gm_pane_screen "$s" "$pane")")")" = empty ] || why="its draft did not stash"
+      fi
+    fi
+  fi
+  if [ -n "$why" ]; then
+    if [ -z "$(gm_focus_field "$focus" unheard_at)" ]; then
+      gm_sql "BEGIN IMMEDIATE;
+UPDATE focus SET unheard_at=(SELECT min(at) FROM ($(gm_summons_sql "$fid"))) WHERE id=$fid;
+INSERT INTO event(at, actor, kind, focus_id, detail) VALUES ($GM_NOW, 'gm', 'unheard', $fid, $(gm_q "$waiting: no watch, and gm typed nothing because $why"));
+COMMIT;"
+    fi
+    return 0
+  fi
+  gm_herdr "$s" pane send-text "$pane" "$GM_SUMMONS_COMMAND" >/dev/null
+  gm_herdr "$s" pane send-keys "$pane" enter >/dev/null
+  gm_sql "BEGIN IMMEDIATE;
+INSERT INTO event(at, actor, kind, focus_id, detail) VALUES ($GM_NOW, 'gm', 'nudged', $fid, $(gm_q "typed $GM_SUMMONS_COMMAND in herdr pane $pane for $waiting${kind:+, its input $kind}"));
+COMMIT;"
+  printf '%s: summoned its Party Leader (%s), whose watch was not running\n' "$focus" "$waiting"
 }
 
 # ---- Quarters: herdr keeps every Party Leader running (vision/herdr-design.md) ----
@@ -4602,6 +5302,7 @@ gm_reconcile() {
   gm_herdr_workspace >/dev/null
   gm_muster_one front-desk "$show"
   gm_collector_muster "$show"
+  gm_runs_reap
   for focus in $(gm_sql "SELECT name FROM focus WHERE closed_at IS NULL ORDER BY name;"); do
     gm_muster_one "party-leader:$focus" "$show"
   done
@@ -4665,7 +5366,14 @@ COMMIT;"
     alive)
       [ "$attempts" = 0 ] && [ -z "$held" ] ||
         gm_sql "BEGIN IMMEDIATE; UPDATE $table SET start_attempts=0, held_at=NULL, held_told=0 WHERE $where; COMMIT;"
-      [ "$show" != all ] && [ "$show" != "$name" ] || line="$name: $who already running ($detail), left as it is" ;;
+      [ "$show" != all ] && [ "$show" != "$name" ] || line="$name: $who already running ($detail), left as it is"
+      # A summons its watch did not deliver: the muster's nudge, only when it is safe.
+      if [ "$key" != front-desk ]; then
+        local nudged
+        nudged=$(gm_nudge "$name")
+        [ -z "$nudged" ] || line=${line:+$line
+}$nudged
+      fi ;;
     *) line="$name: $st ($detail); left alone" ;;
   esac
   [ -z "$line" ] || printf '%s\n' "$line"
@@ -5011,11 +5719,21 @@ gm_cmd_roster() {
       fi
     fi
     [ -n "$closed" ] || [ -z "$(gm_focus_field "$focus" close_requested_at)" ] || detail="${detail:+$detail · }closing, as its Party Leader asked"
+    [ -n "$closed" ] || detail="${detail:+$detail}$(gm_roster_unheard "$focus")"
     [ -z "$last" ] || detail="${detail:+$detail · }last started $last"
     gm_roster_line "$focus" "party leader" "$st" "${pane:--}" "$detail"
   done <<<"$(gm_sql "SELECT f.name, COALESCE(f.closed_at,'-'), COALESCE(f.held_at,'-'), f.start_attempts,
     COALESCE((SELECT replace(substr(e.at,1,16),'T',' ') FROM event e WHERE e.focus_id=f.id AND e.kind='party-leader.launched' ORDER BY e.id DESC LIMIT 1),'-')
     FROM focus f WHERE $where ORDER BY f.name;")"
+}
+
+# gm_roster_unheard <focus>: " · unheard: run 7, #13 since 01:09" while a summons the muster could not deliver waits.
+gm_roster_unheard() {
+  local fid
+  fid=$(gm_focus_id "$1")
+  gm_sql "SELECT ' · unheard: '||group_concat(CASE kind WHEN 'run' THEN 'run '||id ELSE '#'||(SELECT num FROM posting WHERE posting.id=s.id) END, ', ')
+    ||' since '||(SELECT substr(unheard_at,12,5) FROM focus WHERE id=$fid)
+    FROM ($(gm_summons_sql "$fid")) s WHERE (SELECT unheard_at FROM focus WHERE id=$fid) IS NOT NULL HAVING count(*)>0;"
 }
 
 # Retires a focus: its Party Leader is no longer started, and its pane is closed once it holds only a shell. A
@@ -5526,7 +6244,7 @@ cmd=${1:-front-desk}
 [ $# -eq 0 ] || shift
 # Settings left in setup.conf move to guild.conf here; never from a hook or the status line, which only read them.
 case $cmd in
-  hook | statusline | help | -h | --help) ;;
+  hook | statusline | run | help | -h | --help) ;;
   *) gm_conf_migrate ;;
 esac
 case $cmd in
@@ -5546,7 +6264,7 @@ if [ -s "$GM_DB" ]; then
   esac
 fi
 case $cmd in
-  front-desk | open | up | close | start | autostart | install | hook | statusline | collector | config | repos | visit | help | -h | --help) ;;
+  front-desk | open | up | close | start | autostart | install | hook | statusline | welcome | collector | config | repos | visit | run | help | -h | --help) ;;
   *) gm_auto_reconcile ;;
 esac
 case $cmd in
@@ -5561,6 +6279,10 @@ case $cmd in
   autostart) gm_cmd_autostart "$@" ;;
   install) gm_cmd_install "$@" ;;
   post) gm_cmd_post "$@" ;;
+  dispatch) gm_cmd_dispatch "$@" ;;
+  run) gm_cmd_run "$@" ;;
+  runs) gm_cmd_runs "$@" ;;
+  summons) gm_cmd_summons "$@" ;;
   resolve) gm_cmd_resolve "$@" ;;
   list | ls) gm_cmd_list "$@" ;;
   show) gm_cmd_show "$@" ;;
@@ -5568,6 +6290,7 @@ case $cmd in
   park) gm_cmd_park "$@" ;;
   phase) gm_cmd_phase "$@" ;;
   where) gm_cmd_where "$@" ;;
+  welcome) gm_cmd_welcome "$@" ;;
   statusline) gm_cmd_statusline "$@" ;;
   trace) gm_cmd_trace "$@" ;;
   stats) gm_cmd_stats "$@" ;;

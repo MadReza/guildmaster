@@ -4,6 +4,11 @@ import {
   formatElapsed, formatTokens, isSpriteName, packFrame, paletteFamily, PALETTES, pickSprite, rasterColumns,
   spriteFrame, spriteTick, SPRITE_ROWS, withMeter, type Frame, type Palette, type SpriteName,
 } from '../lib/sprites'
+import {
+  ART, artCells, cardOf, cardRows, COMMANDS, foldedOf, isArtName, MINI_ART, parseArt, pickArt, placeCard, rankOf, recordUse, SEAT_ART,
+  SLASH, commandsIn, welcomeOf, type CommandId, type Hue, type Line, type Seat, type Theme, type Usage, type Welcome,
+  type WelcomeData,
+} from '../lib/welcome'
 
 // Heraldic banners: every message of a Guildmaster session is set under a rule naming who speaks. The patron's banner
 // hangs on the right, everyone else's on the left; the heavy rule is for the patron and the one who answers them, the
@@ -22,6 +27,13 @@ import {
 // session waits for the patron, idle-guildmaster or idle-party-leader names the one drawn above the prompt. Both live
 // in rows Claude Code redraws in place, so a sprite never enters the chat: it is gone when its turn, or the wait, ends.
 // The mod repaints each one on its own tick through $.ui.blit, as Firstmate's calm mod repaints its boat.
+//
+// The welcome (../lib/welcome.ts): while guild.conf says welcome: on, the band above the prompt holds a card from the
+// session's start until the patron's first message: who answers, what needs the patron, where the work stands, and
+// the commands the patron has yet to learn, beside a piece of guild art. gm welcome --json, run through the guild's one
+// gm, says what the card shows. After the first message it folds to one rule (welcome-fold: rule) or goes
+// (welcome-fold: vanish), and the idle sprite takes the band again. It is drawn on screen only: the model never
+// reads it.
 
 const GOLD = '#d4a017'
 const CRIMSON = '#c0392b'
@@ -153,18 +165,19 @@ function bannersOn($: EngineInterface): Promise<boolean> {
 // The veil and the sprites as this session holds them: guild.conf's path (none without a Guildhall), what it last read
 // there, and the file's modification time then. Read once, before the first row draws; afterwards only when the file
 // changed. Without a Guildhall the veil is lifted and no sprite is drawn: that patron keeps Claude Code's own rows.
-type Held = { conf?: string; veil: Veil; sprites: Sprites; mtimeMs?: number }
+type Held = { conf?: string; veil: Veil; sprites: Sprites; welcome: Welcome; mtimeMs?: number }
 const LIFTED: Veil = { on: false, hides: new Set() }
+const NO_WELCOME: Welcome = { ...welcomeOf(() => undefined), on: false }
 let held: Promise<Held> | undefined
 
 // Reads guild.conf; a file it cannot read leaves the veil lifted and draws no sprite.
-async function readConf($: EngineInterface, conf: string): Promise<{ veil: Veil; sprites: Sprites; mtimeMs?: number }> {
+async function readConf($: EngineInterface, conf: string): Promise<{ veil: Veil; sprites: Sprites; welcome: Welcome; mtimeMs?: number }> {
   try {
     const { mtimeMs } = await $.fs.stat(conf)
     const text = await $.fs.read(conf)
-    return { veil: veilOf(text), sprites: spritesOf(text), mtimeMs }
+    return { veil: veilOf(text), sprites: spritesOf(text), welcome: welcomeOf(k => confValue(text, k)), mtimeMs }
   } catch {
-    return { veil: LIFTED, sprites: NO_SPRITES }
+    return { veil: LIFTED, sprites: NO_SPRITES, welcome: NO_WELCOME }
   }
 }
 
@@ -172,9 +185,9 @@ function veil($: EngineInterface): Promise<Held> {
   held ??= (async () => {
     const conf = await hallConf($)
     try {
-      if (!(await $.fs.exists(conf))) return { veil: LIFTED, sprites: NO_SPRITES }
+      if (!(await $.fs.exists(conf))) return { veil: LIFTED, sprites: NO_SPRITES, welcome: NO_WELCOME }
     } catch {
-      return { veil: LIFTED, sprites: NO_SPRITES }
+      return { veil: LIFTED, sprites: NO_SPRITES, welcome: NO_WELCOME }
     }
     return { conf, ...(await readConf($, conf)) }
   })()
@@ -188,6 +201,7 @@ async function follow($: EngineInterface, h: Held, always = false): Promise<void
   const changed = !sameVeil(now.veil, h.veil) || !sameSprites(now.sprites, h.sprites)
   h.veil = now.veil
   h.sprites = now.sprites
+  h.welcome = now.welcome
   h.mtimeMs = now.mtimeMs
   if (changed || always) $.ui.invalidate('ui.render')
 }
@@ -380,6 +394,203 @@ async function spriteRaster($: EngineInterface, e: RenderInput, sprite: SpriteNa
 
 const said = (v: Veil) => (v.on ? 'The veil is drawn' : 'The veil is lifted')
 
+// ---- The welcome on screen ----
+
+const HUES: Readonly<Record<Hue, string>> = { gold: GOLD, crimson: CRIMSON, royal: ROYAL, steel: STEEL, green: GREEN, orange: '#d77757' }
+
+// What this session's card shows, once gm has said; its art, drawn at the start; whether the patron's first message
+// folded it; and the tutorial's counts as the store holds them, with the commands this patron had never been shown.
+let welcomeData: WelcomeData | undefined
+let welcomeArt: readonly string[] | undefined
+let folded = false
+let usage: Usage = {}
+let unseen = new Set<CommandId>()
+let sessionId = ''
+const USAGE_KEY = 'tutorial-usage'
+const KNOWN_KEY = 'tutorial-known'
+const LAST_ART_KEY = 'welcome-art-last'
+
+async function hallDir($: EngineInterface): Promise<string> {
+  return (await hallConf($)).replace(/\/guild\.conf$/, '')
+}
+
+const seatOf = async ($: EngineInterface): Promise<Seat> => ((await focusOf($)) ? 'party-leader' : 'guildmaster')
+
+async function artFile($: EngineInterface, path: string): Promise<readonly string[] | undefined> {
+  try {
+    return parseArt(await $.fs.read(path.startsWith('~/') ? `${await $.env.get('HOME')}/${path.slice(2)}` : path))
+  } catch {
+    return undefined
+  }
+}
+
+// The piece this start draws: the one guild.conf names, or for rotate one of the seat's own and the patron's files in
+// art/<seat>/ of the Guildhall, never the one the last start drew. A file that cannot be read rotates instead.
+async function chooseArt($: EngineInterface, seat: Seat, w: Welcome): Promise<readonly string[] | undefined> {
+  const choice = seat === 'guildmaster' ? w.artGuildmaster : w.artPartyLeader
+  if (choice === 'none') return undefined
+  if (typeof choice === 'object') {
+    const own = await artFile($, choice.file)
+    if (own) return own
+  } else if (choice !== 'rotate') {
+    return ART[choice]
+  }
+  const dir = `${await hallDir($)}/art/${seat}`
+  let files: string[] = []
+  try {
+    files = (await $.fs.list(dir)).filter(f => f.kind === 'file' && f.name.endsWith('.txt')).map(f => `${dir}/${f.name}`)
+  } catch {
+    // No art of the patron's own: the seat's pieces alone.
+  }
+  const lastAll = ((await $.store.get(LAST_ART_KEY)) ?? {}) as Partial<Record<Seat, string>>
+  const pool = [...SEAT_ART[seat], ...files]
+  for (let tries = pool.length; tries > 0; tries--) {
+    const pick = pickArt(pool, lastAll[seat], Math.random())
+    if (!pick) return undefined
+    const grid = isArtName(pick) ? ART[pick] : await artFile($, pick)
+    if (grid) {
+      await $.store.set(LAST_ART_KEY, { ...lastAll, [seat]: pick })
+      return grid
+    }
+    pool.splice(pool.indexOf(pick), 1)
+  }
+  return undefined
+}
+
+// What gm says the card shows; when it cannot say, the seat and why.
+async function loadWelcome($: EngineInterface, w: Welcome): Promise<void> {
+  const focus = await focusOf($)
+  const seat = await seatOf($)
+  welcomeArt = await chooseArt($, seat, w)
+  const found = await guildGm($)
+  if ('why' in found) {
+    welcomeData = { seat, focus, why: found.why }
+    return
+  }
+  try {
+    const run = await $.process.run([found.gm, 'welcome', '--json', ...(focus ? [focus] : [])], { timeoutMs: 15000 })
+    const said = run.exitCode === 0 ? (JSON.parse(run.stdout) as WelcomeData) : undefined
+    welcomeData = said?.seat === seat
+      ? said
+      : { seat, focus, why: (run.stderr.trim() || run.stdout.trim()).split('\n')[0] || `gm exited ${run.exitCode}` }
+  } catch (err) {
+    welcomeData = { seat, focus, why: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+// At the session's start: what the tutorial counted so far, and the card's data, asked of gm without holding up the
+// start. A session that resumes, or a reload, finds the patron has spoken already, so its card starts folded; a
+// /clear starts the conversation afresh, so its card is shown again, read anew. Whatever fails here leaves the band to
+// the idle sprite.
+let cleared = false
+let startedOn = { isInteractive: false, surface: null as string | null }
+async function startWelcome($: EngineInterface, e: { isInteractive: boolean; surface: string | null }, fresh = false): Promise<void> {
+  startedOn = { isInteractive: e.isInteractive, surface: e.surface }
+  welcomeData = undefined
+  welcomeArt = undefined
+  folded = false
+  typeahead = false
+  try {
+    folded = !fresh && (await $.session.turns()) > 0
+    sessionId = await $.session.id()
+    usage = ((await $.store.get(USAGE_KEY)) ?? {}) as Usage
+    const known = new Set(((await $.store.get(KNOWN_KEY)) ?? []) as CommandId[])
+    unseen = new Set(COMMANDS.map(c => c.id).filter(id => !known.has(id)))
+    if (unseen.size) await $.store.set(KNOWN_KEY, COMMANDS.map(c => c.id))
+  } catch {
+    usage = {}
+    unseen = new Set()
+  }
+  const { welcome } = await veil($)
+  if (welcome.on && e.isInteractive && e.surface === 'terminal') {
+    void loadWelcome($, welcome).then(() => $.ui.invalidate('ui.render'), () => undefined)
+  }
+}
+
+// One use of a command the card teaches, kept across sessions.
+async function used($: EngineInterface, ids: readonly CommandId[]): Promise<void> {
+  if (!ids.length) return
+  // A /clear goes on under a new session id, which counts as another session.
+  sessionId = await $.session.id()
+  for (const id of ids) usage = recordUse(usage, id, sessionId)
+  await $.store.set(USAGE_KEY, usage)
+}
+
+// While the typeahead is up the card gives it the band, and takes it back when the draft no longer calls for one.
+let typeahead = false
+function typing($: EngineInterface, up: boolean): void {
+  if (typeahead === up) return
+  typeahead = up
+  if (welcomeData && !folded) $.ui.invalidate('ui.render')
+}
+
+// The patron's first message folds the card, whatever it says; the band is drawn again only when a card is up.
+function fold($: EngineInterface): void {
+  if (folded) return
+  folded = true
+  if (welcomeData) $.ui.invalidate('ui.render')
+}
+
+let theme: Promise<Theme> | undefined
+function themeOf($: EngineInterface): Promise<Theme> {
+  theme ??= $.config.list().then(rows => paletteFamily(rows.find(r => r.key === 'theme')?.value), () => 'light' as const)
+  return theme
+}
+
+function lineOf($: EngineInterface, e: RenderInput, line: Line, key: number) {
+  const { Text } = $.ui.resolve(e)
+  if (!line.length) return <Text key={String(key)}> </Text>
+  return (
+    <Text key={String(key)} wrap="truncate-end">
+      {line.map((s, i) => (
+        <Text key={String(i)} color={s.hue ? HUES[s.hue] : undefined} bold={s.bold} dimColor={s.dim} inverse={s.badge}>{s.text}</Text>
+      ))}
+    </Text>
+  )
+}
+
+// A piece of art as a Raster: a terminal's alone.
+async function artRaster($: EngineInterface, e: RenderInput, grid: readonly string[] | undefined) {
+  const elements = $.ui.resolve(e)
+  if (!grid || e.surface !== 'terminal' || !('Raster' in elements)) return undefined
+  const { Raster } = elements
+  const art = artCells(grid, await themeOf($))
+  return { columns: art.columns, node: <Raster key="guild-welcome-art" columns={art.columns} rows={art.rows} cells={art.cells} /> }
+}
+
+// The card, its art at the size guild.conf asks: full for a novice under auto, the small piece after, none on a
+// terminal too narrow for it. A band too short for the card drops its blank rows, then takes the small piece; one
+// shorter still scrolls it, the panel kept whole.
+async function welcomeCard($: EngineInterface, e: RenderInput<'AbovePrompt'>, w: Welcome, data: WelcomeData) {
+  const { Box } = $.ui.resolve(e)
+  const columns = e.props.bodyColumns
+  const seat = data.seat
+  const mini = w.artSize === 'mini' || (w.artSize === 'auto' && rankOf(usage, seat) !== 'novice') || columns < 72
+  const now = new Date(await $.clock.now())
+  const lay = async (grid: readonly string[] | undefined, tight: boolean) => {
+    const art = await artRaster($, e, grid)
+    const artRows = art ? Math.ceil(grid!.length / 2) : 0
+    const sideColumns = columns - (art ? art.columns + 2 : 0)
+    const card = placeCard(cardOf(data, { now, columns: sideColumns, wide: columns, tutorial: w.tutorial, usage, unseen }), artRows, sideColumns, tight)
+    return { art, card, fits: cardRows(card, artRows) <= e.props.maxRows }
+  }
+  const grid = columns < 44 || !welcomeArt ? undefined : mini ? MINI_ART[seat] : welcomeArt
+  // Short of rows, the blank rows go first, then the large piece.
+  let laid = await lay(grid, false)
+  if (!laid.fits) laid = await lay(grid, true)
+  if (!laid.fits && laid.art && !mini) laid = await lay(MINI_ART[seat], true)
+  const { art, card } = laid
+  return (
+    <Box flexDirection="column">
+      <Box flexDirection="row">
+        {art ? <Box marginRight={2}>{art.node}</Box> : null}
+        <Box flexDirection="column">{card.side.map((l, i) => lineOf($, e, l, i))}</Box>
+      </Box>
+      {card.below.map((l, i) => lineOf($, e, l, i))}
+    </Box>
+  )
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     notes.clear()
@@ -397,6 +608,15 @@ export const register: Register = on => {
         immediate: true,
       })
     }
+    await startWelcome($, e)
+    return next(e)
+  })
+
+  // A /clear raises no session.start: the old session ends with reason clear and the process goes on under a new one.
+  // The welcome is shown again for the fresh conversation, read anew with another piece of art at its first drawing,
+  // whose $ is the new session's.
+  on('session.end', async ($, e, next) => {
+    if (e.reason === 'clear') cleared = true
     return next(e)
   })
 
@@ -404,6 +624,9 @@ export const register: Register = on => {
   on('command.run', { command: 'veil' }, async ($, e) => {
     const h = await veil($)
     if (!h.conf) return {}
+    if (e.origin.kind === 'composer' || e.origin.kind === 'bridge') {
+      await used($, ['veil']).catch(() => undefined)
+    }
     const arg = e.args.trim()
     if (arg === 'refresh') {
       await follow($, h, true)
@@ -458,7 +681,8 @@ export const register: Register = on => {
   on('config.set', { key: 'theme' }, async ($, e, next) => {
     const result = await next(e)
     palette = undefined
-    if (sites.size) $.ui.invalidate('ui.render')
+    theme = undefined
+    if (sites.size || (welcomeData && !folded)) $.ui.invalidate('ui.render')
     return result
   })
 
@@ -486,20 +710,58 @@ export const register: Register = on => {
     )
   })
 
-  // Above the prompt while the session waits: the idle sprite, unless a survey holds the band.
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const { sprites } = await veil($)
-    const sprite = sprites.on && e.surface === 'terminal' && !e.props.isWorking && !e.props.hasSurvey && !e.props.view.agentId
-      ? await idleSprite($)
-      : undefined
-    if (!sprite) {
-      forget(e.requestId)
-      return next(e)
+  // The patron's own messages fold the welcome and teach the tutorial what they used.
+  on('prompt.submit', async ($, e, next) => {
+    if (e.origin.kind === 'composer' || e.origin.kind === 'bridge') {
+      fold($)
+      typing($, false)
+      // A count the store will not keep never holds up the prompt.
+      await used($, commandsIn(e.text)).catch(() => undefined)
     }
-    const raster = await spriteRaster($, e, sprite, { keep: true })
-    if (!raster) return next(e)
+    return next(e)
+  })
+
+  // A slash command the card teaches counts too; /veil counts in its own hook above. A command is no message to the
+  // model, so it leaves the card up.
+  on('command.run', async ($, e, next) => {
+    const id = SLASH[e.command]
+    if (id && id !== 'veil' && (e.origin.kind === 'composer' || e.origin.kind === 'bridge')) {
+      await used($, [id]).catch(() => undefined)
+    }
+    typing($, false)
+    return next(e)
+  })
+
+  // Claude Code draws its typeahead over the band, so the card steps aside while one is up: a draft that is a slash
+  // command, or a word at the cursor that names a file with @.
+  on('prompt.edit', async ($, e, next) => {
+    const box = await next(e)
+    const word = box.text.slice(0, box.cursor).split(/\s/).at(-1) ?? ''
+    typing($, /^\s*\//.test(box.text) || word.startsWith('@'))
+    return box
+  })
+
+  // Above the prompt: the welcome until the patron's first message, then its rule; and while the session waits, the
+  // idle sprite, under the rule. A survey, or an agent's transcript, keeps the band.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (cleared) {
+      cleared = false
+      await startWelcome($, startedOn, true)
+    }
+    const { sprites, welcome } = await veil($)
+    const free = e.surface === 'terminal' && !e.props.hasSurvey && !e.props.view.agentId
+    const data = free && welcome.on ? welcomeData : undefined
     const { Box } = $.ui.resolve(e)
-    return <Box flexDirection="column">{raster}</Box>
+    if (data && !folded) {
+      forget(e.requestId)
+      return typeahead ? next(e) : welcomeCard($, e, welcome, data)
+    }
+    const rule = data && welcome.fold === 'rule' ? lineOf($, e, foldedOf(data, e.props.bodyColumns), 0) : undefined
+    const sprite = sprites.on && free && !e.props.isWorking ? await idleSprite($) : undefined
+    const raster = sprite ? await spriteRaster($, e, sprite, { keep: true }) : undefined
+    if (!raster) forget(e.requestId)
+    if (!rule && !raster) return next(e)
+    return <Box flexDirection="column">{rule}{raster}</Box>
   })
 
   // Learns which text blocks are notes, and what a step that hit a limit carried. Subagents' steps never draw here.

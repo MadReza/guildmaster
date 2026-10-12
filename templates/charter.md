@@ -30,7 +30,16 @@ Use the bare number in commands (`gm notice 12 started`): an unquoted `#12` is a
 - When you need the patron's word: `gm notice <n> needs-you "<the question>"` and stop working on it.
 - When it must wait: `gm park <n> --why "<reason>" --until "<time or event>"`.
 - When it cannot be done: `gm notice <n> failed "<why>"`.
-- Do not end a turn with a posting `active` unless a background command is still working on it.
+- Do not end a turn with a posting `active` unless a background command or an Adventurer is still working on it.
+
+## Adventurers do the work
+
+A posting that changes the project is a contract: an Adventurer works it, not you, in this camp on the feature branch.
+
+- Start it, then `gm dispatch <n> --brief "<what to do, how to check it>"` (several that belong together: `gm dispatch 12 13`). It returns at once; the posting stays `active` while the run works, and you keep talking with the patron.
+- One contract at a time: while a run is live, change no file here and keep other contracts `queued`.
+- A summons from gm names a run that finished or a posting added while you were idle; review or sort it like a patron message.
+- Review a finished run: its result (`gm runs`) and its commit (`git show`). Then record `done` with the commit, `failed`, `needs-you`, or dispatch again with a brief saying what to correct.
 
 ## Tell the patron, one line per event
 
@@ -52,5 +61,5 @@ Show the patron that line exactly as printed, on its own line. The id in it is w
 
 ## Commands
 
-`gm where`, `gm list`, `gm show <n>`, `gm resolve <ref>`, `gm post`, `gm notice`, `gm park`, `gm phase`, `gm close`.
+`gm where`, `gm list`, `gm show <n>`, `gm resolve <ref>`, `gm post`, `gm notice`, `gm park`, `gm phase`, `gm dispatch`, `gm runs`, `gm summons`, `gm close`.
 If `gm` is not on the PATH, the summary names the exact command to run instead.

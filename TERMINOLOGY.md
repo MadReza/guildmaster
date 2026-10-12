@@ -36,6 +36,8 @@ Where a term replaces one from Firstmate, the Firstmate column records the origi
 | **Contract** | A posting that produces a change to a project. The default kind. | ship task |
 | **Survey** | A posting that produces knowledge, never a change. Investigation, diagnosis, planning, reproduction, audit. | scout task |
 | **Writ** | The written instructions handed to one adventurer. An executable contract, not a suggestion. | brief |
+| **Run** | One adventurer dispatched on one writ, from its start to its result, numbered across the guild (`run 7`). It may carry several postings the party leader judged belong together. | crew launch |
+| **Keeper** | The code that holds one run: it starts the adventurer, records its result, runs the check, and summons the party leader. Never a model. | (none) |
 | **Field Report** | A survey's deliverable. Self-contained, and survives the camp that produced it. | report |
 | **Ruling** | A posting held for the patron because only they can decide it. | captain hold / decision |
 | **Commission** | Turning a finished survey into a contract with the same adventurer, keeping its context. | promotion |
@@ -65,8 +67,8 @@ Where a term replaces one from Firstmate, the Firstmate column records the origi
 
 | Term | Definition | Firstmate |
 | --- | --- | --- |
-| **The Watch** | The single live supervision cycle. Exactly one runs while any work is under way. | watcher |
-| **Summons** | One event that requires the guildmaster's attention now. Durable until handled and acknowledged. | wake |
+| **The Watch** | The one process that waits for a supervisor's summons and wakes it, run by code, never a model. Each supervisor has its own: the Guildmaster's, and one per Party Leader, a background hook in its session armed at every start and turn end. Exactly one runs per supervisor at a time. Said alone in a camp it is that Party Leader's watch. | watcher |
+| **Summons** | One event that requires a supervisor's attention now: the Guildmaster's, or a Party Leader's (a run that finished, or a posting added from outside its chat). Durable until handled and acknowledged; delivered by that supervisor's watch. A patron's own message is never a summons: it starts a turn by itself. | wake |
 | **Muster** | The once-per-session roll call that reconciles durable records with reality before any work starts. | session start |
 | **Round** | A periodic whole-roster review with no specific trigger. | heartbeat |
 | **Gone Quiet** | A worker that has stopped producing signs of life and must be inspected. | stale |
@@ -103,6 +105,8 @@ Where a term replaces one from Firstmate, the Firstmate column records the origi
 | **Deed** | A tool call as the chat shows it: the call, its result, or a group of them. | tool call |
 | **Veil** | The chat's quiet view: deeds, adventurers and short notes drawn out of the chat while it is on, and back when it is lifted. Hides from the screen only, never from the record. | Calm |
 | **Working Sprite** | The two-row figure drawn while a session works (a fight, a craft, the Guildmaster's quill), or above the prompt while it waits (the campfire). Drawn on the screen only: it never enters the chat. | working ship |
+| **Welcome** | The card above the prompt when the Guildmaster or a Party Leader starts: who answers, what needs the patron, where the work stands, and the commands left to learn, beside a piece of guild art. Folded to one rule at the patron's first message; the model never reads it. | (none) |
+| **Rank** | How far the patron has come with the guild's commands, which the welcome's commands panel fades with: a **Novice** has learned fewer than four, a **Journeyman** four or more, a **Master** every one. A command is learned at 5 uses in 3 separate sessions. | (none) |
 | **Spyglass** | The pane beside the chat, opened and closed with `/spyglass`, whose tabs show the party's work and the guild's settings: the Board (the quest board), the Satchel, the Deeds, the Codex and the Lantern. | (none) |
 | **Satchel** | The spyglass's tab of every file the party changed, the camp's and each adventurer's worktree. | (none) |
 | **Codex** | The spyglass's tab of the guild's settings, `guild.conf`, read and changed there. | (none) |
@@ -118,3 +122,4 @@ Renaming them would obscure the one thing every reader already understands.
 Add a term only when a concept genuinely exists and has no name yet.
 A new term must be a noun a person would recognize from fantasy without a glossary, must map to exactly one concept, and must be recorded in this file in the same change that introduces it.
 Never give one concept two names, and never reuse one name for two concepts.
+One concept may be scoped by context, as each supervisor has its own watch, when the context always says which, so neither the patron nor an agent can mistake one for the other. The patron, 2026-10-11: "The terms could also be in different context mean different things. Until the ai doesn't get confused or the user."
