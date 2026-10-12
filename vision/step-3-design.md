@@ -1,7 +1,7 @@
 # Step 3 design: Adventurers and enforced rules
 
 This is the design of roadmap step 3 ([roadmap.md](roadmap.md#step-3-adventurers-and-enforced-rules)), whose scope is build-order step 2 of [consultation.md](consultation.md#build-order), turned into build slices.
-The patron agreed to it on 2026-10-11 ("Go for it."), with every [question](#questions-for-the-patron) settled. Slice 1 is built; [What building slice 1 changed](#what-building-slice-1-changed) records where it differs from the text below.
+The patron agreed to it on 2026-10-11 ("Go for it."), with every [question](#questions-for-the-patron) settled. Slices 1 and 2 are built; [What building slice 1 changed](#what-building-slice-1-changed), [What the visible Adventurer changed](#what-the-visible-adventurer-changed) and [What building slice 2 changed](#what-building-slice-2-changed) record where they differ from the text below.
 Vocabulary is [TERMINOLOGY.md](../TERMINOLOGY.md)'s.
 
 The patron asked for it on 2026-10-11, in the Party Leader of `adventurers`:
@@ -194,6 +194,27 @@ A running Party Leader gets the watch hooks at its next start, since `gm open` w
 - **A posting records where it came from** (`origin`: `patron` from the capture hook, `party-leader` from `gm post` in its own session, `outside` from anywhere else), so only one added from outside is summoned.
 - **Commands added:** `gm runs` lists a focus's runs; `gm summons` is what `/guild-chat:summons` runs; `gm run <run>` is the keeper. The resume summary (`gm where`) names a live run and any finished run not yet reviewed.
 
+### What the visible Adventurer changed
+
+The patron, on 2026-10-11, in the Party Leader of `adventurers` (posting #28):
+
+<!-- patron: begin -->
+
+"I don't like the fact that it's invisible. The same way that you've arrived inside herdr I want this one to be right under the party leader and specify the work so I could always click on it, view if there's anything I need to view inside its chats. This invisible pane is not good. So fix that"
+
+<!-- patron: end -->
+
+So an Adventurer is no longer a headless `claude -p`, when its Party Leader has a herdr pane:
+
+- **Its own pane, under its Party Leader's.** The keeper, under the herdr lock, splits the Party Leader's recorded pane downwards (`herdr pane split <pane> --direction down --cwd <camp> --no-focus`), titles the new pane with the run (`run 3 · #28 visible-adventurer-pane`, by `herdr pane rename` and claude's own `--name`), records it on the run (schema 7: `pane_session`, `pane_id`, `pane_closed_at`), and types `gm adventurer <run> --pane <id>` into it, as `gm start` is typed into a Party Leader's. `gm adventurer` runs only in that run's pane, while the run is live.
+- **An interactive Claude Code session.** `gm adventurer` starts claude in the camp with everything slice 1 and 2 gave it: `--session-id`, `--setting-sources user,project`, `--settings runs/<run>/settings.json` (its environment, permissions, the rules hook, commit attribution off), `--model`, `--effort` and `--permission-mode`, and the writ as its first prompt. The patron can click into the pane, read its chat and type to it.
+- **The turn's end is the finish.** No `result` event comes from an interactive session, so the run's settings carry a `Stop` and a `StopFailure` hook, `gm hook run-stop`. At the first turn end it records the run's end: its last message (`last_assistant_message` in the hook's input, else the transcript's last assistant text) as `result.md`; from the transcript, the number of assistant messages as its turns, and their `costUSD` summed as its cost only when the transcript carries one; nothing else. It has no exit code, so its notice reads `run 3 finished: 12 turns`. A `StopFailure` ends it with the error (`finished: rate_limit`). The watch then summons the Party Leader as before. Later turns, the patron's own talk with the Adventurer, record nothing.
+- **Lost, as before.** The keeper waits, looking every 2 seconds (`GM_RUN_POLL`): a pane that closes before the turn ended, or holds only a shell, ends the run as lost; so does claude ending before its turn did (`gm adventurer` records it, with the exit code in `result.md`). A keeper that is gone is reaped as slice 1 does.
+- **The pane stays open** after the run ends, for the patron to read, until the Party Leader's review: a notice on one of its postings (`done`, `failed`, `needs-you`, or any other), or another dispatch on them, closes it (`herdr pane close`).
+- **A permission prompt now waits for the patron** in the pane instead of being refused, since someone can answer it there. Nothing summons the patron to it yet; `gm runs` and `gm where` show the run still working.
+- **The fallback is the headless run.** When the Party Leader has no pane herdr still has (the suite's tests opened with `--no-launch`, a Party Leader started outside herdr, herdr not installed or its server down) or herdr will not split the pane, the keeper runs `claude -p` exactly as slice 1 built it, unseen, and records the `result` event. The folder-trust question does not stop the pane's session: the Party Leader already runs in the same camp.
+- **Not yet checked against real herdr:** `pane split` and `pane rename` were written from the CLI's naming and are exercised only through the stub; a herdr that answers them differently makes the keeper fall back to `claude -p` (a split with no pane id) or leaves the pane untitled (claude's `--name` still names the session). The lab check by hand is in [How it will be checked](#how-it-will-be-checked).
+
 ## Slice 2: push rules in every camp
 
 `gm hook rules`, a `PreToolUse` hook on `Bash`, in the Party Leader's settings and in every Adventurer's.
@@ -210,6 +231,42 @@ The patron's files are never overwritten, so the pull request gives the lines to
 It is a guard rail, not a sandbox ([consultation risk 7](consultation.md#risks)); slice 3 checks facts afterwards.
 
 While a contract run is live, the same hook denies the Party Leader `Edit`, `Write` and a commit in the camp.
+
+### The lines the patron adds
+
+`gm` never overwrites the patron's files, so until these lines are in the Guildhall the hook denies every push, naming what is missing. A new Guildhall gets them from `templates/`, with the branch names left empty.
+
+In each `rules/<repository>.md`, above the line, with that repository's real branch names (`protected-branch:` takes several, separated by spaces or commas, or on more than one line):
+
+```
+development-branch: development
+integration-branch: integration
+protected-branch: master
+```
+
+In `playbooks/ticket.md`, above the prose (the first line that applies wins; one ending in `in` and phases applies only in those phases; prose after the words is ignored, as on `phase:` lines):
+
+```
+push: feature merge in merge-request fix-loop sealed closed
+push: feature allow
+push: development merge
+push: integration deny
+push: protected deny
+```
+
+`allow` allows any push to that branch, `merge` only one that moves it forward (never forced, with `--force`, `-f`, `--force-with-lease` or a `+` refspec, and never deleted), and `deny` none.
+
+### What building slice 2 changed
+
+- **`push:` lines may name phases.** The playbook's own words, "push freely. Never force-push it once a merge request is open", need two lines for the feature branch, so a line may end in `in <phase>...`, and the first line that applies in the focus's phase wins.
+- **A push to a branch no line names is denied**, and so are `--all`, `--mirror`, `--branches`, `--prune`, a pattern refspec, and a branch gm cannot read without running anything (`$(...)`, a variable, a detached `HEAD`). A tag, or `git push --tags` alone, is not a branch and is left to Claude Code's permissions, once the lines exist.
+- **A command is allowed only whole.** It is split on `;`, `&&`, `||`, `|`, `&`, newlines and parentheses, with quotes, here-documents and comments read as the shell would (a commit message saying `git push` is not a push), and `bash -c` and `eval` read inside. Any part denied denies it; it is allowed only when every part is an allowed push or a plain `cd`. Anything else in it (`git add . && git push`) leaves it to Claude Code's permissions: an Adventurer, whose permissions do not list `git push`, then pushes in a command of its own.
+- **The Adventurer's `Bash(git push*)` deny rule is gone.** Claude Code evaluates deny rules "regardless of what the hook returns" (<https://code.claude.com/docs/en/hooks>, PreToolUse decision control), so it would have outweighed the hook's allow; the hook answers every push instead. Its other deny rules (merge, rebase, new branches, `glab`, `gh`) stay.
+- **The merge request**: `glab mr create`, `merge` and `approve`, and `gh pr create` and `merge`, are answered `ask` for the Party Leader, so the patron's word is the gate, and `deny` for an Adventurer.
+- **New branches are denied to the Party Leader too**: `gm open` makes the only branch a focus has.
+- **Rebase and `git reset --hard`** are denied on the development branch: when the camp (or a `cd`, or `git -C`) is on it, or `git rebase <upstream> <development>` would check it out. An abort is left alone.
+- **While a contract run is live** the Party Leader's hook also covers `MultiEdit` and `NotebookEdit`, and only files and commits inside the camp; a run whose keeper is gone is reaped first, so a lost run never holds the camp.
+- **A running Party Leader gets the hook at its next start**, since `gm open` writes the camp's settings.
 
 ## Slice 3: `gm check` after every run
 
@@ -257,6 +314,7 @@ All eight are settled; see [What the patron settled](#what-the-patron-settled).
 - Slice 5: `gm trace` shows the dispatch, the Adventurer's run under it and the check, with the writ hash on each.
 - By hand, in a lab herdr session, the done-when: dispatch a contract, keep talking to the Party Leader while it runs, and see the result wake it; then send a follow-up bug on the same ticket and see its commit land on the same feature branch, with a `git checkout -b` tried by the Adventurer denied. And issue #41's own steps: `gm open demo --repo <repo>`, then `gm post --focus demo "say hello"`, and the idle Party Leader takes it up with nobody in its tab; again after that turn ends, to see the Stop re-arm after a rewake turn; and once with `gm open demo2 --brief "say hello"`.
 - By hand, once per Claude Code upgrade: the lab tests above.
+- The visible Adventurer, with the herdr stub: dispatch splits the Party Leader's pane downwards and titles it with the run; the pane runs claude with the writ as its first prompt and the run's settings; the Stop hook records the result and the watch summons; a later turn changes nothing; the review closes the pane; a closed pane, or claude ending early, ends the run as lost. By hand, against real herdr: `herdr pane split` and `herdr pane rename` answer as the stub does, and the pane shows the session under the Party Leader's.
 - gm's suite: the muster's nudge against recorded screens (empty, suggestion, draft, multi-line draft, stash, draft and stash, a changing input), checking what it would type, with the herdr stub.
 
 ## Not in this step

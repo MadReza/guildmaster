@@ -91,7 +91,7 @@ Start a message with an id (`#1 also the edit form`) to add to that posting inst
 The status line shows the focus, phase, and posting counts.
 A Stop guard keeps the turn going until every posting has a recorded state.
 
-Work that changes the project goes to an Adventurer: the Party Leader runs `gm dispatch`, and a headless Claude Code session works the posting in the camp, on the feature branch, and commits there as you, with Claude Code's attribution off (`commit-attribution` in `guild.conf`).
+Work that changes the project goes to an Adventurer: the Party Leader runs `gm dispatch`, and a Claude Code session, in a herdr pane right under the Party Leader's and titled with its run (so you can click into it, read its chat and type to it), works the posting in the camp, on the feature branch, and commits there as you, with Claude Code's attribution off (`commit-attribution` in `guild.conf`).
 The Party Leader stays free while it works, so keep talking to it.
 When the run finishes, gm wakes the Party Leader, which reviews the result and the commit and tells you:
 
@@ -103,6 +103,7 @@ appt-v2#1 fix-owner-empty done: fixed in 6b6a581 ("the owner field is empty…")
 
 A job the Guildmaster hands a focus for you (`gm post --focus`, or `gm open --brief` for a new focus) wakes its Party Leader the same way, with nobody in its workspace.
 An Adventurer may edit, read and commit; to let it run the repository's build and tests, add `adventurer-allow:` lines to the repository's rules file in the Guildhall.
+Pushes, in the Party Leader's camp and every Adventurer's, are answered by the playbook's `push:` lines and the rules file's `development-branch:`, `integration-branch:` and `protected-branch:` lines; until those are there every push is denied ([the lines to add](vision/step-3-design.md#the-lines-the-patron-adds)).
 
 #### Kill it and come back
 

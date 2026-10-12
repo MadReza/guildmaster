@@ -7,6 +7,8 @@
 #   panes        id<TAB>tab<TAB>workspace<TAB>what runs: shell, claude, or any other command name
 #   calls        every call, one a line
 #   runs         pane<TAB>the line typed into it by pane run
+#   splits       pane split<TAB>the new pane<TAB>its --direction
+#   titles       pane<TAB>the title pane rename gave it
 #   run-proc     what a pane runs after pane run (default claude)
 #   run-proc-collector  what the collector's pane runs after pane run (default otelcol-contrib)
 #   typed        pane<TAB>the text sent to it by pane send-text, or <key> for pane send-keys
@@ -109,6 +111,20 @@ case "${1:-} ${2:-}" in
     up
     awk -F '\t' -v OFS='\t' -v k="$3" -v l="$4" '$1 == k { $3 = l } { print }' "$D/tabs" >"$D/tabs.new" && mv "$D/tabs.new" "$D/tabs"
     printf '{"result":{"type":"tab_info","tab":%s}}\n' "$(tab_json "$3")" ;;
+  "pane split")
+    up
+    t=$(field panes "$3" 2)
+    w=$(field panes "$3" 3)
+    [ -n "$t" ] || err pane_not_found "pane $3 not found"
+    p="$w:p$(next)"
+    printf '%s\t%s\t%s\tshell\n' "$p" "$t" "$w" >>"$D/panes"
+    printf '%s\t%s\t%s\n' "$3" "$p" "$(opt direction "$@")" >>"$D/splits"
+    printf '{"result":{"type":"pane_info","pane":%s}}\n' "$(pane_json "$p")" ;;
+  "pane rename")
+    up
+    [ -n "$(field panes "$3" 1)" ] || err pane_not_found "pane $3 not found"
+    printf '%s\t%s\n' "$3" "$4" >>"$D/titles"
+    printf '{"result":{"type":"ok"}}\n' ;;
   "pane get")
     up
     [ -n "$(field panes "$3" 1)" ] || err pane_not_found "pane $3 not found"
