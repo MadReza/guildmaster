@@ -99,8 +99,12 @@ When the run finishes, gm wakes the Party Leader, which reviews the result and t
 ```
 appt-v2#1 fix-owner-empty dispatched: contract, run 1 on claude-opus-5-5[1m] at medium effort ("the owner field is empty…")
 appt-v2#1 fix-owner-empty run 1 finished: exit 0, 14 turns, $0.22 ("the owner field is empty…")
+appt-v2#1 fix-owner-empty run 1 check passed ("the owner field is empty…")
 appt-v2#1 fix-owner-empty done: fixed in 6b6a581 ("the owner field is empty…")
 ```
+
+Before the Party Leader hears of a finished run, gm checks it from git, never from what the Adventurer says: the camp is still on the feature branch, no local branch was made, no remote branch moved but the feature branch (and the development branch, forward, when the playbook's `push:` lines allow it), and no commit sits off the feature branch's line.
+A first failure on a posting sends a correction run at once, its writ (`prompts/adventurer/correction.md` in the Guildhall) quoting the broken rule and the evidence; a second makes the posting `needs-you`, for you, with the evidence.
 
 An Adventurer that stops at a permission prompt or a question waits for its Party Leader, not you: gm wakes the Party Leader with the prompt's last lines, and it answers what is safe and in the posting's scope from its own pane (`gm runner <run> --keys 1`, or `--text` for words), asking you only what is yours to decide.
 Each answer is recorded before it is sent.

@@ -124,7 +124,7 @@ t_schema_created_on_first_use() {
   [ ! -e "$GM_HALL" ] || return 1
   gm list >/dev/null || fail "first gm call failed"
   assert_eq "$(db 'PRAGMA journal_mode;')" wal "journal mode" &&
-    assert_eq "$(db 'PRAGMA user_version;')" 9 "schema version" &&
+    assert_eq "$(db 'PRAGMA user_version;')" 10 "schema version" &&
     assert_eq "$(db "SELECT group_concat(name, ' ') FROM (SELECT name FROM sqlite_master WHERE type='table' ORDER BY name);")" \
       "endpoint event focus guard message model_sample open_span posting prompt_version run run_posting span span_link ticket" "tables"
 }
@@ -961,7 +961,7 @@ t_migration_keeps_schema1_data() {
   for i in 1 2 3 4 5 6; do gm list --all >/dev/null 2>"$WORK/migrate/err$i" & done
   wait
   for i in 1 2 3 4 5 6; do assert_eq "$(cat "$WORK/migrate/err$i")" "" "migration $i ran clean"; done
-  assert_eq "$(db 'PRAGMA user_version;')" 9 "migrated to schema 9" &&
+  assert_eq "$(db 'PRAGMA user_version;')" 10 "migrated to schema 10" &&
     assert_eq "$(for t in $tables; do db "SELECT $(db "SELECT group_concat(name, ',') FROM pragma_table_info('$t') WHERE name NOT IN ('trace_id','span_id','span_start_ms','follows_id','closed_at','start_attempts','held_at','held_told','close_requested_at','origin','summoned_at','unheard_at');") FROM $t ORDER BY rowid;"; done)" "$before" "every schema-1 row kept as it was" &&
     assert_eq "$(db "SELECT count(*) FROM posting WHERE trace_id IS NULL;")" 2 "old postings have no trace" &&
     assert_eq "$(db "SELECT group_concat(name, ' ') FROM (SELECT name FROM sqlite_master WHERE type='table' AND name IN ('span','span_link','open_span','prompt_version','model_sample') ORDER BY name);")" \
@@ -3023,7 +3023,8 @@ fake_stream() {
     "{\"duration_ms\":1200,\"type\":\"result\",\"subtype\":\"${2:-success}\",\"is_error\":false,\"num_turns\":22,\"result\":\"Fixed the owner field in abc123.\",\"total_cost_usd\":1.41,\"modelUsage\":{\"claude-sonnet-5-5\":{\"costUSD\":1.41}}}" >"$1/stream.jsonl"
 }
 
-run_ended() { wait_for "SELECT ended_at IS NOT NULL FROM run WHERE id=$1;" 1; }
+# run_ended <run>: the run has ended and gm check has checked it, as the Party Leader's summons waits for.
+run_ended() { wait_for "SELECT ended_at IS NOT NULL AND checked_at IS NOT NULL FROM run WHERE id=$1;" 1; }
 
 # ---- The visible Adventurer: a herdr workspace of its own, under its Party Leader's ----
 
@@ -3984,6 +3985,166 @@ t_rules_hook_in_every_camp() {
     assert_contains "$(json "SELECT json_extract($f,'\$.hooks.PreToolUse[0].hooks[0].command')")" "GM_RUN='1' bash" "as run 1" &&
     assert_contains "$(json "SELECT json_extract($f,'\$.hooks.PreToolUse[0].hooks[0].command')")" "hook rules" "the rules hook" &&
     assert_not_contains "$settings" '"Bash(git push*)"' "no deny rule to outweigh the hook's allow"
+}
+
+# ---- gm check after every run (vision/step-3-design.md, slice 3) ----
+
+# check_setup <name>: a focus whose repository has a bare remote with main, development, a teammate's branch and the
+# feature branch, the rules' branch names, and an Adventurer that does what each act.<n> in $GM_FAKE_RUN says.
+check_setup() {
+  setup "$1"
+  export GM_FOCUS=appt-v2
+  rules_lines
+  REMOTE=$WORK/$1/remote.git
+  git -C "$REPO" branch development
+  git -C "$REPO" branch teammate
+  git init -q --bare "$REMOTE"
+  git -C "$REPO" remote add origin "$REMOTE"
+  git -C "$REPO" push -q origin main development teammate feature/CRM-8965 2>/dev/null
+  fake_run "$WORK/$1/run"
+}
+
+# check_act <script>: what the next run of the Adventurer does, in the camp.
+check_act() {
+  local n=1
+  while [ -e "$GM_FAKE_RUN/act.$n" ]; do n=$((n + 1)); done
+  printf 'set -e\n%s\n' "$1" >"$GM_FAKE_RUN/act.$n"
+}
+
+# check_post <words>: a started posting, dispatched; prints its run once the run has ended and been checked.
+check_post() {
+  local num run
+  num=$(gm post "$1" | sed -n 's/^appt-v2#\([0-9]*\) .*/\1/p')
+  gm notice "$num" started >/dev/null
+  gm dispatch "$num" >/dev/null || fail "dispatch #$num"
+  run=$(db "SELECT max(id) FROM run;")
+  run_ended "$run" || fail "run $run was never checked"
+  printf '%s' "$run"
+}
+
+commit_in() { printf 'git -c user.name=t -c user.email=t@t commit -q --allow-empty -m %s' "$1"; }
+
+t_check_after_every_run_from_git_facts() {
+  check_setup checkfacts
+  local r out f=feature/CRM-8965
+  # A clean run: a commit on the feature branch, pushed there; the development branch moved forward, which the
+  # playbook's push: development merge allows; a teammate's push to their own branch is not the Adventurer's.
+  local mate=$WORK/checkfacts/mate
+  git clone -q "$REMOTE" "$mate"
+  check_act "$(commit_in fix) && git push -q origin HEAD:$f && git push -q origin HEAD:development"
+  r=$(check_post "a clean fix")
+  assert_eq "$(db "SELECT check_result FROM run WHERE id=$r;")" passed "a clean run passes" &&
+    assert_contains "$(gm show 1)" "appt-v2#1 clean-fix run $r check passed" "a notice says so" &&
+    assert_contains "$(gm runs)" "check passed" "gm runs shows it" &&
+    assert_contains "$(gm summons)" "Its result: $GM_HALL/runs/$r/result.md. gm check: every rule kept." "the summons carries the check" || return 1
+  git -C "$mate" checkout -q teammate && git -C "$mate" -c user.name=m -c user.email=m@m commit -q --allow-empty -m mate && git -C "$mate" push -q origin teammate
+  gm notice 1 'done' >/dev/null
+  check_act ":"
+  r=$(check_post "nothing to do")
+  assert_eq "$(db "SELECT check_result FROM run WHERE id=$r;")" passed "a teammate's push is not the Adventurer's" || return 1
+  gm notice 2 'done' >/dev/null
+  # Each rule broken, caught from git alone: the fake Adventurer's result says it fixed the bug every time.
+  check_act "git checkout -q --detach"
+  check_act "git checkout -q $f"
+  r=$(check_post "left detached")
+  assert_eq "$(db "SELECT check_result||' | '||check_rules FROM run WHERE id=$r;")" "failed | the camp stays on its feature branch" "a detached HEAD" &&
+    assert_contains "$(cat "$GM_HALL/runs/$r/check.txt")" "HEAD is detached at" "with the evidence" || return 1
+  run_ended $((r + 1)) || fail "no correction run"
+  gm notice 3 'done' >/dev/null
+  check_act "git branch side"
+  r=$(check_post "made a branch")
+  assert_eq "$(db "SELECT check_rules FROM run WHERE id=$r;")" "no new local branch" "a new local branch" &&
+    assert_contains "$(db "SELECT check_evidence FROM run WHERE id=$r;")" "the branch side was created, at" "named" || return 1
+  run_ended $((r + 1)) || fail "no correction run"
+  gm notice 4 'done' >/dev/null
+  check_act "$(commit_in other) && git push -q -f origin HEAD:teammate && git push -q origin HEAD:refs/heads/brand-new && git push -q origin --delete development"
+  r=$(check_post "pushed elsewhere")
+  out=$(db "SELECT check_evidence FROM run WHERE id=$r;")
+  assert_contains "$out" "- no remote branch moves but the feature branch, and the development branch only forward when the playbook allows it: origin/teammate moved from" "a teammate's branch moved" &&
+    assert_contains "$out" "origin/brand-new was created, at" "a remote branch created" &&
+    assert_contains "$out" "origin/development was deleted" "the development branch deleted" &&
+    assert_not_contains "$out" "no commit outside" "its commit is on the feature branch's line" || return 1
+  run_ended $((r + 1)) || fail "no correction run"
+  gm notice 5 'done' >/dev/null
+  git -C "$REPO" push -q origin "$f:development" 2>/dev/null
+  check_act "git push -q -f origin main:development"
+  r=$(check_post "forced development")
+  assert_contains "$(db "SELECT check_evidence FROM run WHERE id=$r;")" "origin/development moved from" "the development branch moved back" &&
+    assert_contains "$(db "SELECT check_evidence FROM run WHERE id=$r;")" "which does not contain it: not forward" "not forward" || return 1
+  run_ended $((r + 1)) || fail "no correction run"
+  gm notice 6 'done' >/dev/null
+  check_act "git checkout -q --detach && $(commit_in stray) && git checkout -q $f"
+  r=$(check_post "stray commit")
+  assert_eq "$(db "SELECT check_rules FROM run WHERE id=$r;")" "no commit outside the feature branch's line" "a commit left off the line" &&
+    assert_contains "$(db "SELECT check_evidence FROM run WHERE id=$r;")" '"stray" is not on feature/CRM-8965' "names the commit" || return 1
+  run_ended $((r + 1)) || fail "no correction run"
+}
+
+t_check_failure_dispatches_one_correction_then_needs_you() {
+  check_setup checkfix
+  local r out f=feature/CRM-8965
+  # A first failure: one correction run at once, its writ from the correction template quoting the rule and the
+  # evidence; it puts things right and passes.
+  check_act "git checkout -q --detach"
+  check_act "git checkout -q $f"
+  r=$(check_post "the owner field")
+  run_ended 2 || fail "no correction run"
+  assert_eq "$(db "SELECT id||' '||kind||' '||corrects_run||' '||check_result FROM run WHERE id=2;")" "2 contract 1 passed" "run 2 corrects run 1, and passes" &&
+    assert_eq "$(db "SELECT outcome FROM run WHERE id=1;")" corrected "run 1 was corrected" &&
+    assert_eq "$(db "SELECT state FROM posting WHERE num=1;")" active "the posting stays active" || return 1
+  [ -f "$GM_HALL/prompts/adventurer/correction.md" ] || fail "the correction template was not copied into the Guildhall"
+  local writ
+  writ=$(cat "$GM_HALL/runs/2/writ.md")
+  assert_contains "$writ" "# Correction writ: appt-v2#1 owner-field" "{{posting}}" &&
+    assert_contains "$writ" "what run 1 left" "{{run}}" &&
+    assert_contains "$writ" "these were broken: the camp stays on its feature branch." "{{rule}}" &&
+    assert_contains "$writ" "- the camp stays on its feature branch: HEAD is detached at" "{{evidence}}" &&
+    assert_contains "$writ" "the owner field" "{{original_words}}" &&
+    assert_not_contains "$writ" "{{" "every slot filled" &&
+    assert_not_contains "$writ" "This file is the patron's" "the template's own note stays out" || return 1
+  assert_contains "$(gm show 1)" "appt-v2#1 owner-field dispatched: correction, run 2 of run 1" "gm's notice of the correction" || return 1
+  out=$(gm summons)
+  assert_contains "$out" "- run 1 for appt-v2#1 owner-field finished" "the failed run is summoned" &&
+    assert_contains "$out" "gm check found rules broken, from git:
+    - the camp stays on its feature branch: HEAD is detached at" "with the rule and the evidence" &&
+    assert_contains "$out" "gm dispatched correction run 2 at once" "and the correction" &&
+    assert_contains "$out" "- run 2 for appt-v2#1 owner-field finished" "the correction's own result" || return 1
+  gm notice 1 'done' >/dev/null
+  # A second failure on the same posting: needs-you, with the evidence, for the patron; no third run.
+  check_act "git branch side"
+  check_act "git branch side2"
+  r=$(check_post "a second posting")
+  run_ended 4 || fail "no correction run"
+  sleep 1
+  assert_eq "$(db "SELECT count(*) FROM run;")" 4 "no run after the second failure" &&
+    assert_eq "$(db "SELECT check_result||' '||outcome FROM run WHERE id=4;")" "failed escalated" "the correction failed too" &&
+    assert_eq "$(db "SELECT state FROM posting WHERE num=2;")" needs-you "the posting is the patron's" &&
+    assert_contains "$(gm show 2)" "appt-v2#2 second-posting needs you: run 4's check failed again: - no new local branch: the branch side2 was created, at" "with the evidence" &&
+    assert_contains "$(gm summons)" "gm made its postings needs-you, with this evidence, for the patron" "the summons says so" &&
+    assert_contains "$(gm where)" "Needs the patron:" "the board shows it" || return 1
+  # gm check by hand reports what was recorded, and the check waits for a run to end.
+  assert_contains "$(gm check 4)" "Run 4: check failed." "gm check <run>" || return 1
+  assert_eq "$(db "SELECT count(*) FROM event WHERE verb='checked' AND detail LIKE 'run 4 %';")" 1 "checked once"
+}
+
+t_check_waits_for_the_run_and_the_summons_for_the_check() {
+  check_setup checkwait
+  : >"$GM_FAKE_RUN/hold"
+  gm post "slow" >/dev/null && gm notice 1 started >/dev/null
+  gm dispatch 1 >/dev/null
+  wait_for "SELECT pid IS NOT NULL FROM run WHERE id=1;" 1 || fail "no keeper"
+  local out
+  out=$(gm check 1 2>&1) && fail "checked a live run"
+  assert_contains "$out" "run 1 is still working" "says why" &&
+    assert_contains "$(db "SELECT refs_before FROM run WHERE id=1;")" "HEAD $(git -C "$CAMP" rev-parse HEAD) feature/CRM-8965" "the refs kept at dispatch" &&
+    assert_contains "$(db "SELECT refs_before FROM run WHERE id=1;")" "refs/remotes/origin/development " "remote-tracking refs too" || return 1
+  # An ended run whose check has not run is not summoned until it has.
+  db "UPDATE run SET ended_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=1;"
+  assert_contains "$(gm summons)" "Nothing is waiting for you" "not before the check" || return 1
+  db "UPDATE run SET ended_at=NULL WHERE id=1;"
+  rm -f "$GM_FAKE_RUN/hold"
+  run_ended 1 || fail "never checked"
+  assert_contains "$(gm summons)" "gm check: every rule kept." "after it"
 }
 
 t_shellcheck() {
