@@ -14,6 +14,21 @@ if [ "${1:-}" = -p ] && [ -n "${GM_FAKE_RUN:-}" ]; then
   [ ! -f "$GM_FAKE_RUN/stream.jsonl" ] || cat "$GM_FAKE_RUN/stream.jsonl"
   exit "$(cat "$GM_FAKE_RUN/exit" 2>/dev/null || echo 0)"
 fi
+# As an Adventurer in a herdr pane (--session-id without -p) it records the same, its last argument (the writ) as its
+# stdin, waits while GM_FAKE_RUN/hold exists, and exits with the code in GM_FAKE_RUN/exit; its Stop hook is the
+# test's to run.
+case " $* " in
+  *" --session-id "*)
+    if [ -n "${GM_FAKE_RUN:-}" ]; then
+      env >"$GM_FAKE_RUN/env"
+      printf '%s\n' "$@" >"$GM_FAKE_RUN/args"
+      pwd -P >"$GM_FAKE_RUN/pwd"
+      for a in "$@"; do last=$a; done
+      printf '%s' "$last" >"$GM_FAKE_RUN/stdin"
+      while [ -e "$GM_FAKE_RUN/hold" ]; do sleep 0.1; done
+      exit "$(cat "$GM_FAKE_RUN/exit" 2>/dev/null || echo 0)"
+    fi ;;
+esac
 [ -n "${GM_FAKE_CLAUDE_ENV:-}" ] || exit 0
 env >"$GM_FAKE_CLAUDE_ENV"
 printf '%s\n' "$@" >"$GM_FAKE_CLAUDE_ENV.args"

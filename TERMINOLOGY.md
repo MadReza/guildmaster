@@ -37,7 +37,7 @@ Where a term replaces one from Firstmate, the Firstmate column records the origi
 | **Survey** | A posting that produces knowledge, never a change. Investigation, diagnosis, planning, reproduction, audit. | scout task |
 | **Writ** | The written instructions handed to one adventurer. An executable contract, not a suggestion. | brief |
 | **Run** | One adventurer dispatched on one writ, from its start to its result, numbered across the guild (`run 7`). It may carry several postings the party leader judged belong together. | crew launch |
-| **Keeper** | The code that holds one run: it starts the adventurer, records its result, runs the check, and summons the party leader. Never a model. | (none) |
+| **Keeper** | The code that holds one run: it starts the adventurer (in a herdr pane under its party leader's, where the patron can watch and talk to it), sees that its result is recorded, runs the check, and summons the party leader. Never a model. | (none) |
 | **Field Report** | A survey's deliverable. Self-contained, and survives the camp that produced it. | report |
 | **Ruling** | A posting held for the patron because only they can decide it. | captain hold / decision |
 | **Commission** | Turning a finished survey into a contract with the same adventurer, keeping its context. | promotion |

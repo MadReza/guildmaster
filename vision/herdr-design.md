@@ -224,7 +224,9 @@ Checked against herdr 0.9.1 (`herdr <group> help`) in an isolated lab session. E
 | `pane process-info --pane <pane>` | `.result.process_info.shell_pid`, `.foreground_processes[].{name, argv0}` |
 | `agent get <pane>` | `.result.agent.agent_status`, or `agent_not_found` |
 | `pane run <pane> <line>` | types the line and submits it |
-| `pane close <pane>` | only for a dead focus's husk, at `gm close` and when a dead Party Leader moves out of `guild`; closing a workspace's last pane closes the workspace |
+| `pane close <pane>` | only for a dead focus's husk, at `gm close` and when a dead Party Leader moves out of `guild`, and for an Adventurer's pane once its run is reviewed; closing a workspace's last pane closes the workspace |
+| `pane split <pane> --direction down --cwd <camp> --no-focus` | `.result.pane.pane_id`: an Adventurer's pane under its Party Leader's ([step-3-design.md](step-3-design.md#what-the-visible-adventurer-changed)); not yet checked against real herdr, and without a pane id the keeper runs `claude -p` instead |
+| `pane rename <pane> <title>` | titles an Adventurer's pane with its run; not yet checked against real herdr, and its answer is not read |
 
 Errors such as `pane_not_found` come back as JSON with exit status 1, so gm reads the JSON, not the status.
 A pane run before its shell is ready keeps the line until the shell reads it; the lab saw the line wait in a zsh still loading its configuration.

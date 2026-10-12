@@ -121,7 +121,7 @@ t_schema_created_on_first_use() {
   [ ! -e "$GM_HALL" ] || return 1
   gm list >/dev/null || fail "first gm call failed"
   assert_eq "$(db 'PRAGMA journal_mode;')" wal "journal mode" &&
-    assert_eq "$(db 'PRAGMA user_version;')" 6 "schema version" &&
+    assert_eq "$(db 'PRAGMA user_version;')" 7 "schema version" &&
     assert_eq "$(db "SELECT group_concat(name, ' ') FROM (SELECT name FROM sqlite_master WHERE type='table' ORDER BY name);")" \
       "endpoint event focus guard message model_sample open_span posting prompt_version run run_posting span span_link ticket" "tables"
 }
@@ -958,7 +958,7 @@ t_migration_keeps_schema1_data() {
   for i in 1 2 3 4 5 6; do gm list --all >/dev/null 2>"$WORK/migrate/err$i" & done
   wait
   for i in 1 2 3 4 5 6; do assert_eq "$(cat "$WORK/migrate/err$i")" "" "migration $i ran clean"; done
-  assert_eq "$(db 'PRAGMA user_version;')" 6 "migrated to schema 6" &&
+  assert_eq "$(db 'PRAGMA user_version;')" 7 "migrated to schema 7" &&
     assert_eq "$(for t in $tables; do db "SELECT $(db "SELECT group_concat(name, ',') FROM pragma_table_info('$t') WHERE name NOT IN ('trace_id','span_id','span_start_ms','follows_id','closed_at','start_attempts','held_at','held_told','close_requested_at','origin','summoned_at','unheard_at');") FROM $t ORDER BY rowid;"; done)" "$before" "every schema-1 row kept as it was" &&
     assert_eq "$(db "SELECT count(*) FROM posting WHERE trace_id IS NULL;")" 2 "old postings have no trace" &&
     assert_eq "$(db "SELECT group_concat(name, ' ') FROM (SELECT name FROM sqlite_master WHERE type='table' AND name IN ('span','span_link','open_span','prompt_version','model_sample') ORDER BY name);")" \
@@ -3022,6 +3022,160 @@ fake_stream() {
 
 run_ended() { wait_for "SELECT ended_at IS NOT NULL FROM run WHERE id=$1;" 1; }
 
+# ---- The visible Adventurer: a herdr pane under its Party Leader's ----
+
+# run_pane <run>: the keeper has split a pane for the run.
+run_pane() { wait_for "SELECT pane_id IS NOT NULL FROM run WHERE id=$1;" 1; }
+
+# run_pane_line <pane>: the line the keeper typed into that pane.
+run_pane_line() { awk -F '\t' -v p="$1" '$1 == p { l = $2 } END { print l }' "$HERDR_STUB/runs"; }
+
+# transcript <file> [cost]: a Claude Code transcript of two assistant messages, the first in two lines (as Claude
+# Code writes a message with a tool call), each line with costUSD when a cost is given.
+transcript() {
+  local c=''
+  [ -z "${2:-}" ] || c=",\"costUSD\":$2"
+  printf '%s\n' '{"type":"user","message":{"role":"user","content":"the writ"}}' \
+    "{\"type\":\"assistant\",\"message\":{\"id\":\"m1\",\"content\":[{\"type\":\"text\",\"text\":\"Looking.\"}]}$c}" \
+    "{\"type\":\"assistant\",\"message\":{\"id\":\"m1\",\"content\":[{\"type\":\"tool_use\",\"name\":\"Bash\"}]}$c}" \
+    '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}' \
+    "{\"type\":\"assistant\",\"message\":{\"id\":\"m2\",\"content\":[{\"type\":\"text\",\"text\":\"Fixed \\\"owner\\\" in abc123.\"},{\"type\":\"text\",\"text\":\"Tests pass.\"}]}$c}" >"$1"
+}
+
+# run_stop <run> <last message or ''> [transcript] [event] [error]: the run's Stop hook as Claude Code runs it in
+# the Adventurer's pane; prints what it printed.
+run_stop() {
+  local t=${3:-}
+  if [ -z "$t" ]; then
+    t=$WORK/transcript.$1.jsonl
+    printf '%s\n' '{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"x"}]}}' >"$t"
+  fi
+  json "SELECT json_object('session_id','a1','hook_event_name',$(sqlq "${4:-Stop}"),'transcript_path',$(sqlq "$t"),'stop_hook_active',json('false')
+    $([ -z "$2" ] || printf ",'last_assistant_message',%s" "$(sqlq "$2")")$([ -z "${5:-}" ] || printf ",'error',%s" "$(sqlq "$5")"));" |
+    GM_RUN=$1 GM_FOCUS=appt-v2 bash "$GM" hook run-stop
+}
+
+t_dispatch_opens_the_adventurer_under_its_party_leader() {
+  setup visible
+  gm open appt-v2 >/dev/null 2>&1
+  export GM_FOCUS=appt-v2 GM_RUN_POLL=1 GM_WATCH_TIMEOUT=40
+  fake_run "$WORK/visible/run"
+  : >"$GM_FAKE_RUN/hold"
+  gm post "the owner field is empty after save" >/dev/null && gm notice 1 started >/dev/null
+  local out pl pane line dir=$GM_HALL/runs/1 sid
+  out=$(gm dispatch 1 --model sonnet 2>&1) || fail "dispatch failed: $out"
+  run_pane 1 || fail "the run got no pane"
+  pl=$(pl_pane appt-v2)
+  pane=$(db "SELECT pane_id FROM run WHERE id=1;")
+  assert_eq "$(cat "$HERDR_STUB/splits")" "$pl	$pane	down" "split under the Party Leader's pane" &&
+    assert_eq "$(cat "$HERDR_STUB/titles")" "$pane	run 1 · #1 owner-field-empty-after" "titled with the run and its posting" &&
+    assert_eq "$(awk -F '\t' -v p="$pane" '$1 == p { print $3 }' "$HERDR_STUB/panes")" "$(awk -F '\t' -v p="$pl" '$1 == p { print $3 }' "$HERDR_STUB/panes")" "in the Party Leader's workspace" || return 1
+  line=$(run_pane_line "$pane")
+  assert_contains "$line" "cd '$CAMP' && env GM_HALL='$GM_HALL'" "started in the camp" &&
+    assert_contains "$line" "adventurer 1 --pane '$pane'" "runs gm adventurer for the run" || return 1
+  # Only in its own pane.
+  out=$(gm adventurer 1 --pane "$pl" 2>&1) && fail "gm adventurer ran in another pane"
+  assert_contains "$out" "runs only in run 1's own herdr pane" "says why" || return 1
+  # The pane's shell runs the line: claude in the camp, a session the patron can read and type in.
+  env -u GM_FOCUS sh -c "$line" </dev/null >/dev/null 2>&1 &
+  local shell=$! i=0
+  while [ ! -s "$GM_FAKE_RUN/stdin" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+  sid=$(db "SELECT session_id FROM run WHERE id=1;")
+  assert_eq "$(cat "$GM_FAKE_RUN/stdin")" "$(cat "$dir/writ.md")" "the writ is its first prompt" &&
+    assert_eq "$(cat "$GM_FAKE_RUN/pwd")" "$CAMP" "in the camp" &&
+    assert_eq "$(head -n 14 "$GM_FAKE_RUN/args" | tr '\n' ' ')" "--name run 1 · #1 owner-field-empty-after --session-id $sid --setting-sources user,project --settings $dir/settings.json --model sonnet --effort medium --permission-mode acceptEdits " "its command line, without -p" &&
+    assert_eq "$(grep -c '^CLAUDECODE=\|^GM_FOCUS=' "$GM_FAKE_RUN/env")" 0 "not as a session inside Claude Code, nor as the Party Leader" || return 1
+  local f="CAST(readfile('$dir/settings.json') AS TEXT)"
+  assert_eq "$(json "SELECT group_concat(key) FROM json_each(json_extract($f,'\$.hooks'))")" "PreToolUse,Stop,StopFailure" "the rules hook, and the Stop hooks that record its end" &&
+    assert_contains "$(json "SELECT json_extract($f,'\$.hooks.Stop[0].hooks[0].command')")" "GM_RUN='1' bash" "as run 1" &&
+    assert_contains "$(json "SELECT json_extract($f,'\$.hooks.StopFailure[0].hooks[0].command')")" "hook run-stop" "gm hook run-stop" &&
+    assert_eq "$(json "SELECT json_extract($f,'\$.includeCoAuthoredBy')")" 0 "commit attribution off" || return 1
+  assert_contains "$(gm runs)" "working since" "it works" &&
+    assert_contains "$(gm where)" "an Adventurer is working in the camp" "gm where says so" || return 1
+  # Its turn ends: the Stop hook records the result, and the watch summons the Party Leader.
+  local t=$WORK/visible/transcript.jsonl
+  transcript "$t"
+  assert_eq "$(run_stop 1 "Fixed the owner field in abc123." "$t")" "" "the Stop hook says nothing and never blocks" || return 1
+  run_ended 1 || fail "the run never ended"
+  assert_eq "$(cat "$dir/result.md")" "Fixed the owner field in abc123." "its last message is the result" &&
+    assert_eq "$(db "SELECT result_subtype||' '||turns||' '||COALESCE(cost_usd,'none')||' '||COALESCE(exit_code,'none') FROM run WHERE id=1;")" "success 2 none none" "turns from the transcript; no cost or exit code invented" &&
+    assert_contains "$(gm show 1)" "appt-v2#1 owner-field-empty-after run 1 finished: 2 turns (\"the owner field is empty after save\")" "the finish notice" || return 1
+  local rc=0
+  out=$(printf '{}' | HERDR_ENV=1 HERDR_PANE_ID="$pl" HERDR_SESSION=gm-test GM_WATCH_POLL=1 bash "$GM" hook watch 2>&1) || rc=$?
+  assert_eq "$rc" 2 "the watch summons the Party Leader" &&
+    assert_contains "$out" "- run 1 for appt-v2#1 owner-field-empty-after finished: 2 turns. Its result: $dir/result.md" "naming the run" || return 1
+  sleep 2
+  ! kill -0 "$(db "SELECT pid FROM run WHERE id=1;")" 2>/dev/null || fail "the keeper did not end with the run"
+  # The patron talks to it afterwards: later turns record nothing, and the pane stays open.
+  run_stop 1 "Something else the patron asked." "$t" >/dev/null
+  assert_eq "$(cat "$dir/result.md")" "Fixed the owner field in abc123." "a later turn leaves the result" &&
+    assert_eq "$(awk -F '\t' -v p="$pane" '$1 == p' "$HERDR_STUB/panes" | grep -c .)" 1 "the pane stays open for the patron to read" || return 1
+  rm -f "$GM_FAKE_RUN/hold"
+  wait "$shell"
+  assert_eq "$(db "SELECT result_subtype FROM run WHERE id=1;")" success "claude ending after its turn loses nothing" || return 1
+  # The Party Leader's review closes it.
+  gm notice 1 'done' abc123 >/dev/null
+  assert_eq "$(awk -F '\t' -v p="$pane" '$1 == p' "$HERDR_STUB/panes" | grep -c .)" 0 "the review closes the pane" &&
+    assert_eq "$(db "SELECT pane_closed_at IS NOT NULL FROM run WHERE id=1;")" 1 "recorded" &&
+    assert_eq "$(awk -F '\t' -v p="$pl" '$1 == p' "$HERDR_STUB/panes" | grep -c .)" 1 "and only that pane"
+}
+
+t_run_stop_reads_the_transcript() {
+  setup runstop
+  gm open appt-v2 >/dev/null 2>&1
+  export GM_FOCUS=appt-v2 GM_RUN_POLL=1
+  fake_run "$WORK/runstop/run"
+  gm post "one" >/dev/null && gm post "two" >/dev/null
+  gm notice 1 started >/dev/null && gm notice 2 started >/dev/null
+  gm dispatch 1 >/dev/null
+  run_pane 1 || fail "the run got no pane"
+  # No last message in the payload: the transcript's last text, and its cost when it carries one.
+  local t=$WORK/runstop/t.jsonl
+  transcript "$t" 0.25
+  run_stop 1 '' "$t" >/dev/null
+  run_ended 1 || fail "the run never ended"
+  assert_eq "$(cat "$GM_HALL/runs/1/result.md")" "Fixed \"owner\" in abc123.
+Tests pass." "the transcript's last message" &&
+    assert_eq "$(db "SELECT turns||' '||cost_usd FROM run WHERE id=1;")" "2 0.75" "its turns and cost" || return 1
+  # A turn cut off by an error ends the run with it.
+  gm notice 1 'done' >/dev/null
+  gm dispatch 2 >/dev/null
+  run_pane 2 || fail "run 2 got no pane"
+  run_stop 2 '' "$WORK/runstop/none.jsonl" StopFailure rate_limit >/dev/null
+  run_ended 2 || fail "run 2 never ended"
+  assert_contains "$(gm runs)" "run 2  contract  appt-v2#2 two  finished: rate_limit" "the error, named" &&
+    assert_contains "$(cat "$GM_HALL/runs/2/result.md")" "turn failed (rate_limit)" "and said in the result"
+}
+
+t_a_lost_adventurer_pane_ends_the_run() {
+  setup lostpane
+  gm open appt-v2 >/dev/null 2>&1
+  export GM_FOCUS=appt-v2 GM_RUN_POLL=1
+  fake_run "$WORK/lostpane/run"
+  gm post "one" >/dev/null && gm notice 1 started >/dev/null
+  gm dispatch 1 >/dev/null
+  run_pane 1 || fail "the run got no pane"
+  # The pane is closed before the turn ended.
+  local pane
+  pane=$(db "SELECT pane_id FROM run WHERE id=1;")
+  stub_close "$pane"
+  run_ended 1 || fail "the run never ended"
+  assert_eq "$(db "SELECT result_subtype FROM run WHERE id=1;")" lost "lost" &&
+    assert_contains "$(cat "$GM_HALL/runs/1/result.md")" "its herdr pane $pane closed" "says why" &&
+    assert_contains "$(gm runs)" "lost: its keeper ended without recording a result" "gm runs" || return 1
+  # claude ends before its turn did.
+  gm dispatch 1 >/dev/null
+  run_pane 2 || fail "run 2 got no pane"
+  pane=$(db "SELECT pane_id FROM run WHERE id=2;")
+  printf '1' >"$GM_FAKE_RUN/exit"
+  env -u GM_FOCUS sh -c "$(run_pane_line "$pane")" </dev/null >/dev/null 2>&1
+  run_ended 2 || fail "run 2 never ended"
+  assert_eq "$(db "SELECT result_subtype FROM run WHERE id=2;")" lost "a session that dies is lost" &&
+    assert_contains "$(cat "$GM_HALL/runs/2/result.md")" "claude ended (exit 1)" "with its exit code" || return 1
+  # The summons reaches the Party Leader as for any run.
+  assert_contains "$(gm summons)" "- run 2 for appt-v2#1 one lost" "summoned"
+}
+
 t_dispatch_hands_a_posting_to_an_adventurer() {
   setup dispatch
   export GM_FOCUS=appt-v2
@@ -3214,12 +3368,13 @@ t_watch_summons_an_idle_party_leader() {
   [ ! -e "$pidf" ] || fail "the capture hook left the pid file"
   GM_FOCUS=appt-v2 gm notice 3 started >/dev/null
   fake_run "$WORK/watch/run"
-  fake_stream "$GM_FAKE_RUN"
-  GM_FOCUS=appt-v2 gm dispatch 3 >/dev/null
+  GM_FOCUS=appt-v2 GM_RUN_POLL=1 gm dispatch 3 >/dev/null
+  run_pane 1 || fail "the run got no pane"
+  run_stop 1 "Added the export."
   run_ended 1 || fail "the run never ended"
   rc=0; out=$(printf '{}' | as_watch bash "$GM" hook watch 2>&1) || rc=$?
   assert_eq "$rc" 2 "a finished run wakes it, even at start" &&
-    assert_contains "$out" "- run 1 for appt-v2#3 add-csv-export finished: exit 0, 22 turns, \$1.41. Its result: $GM_HALL/runs/1/result.md" "names the run and its result" &&
+    assert_contains "$out" "- run 1 for appt-v2#3 add-csv-export finished: 1 turns. Its result: $GM_HALL/runs/1/result.md" "names the run and its result" &&
     assert_contains "$(GM_FOCUS=appt-v2 gm summons)" "Nothing is waiting for you" "gm summons finds it heard"
 }
 

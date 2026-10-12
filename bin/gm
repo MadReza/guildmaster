@@ -189,7 +189,7 @@ gm_conf_carried() {
   case $GM_CONF_VARS in *" $1 "*) return 1 ;; esac
   return 0
 }
-GM_SCHEMA_VERSION=6
+GM_SCHEMA_VERSION=7
 GM_STOP_BUDGET=${GM_STOP_BUDGET:-3}
 GM_NOW="strftime('%Y-%m-%dT%H:%M:%fZ','now')"
 GM_NOW_MS="CAST(ROUND((julianday('now')-2440587.5)*86400000) AS INTEGER)"
@@ -436,6 +436,18 @@ PRAGMA user_version=6;
 SQL
 }
 
+# Schema 6 to 7: an Adventurer works in a herdr pane of its own, split under its Party Leader's, which the run
+# records until the Party Leader's review closes it (vision/step-3-design.md, What the visible Adventurer changed).
+# Only adds.
+gm_schema7_sql() {
+  cat <<'SQL'
+ALTER TABLE run ADD COLUMN pane_session TEXT;
+ALTER TABLE run ADD COLUMN pane_id TEXT;
+ALTER TABLE run ADD COLUMN pane_closed_at TEXT;
+PRAGMA user_version=7;
+SQL
+}
+
 gm_db_init() {
   mkdir -p "$GM_HALL"
   local tmp=$GM_DB.init.$$
@@ -449,6 +461,7 @@ $(gm_schema3_sql)
 $(gm_schema4_sql)
 $(gm_schema5_sql)
 $(gm_schema6_sql)
+$(gm_schema7_sql)
 COMMIT;
 SQL
   # ln refuses an existing target, so exactly one concurrent first caller installs its register.
@@ -461,11 +474,12 @@ SQL
 gm_db_migrate() {
   local from=$1 sql err
   case $from in
-    1) sql="$(gm_schema2_sql) $(gm_schema3_sql) $(gm_schema4_sql) $(gm_schema5_sql) $(gm_schema6_sql)" ;;
-    2) sql="$(gm_schema3_sql) $(gm_schema4_sql) $(gm_schema5_sql) $(gm_schema6_sql)" ;;
-    3) sql="$(gm_schema4_sql) $(gm_schema5_sql) $(gm_schema6_sql)" ;;
-    4) sql="$(gm_schema5_sql) $(gm_schema6_sql)" ;;
-    5) sql=$(gm_schema6_sql) ;;
+    1) sql="$(gm_schema2_sql) $(gm_schema3_sql) $(gm_schema4_sql) $(gm_schema5_sql) $(gm_schema6_sql) $(gm_schema7_sql)" ;;
+    2) sql="$(gm_schema3_sql) $(gm_schema4_sql) $(gm_schema5_sql) $(gm_schema6_sql) $(gm_schema7_sql)" ;;
+    3) sql="$(gm_schema4_sql) $(gm_schema5_sql) $(gm_schema6_sql) $(gm_schema7_sql)" ;;
+    4) sql="$(gm_schema5_sql) $(gm_schema6_sql) $(gm_schema7_sql)" ;;
+    5) sql="$(gm_schema6_sql) $(gm_schema7_sql)" ;;
+    6) sql=$(gm_schema7_sql) ;;
   esac
   if ! err=$(sqlite3 -bail -batch -cmd '.timeout 15000' "$GM_DB" "BEGIN IMMEDIATE; $sql COMMIT;" 2>&1 >/dev/null); then
     [ "$(gm_sql 'PRAGMA user_version;')" = "$GM_SCHEMA_VERSION" ] || gm_die "could not migrate the register at $GM_DB to schema $GM_SCHEMA_VERSION: $err"
@@ -478,8 +492,8 @@ gm_db_ensure() {
   local v
   v=$(gm_sql 'PRAGMA user_version;')
   case $v in
-    6) ;;
-    1 | 2 | 3 | 4 | 5) gm_db_migrate "$v" ;;
+    7) ;;
+    1 | 2 | 3 | 4 | 5 | 6) gm_db_migrate "$v" ;;
     *) gm_die "the register at $GM_DB is schema $v; this gm knows schema $GM_SCHEMA_VERSION" ;;
   esac
   GM_DB_READY=1
@@ -721,14 +735,18 @@ They are for advanced use, and for the Guildmaster.
                           add a posting to the current focus, or focus F (state received); one made anywhere
                           but in its own Party Leader's session is summoned to it by its watch
   dispatch <posting>... [--brief TEXT|-] [--model M] [--effort E]
-                          hand started postings to one Adventurer: claude -p in the camp, on the feature branch,
-                          with a writ from prompts/adventurer/contract.md in the Guildhall; returns at once, and
-                          the Party Leader's watch summons it when the run finishes. One contract run at a time
-                          per focus
+                          hand started postings to one Adventurer: claude in the camp, on the feature branch,
+                          with a writ from prompts/adventurer/contract.md in the Guildhall, in a herdr pane split
+                          under the Party Leader's and titled with the run (claude -p, unseen, when the Party
+                          Leader has no herdr pane); returns at once, and the Party Leader's watch summons it when
+                          the run finishes. The pane stays open until a notice on its posting, or another
+                          dispatch, reviews the run. One contract run at a time per focus
   runs [--all]            the focus's runs: postings, how each ended, model and effort, result, outcome
   summons                 what is waiting for this Party Leader (a finished run, a posting added from outside its
                           chat), recorded as heard; what gm types as /guild-chat:summons when its watch died
   run <run>               the keeper gm dispatch starts; never run by hand
+  adventurer <run> --pane ID
+                          what an Adventurer's herdr pane runs: claude with its writ (only in that run's pane)
   resolve <ref>           print the one record a reference names: 12, #12, focus#12, focus#slug, focus, KEY-123
   list [--all] [--state S] [--json] [focus]
                           postings of the current focus (or every focus at the front desk); --json prints them
@@ -1437,6 +1455,7 @@ INSERT INTO event(at, actor, kind, focus_id, posting_id, session_id, verb, detai
 SELECT line FROM event WHERE id=last_insert_rowid();
 COMMIT;
 SQL
+  gm_run_panes_close "$(gm_sql "SELECT focus_id FROM posting WHERE id=$pid;")"
   local word=notice
   [ "$verb" != parked ] || word=park
   (gm_trace_notice "$pid" "$verb" "$before" "$state" "$detail" "$t0" "$word") >/dev/null 2>&1 || gm_span_dropped "guild.notice $verb"
@@ -4429,6 +4448,7 @@ gm_cmd_hook() {
     precompact) gm_hook_precompact ;;
     watch) gm_hook_watch ;;
     rules) gm_hook_rules ;;
+    run-stop) gm_hook_run_stop ;;
     # --clone is what the committed settings pass; a Guildhall's settings from before the front desk moved into the
     # clone pass nothing, and get the same hook.
     front-desk) gm_hook_clone ;;
@@ -4439,8 +4459,9 @@ gm_cmd_hook() {
 }
 
 # ---- Adventurers: a run, its keeper, and the summons (vision/step-3-design.md, slice 1) ----
-# gm dispatch hands started postings to one headless Adventurer, claude -p in the camp, and returns at once; the
-# run's keeper, gm run, waits for it in its own process group and records its result. A Party Leader hears of a run
+# gm dispatch hands started postings to one Adventurer, claude in the camp, and returns at once; the run's keeper,
+# gm run, starts it in a herdr pane under the Party Leader's, where the patron can read and talk to it (or headless,
+# claude -p, when the Party Leader has no herdr pane), waits for it in its own process group, and records its result. A Party Leader hears of a run
 # that finished, or of a posting added from outside its chat, from its watch: a background hook (asyncRewake) armed
 # at every start and turn end, which wakes the idle session. When the watch has died, the muster types
 # /guild-chat:summons into the Party Leader's pane, only when that is safe; otherwise the roster shows the summons
@@ -4448,6 +4469,7 @@ gm_cmd_hook() {
 
 GM_WATCH_TIMEOUT=${GM_WATCH_TIMEOUT:-86400}
 GM_WATCH_POLL=${GM_WATCH_POLL:-2}
+GM_RUN_POLL=${GM_RUN_POLL:-2}
 GM_NUDGE_AFTER=${GM_NUDGE_AFTER:-120}
 GM_NUDGE_IDLE_GAP=${GM_NUDGE_IDLE_GAP:-1}
 GM_NUDGE_SETTLE=${GM_NUDGE_SETTLE:-1.5}
@@ -4484,9 +4506,10 @@ gm_run_postings_sql() {
 }
 
 # How a finished run ended, in a few words: "exit 0, 22 turns, \$1.41", or why it has no result.
+# An Adventurer in a herdr pane finishes at its turn's end, with no exit code, so then none is named.
 gm_run_end_sql() {
-  printf "CASE WHEN %s.result_subtype='lost' THEN 'lost: its keeper ended without recording a result' ELSE 'finished: '||CASE WHEN COALESCE(%s.result_subtype,'success')<>'success' THEN %s.result_subtype||', ' ELSE '' END||'exit '||COALESCE(%s.exit_code,'?')||COALESCE(', '||%s.turns||' turns','')||COALESCE(', '||%s,'')||CASE WHEN %s.result_subtype IS NULL THEN ', no result' ELSE '' END END" \
-    "$1" "$1" "$1" "$1" "$1" "$(gm_usd_sql "$1.cost_usd")" "$1"
+  printf "CASE WHEN %s.result_subtype='lost' THEN 'lost: its keeper ended without recording a result' ELSE 'finished'||COALESCE(': '||NULLIF(ltrim(CASE WHEN COALESCE(%s.result_subtype,'success')<>'success' THEN ', '||%s.result_subtype ELSE '' END||CASE WHEN %s.exit_code IS NOT NULL OR %s.result_subtype IS NULL THEN ', exit '||COALESCE(%s.exit_code,'?') ELSE '' END||COALESCE(', '||%s.turns||' turns','')||COALESCE(', '||%s,'')||CASE WHEN %s.result_subtype IS NULL THEN ', no result' ELSE '' END, ', '),''),'') END" \
+    "$1" "$1" "$1" "$1" "$1" "$1" "$1" "$(gm_usd_sql "$1.cost_usd")" "$1"
 }
 
 # gm_run_end <run> <exit code or ''> <result.json or ''>: the run's end, recorded once, with a notice on each of its
@@ -4580,8 +4603,10 @@ SQL
 # repository's rules file (its build and test commands); never a merge, rebase, new branch or merge request. A push
 # is the rules hook's to answer (slice 2): it allows what the playbook allows, and denies the rest; a deny rule here
 # would outweigh its allow. Claude Code's commit attribution is off unless guild.conf says commit-attribution: on.
+# With pane (an Adventurer in a herdr pane, not claude -p), Stop and StopFailure run gm hook run-stop, which records
+# the run's end, since no result event comes.
 gm_run_settings() {
-  local id=$1 focus=$2 rules=$3 out=$4 allow='' rule attribution=''
+  local id=$1 focus=$2 rules=$3 out=$4 pane=${5:-} allow='' rule attribution='' env stop=''
   for rule in 'Bash(git status*)' 'Bash(git diff*)' 'Bash(git log*)' 'Bash(git show*)' 'Bash(git add*)' 'Bash(git commit*)' \
     'Bash(git rev-parse*)' 'Bash(git ls-files*)' 'Bash(git grep*)' 'Bash(git blame*)'; do
     allow="$allow${allow:+, }$(gm_q "$rule")"
@@ -4595,11 +4620,16 @@ gm_run_settings() {
     deny="$deny${deny:+, }$(gm_q "$rule")"
   done
   [ "$(gm_conf_value commit-attribution)" = on ] || attribution=", 'attribution', json_object('commit', '', 'pr', ''), 'includeCoAuthoredBy', json('false')"
+  env="GM_HALL=$(gm_shq "$GM_HALL") GM_FOCUS=$(gm_shq "$focus") GM_RUN=$(gm_shq "$id") bash $(gm_shq "$GM_SELF") hook"
+  if [ -n "$pane" ]; then
+    stop="json_array(json_object('hooks', json_array(json_object('type','command','command', $(gm_q "$env run-stop"), 'timeout', 30))))"
+    stop=", 'Stop', $stop, 'StopFailure', $stop"
+  fi
   sqlite3 -batch :memory: "SELECT writefile($(gm_q "$out"), json_object(
   'env', json_object('GM_HALL', $(gm_q "$GM_HALL"), 'GM_FOCUS', $(gm_q "$focus"), 'GM_RUN', $(gm_q "$id")),
   'permissions', json_object('allow', json_array($allow), 'deny', json_array($deny)),
   'hooks', json_object('PreToolUse', json_array(json_object('matcher', 'Bash', 'hooks', json_array(
-    json_object('type','command','command', $(gm_q "GM_HALL=$(gm_shq "$GM_HALL") GM_FOCUS=$(gm_shq "$focus") GM_RUN=$(gm_shq "$id") bash $(gm_shq "$GM_SELF") hook rules"), 'timeout', 10)))))$attribution));" >/dev/null
+    json_object('type','command','command', $(gm_q "$env rules"), 'timeout', 10))))$stop)$attribution));" >/dev/null
 }
 
 # ---- The rules hook: the playbook's push rules in every camp (vision/step-3-design.md, slice 2) ----
@@ -5132,6 +5162,7 @@ COMMIT;
 SQL
 ) || { rm -f "$writ"; exit 1; }
   id=$out
+  gm_run_panes_close "$fid"
   dir=$(gm_run_dir "$id")
   mkdir -p "$dir"
   mv "$writ" "$dir/writ.md"
@@ -5150,21 +5181,191 @@ SQL
   printf 'Run %s works in the camp now; its writ is %s. gm summons you when it finishes: until then the posting stays active, and you can talk with the patron, but change no file in the camp.\n' "$id" "$dir/writ.md"
 }
 
-# gm run <run>: the keeper, started by gm dispatch. Runs the Adventurer, claude -p in the camp with the run's own
-# settings, the writ on its standard input and its stream-json transcript kept, then records how it ended.
+# What an Adventurer's pane is titled: "run 3 · #28 visible-adventurer-pane".
+gm_run_title() {
+  gm_sql "SELECT 'run '||$1||' · '||group_concat('#'||p.num||' '||p.slug, ', ') FROM (SELECT p.num, p.slug FROM run_posting rp JOIN posting p ON p.id=rp.posting_id WHERE rp.run_id=$1 ORDER BY p.num) p;"
+}
+
+# gm_run_args <run>: the Adventurer's claude options into GM_RUN_ARGS, for claude -p and for its pane alike: its
+# session id, its own settings beside the user's and the project's (never the camp's local ones, the Party Leader's),
+# its model, effort and permission mode.
+GM_RUN_ARGS=()
+gm_run_args() {
+  local sid model effort mode
+  IFS=$'\t' read -r sid model effort mode <<<"$(gm_sql "SELECT session_id, COALESCE(model,'-'), COALESCE(effort,'-'), COALESCE(permission_mode,'-') FROM run WHERE id=$1;")"
+  GM_RUN_ARGS=(--session-id "$sid" --setting-sources 'user,project' --settings "$(gm_run_dir "$1")/settings.json")
+  [ "$model" = - ] || GM_RUN_ARGS+=(--model "$model")
+  [ "$effort" = - ] || GM_RUN_ARGS+=(--effort "$effort")
+  [ "$mode" = - ] || GM_RUN_ARGS+=(--permission-mode "$mode")
+}
+
+# gm_run_pane_open <run> <focus> <camp>: the Adventurer's own herdr pane, split under its Party Leader's pane and
+# titled with the run, running gm adventurer there; prints session<TAB>pane. Under the herdr lock, so no muster
+# relaunches the Party Leader's pane meanwhile. Fails, and the keeper runs claude -p instead, when the Party Leader has
+# no pane herdr still has (the tests, or a Party Leader outside herdr) or herdr will not split it.
+gm_run_pane_open() {
+  local id=$1 focus=$2 camp=$3 s ws pane out new title line v val
+  command -v "$GM_HERDR" >/dev/null 2>&1 || return 1
+  IFS=$'\t' read -r s ws _ pane _ _ <<<"$(gm_endpoint "party-leader:$focus")"
+  [ -n "$pane" ] && gm_herdr_running "$s" || return 1
+  gm_herdr_lock 30 || return 1
+  if [ "$(gm_herdr_pane_presence "$s" "$ws" "$pane")" != present ]; then
+    gm_herdr_unlock
+    return 1
+  fi
+  out=$(gm_herdr "$s" pane split "$pane" --direction down --cwd "$camp" --no-focus)
+  new=$(gm_hj "$out" '$.result.pane.pane_id')
+  if [ -z "$new" ]; then
+    gm_herdr_unlock
+    printf 'herdr would not split pane %s: %s; running claude -p instead\n' "$pane" "${out:-no answer}" >&2
+    return 1
+  fi
+  title=$(gm_run_title "$id")
+  gm_herdr "$s" pane rename "$new" "$title" >/dev/null
+  gm_run_settings "$id" "$focus" "$(gm_rules_path "$(gm_focus_field "$focus" repo)")" "$(gm_run_dir "$id")/settings.json" pane
+  gm_sql "BEGIN IMMEDIATE;
+UPDATE run SET pane_session=$(gm_q "$s"), pane_id=$(gm_q "$new") WHERE id=$id;
+INSERT INTO event(at, actor, kind, focus_id, detail) SELECT $GM_NOW, 'keeper', 'run.pane', focus_id, $(gm_q "run $id in herdr pane $new, under the Party Leader's $pane: $title") FROM run WHERE id=$id;
+COMMIT;"
+  line="cd $(gm_shq "$camp") && env"
+  for v in GM_HALL GM_CLAUDE; do
+    gm_conf_carried "$v" || continue
+    eval "val=\${$v:-}"
+    [ -z "$val" ] || line="$line $v=$(gm_shq "$val")"
+  done
+  gm_herdr "$s" pane run "$new" "$line bash $(gm_shq "$GM_SELF") adventurer $id --pane $(gm_shq "$new")" >/dev/null
+  gm_herdr_unlock
+  printf '%s\t%s' "$s" "$new"
+}
+
+# gm_run_lost <run> <why>: the run ends as lost, its result saying why, unless it has already ended.
+gm_run_lost() {
+  local dir
+  dir=$(gm_run_dir "$1")
+  [ -z "$(gm_sql "SELECT 1 FROM run WHERE id=$1 AND ended_at IS NULL;")" ] && return 0
+  printf 'The Adventurer was lost: %s, before its turn ended. What it did is in its commits and git status in the camp.\n' "$2" >"$dir/result.md"
+  gm_run_end "$1" '' ''
+}
+
+# The keeper of a run in a herdr pane waits, a look every GM_RUN_POLL seconds, until gm hook run-stop records the
+# end; a pane that closes first, or holds only a shell after GM_LAUNCH_GRACE seconds, ends the run as lost.
+gm_run_pane_wait() {
+  local id=$1 s=$2 pane=$3 waited=0 shells=0 out
+  while [ -n "$(gm_sql "SELECT 1 FROM run WHERE id=$id AND ended_at IS NULL;")" ]; do
+    out=$(gm_herdr "$s" pane get "$pane")
+    if [ "$(gm_hj "$out" '$.error.code')" = pane_not_found ]; then
+      gm_run_lost "$id" "its herdr pane $pane closed"
+      return
+    fi
+    if [ "$waited" -ge "$GM_LAUNCH_GRACE" ] && [ "$(gm_herdr_pane_process "$s" "$pane")" = shell ]; then
+      shells=$((shells + 1))
+      if [ "$shells" -ge 2 ]; then
+        gm_run_lost "$id" "claude is no longer running in its herdr pane $pane"
+        return
+      fi
+    else
+      shells=0
+    fi
+    sleep "$GM_RUN_POLL"
+    waited=$((waited + GM_RUN_POLL))
+  done
+}
+
+# gm_run_panes_close <focus id>: each Adventurer's pane whose run the Party Leader has reviewed (a notice on its
+# posting, or another dispatch) is closed; until then it stays open for the patron to read.
+gm_run_panes_close() {
+  local id s pane
+  command -v "$GM_HERDR" >/dev/null 2>&1 || return 0
+  while IFS=$'\t' read -r id s pane; do
+    [ -n "$pane" ] || continue
+    gm_herdr "$s" pane close "$pane" >/dev/null
+    gm_sql "BEGIN IMMEDIATE; UPDATE run SET pane_closed_at=$GM_NOW WHERE id=$id; COMMIT;"
+  done <<<"$(gm_sql "SELECT id, pane_session, pane_id FROM run WHERE focus_id=$1 AND pane_id IS NOT NULL AND pane_closed_at IS NULL AND reviewed_at IS NOT NULL;")"
+}
+
+# gm adventurer <run> --pane ID: what an Adventurer's herdr pane runs: claude in the camp, a session the patron can
+# read and type in, with the run's own settings and its writ as the first prompt. Only in the pane the keeper split
+# for that run, and only while the run is live. When claude ends before its turn did, the run is lost.
+gm_cmd_adventurer() {
+  local id='' pane='' camp rpane ended dir title rc=0 claude=${GM_CLAUDE:-claude}
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --pane) pane=${2:?--pane needs a pane id}; shift 2 ;;
+      -*) gm_die "adventurer: unknown option $1" ;;
+      *) id=$1; shift ;;
+    esac
+  done
+  [[ $id =~ ^[0-9]+$ ]] || gm_die "adventurer: gm adventurer <run> --pane ID is what the keeper runs in a run's herdr pane"
+  gm_db_ensure
+  IFS=$'\t' read -r camp rpane ended <<<"$(gm_sql "SELECT f.camp, COALESCE(r.pane_id,''), COALESCE(r.ended_at,'-') FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
+  [ -n "$camp" ] || gm_die "adventurer: no run $id"
+  [ -n "$pane" ] && [ "$pane" = "$rpane" ] || gm_die "adventurer: gm adventurer runs only in run $id's own herdr pane"
+  [ "$ended" = - ] || gm_die "adventurer: run $id ended at $ended"
+  dir=$(gm_run_dir "$id")
+  title=$(gm_run_title "$id")
+  gm_run_args "$id"
+  cd "$camp"
+  env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_SESSION_ID -u TRACEPARENT -u GM_FOCUS -u GM_CHAT_FOCUS \
+    GM_HALL="$GM_HALL" "$claude" --name "$title" "${GM_RUN_ARGS[@]}" "$(cat "$dir/writ.md")" || rc=$?
+  gm_run_lost "$id" "claude ended (exit $rc)"
+}
+
+# gm hook run-stop: Stop and StopFailure in an Adventurer's pane settings. The first turn end records the run's end:
+# its last message as result.md and, from the transcript, how many assistant messages it took and their cost when the
+# transcript carries one; a field it cannot read is left empty, never guessed. The Party Leader's watch then summons
+# it. Later turns, the patron's own talk with the Adventurer, record nothing. Never blocks the turn.
+gm_hook_run_stop() {
+  local id=${GM_RUN:-} in dir event err tp r subtype iserr
+  in=$(cat)
+  [[ $id =~ ^[0-9]+$ ]] && [ -s "$GM_DB" ] || return 0
+  [ -n "$(gm_sql "SELECT 1 FROM run WHERE id=$id AND ended_at IS NULL;" 2>/dev/null)" ] || return 0
+  dir=$(gm_run_dir "$id")
+  r=$(gm_tmp)
+  printf '%s' "$in" >"$r"
+  IFS=$'\037' read -r event err tp <<<"$(sqlite3 -batch -separator $'\037' :memory: "SELECT COALESCE(json_extract(j,'\$.hook_event_name'),''), COALESCE(json_extract(j,'\$.error'),''), COALESCE(json_extract(j,'\$.transcript_path'),'') FROM (SELECT CAST(readfile($(gm_q "$r")) AS TEXT) AS j) WHERE json_valid(j);" 2>/dev/null)"
+  subtype=success iserr=0
+  [ "$event" != StopFailure ] || { subtype=${err:-error}; iserr=1; }
+  # The transcript as one JSON array of its lines, unreadable lines left out.
+  local t=''
+  [ -z "$tp" ] || [ ! -f "$tp" ] || t="(SELECT json_group_array(json(l)) FROM (SELECT value AS l FROM json_each('[\"'||replace(replace(replace(replace(CAST(readfile($(gm_q "$tp")) AS TEXT),'\\','\\\\'),'\"','\\\"'),char(13),''),char(10),'\",\"')||'\"]')) WHERE json_valid(l) AND l<>'')"
+  sqlite3 -batch :memory: >/dev/null <<SQL 2>/dev/null || true
+CREATE TEMP TABLE tr(v TEXT);
+INSERT INTO tr SELECT value FROM json_each(${t:-'[]'});
+CREATE TEMP TABLE a AS SELECT v, json_extract(v,'\$.message.id') AS mid FROM tr WHERE json_extract(v,'\$.type')='assistant';
+SELECT writefile($(gm_q "$dir/result.md"), COALESCE(
+  NULLIF(json_extract(CAST(readfile($(gm_q "$r")) AS TEXT),'\$.last_assistant_message'),''),
+  (SELECT group_concat(json_extract(c.value,'\$.text'), char(10)) FROM (SELECT v FROM a WHERE EXISTS (SELECT 1 FROM json_each(v,'\$.message.content') WHERE json_extract(value,'\$.type')='text') ORDER BY rowid DESC LIMIT 1) l, json_each(l.v,'\$.message.content') c WHERE json_extract(c.value,'\$.type')='text'),
+  CASE WHEN $(gm_q "$event")='StopFailure' THEN 'The Adventurer''s turn failed ('||$(gm_q "${err:-error}")||') before it finished; its pane shows where it stopped.' ELSE 'The Adventurer ended its turn with no message.' END));
+SELECT writefile($(gm_q "$dir/result.json"), json_object('type','result','subtype',$(gm_q "$subtype"),'is_error',$iserr,
+  'num_turns', (SELECT NULLIF(count(DISTINCT COALESCE(mid, rowid)),0) FROM a),
+  'total_cost_usd', (SELECT sum(json_extract(v,'\$.costUSD')) FROM tr WHERE json_extract(v,'\$.costUSD') IS NOT NULL)));
+SQL
+  rm -f "$r"
+  [ -s "$dir/result.md" ] || printf 'The Adventurer ended its turn; gm could not read its last message.\n' >"$dir/result.md"
+  gm_run_end "$id" '' "$dir/result.json" >/dev/null 2>&1 || true
+  return 0
+}
+
+# gm run <run>: the keeper, started by gm dispatch. Runs the Adventurer where the patron can see it, in a herdr pane
+# split under its Party Leader's (gm_run_pane_open), and waits for its turn to end; or, when the Party Leader has no
+# herdr pane, headless: claude -p in the camp with the run's own settings, the writ on its standard input and its
+# stream-json transcript kept. Then records how it ended.
 gm_cmd_run() {
-  local id=${1:-} camp sid model effort mode ended dir rc args claude=${GM_CLAUDE:-claude}
+  local id=${1:-} camp ended dir rc args focus visible s pane claude=${GM_CLAUDE:-claude}
   [[ $id =~ ^[0-9]+$ ]] || gm_die "run: gm run <run> is the keeper gm dispatch starts"
   gm_db_ensure
-  IFS=$'\t' read -r camp sid model effort mode ended <<<"$(gm_sql "SELECT f.camp, r.session_id, COALESCE(r.model,'-'), COALESCE(r.effort,'-'), COALESCE(r.permission_mode,'-'), COALESCE(r.ended_at,'-') FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
-  [ -n "$sid" ] || gm_die "run: no run $id"
+  IFS=$'\t' read -r camp focus ended <<<"$(gm_sql "SELECT f.camp, f.name, COALESCE(r.ended_at,'-') FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
+  [ -n "$camp" ] || gm_die "run: no run $id"
   [ "$ended" = - ] || gm_die "run: run $id ended at $ended"
   dir=$(gm_run_dir "$id")
   gm_sql "BEGIN IMMEDIATE; UPDATE run SET pid=$$ WHERE id=$id; COMMIT;"
-  args=(-p --session-id "$sid" --output-format stream-json --verbose --setting-sources 'user,project' --settings "$dir/settings.json")
-  [ "$model" = - ] || args+=(--model "$model")
-  [ "$effort" = - ] || args+=(--effort "$effort")
-  [ "$mode" = - ] || args+=(--permission-mode "$mode")
+  if visible=$(gm_run_pane_open "$id" "$focus" "$camp"); then
+    IFS=$'\t' read -r s pane <<<"$visible"
+    gm_run_pane_wait "$id" "$s" "$pane"
+    return 0
+  fi
+  gm_run_args "$id"
+  args=(-p "${GM_RUN_ARGS[@]:0:2}" --output-format stream-json --verbose "${GM_RUN_ARGS[@]:2}")
   rc=0
   (cd "$camp" && exec env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_SESSION_ID -u TRACEPARENT -u GM_CHAT_FOCUS \
     GM_HALL="$GM_HALL" "$claude" "${args[@]}" <"$dir/writ.md" >"$dir/stream.jsonl" 2>"$dir/stderr.txt") || rc=$?
@@ -6745,6 +6946,7 @@ case $cmd in
   post) gm_cmd_post "$@" ;;
   dispatch) gm_cmd_dispatch "$@" ;;
   run) gm_cmd_run "$@" ;;
+  adventurer) gm_cmd_adventurer "$@" ;;
   runs) gm_cmd_runs "$@" ;;
   summons) gm_cmd_summons "$@" ;;
   resolve) gm_cmd_resolve "$@" ;;
