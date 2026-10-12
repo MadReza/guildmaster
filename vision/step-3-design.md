@@ -48,7 +48,7 @@ Answered on 2026-10-11; every question is settled.
 | 1 | `gm dispatch` runs one headless `claude -p` Adventurer in the camp; its result lands in the register and wakes the Party Leader. With it, the wake for a posting added from outside (issue #41) | settled |
 | 2 | `PreToolUse` push rules in every camp, from the playbook | settled |
 | 3 | `gm check` after every run, reopening a posting that broke a rule | settled |
-| 4 | Parallel surveys and the dispatch cap | settled |
+| 4 | Parallel surveys and contracts, each in its own worktree, and the dispatch cap | the four questions of [Parallel contracts](#questions-only-the-patron-can-answer) |
 | 5 | Adventurer spans, `TRACEPARENT` and writ hashes (tracing slice 3) | none |
 
 Each slice is one pull request with its own tests, and the roadmap's step 3 table tracks them, as step 2's does.
@@ -376,6 +376,121 @@ Its **field report** is the run's result, kept as `reports/<focus>/<n>-<run>.md`
 **The dispatch cap** is guild-wide: `adventurers: 3` in `guild.conf`, counting live runs across every focus. The Party Leader still decides what goes out: over the cap it may let a posting wait, or merge it into another's run. A dispatch over the cap is recorded as waiting and the notice says so; a keeper that finishes starts the oldest waiting run, and the muster does too, in case a keeper died. A second contract on a focus whose contract run is live waits the same way instead of being refused. The status line's guild row shows `adventurers 2 running · 1 waiting`.
 A run that ends on a rate limit (the `result` event, and `StopFailure` with the `rate_limit` matcher) pauses all dispatch until the reset time, recorded and shown in the status line.
 
+### Parallel contracts
+
+The patron, on 2026-10-12, in the Party Leader of `adventurers` (posting #53, split into #55), asked whether contracts on one focus should run side by side:
+
+<!-- patron: begin -->
+
+"2. Yes, unless they have have requirements from one or the other, it should do parallel work when possible. So a git worktree. And when done make sure it cleans up."
+
+<!-- patron: end -->
+
+So "one contract at a time per focus" ([Q14](#what-the-patron-settled), [slice 1](#gm-dispatch)) ends. Each contract run works in a git worktree of its own, on a branch of its own, and `gm` lands what the Party Leader accepts on the feature branch, one run at a time. The ticket still has one branch anyone sees, and every worktree a run made is removed when its work has landed or been given up. This is what Firstmate does for its crew ([its worktrees](../firstmate/components/crew/worktrees.html), [its teardown](../firstmate/components/crew/teardown.html)), except that Firstmate's workers push their own branch and open a pull request each, where the guild's land on the ticket's one feature branch in the camp.
+
+**A worktree and a branch per run.** When a contract run starts (not when it is dispatched, since it may wait), the keeper, under a per-clone lock in the Guildhall (Firstmate's project lock: two `git worktree add` on one clone must not interleave), runs in the camp:
+
+```
+git worktree add -b gm/run-<n> <hall>/camps/<focus>.run-<n> <feature branch's tip>
+```
+
+- **Its base is the feature branch's local tip** at that moment, so it holds every run already landed and every commit the Party Leader made in the camp, pushed or not. It does not hold the camp's uncommitted changes. The run records it (`base_commit`).
+- **The run-local branch `gm/run-<n>`** is `gm`'s, not the ticket's: it is never pushed, and it is deleted when the run's work has landed or been dropped. The rules file's "a new branch for work that belongs to an open ticket" means a branch the ticket's work is shared on; a run-local branch is how `gm` holds one run's commits until they land, as a commit in the camp did before.
+- **An Adventurer pushes nothing.** Its commits are not on the feature branch until they land, so the rules hook now denies every push from a run's worktree (a push to a branch no `push:` line names was already denied, and so is `HEAD:<feature branch>`); slice 2's allowed pushes become the Party Leader's alone, after landing.
+- **The worktree is the run's**, isolated as Firstmate checks its crew's: a worktree root of the camp's clone, distinct from the camp and the clone's main checkout. Git itself keeps the run off the feature branch: a branch checked out in the camp cannot be checked out in another worktree.
+- **Everything else is as slice 1 and its changes built it**, with the run's worktree where the camp was: the herdr workspace is created with `--cwd` on the worktree, `gm adventurer` starts claude there with the run's own settings, and the `claude -p` fallback runs there. The camp's `.claude/settings.local.json` stays the Party Leader's and a worktree has none. Claude Code trusts the worktree through its clone's entry when the clone is trusted; otherwise the keeper records `hasTrustDialogAccepted` for the run's worktree before it starts claude, as `gm dispatch` does for a camp ([#49](#starting-as-firstmates-crew-starts)), ending the run as `failed`, with why, when it cannot; the cleanup removes that entry, so the patron's store does not grow by one key per run.
+- **What a fresh checkout lacks.** A worktree has the repository's tracked files only: no installed dependencies, no build output, no untracked local configuration. `gm` copies nothing into it. A repository that needs a setup step per checkout is a [question for the patron](#questions-only-the-patron-can-answer).
+
+**The camp stays the Party Leader's.** No run changes a file in the camp any more, so the rule of slices 1 and 2 ("while a contract run is live, do not change files in the camp", enforced by the rules hook for `Edit`, `Write`, `MultiEdit`, `NotebookEdit` and commits) is lifted. In its place:
+
+- **The camp is clean when `gm` lands.** A landing refuses while the camp has uncommitted changes to tracked files, naming them, and the rules hook denies the Party Leader's edits and commits in the camp only while a landing holds it (seconds).
+- **The feature branch is never rewritten under a run.** While any contract run of the focus is live or holds commits not yet landed, the rules hook denies the Party Leader `git rebase`, `git reset` (other than `--soft` to `HEAD`) and a forced push of the feature branch, naming the runs: a run made from the old tip would otherwise bring back the commits a rewrite removed. The charter's rebase onto `origin/main` after a merged pull request waits until every run has landed or been dropped.
+- **The Party Leader still does not do contract work.** The charter's "Adventurers do the work" stands; what changes is only that the camp is no longer locked.
+
+**What needs what.** The patron's "unless they have requirements from one or the other" is the Party Leader's judgement, never `gm`'s:
+
+- **Parallel is the default.** `gm dispatch 12` and then `gm dispatch 13` run side by side when the cap allows.
+- **`--after` holds one for another.** `gm dispatch 13 --after 12` (several: `--after 12 --after 14`) names the postings this one needs. `gm` records the run as waiting, with the reason, and does not start it, or make its worktree, until every posting named has a run that has landed. Its worktree is then made from the tip that holds that work. The notice says so: `adventurers#13 add-export dispatched: contract, run 9, waits for #12`.
+- **A need that cannot be met is summoned.** When a posting it waits for is recorded `failed`, `closed` or `needs-you` with nothing landed, the watch summons the Party Leader once, naming the waiting run. The Party Leader dispatches the posting again without `--after` (which replaces the waiting run), or records its state, which drops it.
+- **Postings that belong together still go in one run** (`gm dispatch 12 13`), as the patron settled for Q13. The Party Leader's brief should hold what a writ cannot learn alone: which files a parallel run is also changing, when that is known.
+
+**Landing: `gm land <run>`.** Accepting a run and landing it are one step, taken by the Party Leader after its review (the result in `gm runs`, the commits with `git log -p <feature branch>..gm/run-<n>`). `gm land <run>`, in plain code, under a per-focus landing lock so landings go one at a time in the order they were asked for:
+
+1. Refuses, naming why, if the run has not ended, its check failed, the camp is not on the feature branch or is dirty, the run's worktree has uncommitted changes to tracked files ("uncommitted changes are never landed", Firstmate's words), or the run's `base_commit` is no longer an ancestor of the feature branch.
+2. When the run made no commits, records it as accepted with nothing to land.
+3. When the feature branch is still at the run's base, fast-forwards it (`git merge --ff-only gm/run-<n>` in the camp).
+4. Otherwise merges with a merge commit: `git merge --no-ff --no-edit gm/run-<n> -m "Land run 9 (#13 add-export) on feature/<ticket>"`, in the patron's git identity as the camp has it.
+5. Records `landed_at` and `landed_commit` on the run, the run's outcome `accepted`, and a `landed` notice on each of its postings: `adventurers#13 add-export landed: run 9 at 4f2a91c (merge with run 8's work)`.
+
+**Fast-forward when it can, a merge commit when it must, never a rebase or a squash.** A run alone on the focus, as every run is today, then puts its commits straight on the feature branch with the history slice 1 gives. A merge commit appears only where two runs really ran side by side, and records that they did. A rebase or cherry-pick would rewrite the commits `gm check` judged and the Party Leader reviewed, so what landed would not be what was checked; a squash would lose the Adventurer's own commit messages, and the patron's charter already says never squash. Keeping every run's commits whole also makes cleanup simple: a run has landed exactly when its branch's tip is an ancestor of the feature branch, with no need for Firstmate's patch-id and merge-tree tests for squashed work.
+
+A merge commit joins two changes no Adventurer tested together. The playbook's "tests pass locally" before `dev-test` covers it; whether `gm` should run the tests after a merge landing is a [question for the patron](#questions-only-the-patron-can-answer).
+
+**A conflict is never resolved by `gm`.** When the merge in step 4 conflicts, `gm` runs `git merge --abort` (the camp is as it was), records the conflicting paths on the run, and treats it as the posting's failure, the way a failed check is ([slice 3](#slice-3-gm-check-after-every-run)):
+
+- **A first failure dispatches a landing correction at once.** A fresh worktree and run-local branch are made from the feature branch's new tip, and in it `gm` starts the merge of the conflicting run's branch with `git merge --no-ff --no-commit gm/run-<n>`, leaving the conflict markers. The Adventurer's writ, from `prompts/adventurer/correction.md` with `{{rule}}` "landing" and `{{evidence}}` the conflicting paths and both runs' postings, asks it to resolve them, run the tests and commit; `git commit` concludes the merge, so an Adventurer is still never given `git merge`. Its branch then descends from both the new tip and the conflicting run's work, and lands by fast-forward. The notice says `dispatched: correction, run 11 of run 9 (landing conflict with run 8)`; run 9's outcome is `corrected`.
+- **A second failure on the same posting**, of either kind (a failed check or a conflict), makes it `needs-you` with the evidence, as slice 3 settled.
+- **A failed check's correction continues the failed run's work.** Slice 3's correction ran in the same camp, on top of what the failed run left. Now its worktree and run-local branch are made from the failed run's branch, not the feature branch, so its good commits are kept; the failed run's worktree is removed once the correction starts, since its branch's commits are then in the correction's.
+
+**`gm check` judges the run's worktree.** Slice 3's facts still decide, with the run's own worktree and branch in place of the camp:
+
+- the run's worktree is still on `gm/run-<n>`, and that branch still descends from the run's `base_commit` (nothing rewrote it);
+- no local branch was created except the run-local branches `gm` recorded on runs (any focus's), as other focuses' branches are already excluded;
+- no remote branch moved by a push from this clone that the run could have made: an Adventurer is now denied every push, and the Party Leader's own allowed pushes are recorded by its rules hook (branch and time), so a move the hook recorded as the Party Leader's is not the run's;
+- no commit the run made (the new entries of its worktree's own `HEAD` reflog, which git keeps per worktree) is off `gm/run-<n>`'s line, and none reached the feature branch except through `gm land`.
+
+The refs are kept when the worktree is made, not at dispatch, so a run that waited is judged from its own start.
+
+**Cleanup.** A run's worktree and its run-local branch are removed (`git worktree remove`, then `git branch -d gm/run-<n>`, under the per-clone lock) when the run:
+
+- **has landed**: at the end of `gm land`;
+- **made no commits** and its postings have been reviewed (`done`, `failed`, `needs-you` or another dispatch), whatever the outcome, `lost` included;
+- **holds commits, and the Party Leader says to drop them**: `gm drop <run>`, recorded in the ledger before anything is removed, the one way unlanded work is discarded. `git branch -D` is used only here.
+
+A run whose worktree holds commits not landed, or uncommitted changes, is never removed by anything else: `gm runs` and `gm where` show it (`run 9 · holds 3 commits not landed`), and `gm close` refuses while one exists, naming it, as Firstmate's teardown "REFUSES if the worktree holds work that has not LANDED". Before removing a worktree, `gm` closes the run's herdr workspace if still open, ends any process whose current directory is inside the worktree (TERM, then KILL, as Firstmate reaps), and retries a removal held by git's `index.lock`, removing the lock only when no process holds it and it is older than 30 seconds (Firstmate's "the fix is patience, not rm").
+
+**The muster sweeps what was left.** At every muster, in plain code, for each focus:
+
+- an ended, reviewed run whose worktree is clean and whose branch's tip is an ancestor of the feature branch is cleaned up as above (a keeper that died after landing, or a `gm land` cut off);
+- a `gm/run-<n>` branch with no worktree, contained in the feature branch, is deleted; one not contained is kept and shown as not landed;
+- a worktree under `camps/<focus>.run-<n>` that no run record names, or a run record whose worktree is gone, is reported once in the roster, and `git worktree prune` clears git's record of a worktree whose folder is gone;
+- a live run's worktree, and another focus's, are never touched.
+
+**Beside the cap, the workspaces and the surveys.**
+
+- **The cap counts every live run.** A focus's second and third contract no longer wait for its first: only the guild-wide cap of 3 and `--after` hold a run. A run waiting on `--after` is not in the cap's line until what it needs has landed; then it joins the line in order. The cap also bounds the checkouts on disk to 3 at a time, plus any left holding unlanded work.
+- **One herdr workspace per run, as now**, each under its Party Leader's in the order the runs started, since several of one Party Leader's can now be open at once; its label and status line name the run-local branch and the feature branch it lands on (`run 9 · #13 add-export · gm/run-9 → feature/<ticket>`). The review closes it, as now; cleanup does not wait for the patron to have read it, but a workspace still open when its worktree is removed is closed first.
+- **Surveys use the same place.** A survey's throwaway worktree is `camps/<focus>.run-<n>` too, detached at the feature branch's tip with no run-local branch, and removed when its field report is stored, so the muster sweeps one pattern. Surveys and contracts share the cap.
+
+**What changes in the patron's files and the writ.** `gm` never overwrites the patron's files, so the pull request names these; `templates/` takes them for a new Guildhall. Proposed text:
+
+- In `charter.md`, "Adventurers do the work", the first line:
+  > A posting that changes the project is a contract: an Adventurer works it, not you, in a worktree of its own on a branch gm lands on the feature branch.
+- In `charter.md`, replacing "One contract at a time: while a run is live, change no file here and keep other contracts `queued`.":
+  > Contracts run in parallel when they do not need each other. When one needs another's work, say so: `gm dispatch 13 --after 12`. Keep the camp clean, and never rebase or reset the feature branch while a run holds work not landed.
+- In `charter.md`, replacing "Review a finished run: its result (`gm runs`) and its commit (`git show`). Then record `done` with the commit, `failed`, `needs-you`, or dispatch again with a brief saying what to correct.":
+  > Review a finished run: its result (`gm runs`) and its commits (`git log -p <feature branch>..gm/run-<n>`). To accept it, `gm land <run>`, then record `done` with the commit gm printed. Otherwise record `failed` or `needs-you`, or dispatch again with a brief saying what to correct; `gm drop <run>` discards a run's commits, and only when you mean to.
+- In `charter.md`, "Commands": add `gm land` and `gm drop`.
+- In `playbooks/ticket.md`, the build phase line:
+  > phase: build — postings are worked by Adventurers, in parallel when they do not need each other, and each accepted run is landed on the feature branch.
+- In `playbooks/ticket.md`, "build → dev-test":
+  > **build → dev-test:** the postings meant for this round are done and landed on the feature branch, no run holds work not landed, and tests pass locally.
+- In `rules/<repository>.md`, "What never happens here", after "A new branch for work that belongs to an open ticket.":
+  > (gm's own run branches, `gm/run-<n>`, are not such a branch: they are never pushed, and gm removes each when its work lands on the feature branch.)
+- In `prompts/adventurer/contract.md` and `correction.md`, a new slot `{{run_branch}}`, and the rules lines:
+  > Work only here, in this worktree, on `{{run_branch}}`. Your Party Leader reviews your commits and gm lands them on the ticket's feature branch, `{{branch}}`; you never touch it. Never create, switch or delete a branch, and never push, merge or rebase.
+
+  The commit line becomes "Commit your change on `{{run_branch}}`".
+
+**Added:** schema 11 (`worktree`, `run_branch`, `base_commit`, `after_postings`, `landed_at`, `landed_commit`, `cleaned_at` on the run); `gm land <run>`, `gm drop <run>`, and `--after` on `gm dispatch`; the `landed` notice; the rules hook's record of the Party Leader's allowed pushes. Earlier text this changes: slice 1's step 1 refusal and the charter rule beside it, slice 2's lock on the camp while a run is live, slice 3's snapshot at dispatch and its checks on the camp, and slice 4's `camps/<focus>.survey-<run>` and "a second contract on a focus whose contract run is live waits".
+
+#### Questions only the patron can answer
+
+1. **Merge commits.** A run lands by fast-forward when the feature branch has not moved since it started, and with a merge commit only when another run landed first. Is that the history you want, or a merge commit for every run, so each run is one visible step on the branch?
+2. **Setup per worktree.** A fresh worktree has no installed dependencies or build output. Should a rules file be able to name a setup command `gm` runs in each new worktree before the Adventurer starts (`worktree-setup: npm ci`), or is that the Adventurer's own first step, from the writ?
+3. **Tests after a merge.** A merge commit joins two runs no Adventurer tested together. Should `gm` run the repository's test command in the camp after each merge landing and summon the Party Leader on a failure, or is the playbook's "tests pass locally" before `dev-test` enough?
+4. **A landing conflict.** As designed, a first conflict sends one correction run to resolve it and a second makes the posting `needs-you`, as a failed check does. Or should every conflict come to you?
+
 ## Slice 5: Adventurer spans, `TRACEPARENT` and writ hashes
 
 This is tracing slice 3, exactly as [tracing-design.md](tracing-design.md#how-the-trace-context-travels) defines it; nothing new is designed here.
@@ -386,7 +501,7 @@ The run's own record (slice 1) does not wait for this slice: the run row already
 
 ## Questions for the patron
 
-All eight are settled; see [What the patron settled](#what-the-patron-settled).
+All eight are settled; see [What the patron settled](#what-the-patron-settled). [Parallel contracts](#questions-only-the-patron-can-answer) asks four more, for slice 4.
 
 ## How it will be checked
 
@@ -397,6 +512,7 @@ All eight are settled; see [What the patron settled](#what-the-patron-settled).
 - Slice 2: a table of commands against the rules (allowed pushes allowed, forbidden ones denied with the rule, unrelated commands left alone, compound commands split), and every push denied while the rules lines are missing.
 - Slice 3: in a throwaway repository with a bare remote, each broken rule caught from git facts alone; a first failure dispatches a correction run, a second becomes `needs-you`.
 - Slice 4: surveys beside a contract run, in worktrees removed afterwards, with their field reports kept; the cap holds runs waiting and starts them as others finish; a rate limit pauses dispatch.
+- Parallel contracts, in a throwaway repository with a bare remote: two contract runs of one focus in their own worktrees at once, neither touching the camp; `--after` holds a run, unmade, until its posting has landed, and makes it from the new tip; `gm land` fast-forwards the first and merges the second, one at a time, and refuses a dirty camp, a failed check or uncommitted work; a conflict leaves the camp as it was and sends one correction whose worktree holds the started merge; a second failure makes `needs-you`; `gm check` catches a push, a rewritten run branch and a commit off its line; each worktree and run branch is gone after landing, a lost run with no commits is cleaned up, one holding commits is kept until `gm drop`, and the muster sweeps what a dead keeper left.
 - Slice 5: `gm trace` shows the dispatch, the Adventurer's run under it and the check, with the writ hash on each.
 - By hand, in a lab herdr session, the done-when: dispatch a contract, keep talking to the Party Leader while it runs, and see the result wake it; then send a follow-up bug on the same ticket and see its commit land on the same feature branch, with a `git checkout -b` tried by the Adventurer denied. And issue #41's own steps: `gm open demo --repo <repo>`, then `gm post --focus demo "say hello"`, and the idle Party Leader takes it up with nobody in its tab; again after that turn ends, to see the Stop re-arm after a rewake turn; and once with `gm open demo2 --brief "say hello"`.
 - By hand, once per Claude Code upgrade: the lab tests above.
