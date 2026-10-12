@@ -4647,7 +4647,9 @@ SQL
 # Claude Code keeps at /tmp/claude-<uid>/<the camp's path, each other character a dash>/<session id>/. A push is the
 # rules hook's to answer (slice 2): it allows what the playbook allows, and denies the rest; a deny rule here would
 # outweigh its allow. Claude Code's commit attribution is off unless guild.conf says commit-attribution: on. Its
-# status line names its run and postings (gm statusline with GM_RUN), never its Party Leader's.
+# status line names its run and postings (gm statusline with GM_RUN), never its Party Leader's. In bypass it never
+# stops on Claude Code's confirmation of that mode, whatever the user's own settings say: Claude Code reads
+# skipDangerousModePermissionPrompt from --settings too.
 # With pane (an Adventurer in a herdr pane, not claude -p), Stop and StopFailure run gm hook run-stop, which records
 # the run's end, since no result event comes.
 gm_run_settings() {
@@ -4687,7 +4689,8 @@ gm_run_settings() {
   'permissions', json_object('allow', json_array($allow), 'deny', json_array($deny)),
   'hooks', json_object('PreToolUse', json_array(json_object('matcher', 'Bash', 'hooks', json_array(
     json_object('type','command','command', $(gm_q "$env rules"), 'timeout', 10))))$stop),
-  'statusLine', json_object('type','command','command', $(gm_q "${env% hook} statusline"), 'refreshInterval', 5)$attribution));" >/dev/null
+  'statusLine', json_object('type','command','command', $(gm_q "${env% hook} statusline"), 'refreshInterval', 5),
+  'skipDangerousModePermissionPrompt', json('true')$attribution));" >/dev/null
 }
 
 # ---- The rules hook: the playbook's push rules in every camp (vision/step-3-design.md, slice 2) ----

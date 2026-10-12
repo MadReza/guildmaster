@@ -282,6 +282,7 @@ The patron, on 2026-10-12, in the Party Leader of `adventurers` (posting #49):
 What Firstmate does at a Claude crewmate's launch, besides the permission flag ([its launch](../firstmate/components/crew/launch.html), [its dispatch](../firstmate/components/crew/dispatch.html)), and what gm now does the same way:
 
 - **`bypass` is the default**, as Firstmate's: the patron chose it. `auto` and `acceptEdits` stay, and a run still keeps the mode it was dispatched with.
+- **No stop on the bypass confirmation.** The run's own settings carry `skipDangerousModePermissionPrompt: true`, so a `bypass` Adventurer never waits on Claude Code's "are you sure" for that mode, whatever the patron's own settings say. Claude Code 2.1.296 reads that key from the user, local, policy and `--settings` sources alike (checked in its code), and the run's settings come in through `--settings`.
 
 ## Slice 2: push rules in every camp
 

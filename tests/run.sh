@@ -3450,7 +3450,8 @@ t_adventurer_permission_mode() {
     s="CAST(readfile('$GM_HALL/runs/$n/settings.json') AS TEXT)"
     assert_contains "$(json "SELECT json_extract($s,'\$.hooks.PreToolUse[0].hooks[0].command')")" "GM_RUN='$n' bash" "the rules hook as run $n in ${mode:-the default}" &&
       assert_contains "$(json "SELECT json_extract($s,'\$.hooks.PreToolUse[0].hooks[0].command')")" " hook rules" "gm hook rules in ${mode:-the default}" &&
-      assert_eq "$(json "SELECT json_extract($s,'\$.hooks.PreToolUse[0].matcher')")" Bash "on every Bash command" || return 1
+      assert_eq "$(json "SELECT json_extract($s,'\$.hooks.PreToolUse[0].matcher')")" Bash "on every Bash command" &&
+      assert_eq "$(json "SELECT json_type($s,'\$.skipDangerousModePermissionPrompt')")" true "never stops on the bypass confirmation in ${mode:-the default}" || return 1
     for rule in 'Bash(git merge*)' 'Bash(git checkout -b*)' 'Bash(git branch*)' 'Bash(gh pr create*)' 'Bash(gh-axi pr create*)' 'Bash(glab *)'; do
       assert_eq "$(json "SELECT count(*) FROM json_each(json_extract($s,'\$.permissions.deny')) WHERE value=$(sqlq "$rule")")" 1 "${mode:-the default} denies $rule" || return 1
     done
