@@ -9,12 +9,15 @@
 #   runs         pane<TAB>the line typed into it by pane run
 #   splits       pane split<TAB>the new pane<TAB>its --direction
 #   titles       pane<TAB>the title pane rename gave it
+#   fg/<pane>    when present, the pane's foreground processes as process-info lists them (JSON objects, comma-
+#                separated; its shell is added), in place of what the panes file says it runs
 #   run-proc     what a pane runs after pane run (default claude)
 #   run-proc-collector  what the collector's pane runs after pane run (default otelcol-contrib)
 #   typed        pane<TAB>the text sent to it by pane send-text, or <key> for pane send-keys
-#   agent-status what agent get says a claude pane is doing (default idle)
+#   agent-status what agent get says a claude pane is doing (default idle); agent-status.<pane>, that pane alone
 #   screens/     what pane read shows, a screen a file (1, 2, ...): each read shows the next, then the last one again;
 #                a pane send-keys ctrl+s moves to the file after-stash when there is one
+#   screen.<pane> what pane read shows of that pane alone, every time
 #   exit-ignored present while a claude pane ignores /exit; otherwise /exit and Enter leave it holding a shell
 #   focused      each workspace or tab focused, one a line
 #   attached     present once a client attached (herdr with no command)
@@ -101,6 +104,13 @@ case "${1:-} ${2:-}" in
     label=$(field workspaces "$3" 2)
     [ -n "$label" ] || err workspace_not_found "workspace $3 not found"
     printf '{"result":{"type":"workspace_info","workspace":{"workspace_id":"%s","label":"%s"}}}\n' "$3" "$label" ;;
+  "workspace close")
+    up
+    [ -n "$(field workspaces "$3" 1)" ] || err workspace_not_found "workspace $3 not found"
+    awk -F '\t' -v w="$3" '$1 != w' "$D/workspaces" >"$D/workspaces.new" && mv "$D/workspaces.new" "$D/workspaces"
+    awk -F '\t' -v w="$3" '$2 != w' "$D/tabs" >"$D/tabs.new" && mv "$D/tabs.new" "$D/tabs"
+    awk -F '\t' -v w="$3" '$3 != w' "$D/panes" >"$D/panes.new" && mv "$D/panes.new" "$D/panes"
+    printf '{"result":{"type":"ok"}}\n' ;;
   "tab create")
     up
     w=$(opt workspace "$@")
@@ -134,7 +144,12 @@ case "${1:-} ${2:-}" in
     p=$(opt pane "$@")
     proc=$(field panes "$p" 4)
     [ -n "$proc" ] || err pane_not_found "pane not found"
+    if [ -f "$D/fg/$p" ]; then
+      proc='fg'
+      fg="$(cat "$D/fg/$p"),{\"name\":\"zsh\",\"argv0\":\"zsh\",\"argv\":[\"-zsh\"],\"pid\":999991}"
+    fi
     case $proc in
+      fg) ;;
       shell) fg='{"name":"zsh","argv0":"zsh","argv":["-zsh"],"pid":999991}' ;;
       claude) fg='{"name":"claude","argv0":"claude","argv":["claude","--name","x"],"pid":999992},{"name":"zsh","argv0":"zsh","argv":["-zsh"],"pid":999991}' ;;
       *) fg="{\"name\":\"$proc\",\"argv0\":\"$proc\",\"argv\":[\"$proc\"],\"pid\":999993},{\"name\":\"zsh\",\"argv0\":\"zsh\",\"argv\":[\"-zsh\"],\"pid\":999991}" ;;
@@ -156,7 +171,7 @@ case "${1:-} ${2:-}" in
     up
     [ -n "$(field panes "$3" 1)" ] || err pane_not_found "pane $3 not found"
     last=$(awk -F '\t' -v k="$3" '$1 == k { t = $2 } END { print t }' "$D/typed" 2>/dev/null)
-    printf '%s\t<%s>\n' "$3" "$4" >>"$D/typed"
+    printf '%s\t<%s>\n' "$3" "${*:4}" >>"$D/typed"
     [ "$4" != ctrl+s ] || [ ! -d "$D/screens" ] || : >"$D/screens/stashed"
     if [ "$4" = enter ] && [ "$last" = /exit ] && [ "$(field panes "$3" 4)" = claude ] && [ ! -e "$D/exit-ignored" ]; then
       awk -F '\t' -v OFS='\t' -v k="$3" '$1 == k { $4 = "shell" } { print }' "$D/panes" >"$D/panes.new" && mv "$D/panes.new" "$D/panes"
@@ -176,7 +191,9 @@ case "${1:-} ${2:-}" in
     up
     [ -n "$(field panes "$3" 1)" ] || err pane_not_found "pane $3 not found"
     n=$(cat "$D/screens/at" 2>/dev/null || echo 0)
-    if [ -e "$D/screens/stashed" ] && [ -f "$D/screens/after-stash" ]; then
+    if [ -f "$D/screen.$3" ]; then
+      cat "$D/screen.$3"
+    elif [ -e "$D/screens/stashed" ] && [ -f "$D/screens/after-stash" ]; then
       cat "$D/screens/after-stash"
     else
       [ ! -f "$D/screens/$((n + 1))" ] || { n=$((n + 1)); printf '%s' "$n" >"$D/screens/at"; }
@@ -185,7 +202,7 @@ case "${1:-} ${2:-}" in
   "agent get")
     up
     [ "$(field panes "$3" 4)" = claude ] || err agent_not_found "agent target $3 not found"
-    printf '{"result":{"agent":{"agent":"claude","agent_status":"%s"}}}\n' "$(cat "$D/agent-status" 2>/dev/null || echo idle)" ;;
+    printf '{"result":{"agent":{"agent":"claude","agent_status":"%s"}}}\n' "$(cat "$D/agent-status.$3" 2>/dev/null || cat "$D/agent-status" 2>/dev/null || echo idle)" ;;
   *)
     err stub_unknown "the stub does not know: $*" ;;
 esac

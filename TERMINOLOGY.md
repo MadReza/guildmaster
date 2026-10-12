@@ -37,7 +37,7 @@ Where a term replaces one from Firstmate, the Firstmate column records the origi
 | **Survey** | A posting that produces knowledge, never a change. Investigation, diagnosis, planning, reproduction, audit. | scout task |
 | **Writ** | The written instructions handed to one adventurer. An executable contract, not a suggestion. | brief |
 | **Run** | One adventurer dispatched on one writ, from its start to its result, numbered across the guild (`run 7`). It may carry several postings the party leader judged belong together. | crew launch |
-| **Keeper** | The code that holds one run: it starts the adventurer (in a herdr pane under its party leader's, where the patron can watch and talk to it), sees that its result is recorded, runs the check, and summons the party leader. Never a model. | (none) |
+| **Keeper** | The code that holds one run: it starts the adventurer (in a herdr workspace of its own under its party leader's, where the patron can watch and talk to it), sees that its result is recorded, runs the check, and summons the party leader. Never a model. | (none) |
 | **Field Report** | A survey's deliverable. Self-contained, and survives the camp that produced it. | report |
 | **Ruling** | A posting held for the patron because only they can decide it. | captain hold / decision |
 | **Commission** | Turning a finished survey into a contract with the same adventurer, keeping its context. | promotion |
@@ -68,11 +68,11 @@ Where a term replaces one from Firstmate, the Firstmate column records the origi
 | Term | Definition | Firstmate |
 | --- | --- | --- |
 | **The Watch** | The one process that waits for a supervisor's summons and wakes it, run by code, never a model. Each supervisor has its own: the Guildmaster's, and one per Party Leader, a background hook in its session armed at every start and turn end. Exactly one runs per supervisor at a time. Said alone in a camp it is that Party Leader's watch. | watcher |
-| **Summons** | One event that requires a supervisor's attention now: the Guildmaster's, or a Party Leader's (a run that finished, or a posting added from outside its chat). Durable until handled and acknowledged; delivered by that supervisor's watch. A patron's own message is never a summons: it starts a turn by itself. | wake |
+| **Summons** | One event that requires a supervisor's attention now: the Guildmaster's, or a Party Leader's (a run that finished, or a posting added from outside its chat). Durable until handled and acknowledged; delivered by that supervisor's watch. A Party Leader's also names a run whose Adventurer is blocked on an answer, once per block. A patron's own message is never a summons: it starts a turn by itself. | wake |
 | **Muster** | The once-per-session roll call that reconciles durable records with reality before any work starts. | session start |
 | **Round** | A periodic whole-roster review with no specific trigger. | heartbeat |
 | **Gone Quiet** | A worker that has stopped producing signs of life and must be inspected. | stale |
-| **Runner** | A message carried to a worker, recorded durably before it is delivered. | steer |
+| **Runner** | A message carried to a worker, recorded durably before it is delivered: `gm runner` carries a Party Leader's answer to its blocked Adventurer. | steer |
 | **Seal** | The exclusive claim one session holds over a guildhall. Without it, nothing may change. | session lock |
 
 ## Delivery

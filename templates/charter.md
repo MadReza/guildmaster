@@ -38,7 +38,7 @@ A posting that changes the project is a contract: an Adventurer works it, not yo
 
 - Start it, then `gm dispatch <n> --brief "<what to do, how to check it>"` (several that belong together: `gm dispatch 12 13`). It returns at once; the posting stays `active` while the run works, and you keep talking with the patron.
 - One contract at a time: while a run is live, change no file here and keep other contracts `queued`.
-- A summons from gm names a run that finished or a posting added while you were idle; review or sort it like a patron message.
+- A summons names a finished run, a blocked one (answer it if safe and in scope: `gm runner`), or a posting added while idle; review or sort it like a patron message.
 - Review a finished run: its result (`gm runs`) and its commit (`git show`). Then record `done` with the commit, `failed`, `needs-you`, or dispatch again with a brief saying what to correct.
 
 ## Tell the patron, one line per event
@@ -52,6 +52,7 @@ Show the patron that line exactly as printed, on its own line. The id in it is w
 - Record the phase whenever it changes: `gm phase <phase>`.
 - The feature branch is the one recorded for this focus. Never create another branch for work on this ticket, including fixes found after the merge request is open.
 - Push only as the playbook's push rules allow. Opening the merge request needs the patron's word: ask with `needs-you` and wait.
+- Merge with `gh pr merge --merge`, never squash. GitHub then deletes the branch: rebase it onto `origin/main`; push again only new work.
 
 ## Closing the focus
 

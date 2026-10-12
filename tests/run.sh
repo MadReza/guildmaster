@@ -121,7 +121,7 @@ t_schema_created_on_first_use() {
   [ ! -e "$GM_HALL" ] || return 1
   gm list >/dev/null || fail "first gm call failed"
   assert_eq "$(db 'PRAGMA journal_mode;')" wal "journal mode" &&
-    assert_eq "$(db 'PRAGMA user_version;')" 7 "schema version" &&
+    assert_eq "$(db 'PRAGMA user_version;')" 9 "schema version" &&
     assert_eq "$(db "SELECT group_concat(name, ' ') FROM (SELECT name FROM sqlite_master WHERE type='table' ORDER BY name);")" \
       "endpoint event focus guard message model_sample open_span posting prompt_version run run_posting span span_link ticket" "tables"
 }
@@ -958,7 +958,7 @@ t_migration_keeps_schema1_data() {
   for i in 1 2 3 4 5 6; do gm list --all >/dev/null 2>"$WORK/migrate/err$i" & done
   wait
   for i in 1 2 3 4 5 6; do assert_eq "$(cat "$WORK/migrate/err$i")" "" "migration $i ran clean"; done
-  assert_eq "$(db 'PRAGMA user_version;')" 7 "migrated to schema 7" &&
+  assert_eq "$(db 'PRAGMA user_version;')" 9 "migrated to schema 9" &&
     assert_eq "$(for t in $tables; do db "SELECT $(db "SELECT group_concat(name, ',') FROM pragma_table_info('$t') WHERE name NOT IN ('trace_id','span_id','span_start_ms','follows_id','closed_at','start_attempts','held_at','held_told','close_requested_at','origin','summoned_at','unheard_at');") FROM $t ORDER BY rowid;"; done)" "$before" "every schema-1 row kept as it was" &&
     assert_eq "$(db "SELECT count(*) FROM posting WHERE trace_id IS NULL;")" 2 "old postings have no trace" &&
     assert_eq "$(db "SELECT group_concat(name, ' ') FROM (SELECT name FROM sqlite_master WHERE type='table' AND name IN ('span','span_link','open_span','prompt_version','model_sample') ORDER BY name);")" \
@@ -3022,9 +3022,9 @@ fake_stream() {
 
 run_ended() { wait_for "SELECT ended_at IS NOT NULL FROM run WHERE id=$1;" 1; }
 
-# ---- The visible Adventurer: a herdr pane under its Party Leader's ----
+# ---- The visible Adventurer: a herdr workspace of its own, under its Party Leader's ----
 
-# run_pane <run>: the keeper has split a pane for the run.
+# run_pane <run>: the keeper has opened a pane for the run.
 run_pane() { wait_for "SELECT pane_id IS NOT NULL FROM run WHERE id=$1;" 1; }
 
 # run_pane_line <pane>: the line the keeper typed into that pane.
@@ -3058,18 +3058,29 @@ run_stop() {
 t_dispatch_opens_the_adventurer_under_its_party_leader() {
   setup visible
   gm open appt-v2 >/dev/null 2>&1
+  gm open bravo --repo "$REPO" >/dev/null 2>&1 || fail "open bravo failed"
   export GM_FOCUS=appt-v2 GM_RUN_POLL=1 GM_WATCH_TIMEOUT=40
   fake_run "$WORK/visible/run"
   : >"$GM_FAKE_RUN/hold"
   gm post "the owner field is empty after save" >/dev/null && gm notice 1 started >/dev/null
-  local out pl pane line dir=$GM_HALL/runs/1 sid
+  local out pl pane ws line dir=$GM_HALL/runs/1 sid
+  : >"$HERDR_STUB/focused"
   out=$(gm dispatch 1 --model sonnet 2>&1) || fail "dispatch failed: $out"
   run_pane 1 || fail "the run got no pane"
   pl=$(pl_pane appt-v2)
+  ws=$(db "SELECT pane_workspace FROM run WHERE id=1;")
   pane=$(db "SELECT pane_id FROM run WHERE id=1;")
-  assert_eq "$(cat "$HERDR_STUB/splits")" "$pl	$pane	down" "split under the Party Leader's pane" &&
-    assert_eq "$(cat "$HERDR_STUB/titles")" "$pane	run 1 · #1 owner-field-empty-after" "titled with the run and its posting" &&
-    assert_eq "$(awk -F '\t' -v p="$pane" '$1 == p { print $3 }' "$HERDR_STUB/panes")" "$(awk -F '\t' -v p="$pl" '$1 == p { print $3 }' "$HERDR_STUB/panes")" "in the Party Leader's workspace" || return 1
+  # Its own workspace, one step under its Party Leader's in the sidebar, right after it: the Party Leader's pane
+  # stays whole, for the patron to talk to it.
+  [ ! -s "$HERDR_STUB/splits" ] || fail "the Party Leader's pane was split" || return 1
+  assert_eq "$(awk -F '\t' -v p="$pane" '$1 == p { print $3 }' "$HERDR_STUB/panes")" "$ws" "its pane is in the run's workspace" &&
+    assert_eq "$(sidebar | tr '\n' '|')" "guild|└ appt-v2|  └ #1 owner-field-empty-after|└ bravo|" "labelled one step under its Party Leader's, right after it" &&
+    assert_eq "$(cat "$HERDR_STUB/titles")" "$pane	run 1 · #1 owner-field-empty-after" "its pane titled with the run and its posting" &&
+    assert_eq "$(cat "$HERDR_STUB/focused")" "" "never focused" &&
+    assert_contains "$(cat "$HERDR_STUB/calls")" "workspace create --cwd $CAMP --label   └ #1 owner-field-empty-after --no-focus" "on the camp" || return 1
+  # A Party Leader opened later goes after the run's workspace, not between it and its own Party Leader's.
+  gm open charlie --repo "$REPO" >/dev/null 2>&1 || fail "open charlie failed"
+  assert_eq "$(sidebar | tr '\n' '|')" "guild|└ appt-v2|  └ #1 owner-field-empty-after|└ bravo|└ charlie|" "the run stays under its Party Leader" || return 1
   line=$(run_pane_line "$pane")
   assert_contains "$line" "cd '$CAMP' && env GM_HALL='$GM_HALL'" "started in the camp" &&
     assert_contains "$line" "adventurer 1 --pane '$pane'" "runs gm adventurer for the run" || return 1
@@ -3083,7 +3094,7 @@ t_dispatch_opens_the_adventurer_under_its_party_leader() {
   sid=$(db "SELECT session_id FROM run WHERE id=1;")
   assert_eq "$(cat "$GM_FAKE_RUN/stdin")" "$(cat "$dir/writ.md")" "the writ is its first prompt" &&
     assert_eq "$(cat "$GM_FAKE_RUN/pwd")" "$CAMP" "in the camp" &&
-    assert_eq "$(head -n 14 "$GM_FAKE_RUN/args" | tr '\n' ' ')" "--name run 1 · #1 owner-field-empty-after --session-id $sid --setting-sources user,project --settings $dir/settings.json --model sonnet --effort medium --permission-mode acceptEdits " "its command line, without -p" &&
+    assert_eq "$(head -n 14 "$GM_FAKE_RUN/args" | tr '\n' ' ')" "--name run 1 · #1 owner-field-empty-after --session-id $sid --setting-sources user,project --settings $dir/settings.json --model sonnet --effort medium --permission-mode auto " "its command line, without -p" &&
     assert_eq "$(grep -c '^CLAUDECODE=\|^GM_FOCUS=' "$GM_FAKE_RUN/env")" 0 "not as a session inside Claude Code, nor as the Party Leader" || return 1
   local f="CAST(readfile('$dir/settings.json') AS TEXT)"
   assert_eq "$(json "SELECT group_concat(key) FROM json_each(json_extract($f,'\$.hooks'))")" "PreToolUse,Stop,StopFailure" "the rules hook, and the Stop hooks that record its end" &&
@@ -3113,11 +3124,22 @@ t_dispatch_opens_the_adventurer_under_its_party_leader() {
   rm -f "$GM_FAKE_RUN/hold"
   wait "$shell"
   assert_eq "$(db "SELECT result_subtype FROM run WHERE id=1;")" success "claude ending after its turn loses nothing" || return 1
-  # The Party Leader's review closes it.
+  # The Party Leader's review closes its workspace.
   gm notice 1 'done' abc123 >/dev/null
-  assert_eq "$(awk -F '\t' -v p="$pane" '$1 == p' "$HERDR_STUB/panes" | grep -c .)" 0 "the review closes the pane" &&
+  assert_contains "$(cat "$HERDR_STUB/calls")" "workspace close $ws --session gm-test" "the review closes the run's workspace" &&
+    assert_eq "$(awk -F '\t' -v p="$pane" '$1 == p' "$HERDR_STUB/panes" | grep -c .)" 0 "and its pane" &&
     assert_eq "$(db "SELECT pane_closed_at IS NOT NULL FROM run WHERE id=1;")" 1 "recorded" &&
-    assert_eq "$(awk -F '\t' -v p="$pl" '$1 == p' "$HERDR_STUB/panes" | grep -c .)" 1 "and only that pane"
+    assert_eq "$(sidebar | tr '\n' '|')" "guild|└ appt-v2|└ bravo|└ charlie|" "and only that workspace" &&
+    assert_eq "$(awk -F '\t' -v p="$pl" '$1 == p' "$HERDR_STUB/panes" | grep -c .)" 1 "the Party Leader's pane stays" || return 1
+  # A run from before each had a workspace of its own: only its pane, split under the Party Leader's, is closed.
+  local row
+  row=$(awk -F '\t' -v OFS='\t' -v p="$pl" '$1 == p { print "old-pane", $2, $3, "claude" }' "$HERDR_STUB/panes")
+  printf '%s\n' "$row" >>"$HERDR_STUB/panes"
+  db "INSERT INTO run(focus_id, kind, session_id, started_at, ended_at, reviewed_at, pane_session, pane_id)
+        VALUES (1, 'contract', 'old', '2026-01-01T00:00:00Z', '2026-01-01T00:10:00Z', '2026-01-01T00:20:00Z', 'gm-test', 'old-pane');"
+  gm notice 1 update "looked again" >/dev/null || fail "the notice failed"
+  assert_eq "$(grep -c '^old-pane' "$HERDR_STUB/panes")" 0 "its pane closed" &&
+    assert_eq "$(awk -F '\t' -v p="$pl" '$1 == p' "$HERDR_STUB/panes" | grep -c .)" 1 "the Party Leader's pane with it"
 }
 
 t_run_stop_reads_the_transcript() {
@@ -3176,6 +3198,81 @@ t_a_lost_adventurer_pane_ends_the_run() {
   assert_contains "$(gm summons)" "- run 2 for appt-v2#1 one lost" "summoned"
 }
 
+# A permission prompt, as an Adventurer's pane shows it while it waits.
+blocked_screen() {
+  printf '%s\n' '● Bash(shellcheck bin/gm)' '' 'Do you want to proceed?' '❯ 1. Yes' "  2. Yes, and don't ask again" '  3. No' '' '' >"$HERDR_STUB/screen.$1"
+}
+
+t_a_blocked_adventurer_summons_its_party_leader() {
+  setup blocked
+  gm open appt-v2 >/dev/null 2>&1
+  export GM_FOCUS=appt-v2 GM_RUN_POLL=1 GM_WATCH_TIMEOUT=40
+  fake_run "$WORK/blocked/run"
+  : >"$GM_FAKE_RUN/hold"
+  gm post "the owner field is empty after save" >/dev/null && gm notice 1 started >/dev/null
+  gm dispatch 1 >/dev/null
+  run_pane 1 || fail "the run got no pane" || return 1
+  local pane out rc
+  pane=$(db "SELECT pane_id FROM run WHERE id=1;")
+  stub_proc "$pane" claude
+  # Working: nothing to summon.
+  printf 'working' >"$HERDR_STUB/agent-status.$pane"
+  rc=0; out=$(printf '{}' | as_watch env GM_WATCH_TIMEOUT=33 bash "$GM" hook watch 2>&1) || rc=$?
+  assert_eq "$rc" 0 "a working Adventurer summons nobody" || return 1
+  # Blocked on a permission prompt: its Party Leader is summoned, with what the prompt says.
+  printf 'blocked' >"$HERDR_STUB/agent-status.$pane"
+  blocked_screen "$pane"
+  rc=0; out=$(printf '{}' | as_watch bash "$GM" hook watch 2>&1) || rc=$?
+  assert_eq "$rc" 2 "the watch summons the Party Leader" &&
+    assert_contains "$out" "- run 1 for appt-v2#1 owner-field-empty-after is blocked: its pane waits for an answer. It shows:" "naming the run" &&
+    assert_contains "$out" "    Do you want to proceed?
+    ❯ 1. Yes" "with the prompt's last lines" &&
+    assert_contains "$out" "    3. No
+  It is yours to answer" "and no blank lines after them" &&
+    assert_contains "$out" "gm runner 1 --keys <keys> or --text <words>" "how to answer" &&
+    assert_contains "$out" "ask the patron, with needs-you, only what is theirs to decide" "and what goes to the patron" &&
+    assert_eq "$(db "SELECT count(*) FROM event WHERE kind='run.blocked';")" 1 "recorded once" || return 1
+  # Once per block: the next watch finds nothing new.
+  rc=0; out=$(printf '{}' | as_watch env GM_WATCH_TIMEOUT=33 bash "$GM" hook watch 2>&1) || rc=$?
+  assert_eq "$rc" 0 "the same block never summons twice" && assert_eq "$out" "" "and says nothing" || return 1
+  assert_contains "$(gm runs)" "blocked since" "gm runs shows it" &&
+    assert_contains "$(gm where)" "It is blocked since" "and the resume summary" &&
+    assert_contains "$(GM_RUN=1 gm statusline </dev/null)" "blocked: its Party Leader answers" "and its own status line" || return 1
+  # The Party Leader reads its pane and answers it: recorded, then sent.
+  assert_contains "$(gm runner 1)" "Do you want to proceed?" "gm runner shows the pane" || return 1
+  out=$(gm runner 1 --keys 1 2>&1) || fail "runner --keys failed: $out"
+  assert_contains "$out" "Run 1: sent keys: 1." "says what it sent" &&
+    assert_eq "$(tail -n 1 "$HERDR_STUB/typed")" "$pane	<1>" "the key, to the run's pane" &&
+    assert_eq "$(db "SELECT detail FROM event WHERE kind='runner';")" "run 1 keys: 1" "recorded" &&
+    assert_eq "$(db "SELECT blocked_at IS NULL FROM run WHERE id=1;")" 1 "an answered block is cleared" || return 1
+  gm runner 1 --keys "down enter" >/dev/null
+  assert_eq "$(tail -n 1 "$HERDR_STUB/typed")" "$pane	<down enter>" "several keys, in one call" || return 1
+  gm runner 1 --text "keep the old URL" >/dev/null
+  assert_eq "$(tail -n 2 "$HERDR_STUB/typed" | cut -f 2 | tr '\n' '|')" "keep the old URL|<enter>|" "words, then Enter" || return 1
+  # Still blocked after an answer, or blocked again: summoned again.
+  rc=0; out=$(printf '{}' | as_watch bash "$GM" hook watch 2>&1) || rc=$?
+  assert_eq "$rc" 2 "a block after an answer summons again" || return 1
+  printf 'working' >"$HERDR_STUB/agent-status.$pane"
+  gm up >/dev/null 2>&1
+  assert_eq "$(db "SELECT blocked_at IS NULL FROM run WHERE id=1;")" 1 "working again clears it" || return 1
+  # With no watch, the muster finds a new block and types the summons into the idle Party Leader's pane.
+  printf 'blocked' >"$HERDR_STUB/agent-status.$pane"
+  printf '%s\n' '────' '❯ ' '────' >"$HERDR_STUB/screen.$(pl_pane appt-v2)"
+  : >"$HERDR_STUB/typed"
+  out=$(GM_NUDGE_AFTER=0 GM_NUDGE_IDLE_GAP=0 GM_NUDGE_SETTLE=0 gm up 2>&1)
+  assert_contains "$out" "appt-v2: summoned its Party Leader (run 1 blocked), whose watch was not running" "the muster's backstop" &&
+    assert_eq "$(grep -c "	/guild-chat:summons$" "$HERDR_STUB/typed")" 1 "typed /guild-chat:summons" &&
+    assert_contains "$(gm summons)" "- run 1 for appt-v2#1 owner-field-empty-after is blocked" "which names the blocked run" || return 1
+  # Only a live run of this focus, with a pane.
+  out=$(gm runner 2 2>&1) && fail "answered a run that does not exist"
+  assert_contains "$out" "no run 2" "says so" || return 1
+  run_stop 1 "Done." >/dev/null
+  run_ended 1 || fail "the run never ended" || return 1
+  out=$(gm runner 1 --keys enter 2>&1) && fail "answered an ended run"
+  assert_contains "$out" "run 1 ended at" "an ended run is not answered" &&
+    assert_contains "$(gm runner 1)" "Do you want to proceed?" "though its pane can still be read"
+}
+
 t_dispatch_hands_a_posting_to_an_adventurer() {
   setup dispatch
   export GM_FOCUS=appt-v2
@@ -3205,20 +3302,45 @@ t_dispatch_hands_a_posting_to_an_adventurer() {
     assert_contains "$writ" "$GM_HALL/rules/repo.md" "{{rules}}, a path" &&
     assert_contains "$writ" "phase intake" "{{phase}}" &&
     assert_not_contains "$writ" "{{" "every slot filled" &&
-    assert_not_contains "$writ" "This file is the patron's" "the template's own note stays out" || return 1
+    assert_not_contains "$writ" "This file is the patron's" "the template's own note stays out" &&
+    assert_contains "$writ" "your Party Leader is watching and answers" "it asks rather than guesses" &&
+    assert_not_contains "$writ" "Nobody answers questions" "nobody is said to be away" || return 1
   [ -f "$GM_HALL/prompts/adventurer/contract.md" ] || fail "the template was not copied into the Guildhall"
   sid=$(db "SELECT session_id FROM run WHERE id=1;")
   assert_eq "$(cat "$GM_FAKE_RUN/pwd")" "$CAMP" "it runs in the camp" &&
-    assert_eq "$(tr '\n' ' ' <"$GM_FAKE_RUN/args")" "-p --session-id $sid --output-format stream-json --verbose --setting-sources user,project --settings $dir/settings.json --model sonnet --effort medium --permission-mode acceptEdits " "its command line" &&
+    assert_eq "$(tr '\n' ' ' <"$GM_FAKE_RUN/args")" "-p --session-id $sid --output-format stream-json --verbose --setting-sources user,project --settings $dir/settings.json --model sonnet --effort medium --permission-mode auto " "its command line" &&
     assert_eq "$(grep -c '^CLAUDECODE=' "$GM_FAKE_RUN/env")" 0 "not as a session inside Claude Code" || return 1
   local settings s
   settings=$(cat "$dir/settings.json")
   s=$(sqlq "$settings")
   assert_eq "$(json "SELECT json_extract($s,'\$.env.GM_RUN')||' '||json_extract($s,'\$.env.GM_FOCUS')")" "1 appt-v2" "its own environment" &&
-    assert_eq "$(json "SELECT group_concat(key)||'|'||COALESCE(json_type($s,'\$.statusLine'),'') FROM json_each(json_extract($s,'\$.hooks'))")" "PreToolUse|" "no capture, charter, Stop guard or status line: only the rules hook" &&
+    assert_eq "$(json "SELECT group_concat(key) FROM json_each(json_extract($s,'\$.hooks'))")" "PreToolUse" "no capture, charter or Stop guard: only the rules hook" &&
+    assert_contains "$(json "SELECT json_extract($s,'\$.statusLine.command')")" "GM_RUN='1' bash" "a status line of its own, as run 1" &&
+    assert_eq "$(json "SELECT json_extract($s,'\$.env.GM_RUN_TITLE')")" "run 1 · #1 owner-field-empty-after" "its run's title, for its banner" &&
     assert_eq "$(json "SELECT json_extract($s,'\$.attribution.commit')||'|'||json_extract($s,'\$.includeCoAuthoredBy')")" "|0" "commit attribution off" &&
     assert_contains "$settings" '"Bash(git merge*)"' "never a merge" &&
     assert_contains "$settings" '"Bash(git commit*)"' "commits allowed" || return 1
+  # What it predictably reads is allowed, so nobody is asked: the rules and playbooks, issue and pull request views,
+  # ps, shellcheck, and its own scratchpad; a merge request stays denied.
+  local scratch
+  scratch="claude-$(id -u)/$(printf '%s' "$CAMP" | sed 's/[^A-Za-z0-9]/-/g')/$sid"
+  local rule
+  for rule in "Read(/$GM_HALL/rules/repo.md)" "Read(/$GM_HALL/playbooks/**)" 'Bash(gh issue view*)' 'Bash(gh pr view*)' \
+    'Bash(gh-axi issue view*)' 'Bash(gh-axi pr view*)' 'Bash(ps)' 'Bash(ps *)' 'Bash(shellcheck *)' \
+    "Edit(//tmp/$scratch/**)" "Write(//private/tmp/$scratch/**)"; do
+    assert_eq "$(json "SELECT count(*) FROM json_each(json_extract($s,'\$.permissions.allow')) WHERE value=$(sqlq "$rule")")" 1 "allows $rule" || return 1
+  done
+  for rule in 'Bash(gh pr create*)' 'Bash(gh pr merge*)' 'Bash(gh-axi pr create*)' 'Bash(glab *)'; do
+    assert_eq "$(json "SELECT count(*) FROM json_each(json_extract($s,'\$.permissions.deny')) WHERE value=$(sqlq "$rule")")" 1 "denies $rule" || return 1
+  done
+  assert_not_contains "$settings" '"Bash(gh *)"' "a view is not denied with the rest of gh" || return 1
+  # Its status line names its run and postings, never its Party Leader's.
+  local line
+  line=$(printf '{"model":{"display_name":"Sonnet"}}' | GM_RUN=1 gm statusline)
+  assert_eq "$line" "⛨ adventurer · run 1 · #1 owner-field-empty-after · for appt-v2 on feature/CRM-8965 · its run ended · Sonnet" "its status line" || return 1
+  # A run with no pane cannot be answered.
+  out=$(gm runner 1 2>&1) && fail "read a run with no pane"
+  assert_contains "$out" "run 1 has no herdr pane: it runs unseen" "says why" || return 1
   assert_eq "$(db "SELECT count(*) FROM message;")" "$messages" "the writ is never recorded as a patron message" &&
     assert_eq "$(cat "$dir/result.md")" "Fixed the owner field in abc123." "the result kept" &&
     assert_eq "$(db "SELECT kind||' '||model||' '||effort||' '||exit_code||' '||result_subtype||' '||turns||' '||cost_usd||' '||duration_ms FROM run WHERE id=1;")" \
@@ -3291,7 +3413,57 @@ t_dispatch_several_postings_and_settings() {
   assert_contains "$(cat "$GM_HALL/runs/1/writ.md")" "# Writ: appt-v2#1 export-button, #2 export-format" "one writ for both" &&
     assert_contains "$settings" '"Bash(npm test*)"' "the rules file's build and test commands" &&
     assert_eq "$(json "SELECT json_type($(sqlq "$settings"),'\$.attribution')")" "" "attribution left to Claude Code when on" &&
-    assert_contains "$(gm show 2)" "run 1 finished" "both postings get the finish notice"
+    assert_contains "$(gm show 2)" "run 1 finished" "both postings get the finish notice" || return 1
+  # The next run of two: run 2, while its postings' rows are the register's third and fourth, so a run id read
+  # from the last row inserted would give the second posting run 3, which does not exist.
+  gm notice 1 'done' >/dev/null && gm notice 2 'done' >/dev/null
+  gm post "the export header" >/dev/null && gm post "the export footer" >/dev/null
+  gm notice 3 started >/dev/null && gm notice 4 started >/dev/null
+  out=$(gm dispatch 3 4 2>&1) || fail "dispatching two postings again failed: $out"
+  run_ended 2 || fail "run 2 never ended"
+  assert_eq "$(db "SELECT group_concat(run_id||':'||posting_id, ' ') FROM (SELECT * FROM run_posting ORDER BY rowid);")" "1:1 1:2 2:3 2:4" "each posting in its own run" &&
+    assert_contains "$(gm show 4)" "run 2 finished" "the second posting's run"
+}
+
+# An Adventurer starts as Firstmate's crew does: adventurer-permission-mode in guild.conf, read at every dispatch,
+# auto by default. The rules hook and the denied merges, branches and merge requests are in its settings whatever
+# the mode.
+t_adventurer_permission_mode() {
+  setup permmode
+  export GM_FOCUS=appt-v2
+  fake_run "$WORK/permmode/run"
+  local n=0 mode flag out rule s
+  for mode in '' auto bypass acceptEdits; do
+    n=$((n + 1))
+    if [ -n "$mode" ]; then gm config set adventurer-permission-mode "$mode" >/dev/null || fail "config set $mode"; fi
+    gm post "job $n" >/dev/null && gm notice "$n" started >/dev/null
+    out=$(gm dispatch "$n" 2>&1) || fail "dispatch in mode ${mode:-default} failed: $out"
+    run_ended "$n" || fail "run $n never ended"
+    case $mode in
+      '' | auto) flag='--permission-mode auto' ;;
+      bypass) flag='--dangerously-skip-permissions' ;;
+      *) flag="--permission-mode $mode" ;;
+    esac
+    assert_contains "$(tr '\n' ' ' <"$GM_FAKE_RUN/args")" "--effort medium $flag " "${mode:-the default} starts claude with $flag" &&
+      assert_eq "$(grep -c -e '--permission-mode' -e '--dangerously-skip-permissions' "$GM_FAKE_RUN/args")" 1 "and with no other mode" &&
+      assert_eq "$(db "SELECT permission_mode FROM run WHERE id=$n;")" "$(case $mode in '') echo auto ;; bypass) echo bypassPermissions ;; *) echo "$mode" ;; esac)" "the run records ${mode:-auto}" || return 1
+    s="CAST(readfile('$GM_HALL/runs/$n/settings.json') AS TEXT)"
+    assert_contains "$(json "SELECT json_extract($s,'\$.hooks.PreToolUse[0].hooks[0].command')")" "GM_RUN='$n' bash" "the rules hook as run $n in ${mode:-the default}" &&
+      assert_contains "$(json "SELECT json_extract($s,'\$.hooks.PreToolUse[0].hooks[0].command')")" " hook rules" "gm hook rules in ${mode:-the default}" &&
+      assert_eq "$(json "SELECT json_extract($s,'\$.hooks.PreToolUse[0].matcher')")" Bash "on every Bash command" || return 1
+    for rule in 'Bash(git merge*)' 'Bash(git checkout -b*)' 'Bash(git branch*)' 'Bash(gh pr create*)' 'Bash(gh-axi pr create*)' 'Bash(glab *)'; do
+      assert_eq "$(json "SELECT count(*) FROM json_each(json_extract($s,'\$.permissions.deny')) WHERE value=$(sqlq "$rule")")" 1 "${mode:-the default} denies $rule" || return 1
+    done
+    gm notice "$n" 'done' >/dev/null
+  done
+  # A value the setting cannot take refuses the dispatch, naming the setting, and records no run.
+  printf 'adventurer-permission-mode: yolo\n' >>"$GM_HALL/guild.conf"
+  sed -i.bak '/^adventurer-permission-mode: acceptEdits$/d' "$GM_HALL/guild.conf"
+  gm post "job 5" >/dev/null && gm notice 5 started >/dev/null
+  out=$(gm dispatch 5 2>&1) && fail "dispatched with an unknown permission mode"
+  assert_contains "$out" "adventurer-permission-mode: yolo, which is not auto, bypass or acceptEdits" "names the setting" &&
+    assert_eq "$(db "SELECT count(*) FROM run;")" 4 "no run recorded" &&
+    assert_contains "$(cat "$GM_HALL/guild.conf")" "# adventurer-permission-mode: auto | bypass | acceptEdits, default auto" "guild.conf documents it"
 }
 
 t_lost_run_is_reaped() {
@@ -3385,6 +3557,63 @@ t_camp_settings_arm_the_watch() {
   for ev in SessionStart Stop StopFailure; do
     assert_eq "$(json "SELECT count(*) FROM json_each($s,'\$.hooks.${ev}[0].hooks') WHERE json_extract(value,'\$.command') LIKE '%hook watch' AND json_extract(value,'\$.asyncRewake')=1 AND json_extract(value,'\$.timeout')=86400;")" 1 "$ev arms the watch" || return 1
   done
+}
+
+t_watch_ends_with_its_session() {
+  setup watchsession
+  gm open appt-v2 >/dev/null 2>&1
+  local pidf=$GM_HALL/watch.appt-v2.pid c w i
+  # A session named claude (bash under that name) arms the watch, then ends without a word.
+  ln -s "$(command -v bash)" "$WORK/watchsession/claude"
+  # shellcheck disable=SC2016 # $0 is for the inner shell
+  as_watch "$WORK/watchsession/claude" -c 'printf "{}" | bash "$0" hook watch; true' "$GM" >/dev/null 2>&1 & c=$!
+  for i in 1 2 3 4 5 6 7 8 9 10; do [ ! -s "$pidf" ] || break; sleep 0.2; done
+  w=$(cat "$pidf" 2>/dev/null)
+  [ -n "$w" ] && kill -0 "$w" 2>/dev/null || fail "the watch did not arm" || return 1
+  sleep 1
+  kill -0 "$w" 2>/dev/null || fail "the watch ended while its session lives" || return 1
+  kill -9 "$(ps -o ppid= -p "$w" | tr -d ' ')"
+  wait "$c" 2>/dev/null || true
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do kill -0 "$w" 2>/dev/null || break; sleep 0.2; done
+  if kill -0 "$w" 2>/dev/null; then kill "$w"; fail "the watch outlived its session"; fi
+  [ ! -e "$pidf" ] || fail "it left its pid file"
+}
+
+t_open_restarts_a_party_leader_whose_watch_outlived_it() {
+  setup deadwatch
+  gm open appt-v2 >/dev/null 2>&1 || fail "open failed"
+  local pane out w kids k other
+  pane=$(pl_pane appt-v2)
+  # Its session has ended; its watch, and what the watch runs, are still in the pane.
+  mkdir -p "$WORK/deadwatch/bin" "$HERDR_STUB/fg"
+  printf 'sleep 60 &\nsleep 60 &\nwait\n' >"$WORK/deadwatch/bin/gm"
+  bash "$WORK/deadwatch/bin/gm" hook watch & w=$!
+  sleep 0.5
+  kids=$(pgrep -P "$w" | tr '\n' ' ')
+  [ -n "$kids" ] || fail "the stand-in watch has no children" || return 1
+  out=''
+  for k in $kids; do out="${out:+$out,}{\"name\":\"tail\",\"argv0\":\"tail\",\"argv\":[\"tail\"],\"pid\":$k}"; done
+  printf '%s' "$out" >"$HERDR_STUB/fg/$pane"
+  : >"$HERDR_STUB/runs"
+  out=$(gm open appt-v2 2>&1) || fail "the second open failed: $out"
+  rm -f "$HERDR_STUB/fg/$pane"
+  assert_contains "$out" "appt-v2: Party Leader started in herdr pane $pane (dead: the pane held only an ended Party Leader's watch, now stopped)" "the first open starts it" &&
+    assert_eq "$(runs_in "$pane")" 1 "in its own pane"
+  sleep 0.2
+  if kill -0 "$w" 2>/dev/null; then kill "$w"; fail "the watch was not ended"; fi
+  for k in $kids; do
+    if kill -0 "$k" 2>/dev/null; then kill "$k"; fail "what the watch ran was not ended"; fi
+  done
+  # A pane running anything else is still left alone.
+  sleep 60 & other=$!
+  printf '{"name":"vim","argv0":"vim","argv":["vim"],"pid":%s}' "$other" >"$HERDR_STUB/fg/$pane"
+  : >"$HERDR_STUB/runs"
+  out=$(gm open appt-v2 2>&1) || fail "the third open failed: $out"
+  rm -f "$HERDR_STUB/fg/$pane"
+  kill -0 "$other" 2>/dev/null || fail "gm ended a process that was not a watch"
+  kill "$other" 2>/dev/null
+  assert_contains "$out" "appt-v2: unknown (the pane runs vim, not a Party Leader); left alone" "something else: unknown" &&
+    assert_eq "$(runs_in "$pane")" 0 "nothing typed"
 }
 
 # nudge_ready: a Party Leader alive in herdr with a run finished long ago that nobody summoned, and no watch.

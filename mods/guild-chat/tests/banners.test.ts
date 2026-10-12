@@ -104,6 +104,13 @@ describe('a claude started by hand', () => {
     expect(await ui.find({ type: 'Text', text: /GUILDMASTER/ })).toBeUndefined()
   })
 
+  test("an Adventurer answers under its run, never its Party Leader's banner", async ($, on) => {
+    byHand(on, 'chat: banners\n', { HOME: '/home/p', GM_FOCUS: 'appt-v2', GM_RUN: '7', GM_RUN_TITLE: 'run 7 · #39 why-open-pane-right' })
+    const ui = await $.ui.mount({ plugin: 'guild-chat', surface: 'terminal', viewport, ...reply })
+    expect(await ui.find({ type: 'Text', text: / ⛨ ADVENTURER · run 7 · #39 why-open-pane-right $/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /PARTY LEADER/ })).toBeUndefined()
+  })
+
   test('keeps Claude Code\'s own chat when guild.conf says chat: off', async ($, on) => {
     byHand(on, '# chat: off | banners\nchat: off\n')
     const ui = await $.ui.mount({ plugin: 'guild-chat', surface: 'terminal', viewport, ...reply })

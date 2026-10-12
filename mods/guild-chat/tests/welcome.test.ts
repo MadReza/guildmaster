@@ -386,6 +386,15 @@ describe('the welcome on screen', () => {
     expect(await drawn($)).toEqual([STOCK])
   })
 
+  test("an Adventurer draws no card, nor its Party Leader's rule", async ($, on) => {
+    world(on, 'chat: banners\nsprites: off\n', FOCUS, { env: { GM_FOCUS: 'crm-1234', GM_RUN: '7', GM_RUN_TITLE: 'run 7 · #39 why-open-pane-right' } })
+    await $.session.start(sessionStart)
+    await settle()
+    expect(await drawn($)).toEqual([STOCK])
+    await $.prompt.submit(submit('go on'))
+    expect(await drawn($)).toEqual([STOCK])
+  })
+
   test('a short band takes the small piece and keeps the whole panel, which the band scrolls', async ($, on) => {
     world(on, 'chat: banners\nsprites: off\n', GUILD)
     await $.session.start(sessionStart)

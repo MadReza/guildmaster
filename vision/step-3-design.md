@@ -1,7 +1,7 @@
 # Step 3 design: Adventurers and enforced rules
 
 This is the design of roadmap step 3 ([roadmap.md](roadmap.md#step-3-adventurers-and-enforced-rules)), whose scope is build-order step 2 of [consultation.md](consultation.md#build-order), turned into build slices.
-The patron agreed to it on 2026-10-11 ("Go for it."), with every [question](#questions-for-the-patron) settled. Slices 1 and 2 are built; [What building slice 1 changed](#what-building-slice-1-changed), [What the visible Adventurer changed](#what-the-visible-adventurer-changed) and [What building slice 2 changed](#what-building-slice-2-changed) record where they differ from the text below.
+The patron agreed to it on 2026-10-11 ("Go for it."), with every [question](#questions-for-the-patron) settled. Slices 1 and 2 are built; [What building slice 1 changed](#what-building-slice-1-changed), [What the visible Adventurer changed](#what-the-visible-adventurer-changed) (and [its own workspace](#its-own-workspace-and-a-party-leader-that-answers-it) after it) and [What building slice 2 changed](#what-building-slice-2-changed) record where they differ from the text below.
 Vocabulary is [TERMINOLOGY.md](../TERMINOLOGY.md)'s.
 
 The patron asked for it on 2026-10-11, in the Party Leader of `adventurers`:
@@ -215,6 +215,60 @@ So an Adventurer is no longer a headless `claude -p`, when its Party Leader has 
 - **The fallback is the headless run.** When the Party Leader has no pane herdr still has (the suite's tests opened with `--no-launch`, a Party Leader started outside herdr, herdr not installed or its server down) or herdr will not split the pane, the keeper runs `claude -p` exactly as slice 1 built it, unseen, and records the `result` event. The folder-trust question does not stop the pane's session: the Party Leader already runs in the same camp.
 - **Not yet checked against real herdr:** `pane split` and `pane rename` were written from the CLI's naming and are exercised only through the stub; a herdr that answers them differently makes the keeper fall back to `claude -p` (a split with no pane id) or leaves the pane untitled (claude's `--name` still names the session). The lab check by hand is in [How it will be checked](#how-it-will-be-checked).
 
+### Its own workspace, and a Party Leader that answers it
+
+The patron, on 2026-10-12, in the Party Leader of `adventurers` (posting #40):
+
+<!-- patron: begin -->
+
+"Don't forget, I want these to be opened right under you on the machine part, not on the bottom half the screen. Patron needs to be able to interact with you. [Image #3] [Image #4]"
+
+<!-- patron: end -->
+
+The split pane took the bottom half of the Party Leader's own pane, where the patron talks to it. So, as [herdr-design.md](herdr-design.md) had already said for every worker:
+
+- **A workspace of its own.** The keeper, under the herdr lock, makes a workspace on the camp (`herdr workspace create --cwd <camp> --label '  └ #28 visible-adventurer-pane' --no-focus`), one step deeper than its Party Leader's `└ <focus>`, and places it right after the Party Leader's workspace in the sidebar with the same `workspace.move` as a Party Leader's under the guild's (after any other open run of that Party Leader). It is never focused. Its first pane is titled and runs `gm adventurer` as before; the run records the workspace beside the pane (schema 8: `pane_workspace`). A Party Leader placed later goes after the open runs' workspaces, so a run stays under its own Party Leader.
+- **The review closes the workspace** (`herdr workspace close`), not only the pane. A run recorded before schema 8 has only its split pane closed.
+- Everything else is as the visible Adventurer built it: the fallback to `claude -p`, the Stop hook, a lost pane.
+
+The patron, the same day (posting #39), on an Adventurer that had waited a long while at a permission prompt:
+
+<!-- patron: begin -->
+
+"Why did you open it in a pane, right under you ? It needs to be a Pane in Herdr so you can see if the agent is blocked or not.
+
+For example, your agent has been blocked for a while waiting on input. [Image #2]
+As party leader, you are supposed to answer these. Think of firstmate and 2ndmate, you would need to manage your adventurers (crew)"
+
+<!-- patron: end -->
+
+So a blocked Adventurer waits for its Party Leader, not the patron. This changes "A permission prompt now waits for the patron" above:
+
+- **Blocked is a summons.** While a run lives in a pane, the Party Leader's watch asks herdr at each poll what the pane is doing (`agent get`). The first time it says `blocked`, the run records it (schema 9: `blocked_at`, `blocked_summoned_at`) with the pane's last lines (`pane read --source recent`, trailing blank lines dropped, 15 kept, in `runs/<run>/blocked.txt`), and the watch summons the Party Leader with those lines and how to answer. Once per block: herdr saying anything else clears it, and so does an answer, so the next block summons again. The muster asks the same of each alive Party Leader's runs, so with the watch dead the nudge types `/guild-chat:summons` for it. `gm runs`, `gm where` and the Adventurer's status line say it is blocked.
+- **`gm runner <run>`** is how the Party Leader answers: alone it shows the pane's last 40 lines; `--keys "down enter"` sends key presses, `--text` types words and Enter. A runner is recorded in the ledger before it is sent, and only to a live run of the focus with a pane open. The name is the glossary's: a message carried to a worker, recorded before it is delivered.
+- **The charter** says it in its summons line: a blocked run is the Party Leader's to answer when it is safe and in scope; the summons itself adds that only the patron's decisions go to `needs-you`. The charter, playbook and rules still load whole: 9,290 characters for `~/.guildmaster` with the template files (the hook's first line is shorter to make room).
+- **Fewer prompts to answer.** The run's settings allow what an Adventurer predictably reads: the rules file and the playbooks in the Guildhall, the issue and pull request views of `gh` and `gh-axi`, `ps`, `shellcheck` (git status, diff, log and show were already allowed), and its own scratchpad. `gh` is no longer denied whole: only a pull request's create, merge and review, as `glab` still is.
+- **Its own name.** The run's settings set `GM_RUN_TITLE` and a status line of its own (`⛨ adventurer · run 7 · #39 … · for <focus> on <branch>`); the guild chat mod draws its replies under `⛨ ADVENTURER · run 7 · …` and gives it no welcome card, where it drew its Party Leader's `PARTY LEADER · <focus>` from the `GM_FOCUS` its settings carry.
+- **The writ asks.** The contract template no longer says nobody answers: when something is unclear the Adventurer asks in its session with a question that waits for the answer, not by ending its turn (the first turn's end is the run's end), and only when no answer can come chooses the safer reading. The Guildhall's copy is the patron's and is not changed.
+- **Not yet checked against real herdr:** that Claude Code's permission prompt and its question tool both read as `blocked`, and the `--lines` count `pane read` takes. `send-keys` takes several keys in one call, by its help.
+
+### The permission mode, as Firstmate starts its crew
+
+The patron, on 2026-10-12, in the Party Leader of `adventurers` (posting #41):
+
+<!-- patron: begin -->
+
+"I think adventurers should start the same way as crews from Firstmate ? Auto-mode or something similar ?"
+
+<!-- patron: end -->
+
+Firstmate starts every Claude crewmate with the flag `config/claude-permission-mode` names, `bypass` by default or `auto`, re-read on every launch, and refuses an unknown value ([its launch](../firstmate/components/crew/launch.html)). An Adventurer started in `acceptEdits` stops at every command its allow-list does not name, and each stop now summons its Party Leader. So this changes the fixed `--permission-mode acceptEdits` of [slice 1](#permissions-in-slice-1):
+
+- **`adventurer-permission-mode` in `guild.conf`**: `auto` (the default) starts claude with `--permission-mode auto`, Claude Code's own classifier answering its prompts; `bypass` with `--dangerously-skip-permissions`; `acceptEdits` as before. It applies to every Adventurer gm starts, in its herdr workspace and in the `claude -p` fallback alike.
+- **Read at every dispatch, recorded on the run.** `gm dispatch` reads the setting and writes Claude Code's mode name on the run (`permission_mode`: `auto`, `bypassPermissions`, `acceptEdits`), and the keeper starts claude from the run, so a run keeps the mode it was dispatched with. A value the setting cannot take refuses the dispatch, naming the setting, rather than starting an Adventurer in a mode the patron did not choose; elsewhere gm ignores such a value and keeps the default.
+- **The guard rails stay in every mode.** The rules hook (`gm hook rules`) is in the run's settings whatever the mode, and so are the denied merges, rebases, new branches and merge requests: a `PreToolUse` hook's deny and a deny rule hold in `bypass` too. The suite checks the settings carry them in each mode.
+- Firstmate's default is `bypass`; the guild's is `auto`, the safer of the two the patron named, since the rules hook is a guard rail, not a sandbox.
+
 ## Slice 2: push rules in every camp
 
 `gm hook rules`, a `PreToolUse` hook on `Bash`, in the Party Leader's settings and in every Adventurer's.
@@ -314,7 +368,7 @@ All eight are settled; see [What the patron settled](#what-the-patron-settled).
 - Slice 5: `gm trace` shows the dispatch, the Adventurer's run under it and the check, with the writ hash on each.
 - By hand, in a lab herdr session, the done-when: dispatch a contract, keep talking to the Party Leader while it runs, and see the result wake it; then send a follow-up bug on the same ticket and see its commit land on the same feature branch, with a `git checkout -b` tried by the Adventurer denied. And issue #41's own steps: `gm open demo --repo <repo>`, then `gm post --focus demo "say hello"`, and the idle Party Leader takes it up with nobody in its tab; again after that turn ends, to see the Stop re-arm after a rewake turn; and once with `gm open demo2 --brief "say hello"`.
 - By hand, once per Claude Code upgrade: the lab tests above.
-- The visible Adventurer, with the herdr stub: dispatch splits the Party Leader's pane downwards and titles it with the run; the pane runs claude with the writ as its first prompt and the run's settings; the Stop hook records the result and the watch summons; a later turn changes nothing; the review closes the pane; a closed pane, or claude ending early, ends the run as lost. By hand, against real herdr: `herdr pane split` and `herdr pane rename` answer as the stub does, and the pane shows the session under the Party Leader's.
+- The visible Adventurer, with the herdr stub: dispatch makes the run a workspace of its own, labelled one step under its Party Leader's and placed right after it, never focused, leaving the Party Leader's pane whole, and titles its pane with the run; the pane runs claude with the writ as its first prompt and the run's settings; the Stop hook records the result and the watch summons; a later turn changes nothing; the review closes the workspace; a closed pane, or claude ending early, ends the run as lost. By hand, against real herdr: `herdr workspace create`, `workspace close` and `pane rename` answer as the stub does, and the sidebar shows the run's workspace under the Party Leader's.
 - gm's suite: the muster's nudge against recorded screens (empty, suggestion, draft, multi-line draft, stash, draft and stash, a changing input), checking what it would type, with the herdr stub.
 
 ## Not in this step
