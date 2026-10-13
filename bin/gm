@@ -2056,6 +2056,10 @@ gm_where() {
     done <<<"$(gm_sql "SELECT name, repo, camp, branch, COALESCE(phase,''), COALESCE(mr,'') FROM focus_repo WHERE focus_id=$fid ORDER BY position;")"
     repos_sql="SELECT $(gm_q "$block");"
     least="', the least advanced of its repositories'"
+    # Every repository's rules file, named once beside their folder: the start-up hook's budget is tight.
+    rules=$(gm_sql "SELECT repo FROM focus_repo WHERE focus_id=$fid ORDER BY position;" | while IFS= read -r rrepo; do
+      [ -n "$rrepo" ] && basename "$rrepo"; done | sed 's/$/.md/' | paste -sd, - | sed 's/,/, /g')
+    rules="$rules in $GM_HALL/rules"
   fi
   gm_sql <<SQL
 SELECT 'Resume summary for focus '||f.name||' ('||f.kind||COALESCE('; tickets '||(SELECT group_concat(key, ', ') FROM ticket WHERE focus_id=f.id),'')||'), built by gm from the register at '||$GM_NOW||'.'

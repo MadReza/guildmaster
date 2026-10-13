@@ -4878,12 +4878,14 @@ web -" "on api's row only" &&
     assert_contains "$out" "the owner is kept after save; 1 ahead, 0 behind origin/feature/CRM-5; 1 changed file (repository $api)" "where: api's git state" &&
     assert_contains "$out" "- web on feature/CRM-5, phase build (3/8), MR https://git.example/web/-/merge_requests/9: HEAD " "where: web" &&
     assert_contains "$out" "no upstream; clean (repository $web)" "where: web's git state" &&
+    assert_contains "$out" ", rules api.md, web.md in $GM_HALL/rules." "where: every repository's rules file" &&
     assert_not_contains "$out" "Camp git state" "no git state of the folder" &&
     assert_eq "$(gm show crm-5 | tail -n +2)" "$(printf '%s\n' "$out" | tail -n +2)" "gm show of the focus is the same" || return 1
   out=$(printf '{"session_id":"s1","source":"startup","hook_event_name":"SessionStart"}' | gm hook session-start)
   out=$(json "SELECT json_extract($(sqlq "$out"),'\$.hookSpecificOutput.additionalContext');")
   assert_contains "$out" "- api on feature/CRM-5, phase dev-test (4/8), MR https://git.example/api/-/merge_requests/7" "resume: api" &&
-    assert_contains "$out" "- web on feature/CRM-5, phase build (3/8)" "resume: web" || return 1
+    assert_contains "$out" "- web on feature/CRM-5, phase build (3/8)" "resume: web" &&
+    assert_contains "$out" ", rules api.md, web.md in $GM_HALL/rules." "resume: every repository's rules file" || return 1
   # The status line: each repository and its phase, in place of one branch; cut short when they are many.
   assert_eq "$(gm statusline <<<'{}' | sed -n 1p)" "▸ crm-5 · ticket · CRM-5 · phase 3/8 build · api dev-test · web build" "status line" || return 1
   db "UPDATE focus_repo SET name=name||'-with-a-rather-long-repository-name-that-goes-on-and-on' WHERE name='api';"
