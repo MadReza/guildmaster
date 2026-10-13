@@ -1,0 +1,337 @@
+import { atom, read, update } from 'claude-code'
+import type { EngineInterface, Register, RenderChildren } from 'claude-code'
+
+import type { Shown } from '../types'
+import { layout } from './layout'
+import type { Piece, Word } from './layout'
+import { findRule, findTerm, forkPrompt, markSpans, norm, parseCharter, parseTerminology, postingTldr, refOf, runTldr, tldr } from './marks'
+import type { Mark, Rule, Term } from './marks'
+
+// Guildmaster's lexicon. A reply from a Party Leader or the Guildmaster is drawn with each thing
+// it can explain drawn underlined, the word alone and pressable: the terms of TERMINOLOGY.md,
+// posting references (#49, context-bar#1), run references (run 13), and code spans that name
+// something (GM_VEIL, guild.conf). A click on one, or /what over a phrase selected with the mouse, opens a small
+// popup with a TL;DR of it and where the meaning came from; while Claude asks a question (AskUserQuestion) and
+// the keys are the question's, a click on a line drawn above it does /what's work, and one on the line under
+// that sets the question aside for Claude to explain the words and ask again. What the guild already knows
+// answers first and costs nothing: TERMINOLOGY.md, the charter's named rules, gm show for a
+// posting, gm runs for a run. Anything else is asked of the model over this session's own
+// transcript ($.model.fork), and the answer is kept in $.store, by focus and phrase, so the
+// next click on it costs nothing.
+
+export const PANE = 'guild-lexicon'
+export const AI = 'AI, from this session'
+
+const shown = atom({ plugin: 'guild-lexicon', key: 'shown' } as const, null as Shown)
+
+// The guild's terms and the session's charter rules, read once a session (again after a reload).
+let terms: Term[] = []
+let rules: Rule[] = []
+let reading: Promise<void> | undefined
+// Which lookup the popup shows: a click on another phrase while the model answers wins.
+let asking = 0
+
+async function home($: EngineInterface) {
+  return (await $.env.get('HOME')) ?? ''
+}
+
+async function focusOf($: EngineInterface) {
+  return (await $.env.get('GM_CHAT_FOCUS')) || (await $.env.get('GM_FOCUS')) || undefined
+}
+
+async function readFile($: EngineInterface, path: string) {
+  try {
+    return await $.fs.read(path)
+  } catch {
+    return undefined
+  }
+}
+
+// TERMINOLOGY.md is at the clone's root, two folders above the mod, whether the mod was loaded
+// from mods/guild-lexicon or through the clone's .claude/skills link to it.
+function knowledge($: EngineInterface) {
+  return (reading ??= readKnowledge($))
+}
+
+async function readKnowledge($: EngineInterface) {
+  try {
+    const real = (await $.fs.stat($.plugin.root, { resolve: true })).realPath ?? $.plugin.root
+    const md = await readFile($, `${real.replace(/\/[^/]+\/[^/]+\/?$/, '')}/TERMINOLOGY.md`)
+    if (md) terms = parseTerminology(md)
+  } catch {
+    // Loaded away from a Guildmaster clone: no terms, the rest still explains.
+  }
+  const hall = (await $.env.get('GM_HALL')) || `${await home($)}/.guildmaster`
+  const charter = await readFile($, (await focusOf($)) ? `${hall}/charter.md` : `${hall}/front-desk/CLAUDE.md`)
+  rules = charter ? parseCharter(charter) : []
+}
+
+// The guild's one gm, linked at ~/.local/bin/gm, never a camp's draft of it.
+async function gm($: EngineInterface, args: string[]): Promise<string | undefined> {
+  const path = `${await home($)}/.local/bin/gm`
+  if (!(await $.fs.exists(path))) return undefined
+  const focus = await focusOf($)
+  try {
+    const r = await $.process.run([path, ...args], { env: focus ? { GM_FOCUS: focus } : {}, timeoutMs: 10_000 })
+    return r.exitCode === 0 ? r.stdout : undefined
+  } catch {
+    return undefined
+  }
+}
+
+type Known = { tldr: string; source: string }
+
+/** What the guild's own records say of a mark, the model not asked; undefined when they say nothing. */
+export async function known($: EngineInterface, mark: Mark): Promise<Known | undefined> {
+  await knowledge($)
+  const ref = mark.kind === 'phrase' || mark.kind === 'code' ? (refOf(mark.key) ?? mark) : mark
+  if (ref.kind === 'posting') {
+    const focus = await focusOf($)
+    const key = ref.key.startsWith('#') && focus ? `${focus}${ref.key}` : ref.key
+    const said = await gm($, ['show', key])
+    const t = said && postingTldr(said)
+    return t ? { tldr: t, source: `posting ${key}` } : undefined
+  }
+  if (ref.kind === 'run') {
+    const said = await gm($, ['runs', '--all'])
+    const t = said && runTldr(said, ref.key)
+    return t ? { tldr: t, source: `run ${ref.key}, gm runs` } : undefined
+  }
+  const phrase = ref.kind === 'code' ? ref.key.replace(/=.*$/, '') : ref.key
+  const term = ref.kind === 'rule' ? undefined : findTerm(terms, phrase)
+  if (term) return { tldr: tldr(term.definition), source: 'TERMINOLOGY.md' }
+  const rule = ref.kind === 'term' ? undefined : findRule(rules, phrase)
+  if (rule) return { tldr: tldr(`${rule.name}: ${rule.text}`), source: 'the charter' }
+  return undefined
+}
+
+/** The store key of the model's answer for one phrase, in this focus (the front desk's own otherwise). */
+export async function cacheKey($: EngineInterface, phrase: string) {
+  return `ai:${(await focusOf($)) ?? 'front-desk'}:${norm(phrase)}`
+}
+
+/** The model's TL;DR of a phrase the records do not know: a kept answer, else the model's, then kept. */
+export async function ask($: EngineInterface, phrase: string): Promise<Known> {
+  const key = await cacheKey($, phrase)
+  const kept = await $.store.get(key)
+  if (typeof kept === 'string' && kept) return { tldr: kept, source: AI }
+  const reply = await $.model.fork({ prompt: forkPrompt(phrase) })
+  if (!reply.isAnswered) {
+    const why = reply.reason === 'nothing-to-fork' ? 'there is no conversation yet to read it from' : `the model gave no answer (${reply.reason})`
+    return { tldr: `Not in the guild's records, and ${why}.`, source: 'nowhere yet' }
+  }
+  const t = tldr(reply.text)
+  await $.store.set(key, t)
+  return { tldr: t, source: AI }
+}
+
+/** The phrase selected with the mouse, on one line; undefined with none. */
+async function selection($: EngineInterface) {
+  return (await $.ui.selection())?.text.replace(/\s+/g, ' ').trim() || undefined
+}
+
+/** Opens the popup on a phrase the patron chose: a reference when it reads as one. */
+function explainPhrase($: EngineInterface, phrase: string) {
+  return explain($, refOf(phrase) ?? { kind: 'phrase', key: phrase.length > 200 ? phrase.slice(0, 200) : phrase })
+}
+
+export const ASK_LINE = 'lexicon: select words above, then click here to see what they mean'
+export const ASIDE_LINE = 'lexicon: set this question aside and ask about the selected words'
+
+/** What Claude reads when the patron sets its question aside to ask about `phrase`: the question comes back by itself. */
+export const asideReason = (phrase: string) =>
+  `The user set this question aside to ask what "${phrase}" means. Explain it briefly, then ask the same question again with AskUserQuestion.`
+
+// Each AskUserQuestion call still open, by its tool_use_id (the dialog's requestId): what settles it from outside the dialog.
+const openAsks = new Map<string, (r: { deny: string }) => void>()
+
+const title = (phrase: string) => (phrase.length > 50 ? `${phrase.slice(0, 49)}…` : phrase)
+const failed = (err: unknown) => `The lookup failed: ${err instanceof Error ? err.message : String(err)}`
+
+/**
+ * Opens the popup on a mark and fills it. It settles once the popup shows what the records say,
+ * or says it is looking the phrase up; the model's answer, when one is asked for, lands after.
+ */
+export async function explain($: EngineInterface, mark: Mark) {
+  const mine = ++asking
+  const phrase = mark.key
+  const show = async (value: Shown) => {
+    if (mine === asking) await update($, shown, () => value)
+  }
+  await show({ phrase, tldr: null, source: '' })
+  const opened = await $.ui.open({ id: PANE, title: `Lexicon · ${title(phrase)}`, focus: true, closeOnEscape: true, holdToasts: true, rows: 7, columns: 64 })
+  if (!opened.isPlaced) $.ui.toast(`lexicon: the popup cannot open here: ${opened.reason}`)
+  let got: Known | undefined
+  try {
+    got = await known($, mark)
+  } catch (err) {
+    return show({ phrase, tldr: failed(err), source: 'nowhere yet' })
+  }
+  if (got) return show({ phrase, ...got })
+  void ask($, phrase).then(a => show({ phrase, ...a }), err => show({ phrase, tldr: failed(err), source: 'nowhere yet' }))
+}
+
+// The lexicon's row takes the place of the engine's own (`{ type: 'engine' }`, what the bottom of
+// the chain answers) within what the hooks beneath drew, so another mod's banner over the row
+// stays, whichever order the mods load in. A tree that holds no engine row (a mod that hid the
+// row, as the veil does, or drew its own) is left as it was drawn.
+function swapEngine(tree: unknown, mine: unknown): { tree: unknown; swapped: boolean } {
+  if (Array.isArray(tree)) {
+    let swapped = false
+    const out = tree.map(t => {
+      const r = swapEngine(t, mine)
+      swapped ||= r.swapped
+      return r.tree
+    })
+    return { tree: out, swapped }
+  }
+  if (tree === null || typeof tree !== 'object') return { tree, swapped: false }
+  const node = tree as { type?: unknown; children?: unknown }
+  if (node.type === 'engine') return { tree: mine, swapped: true }
+  if (node.children === undefined) return { tree, swapped: false }
+  const r = swapEngine(node.children, mine)
+  return r.swapped ? { tree: { ...node, children: r.tree }, swapped: true } : { tree, swapped: false }
+}
+
+export const register: Register = on => {
+  on('session.start', async ($, e, next) => {
+    await $.command.register({
+      name: 'what',
+      description: 'Explain the phrase you selected with the mouse: a short TL;DR, from the guild\'s records or this session (while Claude asks a question, click the lexicon line above it instead)',
+    })
+    reading = undefined
+    void knowledge($)
+    return next(e)
+  })
+
+  // An open question is settled by the dialog, or by the set-aside line drawn above it, whichever comes first: the
+  // line's press refuses the call, and Claude reads the refusal's reason as the tool's error result.
+  on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
+    let settle!: (r: { deny: string }) => void
+    const pressed = new Promise<{ deny: string }>(r => { settle = r })
+    openAsks.set(e.tool_use_id, settle)
+    try {
+      return await Promise.race([next(e), pressed])
+    } finally {
+      openAsks.delete(e.tool_use_id)
+    }
+  })
+
+  on('command.run', { command: 'what' }, async ($, e) => {
+    const typed = e.args.trim()
+    const selected = typed || (await selection($))
+    if (!selected) {
+      return {
+        text: 'Select a word or phrase in the chat with the mouse, then type /what (or /what <phrase>). A marked word in a reply opens the same popup at a click. '
+          + `While Claude asks you a question, the prompt is the question's: select the words, then click the line above the question (“${ASK_LINE}”); the popup closes with a click on its ✕, the question left as it was. `
+          + `Or click the line under it (“${ASIDE_LINE}”): the question closes, Claude explains the words, then asks the same question again.`,
+      }
+    }
+    await explainPhrase($, selected)
+    return { text: `“${title(selected)}” is in the lexicon popup (esc closes it).` }
+  })
+
+  on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
+    // A summary stands for text the patron has not read; ctrl+o draws the stored message, not this.
+    if (e.props.isSummary === true) return next(e)
+    await knowledge($)
+    const spans = markSpans(e.props.text, terms, rules)
+    if (spans.length === 0) return next(e)
+    const drawn = await next(e)
+    const { Box, Text, Button, Link, Markdown } = $.ui.resolve(e)
+    // A mark is a plain Button: the word alone, underlined, a click opens the popup. It is never a
+    // markdown link, which a terminal without hyperlinks draws with its URL after it.
+    let n = 0
+    const piece = (p: Piece, mark: boolean) => (
+      <Text bold={p.bold} italic={p.italic} strikethrough={p.strike} underline={mark || undefined} color={p.code ? 'permission' : undefined}>
+        {p.href ? <Link href={p.href}>{p.text}</Link> : p.text}
+      </Text>
+    )
+    const word = (w: Word) => {
+      const parts: RenderChildren[] = []
+      for (let i = 0; i < w.length;) {
+        const mark = w[i]!.mark
+        if (!mark) {
+          parts.push(piece(w[i++]!, false))
+          continue
+        }
+        const run: Piece[] = []
+        while (i < w.length && w[i]!.mark === mark) run.push(w[i++]!)
+        parts.push(
+          <Button key={`lexicon:${e.requestId}:${n++}`} label={run.map(p => p.text).join('')} plain onPress={() => void explain($, mark)}>
+            {run.map(p => piece(p, true))}
+          </Button>,
+        )
+      }
+      return <Box flexDirection="row" flexShrink={1} marginRight={1}>{parts}</Box>
+    }
+    const blocks = layout(e.props.text, spans).map(b => {
+      if (b.kind === 'markdown') return <Box marginTop={b.gap ? 1 : 0}><Markdown text={b.text} /></Box>
+      const words = b.words.map(w => (b.heading ? w.map(p => ({ ...p, bold: true as const })) : w))
+      return (
+        <Box flexDirection="row" marginTop={b.gap ? 1 : 0} marginLeft={b.indent}>
+          {b.prefix ? <Box flexShrink={0} width={b.prefix.length}><Text dimColor={b.quote}>{b.prefix}</Text></Box> : null}
+          <Box flexDirection="row" flexWrap="wrap" flexGrow={1} flexShrink={1}>{words.map(word)}</Box>
+        </Box>
+      )
+    })
+    const mine = (
+      <Box flexDirection="row" marginTop={e.props.isFirstOfReply ? 1 : 0}>
+        <Box width={2} flexShrink={0}>
+          <Text>{e.props.isFirstOfReply ? '⏺' : ' '}</Text>
+        </Box>
+        <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+          {blocks}
+        </Box>
+      </Box>
+    )
+    const r = swapEngine(drawn, mine)
+    return (r.swapped ? r.tree : drawn) as typeof drawn
+  })
+
+  // While Claude asks a question the dialog holds every key, so no chord and no /what reach the lexicon; a click
+  // does. Two dim lines are drawn above the dialog (the engine draws nothing of a plugin's below it), the dialog
+  // itself passed on as it came: a click on the first reads the selection and opens the popup, the question untouched.
+  // Only where Claude Code reports a mouse selection: the fullscreen layout.
+  on('ui.render', { component: 'AskUserQuestion' }, async ($, e, next) => {
+    const drawn = await next(e)
+    if (e.surface !== 'terminal' || e.viewport?.isFullscreen !== true) return drawn
+    const { Box, Button } = $.ui.resolve(e)
+    const press = async () => {
+      const selected = await selection($)
+      if (selected) await explainPhrase($, selected)
+      else $.ui.toast('lexicon: select a word or phrase with the mouse first, then click the line again')
+    }
+    // The second line sets the question aside: Claude explains the words, then asks the same question again. It
+    // settles only the call this dialog was drawn for (its requestId), so a press that lands after Claude has
+    // asked again cannot settle the new question in the old one's place.
+    const call = e.requestId
+    const aside = async () => {
+      const selected = await selection($)
+      if (!selected) return $.ui.toast('lexicon: select a word or phrase with the mouse first, then click the line again')
+      openAsks.get(call)?.({ deny: asideReason(selected.length > 200 ? selected.slice(0, 200) : selected) })
+    }
+    return (
+      <Box flexDirection="column">
+        <Button key="lexicon:selection" plain dimColor onPress={press}>{ASK_LINE}</Button>
+        <Button key={`lexicon:aside:${call}`} plain dimColor onPress={aside}>{ASIDE_LINE}</Button>
+        {drawn}
+      </Box>
+    ) as typeof drawn
+  })
+
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const { Box, Text } = $.ui.resolve(e)
+    const now = await read($, shown)
+    if (now === null) return <Text dimColor>Click a marked word in a reply, or select a phrase and type /what.</Text>
+    return (
+      <Box flexDirection="column">
+        <Text bold wrap="truncate-end">{now.phrase}</Text>
+        {now.tldr === null
+          ? <Text dimColor>{`Looking up “${title(now.phrase)}”…`}</Text>
+          : <Text>{now.tldr}</Text>}
+        {now.tldr !== null && <Text dimColor wrap="truncate-end">{`from ${now.source} · ${e.props.isFocused ? 'esc closes' : '✕ closes'}`}</Text>}
+      </Box>
+    )
+  })
+}

@@ -111,6 +111,7 @@ Where a term replaces one from Firstmate, the Firstmate column records the origi
 | **Satchel** | The spyglass's tab of every file the party changed, the camp's and each adventurer's worktree. | (none) |
 | **Codex** | The spyglass's tab of the guild's settings, `guild.conf`, read and changed there. | (none) |
 | **Lantern** | The spyglass's tab of the session's context window: how full it burns, and what feeds it. | (none) |
+| **Lexicon** | The chat's glossary of the words a reply leans on: the guild's terms, postings, runs, named rules and code names marked in the Guildmaster's and Party Leaders' replies, each explained at a click (or `/what` over a selected phrase) in a small popup, from the guild's own records first and the model only after. Drawn on the screen only: it never enters the chat. | (none) |
 
 ## Words kept as they are
 

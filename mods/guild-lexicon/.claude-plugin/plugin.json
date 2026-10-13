@@ -1,0 +1,6 @@
+{
+  "name": "guild-lexicon",
+  "version": "0.1.0",
+  "description": "Guildmaster's lexicon: the guild's terms, postings, runs and named rules marked in a reply, each explained at a click in a short popup, from the guild's own records first and the model only after; /what explains a selected phrase.",
+  "types": "./types/index.d.ts"
+}
