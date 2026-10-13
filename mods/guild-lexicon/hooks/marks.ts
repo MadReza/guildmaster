@@ -9,23 +9,6 @@ export type Rule = { name: string; text: string }
 /** What a marked word stands for: the kind decides where its meaning is looked up first. */
 export type Mark = { kind: 'term' | 'rule' | 'posting' | 'run' | 'code' | 'phrase'; key: string }
 
-// Every href the lexicon writes starts here. A Markdown link must be https: to be drawn as a link;
-// .invalid is reserved, so a ctrl-click that opens one in a browser reaches nobody.
-export const HREF = 'https://lexicon.invalid/'
-
-export const hrefOf = (m: Mark) => `${HREF}${m.kind}/${encodeURIComponent(m.key)}`
-
-export function markOf(href: string): Mark | undefined {
-  if (!href.startsWith(HREF)) return undefined
-  const [kind, ...rest] = href.slice(HREF.length).split('/')
-  if (kind === undefined || !['term', 'rule', 'posting', 'run', 'code', 'phrase'].includes(kind)) return undefined
-  try {
-    return { kind: kind as Mark['kind'], key: decodeURIComponent(rest.join('/')) }
-  } catch {
-    return undefined
-  }
-}
-
 const plain = (s: string) => s.replace(/\*\*|__|`/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').trim()
 
 /** The bold Term column of every table in TERMINOLOGY.md, with its Definition cell. */
@@ -85,7 +68,8 @@ const COMMON = new Set(['run', 'round', 'register', 'archive', 'seal', 'sealing'
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-type Span = { start: number; end: number; mark: Mark }
+/** One marked stretch of a reply: where it starts and ends in the text, and what it stands for. */
+export type Span = { start: number; end: number; mark: Mark }
 
 /** A posting or run reference typed alone, as `/what` gets it: `#49`, `context-bar#1`, `run 13`. */
 export function refOf(phrase: string): Mark | undefined {
@@ -141,15 +125,14 @@ function prose(text: string, offset: number, terms: readonly Term[], rules: read
 }
 
 /**
- * The reply's markdown with each thing it can explain made a link to the lexicon, and the hrefs
- * written; `hrefs` is empty when there is nothing to mark. Code fences, links, URLs and code
- * spans that name nothing are left as written.
+ * Where each thing a reply can explain is in its markdown, in order: `[]` when there is nothing
+ * to mark. Code fences, tables, links, URLs and code spans that name nothing are left alone.
  */
-export function markText(text: string, terms: readonly Term[], rules: readonly Rule[]): { text: string; hrefs: string[] } {
+export function markSpans(text: string, terms: readonly Term[], rules: readonly Rule[]): Span[] {
   const spans: Span[] = []
   const seen = new Set<string>()
-  // Fences, links, bare URLs, autolinks and code spans are taken out of the prose first.
-  const guarded = /(^|\n)(```|~~~)[\s\S]*?(\n\2[^\n]*(?=\n|$)|$)|!?\[[^\]\n]*\]\([^)\n]*\)|<[a-z]+:[^>\s]+>|https?:\/\/[^\s)>\]]+|`([^`\n]+)`/g
+  // Fences, table rows, links, bare URLs, autolinks and code spans are taken out of the prose first.
+  const guarded = /(^|\n)(```|~~~)[\s\S]*?(\n\2[^\n]*(?=\n|$)|$)|(?<=^|\n)[ \t]*\|[^\n]*|!?\[[^\]\n]*\]\([^)\n]*\)|<[a-z]+:[^>\s]+>|https?:\/\/[^\s)>\]]+|`([^`\n]+)`/g
   let at = 0
   for (const m of text.matchAll(guarded)) {
     spans.push(...prose(text.slice(at, m.index), at, terms, rules, seen))
@@ -164,19 +147,7 @@ export function markText(text: string, terms: readonly Term[], rules: readonly R
     at = m.index + m[0].length
   }
   spans.push(...prose(text.slice(at), at, terms, rules, seen))
-  if (spans.length === 0) return { text, hrefs: [] }
-  spans.sort((a, b) => a.start - b.start)
-  let out = ''
-  let last = 0
-  const hrefs: string[] = []
-  for (const s of spans) {
-    const href = hrefOf(s.mark)
-    const shown = text.slice(s.start, s.end).replace(/([[\]])/g, '\\$1')
-    out += `${text.slice(last, s.start)}[${shown}](${href})`
-    if (!hrefs.includes(href)) hrefs.push(href)
-    last = s.end
-  }
-  return { text: out + text.slice(last), hrefs: hrefs.slice(0, 256) }
+  return spans.sort((a, b) => a.start - b.start)
 }
 
 /** At most `lines` lines of at most `width` characters in all: the popup's TL;DR. */
