@@ -1,14 +1,16 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
 import type { Shown } from '../types'
-import { findRule, findTerm, forkPrompt, markOf, markText, norm, parseCharter, parseTerminology, postingTldr, refOf, runTldr, tldr } from './marks'
+import { layout } from './layout'
+import type { Piece, Word } from './layout'
+import { findRule, findTerm, forkPrompt, markSpans, norm, parseCharter, parseTerminology, postingTldr, refOf, runTldr, tldr } from './marks'
 import type { Mark, Rule, Term } from './marks'
 
 // Guildmaster's lexicon. A reply from a Party Leader or the Guildmaster is drawn with each thing
-// it can explain marked as a link: the terms of TERMINOLOGY.md, posting references (#49,
-// context-bar#1), run references (run 13), and code spans that name something (GM_VEIL,
-// guild.conf). A click on one, or /what over a phrase selected with the mouse, opens a small
+// it can explain drawn underlined, the word alone and pressable: the terms of TERMINOLOGY.md,
+// posting references (#49, context-bar#1), run references (run 13), and code spans that name
+// something (GM_VEIL, guild.conf). A click on one, or /what over a phrase selected with the mouse, opens a small
 // popup with a TL;DR of it and where the meaning came from. What the guild already knows
 // answers first and costs nothing: TERMINOLOGY.md, the charter's named rules, gm show for a
 // posting, gm runs for a run. Anything else is asked of the model over this session's own
@@ -194,25 +196,53 @@ export const register: Register = on => {
     // A summary stands for text the patron has not read; ctrl+o draws the stored message, not this.
     if (e.props.isSummary === true) return next(e)
     await knowledge($)
-    const marked = markText(e.props.text, terms, rules)
-    if (marked.hrefs.length === 0) return next(e)
+    const spans = markSpans(e.props.text, terms, rules)
+    if (spans.length === 0) return next(e)
     const drawn = await next(e)
-    const { Box, Text, Markdown } = $.ui.resolve(e)
+    const { Box, Text, Button, Link, Markdown } = $.ui.resolve(e)
+    // A mark is a plain Button: the word alone, underlined, a click opens the popup. It is never a
+    // markdown link, which a terminal without hyperlinks draws with its URL after it.
+    let n = 0
+    const piece = (p: Piece, mark: boolean) => (
+      <Text bold={p.bold} italic={p.italic} strikethrough={p.strike} underline={mark || undefined} color={p.code ? 'permission' : undefined}>
+        {p.href ? <Link href={p.href}>{p.text}</Link> : p.text}
+      </Text>
+    )
+    const word = (w: Word) => {
+      const parts: RenderChildren[] = []
+      for (let i = 0; i < w.length;) {
+        const mark = w[i]!.mark
+        if (!mark) {
+          parts.push(piece(w[i++]!, false))
+          continue
+        }
+        const run: Piece[] = []
+        while (i < w.length && w[i]!.mark === mark) run.push(w[i++]!)
+        parts.push(
+          <Button key={`lexicon:${e.requestId}:${n++}`} label={run.map(p => p.text).join('')} plain onPress={() => void explain($, mark)}>
+            {run.map(p => piece(p, true))}
+          </Button>,
+        )
+      }
+      return <Box flexDirection="row" flexShrink={1} marginRight={1}>{parts}</Box>
+    }
+    const blocks = layout(e.props.text, spans).map(b => {
+      if (b.kind === 'markdown') return <Box marginTop={b.gap ? 1 : 0}><Markdown text={b.text} /></Box>
+      const words = b.words.map(w => (b.heading ? w.map(p => ({ ...p, bold: true as const })) : w))
+      return (
+        <Box flexDirection="row" marginTop={b.gap ? 1 : 0} marginLeft={b.indent}>
+          {b.prefix ? <Box flexShrink={0} width={b.prefix.length}><Text dimColor={b.quote}>{b.prefix}</Text></Box> : null}
+          <Box flexDirection="row" flexWrap="wrap" flexGrow={1} flexShrink={1}>{words.map(word)}</Box>
+        </Box>
+      )
+    })
     const mine = (
       <Box flexDirection="row" marginTop={e.props.isFirstOfReply ? 1 : 0}>
         <Box width={2} flexShrink={0}>
           <Text>{e.props.isFirstOfReply ? '⏺' : ' '}</Text>
         </Box>
         <Box flexDirection="column" flexGrow={1} flexShrink={1}>
-          <Markdown
-            key={`lexicon:${e.requestId}`}
-            text={marked.text}
-            pressableLinks={marked.hrefs}
-            onLinkPress={link => {
-              const mark = markOf(link.href)
-              if (mark) void explain($, mark)
-            }}
-          />
+          {blocks}
         </Box>
       </Box>
     )

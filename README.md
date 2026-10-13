@@ -348,7 +348,7 @@ The mod's own tests run with `claude plugin test mods/paste-viewer`.
 
 ### The lexicon
 
-A reply leans on words the patron may not have at hand: a guild term, a posting, a run, a rule of the charter. The mod in `mods/guild-lexicon/` marks them in each reply of the Guildmaster or a Party Leader as links, drawn in the reply's own markdown, and a click on one opens a small popup with a TL;DR of it (2 to 4 lines) and where that came from:
+A reply leans on words the patron may not have at hand: a guild term, a posting, a run, a rule of the charter. The mod in `mods/guild-lexicon/` marks them in each reply of the Guildmaster or a Party Leader, each drawn as the word alone and underlined, and a click on one opens a small popup with a TL;DR of it (2 to 4 lines) and where that came from:
 
 | Marked | Explained from |
 | --- | --- |
@@ -358,8 +358,8 @@ A reply leans on words the patron may not have at hand: a guild term, a posting,
 | a run reference (`run 13`, *Runs 11, 12 and 13*) | `gm runs --all` |
 | a code span that names something (`GM_VEIL`, `guild.conf`) | the records above when they know it |
 
-What the records do not know is asked of the model over the session's own transcript (`$.model.fork`, one short question with no tools), the popup saying it is looking it up meanwhile, and the answer is kept in the mod's store by focus and phrase, so the next click on it asks nothing: it says *AI, from this session*. Each thing is marked once in each block of a reply, a common word (*run*, *contract*) only where the reply capitalises it, and nothing in a code block, a link or a summary row; ctrl+o shows the reply as written.
-A click is a plain click where Claude Code reports clicks (the fullscreen layout); elsewhere select a phrase with the mouse and type `/what`, or type `/what <phrase>`. Links take the colour Claude Code gives a reply's links: the mod draws the reply with Claude Code's own markdown, which has no dim underline for a link.
+What the records do not know is asked of the model over the session's own transcript (`$.model.fork`, one short question with no tools), the popup saying it is looking it up meanwhile, and the answer is kept in the mod's store by focus and phrase, so the next click on it asks nothing: it says *AI, from this session*. Each thing is marked once in each block of a reply, a common word (*run*, *contract*) only where the reply capitalises it, and nothing in a code block, a table, a link or a summary row; ctrl+o shows the reply as written.
+A click is a plain click where Claude Code reports clicks (the fullscreen layout); elsewhere select a phrase with the mouse and type `/what`, or type `/what <phrase>`. A mark is never a markdown link, which a terminal without hyperlinks draws with its URL after it: what of a reply holds no mark stays Claude Code's own markdown, and each paragraph, list item or heading that holds one is laid out by the mod as words, its bold, italics, code and links kept, each mark a plain button.
 Every session gm starts loads the mod, and a `claude` started by hand in the clone loads it from `.claude/skills/guild-lexicon`.
 The mod's own tests run with `claude plugin test mods/guild-lexicon`.
 

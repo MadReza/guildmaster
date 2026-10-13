@@ -1,7 +1,8 @@
 import type { On } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { HREF, findRule, findTerm, markOf, markText, parseCharter, parseTerminology, postingTldr, refOf, runTldr } from '../hooks/marks'
+import { layout } from '../hooks/layout'
+import { findRule, findTerm, markSpans, parseCharter, parseTerminology, postingTldr, refOf, runTldr } from '../hooks/marks'
 import { AI, PANE } from '../hooks/register'
 
 const HOME = '/home/p'
@@ -111,6 +112,25 @@ async function popupText($: Mounter) {
 const terms = parseTerminology(TERMINOLOGY)
 const rules = parseCharter(CHARTER)
 
+// A reply's marks written into it, `[shown](kind/key)`, to read them at a glance.
+function marked(text: string) {
+  let out = ''
+  let last = 0
+  for (const s of markSpans(text, terms, rules)) {
+    out += `${text.slice(last, s.start)}[${text.slice(s.start, s.end)}](${s.mark.kind}/${s.mark.key})`
+    last = s.end
+  }
+  return out + text.slice(last)
+}
+
+type Drawn = { find: (q: { type: 'Button'; text: string }) => Promise<{ key?: string } | undefined>; press: (t: { key: string }) => Promise<unknown> }
+// A click on the mark drawn as `text`.
+async function click(ui: Drawn, text: string) {
+  const mark = await ui.find({ type: 'Button', text })
+  expect(mark).toBeDefined()
+  await ui.press({ key: mark!.key! })
+}
+
 describe('marking', () => {
   test('reads the bold Term column and the charter\'s named rules', async () => {
     expect(terms.map(t => t.name)).toEqual(['Posting', 'Run', 'Veil', 'Party Leader', 'The Watch'])
@@ -119,23 +139,21 @@ describe('marking', () => {
     expect(findRule(rules, 'Adventurers do the work')?.text).toContain('A posting that changes the project')
   })
 
-  test('marks terms, rules, postings, runs and code names, each once, as lexicon links', async () => {
+  test('marks terms, rules, postings, runs and code names, each once', async () => {
     const text = 'Not on main: #49 and adventurers#50. Runs 11, 12 and 13 passed; run 7 too. The veil stays, as `guild.conf` and `GM_VEIL=off` say; the veil again. Party Leaders keep the one-contract-at-a-time rule.'
-    const marked = markText(text, terms, rules)
-    expect(marked.text).toBe(
-      `Not on main: [#49](${HREF}posting/%2349) and [adventurers#50](${HREF}posting/adventurers%2350). ` +
-      `Runs [11](${HREF}run/11), [12](${HREF}run/12) and [13](${HREF}run/13) passed; [run 7](${HREF}run/7) too. ` +
-      `The [veil](${HREF}term/Veil) stays, as [\`guild.conf\`](${HREF}code/guild.conf) and [\`GM_VEIL=off\`](${HREF}code/GM_VEIL%3Doff) say; the veil again. ` +
-      `[Party Leaders](${HREF}term/Party%20Leader) keep the [one-contract-at-a-time rule](${HREF}rule/One%20contract%20at%20a%20time).`)
-    expect(marked.hrefs.map(h => markOf(h)?.key)).toEqual(['#49', 'adventurers#50', '11', '12', '13', '7', 'Veil', 'guild.conf', 'GM_VEIL=off', 'Party Leader', 'One contract at a time'])
+    expect(marked(text)).toBe(
+      'Not on main: [#49](posting/#49) and [adventurers#50](posting/adventurers#50). ' +
+      'Runs [11](run/11), [12](run/12) and [13](run/13) passed; [run 7](run/7) too. ' +
+      'The [veil](term/Veil) stays, as [`guild.conf`](code/guild.conf) and [`GM_VEIL=off`](code/GM_VEIL=off) say; the veil again. ' +
+      '[Party Leaders](term/Party Leader) keep the [one-contract-at-a-time rule](rule/One contract at a time).')
   })
 
-  test('leaves fences, links, URLs, common words in lower case and code that names nothing alone', async () => {
-    const text = 'Every run here. A [link #3](https://x.y/#4) and https://h.io/a#5 and `ls -la /tmp`.\n```\n#7 veil\n```\n'
-    expect(markText(text, terms, rules)).toEqual({ text, hrefs: [] })
-    expect(markText('One Run went well.', terms, rules).text).toBe(`One [Run](${HREF}term/Run) went well.`)
-    expect(markText('Keep one contract at a time, then the One contract at a time rule.', terms, rules).text)
-      .toBe(`Keep one contract at a time, then the [One contract at a time rule](${HREF}rule/One%20contract%20at%20a%20time).`)
+  test('leaves fences, tables, links, URLs, common words in lower case and code that names nothing alone', async () => {
+    const text = 'Every run here. A [link #3](https://x.y/#4) and https://h.io/a#5 and `ls -la /tmp`.\n```\n#7 veil\n```\n| #8 | the veil |\n'
+    expect(markSpans(text, terms, rules)).toEqual([])
+    expect(marked('One Run went well.')).toBe('One [Run](term/Run) went well.')
+    expect(marked('Keep one contract at a time, then the One contract at a time rule.'))
+      .toBe('Keep one contract at a time, then the [One contract at a time rule](rule/One contract at a time).')
   })
 
   test('a typed reference, and gm\'s answers as TL;DRs', async () => {
@@ -150,12 +168,12 @@ describe('marking', () => {
 })
 
 describe('a reply', () => {
-  test('is drawn as markdown whose marks the lexicon answers; a click opens the popup', async ($, on) => {
+  test('is drawn with each mark the word alone, and a click on it opens the popup', async ($, on) => {
     const journal = world(on)
-    const ui = await $.ui.mount(reply('The veil is drawn.'))
-    const md = await ui.find({ type: 'Markdown' })
-    expect(md?.text).toBe(`The [veil](${HREF}term/Veil) is drawn.`)
-    await ui.press({ key: 'lexicon:a-1', link: { href: `${HREF}term/Veil` } })
+    const ui = await $.ui.mount(reply('The veil is **drawn**.'))
+    expect((await ui.findAll({ type: 'Button' })).map(b => b.text)).toEqual(['veil'])
+    expect(await ui.find({ type: 'Text', text: 'drawn' })).toMatchObject({ props: { bold: true } })
+    await click(ui, 'veil')
     expect(journal.opens).toEqual([{ id: PANE, focus: true, closeOnEscape: true, holdToasts: true }])
     const popup = await $.ui.mount(pane)
     const texts = (await popup.findAll({ type: 'Text' })).map(t => t.text).join('\n')
@@ -163,13 +181,74 @@ describe('a reply', () => {
     expect(texts).toContain('from TERMINOLOGY.md')
   })
 
+  test('never shows a lexicon address: no mark is a link, the rest stays markdown', async ($, on) => {
+    world(on)
+    const text = [
+      '## The Party Leader',
+      '',
+      'Posting #49 is **done**; run 13 kept the one-contract-at-a-time rule, and `GM_VEIL=off` lifts the veil.',
+      '',
+      '- the [docs](https://example.com/docs) say so',
+      '- adventurers#50 is next, then Run 7',
+      '',
+      '| Term | Meaning |',
+      '| --- | --- |',
+      '| Posting | one item |',
+      '',
+      '```',
+      'gm show #49',
+      '```',
+      '',
+      'Nothing to mark here.',
+    ].join('\n')
+    const ui = await $.ui.mount(reply(text))
+    const shown = (await ui.findAll({})).map(el => el.text)
+    for (const t of shown) expect(t).not.toContain('lexicon.invalid')
+    expect((await ui.findAll({ type: 'Button' })).map(b => b.text))
+      .toEqual(['Party Leader', 'Posting', '#49', 'run 13', 'one-contract-at-a-time rule', 'GM_VEIL=off', 'veil', 'adventurers#50', 'Run 7'])
+    const md = (await ui.findAll({ type: 'Markdown' })).map(m => m.text)
+    expect(md).toEqual(['| Term | Meaning |\n| --- | --- |\n| Posting | one item |\n\n```\ngm show #49\n```\n\nNothing to mark here.'])
+    expect(await ui.find({ type: 'Link' })).toMatchObject({ props: { href: 'https://example.com/docs' }, children: ['docs'] })
+  })
+
   test('a summary, and a reply with nothing to mark, are drawn as Claude Code draws them', async ($, on) => {
     world(on)
     for (const one of [reply('The veil is drawn.', { isSummary: true }), reply('Nothing here.')]) {
       const ui = await $.ui.mount(one)
       expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
+      expect(await ui.find({ type: 'Button' })).toBeUndefined()
       await ui.unmount()
     }
+  })
+})
+
+describe('the layout', () => {
+  const blocks = (text: string) => layout(text, markSpans(text, terms, rules)).map(b =>
+    b.kind === 'markdown' ? { md: b.text, gap: b.gap } : { prefix: b.prefix, indent: b.indent, heading: b.heading, gap: b.gap, words: b.words.map(w => w.map(p => (p.mark ? `[${p.text}]` : p.text)).join('')) })
+
+  test('marked lines become words, the unmarked stay one markdown run', async () => {
+    expect(blocks('Intro line.\n\nOne Run here,\nsplit over lines.\n  - nested #49 item\n\n# The veil\n\nPlain\n\nand more.')).toEqual([
+      { md: 'Intro line.', gap: false },
+      { prefix: '', indent: 0, heading: false, gap: true, words: ['One', '[Run]', 'here,', 'split', 'over', 'lines.'] },
+      { prefix: '- ', indent: 2, heading: false, gap: false, words: ['nested', '[#49]', 'item'] },
+      { prefix: '', indent: 0, heading: true, gap: true, words: ['The', '[veil]'] },
+      { md: 'Plain\n\nand more.', gap: true },
+    ])
+  })
+
+  test('inline markdown is read into styles; a mark of several words stays one word', async () => {
+    const text = '**Party Leaders** keep `guild.conf` and snake_case, *not* \\*this\\*.'
+    const all = layout(text, markSpans(text, terms, rules))
+    expect(all).toHaveLength(1)
+    expect(all[0]).toMatchObject({ kind: 'words', words: [
+      [{ text: 'Party Leaders', bold: true, mark: { kind: 'term', key: 'Party Leader' } }],
+      [{ text: 'keep' }],
+      [{ text: 'guild.conf', code: true, mark: { kind: 'code', key: 'guild.conf' } }],
+      [{ text: 'and' }],
+      [{ text: 'snake_case,' }],
+      [{ text: 'not', italic: true }],
+      [{ text: '*this*.' }],
+    ] })
   })
 })
 
@@ -178,7 +257,7 @@ describe('the lookup order', () => {
   test('a posting comes from gm show, in the session\'s focus', async ($, on) => {
     const journal = world(on)
     const ui = await $.ui.mount(reply('Not on main yet: #49.'))
-    await ui.press({ key: 'lexicon:a-1', link: { href: `${HREF}posting/%2349` } })
+    await click(ui, '#49')
     expect(journal.runs).toContainEqual([GM, 'show', 'adventurers#49'])
     expect(await popupText($)).toContain('from posting adventurers#49')
     expect(journal.forks).toEqual([])
@@ -187,9 +266,9 @@ describe('the lookup order', () => {
   test('a run comes from gm runs, a charter rule from the charter', async ($, on) => {
     const journal = world(on)
     const ui = await $.ui.mount(reply('Run 13 kept the one contract at a time rule.'))
-    await ui.press({ key: 'lexicon:a-1', link: { href: `${HREF}run/13` } })
+    await click(ui, 'Run 13')
     expect(await popupText($)).toContain('from run 13, gm runs')
-    await ui.press({ key: 'lexicon:a-1', link: { href: `${HREF}rule/One%20contract%20at%20a%20time` } })
+    await click(ui, 'one contract at a time rule')
     const shown = await popupText($)
     expect(shown).toContain('while a run is live')
     expect(shown).toContain('from the charter')
@@ -199,7 +278,7 @@ describe('the lookup order', () => {
   test('a code name the records know is theirs; one they do not goes to the model', async ($, on) => {
     const journal = world(on)
     const ui = await $.ui.mount(reply('See `veil-hides` and `#49`.'))
-    await ui.press({ key: 'lexicon:a-1', link: { href: `${HREF}code/veil-hides` } })
+    await click(ui, 'veil-hides')
     const shown = await popupText($)
     expect(shown).toContain('The veil-hides setting lists what the veil hides.')
     expect(shown).toContain(`from ${AI}`)
@@ -210,7 +289,7 @@ describe('the lookup order', () => {
   test('a posting gm does not know goes to the model', async ($, on) => {
     const journal = world(on)
     const ui = await $.ui.mount(reply('See #77.'))
-    await ui.press({ key: 'lexicon:a-1', link: { href: `${HREF}posting/%2377` } })
+    await click(ui, '#77')
     expect(journal.forks).toHaveLength(1)
     expect(await popupText($)).toContain(`from ${AI}`)
   })
@@ -220,7 +299,7 @@ describe('the cache', () => {
   test('the model\'s answer is kept by focus and phrase, so the next click asks nothing', async ($, on) => {
     const journal = world(on)
     const ui = await $.ui.mount(reply('See `veil-hides`.'))
-    const press = () => ui.press({ key: 'lexicon:a-1', link: { href: `${HREF}code/veil-hides` } })
+    const press = () => click(ui, 'veil-hides')
     await press()
     await press()
     expect(journal.forks).toHaveLength(1)
@@ -232,7 +311,7 @@ describe('the cache', () => {
     const journal = world(on, { HOME })
     journal.store.set('ai:adventurers:veil hides', 'kept elsewhere')
     const ui = await $.ui.mount(reply('See `veil-hides`.'))
-    await ui.press({ key: 'lexicon:a-1', link: { href: `${HREF}code/veil-hides` } })
+    await click(ui, 'veil-hides')
     expect(journal.forks).toHaveLength(1)
     expect(journal.store.get('ai:front-desk:veil hides')).toBe('The veil-hides setting lists what the veil hides.')
   })
