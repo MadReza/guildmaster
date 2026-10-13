@@ -48,7 +48,7 @@ Answered on 2026-10-11; every question is settled.
 | 1 | `gm dispatch` runs one headless `claude -p` Adventurer in the camp; its result lands in the register and wakes the Party Leader. With it, the wake for a posting added from outside (issue #41) | settled |
 | 2 | `PreToolUse` push rules in every camp, from the playbook | settled |
 | 3 | `gm check` after every run, reopening a posting that broke a rule | settled |
-| 4 | Parallel surveys and contracts, each in its own worktree, and the dispatch cap | the four questions of [Parallel contracts](#questions-only-the-patron-can-answer) |
+| 4 | Parallel surveys and contracts, each in its own worktree, and the dispatch cap | settled ([the patron's answers](#the-patrons-answers)) |
 | 5 | Adventurer spans, `TRACEPARENT` and writ hashes (tracing slice 3) | none |
 
 Each slice is one pull request with its own tests, and the roadmap's step 3 table tracks them, as step 2's does.
@@ -491,6 +491,17 @@ A run whose worktree holds commits not landed, or uncommitted changes, is never 
 3. **Tests after a merge.** A merge commit joins two runs no Adventurer tested together. Should `gm` run the repository's test command in the camp after each merge landing and summon the Party Leader on a failure, or is the playbook's "tests pass locally" before `dev-test` enough?
 4. **A landing conflict.** As designed, a first conflict sends one correction run to resolve it and a second makes the posting `needs-you`, as a failed check does. Or should every conflict come to you?
 
+#### The patron's answers
+
+Relayed by the Party Leader of `adventurers` on 2026-10-12, in its brief for #55; the patron's words were not quoted, so they are recorded as relayed:
+
+| Question | Settled as |
+| --- | --- |
+| 1. Merge commits | Fast-forward when possible, a merge commit otherwise, as designed. |
+| 2. Setup per worktree | Yes: an optional `worktree-setup:` line in the rules file (for example `worktree-setup: npm ci`), which `gm` runs in each new run worktree before the Adventurer starts. This repository has none. |
+| 3. Tests after a merge | Yes: after a landing that made a merge commit, `gm` runs the test command the rules file names, on a machine-readable line of its own (`test-command:`; Guildmaster's is `bash tests/run.sh`). A failure becomes a correction run, and the feature branch is not pushed until the tests pass. |
+| 4. A landing conflict | One correction run first, as designed; a second failure makes the posting `needs-you`. |
+
 ## Slice 5: Adventurer spans, `TRACEPARENT` and writ hashes
 
 This is tracing slice 3, exactly as [tracing-design.md](tracing-design.md#how-the-trace-context-travels) defines it; nothing new is designed here.
@@ -501,7 +512,7 @@ The run's own record (slice 1) does not wait for this slice: the run row already
 
 ## Questions for the patron
 
-All eight are settled; see [What the patron settled](#what-the-patron-settled). [Parallel contracts](#questions-only-the-patron-can-answer) asks four more, for slice 4.
+All eight are settled; see [What the patron settled](#what-the-patron-settled). [Parallel contracts](#questions-only-the-patron-can-answer) asked four more, for slice 4, and [those are settled too](#the-patrons-answers).
 
 ## How it will be checked
 
