@@ -124,7 +124,7 @@ t_schema_created_on_first_use() {
   [ ! -e "$GM_HALL" ] || return 1
   gm list >/dev/null || fail "first gm call failed"
   assert_eq "$(db 'PRAGMA journal_mode;')" wal "journal mode" &&
-    assert_eq "$(db 'PRAGMA user_version;')" 10 "schema version" &&
+    assert_eq "$(db 'PRAGMA user_version;')" 11 "schema version" &&
     assert_eq "$(db "SELECT group_concat(name, ' ') FROM (SELECT name FROM sqlite_master WHERE type='table' ORDER BY name);")" \
       "endpoint event focus guard message model_sample open_span posting prompt_version run run_posting span span_link ticket" "tables"
 }
@@ -527,8 +527,14 @@ t_charter_hook_loads_the_patron_files() {
   local out
   out=$(printf '{"session_id":"s1","source":"startup"}' | gm hook charter)
   assert_contains "$out" "PATRON-EDIT-MARKER" "the patron's charter" &&
-    assert_contains "$out" "phase: dev-test" "the playbook" &&
-    assert_contains "$out" "feature-branch:" "the rules"
+    assert_not_contains "$out" "too long" "whole" || return 1
+  # The playbook and rules come with a second handler: each stays under Claude Code's cap on one additionalContext.
+  out=$(printf '{"session_id":"s1","source":"startup"}' | gm hook charter --rules)
+  assert_contains "$out" "phase: dev-test" "the playbook" &&
+    assert_contains "$out" "feature-branch:" "the rules" &&
+    assert_not_contains "$out" "too long" "whole" &&
+    assert_contains "$(json "SELECT group_concat(h.value->>'command', ' | ') FROM json_each(json_extract(CAST(readfile('$CAMP/.claude/settings.local.json') AS TEXT),'\$.hooks.SessionStart')) s, json_each(s.value->'hooks') h;")" "hook charter | GM_HALL=" "in the camp's settings" &&
+    assert_contains "$(cat "$CAMP/.claude/settings.local.json")" "hook charter --rules" "both handlers"
   gm open appt-v2 --no-launch >/dev/null 2>&1
   grep -q PATRON-EDIT-MARKER "$GM_HALL/charter.md" || fail "gm overwrote the patron's charter"
 }
@@ -961,7 +967,7 @@ t_migration_keeps_schema1_data() {
   for i in 1 2 3 4 5 6; do gm list --all >/dev/null 2>"$WORK/migrate/err$i" & done
   wait
   for i in 1 2 3 4 5 6; do assert_eq "$(cat "$WORK/migrate/err$i")" "" "migration $i ran clean"; done
-  assert_eq "$(db 'PRAGMA user_version;')" 10 "migrated to schema 10" &&
+  assert_eq "$(db 'PRAGMA user_version;')" 11 "migrated to schema 11" &&
     assert_eq "$(for t in $tables; do db "SELECT $(db "SELECT group_concat(name, ',') FROM pragma_table_info('$t') WHERE name NOT IN ('trace_id','span_id','span_start_ms','follows_id','closed_at','start_attempts','held_at','held_told','close_requested_at','origin','summoned_at','unheard_at');") FROM $t ORDER BY rowid;"; done)" "$before" "every schema-1 row kept as it was" &&
     assert_eq "$(db "SELECT count(*) FROM posting WHERE trace_id IS NULL;")" 2 "old postings have no trace" &&
     assert_eq "$(db "SELECT group_concat(name, ' ') FROM (SELECT name FROM sqlite_master WHERE type='table' AND name IN ('span','span_link','open_span','prompt_version','model_sample') ORDER BY name);")" \
@@ -3084,7 +3090,7 @@ t_dispatch_opens_the_adventurer_under_its_party_leader() {
   : >"$GM_FAKE_RUN/hold"
   gm config set veil on >/dev/null || fail "config set veil on"
   gm post "the owner field is empty after save" >/dev/null && gm notice 1 started >/dev/null
-  local out pl pane ws line dir=$GM_HALL/runs/1 sid
+  local out pl pane ws line dir=$GM_HALL/runs/1 sid wt=$GM_HALL/camps/appt-v2.run-1
   : >"$HERDR_STUB/focused"
   out=$(gm dispatch 1 --model sonnet 2>&1) || fail "dispatch failed: $out"
   run_pane 1 || fail "the run got no pane"
@@ -3095,26 +3101,26 @@ t_dispatch_opens_the_adventurer_under_its_party_leader() {
   # stays whole, for the patron to talk to it.
   [ ! -s "$HERDR_STUB/splits" ] || fail "the Party Leader's pane was split" || return 1
   assert_eq "$(awk -F '\t' -v p="$pane" '$1 == p { print $3 }' "$HERDR_STUB/panes")" "$ws" "its pane is in the run's workspace" &&
-    assert_eq "$(sidebar | tr '\n' '|')" "guild|└ appt-v2|  └ #1 owner-field-empty-after|└ bravo|" "labelled one step under its Party Leader's, right after it" &&
+    assert_eq "$(sidebar | tr '\n' '|')" "guild|└ appt-v2|  └ #1 owner-field-empty-after · gm/run-1 → feature/CRM-8965|└ bravo|" "labelled one step under its Party Leader's, right after it, with its branch and the one it lands on" &&
     assert_eq "$(cat "$HERDR_STUB/titles")" "$pane	run 1 · #1 owner-field-empty-after" "its pane titled with the run and its posting" &&
     assert_eq "$(cat "$HERDR_STUB/focused")" "" "never focused" &&
-    assert_contains "$(cat "$HERDR_STUB/calls")" "workspace create --cwd $CAMP --label   └ #1 owner-field-empty-after --no-focus" "on the camp" || return 1
+    assert_contains "$(cat "$HERDR_STUB/calls")" "workspace create --cwd $wt --label   └ #1 owner-field-empty-after · gm/run-1 → feature/CRM-8965 --no-focus" "on the run's own worktree" || return 1
   # A Party Leader opened later goes after the run's workspace, not between it and its own Party Leader's.
   gm open charlie --repo "$REPO" >/dev/null 2>&1 || fail "open charlie failed"
-  assert_eq "$(sidebar | tr '\n' '|')" "guild|└ appt-v2|  └ #1 owner-field-empty-after|└ bravo|└ charlie|" "the run stays under its Party Leader" || return 1
+  assert_eq "$(sidebar | tr '\n' '|')" "guild|└ appt-v2|  └ #1 owner-field-empty-after · gm/run-1 → feature/CRM-8965|└ bravo|└ charlie|" "the run stays under its Party Leader" || return 1
   line=$(run_pane_line "$pane")
-  assert_contains "$line" "cd '$CAMP' && env GM_HALL='$GM_HALL'" "started in the camp" &&
+  assert_contains "$line" "cd '$wt' && env GM_HALL='$GM_HALL'" "started in its worktree" &&
     assert_contains "$line" "adventurer 1 --pane '$pane'" "runs gm adventurer for the run" || return 1
   # Only in its own pane.
   out=$(gm adventurer 1 --pane "$pl" 2>&1) && fail "gm adventurer ran in another pane"
   assert_contains "$out" "runs only in run 1's own herdr pane" "says why" || return 1
-  # The pane's shell runs the line: claude in the camp, a session the patron can read and type in.
+  # The pane's shell runs the line: claude in its worktree, a session the patron can read and type in.
   env -u GM_FOCUS sh -c "$line" </dev/null >/dev/null 2>&1 &
   local shell=$! i=0
   while [ ! -s "$GM_FAKE_RUN/stdin" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
   sid=$(db "SELECT session_id FROM run WHERE id=1;")
   assert_eq "$(cat "$GM_FAKE_RUN/stdin")" "$(cat "$dir/writ.md")" "the writ is its first prompt" &&
-    assert_eq "$(cat "$GM_FAKE_RUN/pwd")" "$CAMP" "in the camp" &&
+    assert_eq "$(cat "$GM_FAKE_RUN/pwd")" "$wt" "in its worktree" &&
     assert_eq "$(head -n 15 "$GM_FAKE_RUN/args" | tr '\n' ' ')" "--name run 1 · #1 owner-field-empty-after --session-id $sid --setting-sources user,project --settings $dir/settings.json --model sonnet --effort medium --dangerously-skip-permissions --append-system-prompt $(trust_statement) " "its command line, without -p" &&
     assert_eq "$(grep -c '^CLAUDECODE=\|^GM_FOCUS=' "$GM_FAKE_RUN/env")" 0 "not as a session inside Claude Code, nor as the Party Leader" &&
     assert_eq "$(grep -e '^CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=' -e '^CLAUDE_CODE_SEND_FEEDBACK=' "$GM_FAKE_RUN/env" | sort | tr '\n' ' ')" "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false CLAUDE_CODE_SEND_FEEDBACK=0 " "no prompt suggestions in its composer, no feedback drafts" &&
@@ -3125,7 +3131,7 @@ t_dispatch_opens_the_adventurer_under_its_party_leader() {
     assert_contains "$(json "SELECT json_extract($f,'\$.hooks.StopFailure[0].hooks[0].command')")" "hook run-stop" "gm hook run-stop" &&
     assert_eq "$(json "SELECT json_extract($f,'\$.includeCoAuthoredBy')")" 0 "commit attribution off" || return 1
   assert_contains "$(gm runs)" "working since" "it works" &&
-    assert_contains "$(gm where)" "an Adventurer is working in the camp" "gm where says so" || return 1
+    assert_contains "$(gm where)" "an Adventurer is working in its own worktree $wt" "gm where says so" || return 1
   # Its turn ends: the Stop hook records the result, and the watch summons the Party Leader.
   local t=$WORK/visible/transcript.jsonl
   transcript "$t"
@@ -3153,7 +3159,9 @@ t_dispatch_opens_the_adventurer_under_its_party_leader() {
     assert_eq "$(awk -F '\t' -v p="$pane" '$1 == p' "$HERDR_STUB/panes" | grep -c .)" 0 "and its pane" &&
     assert_eq "$(db "SELECT pane_closed_at IS NOT NULL FROM run WHERE id=1;")" 1 "recorded" &&
     assert_eq "$(sidebar | tr '\n' '|')" "guild|└ appt-v2|└ bravo|└ charlie|" "and only that workspace" &&
-    assert_eq "$(awk -F '\t' -v p="$pl" '$1 == p' "$HERDR_STUB/panes" | grep -c .)" 1 "the Party Leader's pane stays" || return 1
+    assert_eq "$(awk -F '\t' -v p="$pl" '$1 == p' "$HERDR_STUB/panes" | grep -c .)" 1 "the Party Leader's pane stays" &&
+    assert_eq "$(db "SELECT cleaned_at IS NOT NULL FROM run WHERE id=1;")" 1 "a run with no commits, reviewed, is cleaned up" &&
+    [ ! -e "$wt" ] || fail "its worktree is still there" || return 1
   # A run from before each had a workspace of its own: only its pane, split under the Party Leader's, is closed.
   local row
   row=$(awk -F '\t' -v OFS='\t' -v p="$pl" '$1 == p { print "old-pane", $2, $3, "claude" }' "$HERDR_STUB/panes")
@@ -3296,6 +3304,67 @@ t_a_blocked_adventurer_summons_its_party_leader() {
     assert_contains "$(gm runner 1)" "Do you want to proceed?" "though its pane can still be read"
 }
 
+# Claude Code's question dialog, as an Adventurer's pane shows it while herdr says idle or done.
+question_screen() {
+  printf '%s\n' '☐ Charter size' '' 'The charter is over the cap. Which way?' '❯ 1. Split the hook' '  2. Trim the wording' '' '' >"$HERDR_STUB/screen.$1"
+}
+
+t_an_adventurer_waiting_on_a_question_summons_its_party_leader() {
+  setup question
+  gm open appt-v2 >/dev/null 2>&1
+  export GM_FOCUS=appt-v2 GM_RUN_POLL=1
+  fake_run "$WORK/question/run"
+  : >"$GM_FAKE_RUN/hold"
+  gm post "the owner field is empty after save" >/dev/null && gm notice 1 started >/dev/null
+  gm dispatch 1 >/dev/null
+  run_pane 1 || fail "the run got no pane" || return 1
+  local pane out rc
+  pane=$(db "SELECT pane_id FROM run WHERE id=1;")
+  stub_proc "$pane" claude
+  # Idle before its writ is submitted: never waiting, however many polls.
+  printf 'idle' >"$HERDR_STUB/agent-status.$pane"
+  gm up >/dev/null 2>&1; gm up >/dev/null 2>&1
+  rc=0; out=$(printf '{}' | as_watch env GM_WATCH_TIMEOUT=33 bash "$GM" hook watch 2>&1) || rc=$?
+  assert_eq "$rc" 0 "an Adventurer still starting summons nobody" &&
+    assert_eq "$(db "SELECT blocked_at IS NULL FROM run WHERE id=1;")" 1 "and is not waiting" || return 1
+  # Working, then idle on its question: one poll is not enough, two in a row are.
+  printf 'working' >"$HERDR_STUB/agent-status.$pane"
+  gm up >/dev/null 2>&1
+  printf 'idle' >"$HERDR_STUB/agent-status.$pane"
+  question_screen "$pane"
+  gm up >/dev/null 2>&1
+  assert_eq "$(db "SELECT blocked_at IS NULL FROM run WHERE id=1;")" 1 "idle on one poll is not waiting" || return 1
+  rc=0; out=$(printf '{}' | as_watch env GM_WATCH_TIMEOUT=40 bash "$GM" hook watch 2>&1) || rc=$?
+  assert_eq "$rc" 2 "idle on the next poll summons the Party Leader" &&
+    assert_contains "$out" "- run 1 for appt-v2#1 owner-field-empty-after is blocked: its pane waits for an answer. It shows:" "naming the run" &&
+    assert_contains "$out" "    The charter is over the cap. Which way?
+    ❯ 1. Split the hook" "with the question's last lines" &&
+    assert_eq "$(db "SELECT count(*) FROM event WHERE kind='run.blocked';")" 1 "recorded once" || return 1
+  rc=0; out=$(printf '{}' | as_watch env GM_WATCH_TIMEOUT=33 bash "$GM" hook watch 2>&1) || rc=$?
+  assert_eq "$rc" 0 "the same wait never summons twice" && assert_eq "$out" "" "and says nothing" || return 1
+  # Working again clears it; a second question that herdr shows as done summons again.
+  printf 'working' >"$HERDR_STUB/agent-status.$pane"
+  gm up >/dev/null 2>&1
+  assert_eq "$(db "SELECT blocked_at IS NULL FROM run WHERE id=1;")" 1 "working again clears it" || return 1
+  printf 'done' >"$HERDR_STUB/agent-status.$pane"
+  rc=0; out=$(printf '{}' | as_watch env GM_WATCH_TIMEOUT=40 bash "$GM" hook watch 2>&1) || rc=$?
+  assert_eq "$rc" 2 "done on two polls summons again" &&
+    assert_eq "$(db "SELECT count(*) FROM event WHERE kind='run.blocked';")" 2 "a second wait, recorded" || return 1
+  # An answer clears it, and the dialog's last idle moment is not a new wait.
+  gm runner 1 --keys 1 >/dev/null || fail "runner --keys failed"
+  gm up >/dev/null 2>&1
+  assert_eq "$(db "SELECT blocked_at IS NULL FROM run WHERE id=1;")" 1 "one idle poll after an answer is not waiting" || return 1
+  printf 'working' >"$HERDR_STUB/agent-status.$pane"
+  gm up >/dev/null 2>&1
+  assert_eq "$(db "SELECT blocked_at IS NULL FROM run WHERE id=1;")" 1 "working after the answer" || return 1
+  # Its turn ends: an ended run is never waiting, idle or not.
+  printf 'idle' >"$HERDR_STUB/agent-status.$pane"
+  run_stop 1 "Done." >/dev/null
+  run_ended 1 || fail "the run never ended" || return 1
+  gm up >/dev/null 2>&1; gm up >/dev/null 2>&1
+  assert_eq "$(db "SELECT count(*) FROM event WHERE kind='run.blocked';")" 2 "an ended run is not waiting"
+}
+
 t_dispatch_hands_a_posting_to_an_adventurer() {
   setup dispatch
   export GM_FOCUS=appt-v2
@@ -3330,7 +3399,7 @@ t_dispatch_hands_a_posting_to_an_adventurer() {
     assert_not_contains "$writ" "Nobody answers questions" "nobody is said to be away" || return 1
   [ -f "$GM_HALL/prompts/adventurer/contract.md" ] || fail "the template was not copied into the Guildhall"
   sid=$(db "SELECT session_id FROM run WHERE id=1;")
-  assert_eq "$(cat "$GM_FAKE_RUN/pwd")" "$CAMP" "it runs in the camp" &&
+  assert_eq "$(cat "$GM_FAKE_RUN/pwd")" "$GM_HALL/camps/appt-v2.run-1" "it runs in a worktree of its own" &&
     assert_eq "$(tr '\n' ' ' <"$GM_FAKE_RUN/args")" "-p --session-id $sid --output-format stream-json --verbose --setting-sources user,project --settings $dir/settings.json --model sonnet --effort medium --dangerously-skip-permissions --append-system-prompt $(trust_statement) " "its command line" &&
     assert_eq "$(grep -c '^CLAUDECODE=' "$GM_FAKE_RUN/env")" 0 "not as a session inside Claude Code" || return 1
   local settings s
@@ -3346,7 +3415,7 @@ t_dispatch_hands_a_posting_to_an_adventurer() {
   # What it predictably reads is allowed, so nobody is asked: the rules and playbooks, issue and pull request views,
   # ps, shellcheck, and its own scratchpad; a merge request stays denied.
   local scratch
-  scratch="claude-$(id -u)/$(printf '%s' "$CAMP" | sed 's/[^A-Za-z0-9]/-/g')/$sid"
+  scratch="claude-$(id -u)/$(printf '%s' "$GM_HALL/camps/appt-v2.run-1" | sed 's/[^A-Za-z0-9]/-/g')/$sid"
   local rule
   for rule in "Read(/$GM_HALL/rules/repo.md)" "Read(/$GM_HALL/playbooks/**)" 'Bash(gh issue view*)' 'Bash(gh pr view*)' \
     'Bash(gh-axi issue view*)' 'Bash(gh-axi pr view*)' 'Bash(ps)' 'Bash(ps *)' 'Bash(shellcheck *)' \
@@ -3360,7 +3429,7 @@ t_dispatch_hands_a_posting_to_an_adventurer() {
   # Its status line names its run and postings, never its Party Leader's.
   local line
   line=$(printf '{"model":{"display_name":"Sonnet"}}' | GM_RUN=1 gm statusline)
-  assert_eq "$line" "⛨ adventurer · run 1 · #1 owner-field-empty-after · for appt-v2 on feature/CRM-8965 · its run ended · Sonnet" "its status line" || return 1
+  assert_eq "$line" "⛨ adventurer · run 1 · #1 owner-field-empty-after · gm/run-1 → feature/CRM-8965 · for appt-v2 · its run ended · Sonnet" "its status line" || return 1
   # A run with no pane cannot be answered.
   out=$(gm runner 1 2>&1) && fail "read a run with no pane"
   assert_contains "$out" "run 1 has no herdr pane: it runs unseen" "says why" || return 1
@@ -3373,37 +3442,45 @@ t_dispatch_hands_a_posting_to_an_adventurer() {
     assert_contains "$(gm where)" "run 1 for appt-v2#1 owner-field-empty-after finished: exit 0, 22 turns, \$1.41, not reviewed yet" "the resume summary names it"
 }
 
-t_one_contract_at_a_time() {
-  setup onecontract
-  export GM_FOCUS=appt-v2
-  fake_run "$WORK/onecontract/run"
+t_contracts_run_side_by_side() {
+  setup sidebyside
+  export GM_FAKE_RUN=$WORK/sidebyside/run GM_FOCUS=appt-v2
+  fake_run "$GM_FAKE_RUN"
   : >"$GM_FAKE_RUN/hold"
   gm post "first" >/dev/null && gm post "second" >/dev/null
   gm notice 1 started >/dev/null && gm notice 2 started >/dev/null
+  local out tip
+  tip=$(git -C "$CAMP" rev-parse HEAD)
   gm dispatch 1 >/dev/null || fail "first dispatch"
-  wait_for "SELECT pid IS NOT NULL FROM run WHERE id=1;" 1 || fail "no keeper pid"
-  local out
-  out=$(gm dispatch 2 2>&1) && fail "a second contract ran beside the first"
-  assert_contains "$out" "run 1 is still working in appt-v2's camp" "says why" &&
-    assert_contains "$(gm where)" "an Adventurer is working in the camp" "the summary says a run works" || return 1
-  # While it works, the turn may end with the posting active; then a finished, unreviewed run holds it.
+  out=$(gm dispatch 2 2>&1) || fail "a second contract on the focus: $out"
+  assert_contains "$out" "appt-v2#2 second dispatched: contract, run 2 at medium effort (\"second\")" "started at once, beside the first" &&
+    assert_contains "$out" "Run 2 works in a worktree of its own, $GM_HALL/camps/appt-v2.run-2, on its own branch gm/run-2" "says where" || return 1
+  wait_for "SELECT count(*) FROM run WHERE worktree IS NOT NULL AND pid IS NOT NULL;" 2 || fail "the runs never started"
+  wait_for "SELECT count(*) FROM run WHERE refs_before IS NOT NULL;" 2 || fail "no refs kept"
+  assert_eq "$(git -C "$GM_HALL/camps/appt-v2.run-1" symbolic-ref --short HEAD)" gm/run-1 "run 1 on its own branch" &&
+    assert_eq "$(git -C "$GM_HALL/camps/appt-v2.run-2" symbolic-ref --short HEAD)" gm/run-2 "run 2 on its own" &&
+    assert_eq "$(db "SELECT group_concat(base_commit) FROM run;")" "$tip,$tip" "both made from the feature branch's tip" &&
+    assert_eq "$(git -C "$CAMP" symbolic-ref --short HEAD) $(git -C "$CAMP" rev-parse HEAD)" "feature/CRM-8965 $tip" "the camp untouched" &&
+    assert_contains "$(gm where)" "an Adventurer is working in its own worktree $GM_HALL/camps/appt-v2.run-1" "the summary says where" || return 1
+  # While they work, the turn may end with the postings active; then a finished, unreviewed run holds it.
   local stop
   stop=$(json "SELECT json_object('session_id','s1','background_tasks',json_array());")
-  gm notice 2 queued >/dev/null
-  assert_eq "$(printf '%s' "$stop" | gm hook stop)" "" "a live run lets the turn end" || return 1
+  assert_eq "$(printf '%s' "$stop" | gm hook stop)" "" "live runs let the turn end" || return 1
   rm -f "$GM_FAKE_RUN/hold"
-  run_ended 1 || fail "the run never ended"
+  run_ended 1 || fail "run 1 never ended"
+  run_ended 2 || fail "run 2 never ended"
+  assert_eq "$(cat "$GM_FAKE_RUN/by/appt-v2.run-1/pwd") $(cat "$GM_FAKE_RUN/by/appt-v2.run-2/pwd")" "$GM_HALL/camps/appt-v2.run-1 $GM_HALL/camps/appt-v2.run-2" "each in its own worktree" || return 1
   out=$(printf '%s' "$stop" | gm hook stop)
   assert_contains "$out" '"decision":"block"' "an unreviewed run holds the turn" &&
     assert_contains "$out" "run 1 for appt-v2#1 first finished: exit 0, no result, and no notice has reviewed it yet" "naming it" &&
     assert_contains "$(cat "$GM_HALL/runs/1/result.md")" "without a result" "a run with no result says so" || return 1
-  gm notice 2 started >/dev/null
-  gm dispatch 2 >/dev/null || fail "the second contract once the first ended"
-  run_ended 2 || fail "run 2 never ended"
   gm notice 1 'done' "abc123" >/dev/null
   gm notice 2 needs-you "keep the old URL?" >/dev/null
   assert_eq "$(printf '%s' "$stop" | gm hook stop)" "" "reviewed runs let it end" &&
-    assert_eq "$(db "SELECT group_concat(id||' '||outcome, ', ') FROM run;")" "1 accepted, 2 escalated" "outcomes from the notices" || return 1
+    assert_eq "$(db "SELECT group_concat(id||' '||outcome, ', ') FROM run;")" "1 accepted, 2 escalated" "outcomes from the notices" &&
+    assert_eq "$(db "SELECT count(*) FROM run WHERE cleaned_at IS NOT NULL;")" 2 "runs with no commits, reviewed, are cleaned up" &&
+    [ ! -e "$GM_HALL/camps/appt-v2.run-1" ] && [ ! -e "$GM_HALL/camps/appt-v2.run-2" ] || fail "a worktree was left" || return 1
+  assert_eq "$(git -C "$REPO" branch --list 'gm/*')" "" "and their branches" || return 1
   # Another run on the same posting means the last one was not enough.
   gm notice 2 started >/dev/null
   gm dispatch 2 --brief "keep it" >/dev/null
@@ -3930,7 +4007,7 @@ EOF
   assert_eq "$(rules Bash 'git push origin v1.0')" "" "a tag is left alone" || return 1
   # An Adventurer is denied the merge request outright.
   assert_eq "$(decision "$(GM_RUN=1 rules Bash 'glab mr create --fill')")" deny "an Adventurer never opens a merge request" &&
-    assert_eq "$(decision "$(GM_RUN=1 rules Bash 'git push origin feature/CRM-8965')")" allow "and pushes as the playbook allows" || return 1
+    assert_eq "$(decision "$(GM_RUN=1 rules Bash 'git push origin feature/CRM-8965')")" deny "nor pushes: gm lands its work" || return 1
   # Once a merge request is open, the playbook's phase-scoped line keeps the feature branch from a force-push.
   db "UPDATE focus SET phase='fix-loop';"
   out=$(rules Bash 'git push --force origin feature/CRM-8965')
@@ -3953,29 +4030,49 @@ t_rules_development_is_never_rewritten() {
     assert_eq "$(decision "$(rules Bash "cd $REPO && git rebase main")")" deny "after a cd"
 }
 
-t_rules_hold_the_camp_while_a_contract_runs() {
+t_rules_while_runs_hold_work() {
   setup ruleslive
   export GM_FOCUS=appt-v2
   rules_lines
+  git -C "$CAMP" -c user.name=t -c user.email=t@t commit -q --allow-empty -m second
   fake_run "$WORK/ruleslive/run"
   : >"$GM_FAKE_RUN/hold"
   gm post "the export" >/dev/null && gm notice 1 started >/dev/null
-  assert_eq "$(rules Edit "$CAMP/app.js")" "" "no run, an edit is left alone" || return 1
+  assert_eq "$(rules Bash 'git rebase main')" "" "no run, a rebase is left to the permissions" || return 1
   gm dispatch 1 >/dev/null || fail "dispatch"
-  wait_for "SELECT pid IS NOT NULL FROM run WHERE id=1;" 1 || fail "no keeper pid"
+  wait_for "SELECT pid IS NOT NULL AND worktree IS NOT NULL FROM run WHERE id=1;" 1 || fail "no keeper"
+  # The run works in its own worktree, so the camp is the Party Leader's: edits and commits are left alone.
+  assert_eq "$(rules Edit "$CAMP/app.js")" "" "an edit in the camp while run 1 works" &&
+    assert_eq "$(rules Bash 'git commit -m wip')" "" "a commit in the camp" || return 1
+  # But the feature branch is never rewritten under a run.
   local out
-  out=$(rules Edit "$CAMP/app.js")
-  assert_eq "$(decision "$out")" deny "an edit in the camp while run 1 works" &&
-    assert_contains "$(reason "$out")" "run 1 is working in this camp" "says which run" &&
-    assert_eq "$(decision "$(rules Write src/new.js)")" deny "a relative path in the camp" &&
-    assert_eq "$(decision "$(rules Bash 'git commit -m wip')")" deny "a commit in the camp" &&
-    assert_eq "$(decision "$(rules Bash "git -C $CAMP commit -m wip" "$WORK")")" deny "a commit with -C" &&
-    assert_eq "$(rules Edit "$GM_HALL/rules/repo.md")" "" "a file outside the camp" &&
-    assert_eq "$(rules Bash 'git status')" "" "reading the camp" &&
-    assert_eq "$(GM_RUN=1 rules Bash 'git commit -m fix')" "" "the Adventurer itself commits" || return 1
+  out=$(rules Bash 'git rebase main')
+  assert_eq "$(decision "$out")" deny "a rebase of the feature branch while run 1 is live" &&
+    assert_contains "$(reason "$out")" "while run 1 of this focus hold work made from its tip" "naming the run" &&
+    assert_eq "$(decision "$(rules Bash 'git reset --hard HEAD~1')")" deny "a reset that moves it" &&
+    assert_eq "$(decision "$(rules Bash 'git reset --soft HEAD~1')")" deny "a soft one too" &&
+    assert_eq "$(rules Bash 'git reset --soft HEAD')" "" "a reset to HEAD moves nothing" &&
+    assert_eq "$(rules Bash 'git reset')" "" "nor does unstaging" &&
+    assert_eq "$(rules Bash 'git reset -- app.js')" "" "nor a path" || return 1
+  assert_eq "$(decision "$(rules Bash 'git push --force origin feature/CRM-8965')")" deny "a forced push of it" &&
+    assert_eq "$(decision "$(rules Bash 'git push origin feature/CRM-8965')")" allow "a plain push still goes" &&
+    assert_eq "$(db "SELECT detail FROM event WHERE kind='push.allowed' ORDER BY id DESC LIMIT 1;")" feature/CRM-8965 "and is recorded as the Party Leader's" || return 1
+  # An Adventurer pushes nothing: its commits reach the feature branch only through gm land.
+  out=$(GM_RUN=1 rules Bash 'git push origin feature/CRM-8965')
+  assert_eq "$(decision "$out")" deny "an Adventurer's push" &&
+    assert_contains "$(reason "$out")" "an Adventurer pushes nothing" "says why" &&
+    assert_eq "$(GM_RUN=1 rules Bash 'git commit -m fix')" "" "it commits" || return 1
+  # While gm lands a run, the camp is held for those seconds.
+  mkdir -p "$GM_HALL/locks/land-appt-v2.lock" && printf '%s' "$$" >"$GM_HALL/locks/land-appt-v2.lock/pid"
+  assert_eq "$(decision "$(rules Edit "$CAMP/app.js")")" deny "an edit while gm lands" &&
+    assert_contains "$(reason "$(rules Write src/new.js)")" "gm is landing a run on the feature branch in this camp" "says why" &&
+    assert_eq "$(decision "$(rules Bash 'git commit -m wip')")" deny "a commit while gm lands" &&
+    assert_eq "$(rules Edit "$GM_HALL/rules/repo.md")" "" "a file outside the camp" || return 1
+  rm -rf "$GM_HALL/locks/land-appt-v2.lock"
   rm -f "$GM_FAKE_RUN/hold"
   run_ended 1 || fail "the run never ended"
-  assert_eq "$(rules Edit "$CAMP/app.js")" "" "the run over, edits are the Party Leader's again"
+  # Ended with no commits, it holds nothing: the feature branch is the Party Leader's to rewrite again.
+  assert_eq "$(rules Bash 'git rebase main')" "" "nothing held, a rebase is left to the permissions"
 }
 
 t_rules_hook_in_every_camp() {
@@ -3997,15 +4094,19 @@ t_rules_hook_in_every_camp() {
     assert_not_contains "$settings" '"Bash(git push*)"' "no deny rule to outweigh the hook's allow"
 }
 
-# ---- gm check after every run (vision/step-3-design.md, slice 3) ----
+# ---- gm check after every run (vision/step-3-design.md, slice 3), judging each run's own worktree (slice 4) ----
 
 # check_setup <name>: a focus whose repository has a bare remote with main, development, a teammate's branch and the
-# feature branch, the rules' branch names, and an Adventurer that does what each act.<n> in $GM_FAKE_RUN says.
+# feature branch (one commit ahead of main, so a run's base has a parent), the rules' branch names, git's identity for
+# gm land's merge commits, and an Adventurer that does what each act.<n> in $GM_FAKE_RUN says.
 check_setup() {
   setup "$1"
   export GM_FOCUS=appt-v2
   rules_lines
   REMOTE=$WORK/$1/remote.git
+  git -C "$REPO" config user.name t
+  git -C "$REPO" config user.email t@t
+  git -C "$CAMP" commit -q --allow-empty -m "the feature's first commit"
   git -C "$REPO" branch development
   git -C "$REPO" branch teammate
   git init -q --bare "$REMOTE"
@@ -4014,101 +4115,142 @@ check_setup() {
   fake_run "$WORK/$1/run"
 }
 
-# check_act <script>: what the next run of the Adventurer does, in the camp.
+# check_act <script>: what the next run of the Adventurer does, where it works.
 check_act() {
   local n=1
   while [ -e "$GM_FAKE_RUN/act.$n" ]; do n=$((n + 1)); done
   printf 'set -e\n%s\n' "$1" >"$GM_FAKE_RUN/act.$n"
 }
 
+# act_for <run> <script>: what run <run> does, whichever run starts first.
+act_for() {
+  local n=1
+  while [ -e "$GM_FAKE_RUN/act.appt-v2.run-$1.$n" ]; do n=$((n + 1)); done
+  printf 'set -e\n%s\n' "$2" >"$GM_FAKE_RUN/act.appt-v2.run-$1.$n"
+}
+
 # check_post <words>: a started posting, dispatched; prints its run once the run has ended and been checked.
 check_post() {
   local num run
-  num=$(gm post "$1" | sed -n 's/^appt-v2#\([0-9]*\) .*/\1/p')
-  gm notice "$num" started >/dev/null
+  num=$(started "$1")
   gm dispatch "$num" >/dev/null || fail "dispatch #$num"
   run=$(db "SELECT max(id) FROM run;")
   run_ended "$run" || fail "run $run was never checked"
   printf '%s' "$run"
 }
 
+# started <words>: a posting, started; prints its number.
+started() {
+  local num
+  num=$(gm post "$1" | sed -n 's/^appt-v2#\([0-9]*\) .*/\1/p')
+  gm notice "$num" started >/dev/null
+  printf '%s' "$num"
+}
+
 commit_in() { printf 'git -c user.name=t -c user.email=t@t commit -q --allow-empty -m %s' "$1"; }
+
+# file_in <file> <text> <message>: an Adventurer's commit of a file.
+file_in() { printf "printf '%%s\\\\n' '%s' >%s && git add %s && git -c user.name=t -c user.email=t@t commit -q -m '%s'" "$2" "$1" "$1" "$3"; }
 
 t_check_after_every_run_from_git_facts() {
   check_setup checkfacts
-  local r out f=feature/CRM-8965
-  # A clean run: a commit on the feature branch, pushed there; the development branch moved forward, which the
-  # playbook's push: development merge allows; a teammate's push to their own branch is not the Adventurer's.
-  local mate=$WORK/checkfacts/mate
+  local r out f=feature/CRM-8965 mate=$WORK/checkfacts/mate
   git clone -q "$REMOTE" "$mate"
-  check_act "$(commit_in fix) && git push -q origin HEAD:$f && git push -q origin HEAD:development"
-  r=$(check_post "a clean fix")
-  assert_eq "$(db "SELECT check_result FROM run WHERE id=$r;")" passed "a clean run passes" &&
-    assert_contains "$(gm show 1)" "appt-v2#1 clean-fix run $r check passed" "a notice says so" &&
-    assert_contains "$(gm runs)" "check passed" "gm runs shows it" &&
-    assert_contains "$(gm summons)" "Its result: $GM_HALL/runs/$r/result.md. gm check: every rule kept." "the summons carries the check" || return 1
+  # A clean run: a commit on its own branch. A teammate's push to their own branch, and the Party Leader's own push
+  # of the feature branch while the run works, which its rules hook records, are not the run's.
+  check_act "$(commit_in fix)"
+  : >"$GM_FAKE_RUN/hold"
+  gm dispatch "$(started "a clean fix")" >/dev/null || fail "dispatch"
+  wait_for "SELECT refs_before IS NOT NULL FROM run WHERE id=1;" 1 || fail "the run never started"
+  git -C "$CAMP" commit -q --allow-empty -m "the party leader's own"
+  assert_eq "$(decision "$(rules Bash "git push origin $f")")" allow "the Party Leader pushes the feature branch" || return 1
+  git -C "$CAMP" push -q origin "$f"
   git -C "$mate" checkout -q teammate && git -C "$mate" -c user.name=m -c user.email=m@m commit -q --allow-empty -m mate && git -C "$mate" push -q origin teammate
+  rm -f "$GM_FAKE_RUN/hold"
+  run_ended 1 || fail "the run never ended"
+  assert_eq "$(db "SELECT check_result FROM run WHERE id=1;")" passed "a clean run passes" &&
+    assert_contains "$(gm show 1)" "appt-v2#1 clean-fix run 1 check passed" "a notice says so" &&
+    assert_contains "$(gm runs)" "check passed" "gm runs shows it" &&
+    assert_contains "$(gm summons)" "Its result: $GM_HALL/runs/1/result.md. gm check: every rule kept." "the summons carries the check" || return 1
   gm notice 1 'done' >/dev/null
-  check_act ":"
-  r=$(check_post "nothing to do")
-  assert_eq "$(db "SELECT check_result FROM run WHERE id=$r;")" passed "a teammate's push is not the Adventurer's" || return 1
-  gm notice 2 'done' >/dev/null
   # Each rule broken, caught from git alone: the fake Adventurer's result says it fixed the bug every time.
   check_act "git checkout -q --detach"
-  check_act "git checkout -q $f"
   r=$(check_post "left detached")
-  assert_eq "$(db "SELECT check_result||' | '||check_rules FROM run WHERE id=$r;")" "failed | the camp stays on its feature branch" "a detached HEAD" &&
+  assert_eq "$(db "SELECT check_result||' | '||check_rules FROM run WHERE id=$r;")" "failed | the run stays in its own worktree, on its own branch, which only grows" "a detached HEAD" &&
     assert_contains "$(cat "$GM_HALL/runs/$r/check.txt")" "HEAD is detached at" "with the evidence" || return 1
+  run_ended $((r + 1)) || fail "no correction run"
+  gm notice 2 'done' >/dev/null
+  check_act "git reset -q --hard HEAD~1"
+  r=$(check_post "rewrote its branch")
+  assert_contains "$(db "SELECT check_evidence FROM run WHERE id=$r;")" "which no longer holds its base" "a run branch rewritten" || return 1
   run_ended $((r + 1)) || fail "no correction run"
   gm notice 3 'done' >/dev/null
   check_act "git branch side"
   r=$(check_post "made a branch")
   assert_eq "$(db "SELECT check_rules FROM run WHERE id=$r;")" "no new local branch" "a new local branch" &&
-    assert_contains "$(db "SELECT check_evidence FROM run WHERE id=$r;")" "the branch side was created, at" "named" || return 1
+    assert_contains "$(db "SELECT check_evidence FROM run WHERE id=$r;")" "the branch side was created, at" "named" &&
+    assert_not_contains "$(db "SELECT check_evidence FROM run WHERE id=$r;")" "gm/run-" "never a run branch gm made" || return 1
   run_ended $((r + 1)) || fail "no correction run"
   gm notice 4 'done' >/dev/null
   check_act "$(commit_in other) && git push -q -f origin HEAD:teammate && git push -q origin HEAD:refs/heads/brand-new && git push -q origin --delete development"
   r=$(check_post "pushed elsewhere")
   out=$(db "SELECT check_evidence FROM run WHERE id=$r;")
-  assert_contains "$out" "- no remote branch moves but the feature branch, and the development branch only forward when the playbook allows it: origin/teammate moved from" "a teammate's branch moved" &&
+  assert_contains "$out" "- an Adventurer pushes nothing: origin/teammate moved from" "a teammate's branch moved" &&
     assert_contains "$out" "origin/brand-new was created, at" "a remote branch created" &&
     assert_contains "$out" "origin/development was deleted" "the development branch deleted" &&
-    assert_not_contains "$out" "no commit outside" "its commit is on the feature branch's line" || return 1
+    assert_not_contains "$out" "no commit off" "its commit is on its run branch's line" || return 1
   run_ended $((r + 1)) || fail "no correction run"
   gm notice 5 'done' >/dev/null
-  git -C "$REPO" push -q origin "$f:development" 2>/dev/null
-  check_act "git push -q -f origin main:development"
-  r=$(check_post "forced development")
-  assert_contains "$(db "SELECT check_evidence FROM run WHERE id=$r;")" "origin/development moved from" "the development branch moved back" &&
-    assert_contains "$(db "SELECT check_evidence FROM run WHERE id=$r;")" "which does not contain it: not forward" "not forward" || return 1
+  check_act "git checkout -q --detach && $(commit_in stray) && git tag kept && git checkout -q -"
+  r=$(check_post "stray commit")
+  assert_eq "$(db "SELECT check_rules FROM run WHERE id=$r;")" "no commit off the run branch's line, and none on the feature branch but through gm land" "a commit left off the line" &&
+    assert_contains "$(db "SELECT check_evidence FROM run WHERE id=$r;")" "\"stray\" is not on gm/run-$r" "names the commit" || return 1
   run_ended $((r + 1)) || fail "no correction run"
   gm notice 6 'done' >/dev/null
-  check_act "git checkout -q --detach && $(commit_in stray) && git checkout -q $f"
-  r=$(check_post "stray commit")
-  assert_eq "$(db "SELECT check_rules FROM run WHERE id=$r;")" "no commit outside the feature branch's line" "a commit left off the line" &&
-    assert_contains "$(db "SELECT check_evidence FROM run WHERE id=$r;")" '"stray" is not on feature/CRM-8965' "names the commit" || return 1
+  # A commit amended, or a branch rebased onto its own base, leaves its old version in the reflog alone: on the line.
+  check_act "$(commit_in draft) && git -c user.name=t -c user.email=t@t commit -q --amend --allow-empty -m amended && $(commit_in second) && git -c user.name=t -c user.email=t@t rebase -q --force-rebase HEAD~2"
+  r=$(check_post "amended its commit")
+  assert_eq "$(db "SELECT check_result FROM run WHERE id=$r;")" passed "an amend and a rebase pass" &&
+    assert_eq "$(git -C "$GM_HALL/camps/appt-v2.run-$r" log --format=%s -2 "gm/run-$r" | tr '\n' '|')" "second|amended|" "with the amended commits on the run branch" || return 1
+  gm notice 7 'done' >/dev/null
+  # A commit on another branch is still off the line, though the branch was there before.
+  check_act "git checkout -q development && $(commit_in elsewhere) && git checkout -q -"
+  r=$(check_post "committed elsewhere")
+  assert_eq "$(db "SELECT check_rules FROM run WHERE id=$r;")" "no commit off the run branch's line, and none on the feature branch but through gm land" "a commit on another branch" &&
+    assert_contains "$(db "SELECT check_evidence FROM run WHERE id=$r;")" "\"elsewhere\" is not on gm/run-$r" "names the commit" || return 1
+  run_ended $((r + 1)) || fail "no correction run"
+  gm notice 8 'done' >/dev/null
+  check_act "$(commit_in sneaked) && git update-ref refs/heads/$f HEAD"
+  r=$(check_post "sneaked onto the feature branch")
+  assert_contains "$(db "SELECT check_evidence FROM run WHERE id=$r;")" "\"sneaked\" reached $f outside gm land" "a commit put on the feature branch but through gm land" || return 1
   run_ended $((r + 1)) || fail "no correction run"
 }
 
 t_check_failure_dispatches_one_correction_then_needs_you() {
   check_setup checkfix
-  local r out f=feature/CRM-8965
+  local r out good
   # A first failure: one correction run at once, its writ from the correction template quoting the rule and the
-  # evidence; it puts things right and passes.
-  check_act "git checkout -q --detach"
-  check_act "git checkout -q $f"
+  # evidence, its branch starting where the failed run's ended, so its good commit is kept; it passes.
+  check_act "$(commit_in good) && git branch side"
   r=$(check_post "the owner field")
   run_ended 2 || fail "no correction run"
-  assert_eq "$(db "SELECT id||' '||kind||' '||corrects_run||' '||check_result FROM run WHERE id=2;")" "2 contract 1 passed" "run 2 corrects run 1, and passes" &&
+  good=$(git -C "$REPO" rev-parse gm/run-2)
+  assert_eq "$(db "SELECT id||' '||kind||' '||corrects_run||' '||correction||' '||check_result FROM run WHERE id=2;")" "2 contract 1 check passed" "run 2 corrects run 1, and passes" &&
+    assert_eq "$(git -C "$REPO" log -1 --format=%s "$good")" good "its branch holds run 1's good commit" &&
+    assert_eq "$(db "SELECT base_commit FROM run WHERE id=2;")" "$good" "made from run 1's branch" &&
     assert_eq "$(db "SELECT outcome FROM run WHERE id=1;")" corrected "run 1 was corrected" &&
     assert_eq "$(db "SELECT state FROM posting WHERE num=1;")" active "the posting stays active" || return 1
+  wait_for "SELECT cleaned_at IS NOT NULL FROM run WHERE id=1;" 1 || fail "run 1's worktree was kept"
+  assert_eq "$(git -C "$REPO" branch --list gm/run-1)" "" "run 1's branch is gone, its commits in run 2's" &&
+    [ ! -e "$GM_HALL/camps/appt-v2.run-1" ] || fail "run 1's worktree is still there" || return 1
   [ -f "$GM_HALL/prompts/adventurer/correction.md" ] || fail "the correction template was not copied into the Guildhall"
   local writ
   writ=$(cat "$GM_HALL/runs/2/writ.md")
   assert_contains "$writ" "# Correction writ: appt-v2#1 owner-field" "{{posting}}" &&
     assert_contains "$writ" "what run 1 left" "{{run}}" &&
-    assert_contains "$writ" "these were broken: the camp stays on its feature branch." "{{rule}}" &&
-    assert_contains "$writ" "- the camp stays on its feature branch: HEAD is detached at" "{{evidence}}" &&
+    assert_contains "$writ" "on your run's branch \`gm/run-2\`" "{{run_branch}}" &&
+    assert_contains "$writ" "this was broken: no new local branch." "{{rule}}" &&
+    assert_contains "$writ" "- no new local branch: the branch side was created, at" "{{evidence}}" &&
     assert_contains "$writ" "the owner field" "{{original_words}}" &&
     assert_not_contains "$writ" "{{" "every slot filled" &&
     assert_not_contains "$writ" "This file is the patron's" "the template's own note stays out" || return 1
@@ -4116,20 +4258,24 @@ t_check_failure_dispatches_one_correction_then_needs_you() {
   out=$(gm summons)
   assert_contains "$out" "- run 1 for appt-v2#1 owner-field finished" "the failed run is summoned" &&
     assert_contains "$out" "gm check found rules broken, from git:
-    - the camp stays on its feature branch: HEAD is detached at" "with the rule and the evidence" &&
+    - no new local branch: the branch side was created, at" "with the rule and the evidence" &&
     assert_contains "$out" "gm dispatched correction run 2 at once" "and the correction" &&
     assert_contains "$out" "- run 2 for appt-v2#1 owner-field finished" "the correction's own result" || return 1
+  out=$(gm land 1 2>&1) && fail "landed a run whose check failed"
+  assert_contains "$out" "run 1's worktree and branch were removed" "nothing of it is left" || return 1
+  out=$(gm land 2) || fail "landing the correction"
+  assert_eq "$(git -C "$CAMP" rev-parse HEAD)" "$good" "the correction lands its good commit, by fast-forward" || return 1
   gm notice 1 'done' >/dev/null
   # A second failure on the same posting: needs-you, with the evidence, for the patron; no third run.
-  check_act "git branch side"
   check_act "git branch side2"
+  check_act "git branch side3"
   r=$(check_post "a second posting")
   run_ended 4 || fail "no correction run"
   sleep 1
   assert_eq "$(db "SELECT count(*) FROM run;")" 4 "no run after the second failure" &&
     assert_eq "$(db "SELECT check_result||' '||outcome FROM run WHERE id=4;")" "failed escalated" "the correction failed too" &&
     assert_eq "$(db "SELECT state FROM posting WHERE num=2;")" needs-you "the posting is the patron's" &&
-    assert_contains "$(gm show 2)" "appt-v2#2 second-posting needs you: run 4's check failed again: - no new local branch: the branch side2 was created, at" "with the evidence" &&
+    assert_contains "$(gm show 2)" "appt-v2#2 second-posting needs you: run 4's check failed again: - no new local branch: the branch side3 was created, at" "with the evidence" &&
     assert_contains "$(gm summons)" "gm made its postings needs-you, with this evidence, for the patron" "the summons says so" &&
     assert_contains "$(gm where)" "Needs the patron:" "the board shows it" || return 1
   # gm check by hand reports what was recorded, and the check waits for a run to end.
@@ -4142,11 +4288,11 @@ t_check_waits_for_the_run_and_the_summons_for_the_check() {
   : >"$GM_FAKE_RUN/hold"
   gm post "slow" >/dev/null && gm notice 1 started >/dev/null
   gm dispatch 1 >/dev/null
-  wait_for "SELECT pid IS NOT NULL FROM run WHERE id=1;" 1 || fail "no keeper"
+  wait_for "SELECT pid IS NOT NULL AND refs_before IS NOT NULL FROM run WHERE id=1;" 1 || fail "no keeper"
   local out
   out=$(gm check 1 2>&1) && fail "checked a live run"
   assert_contains "$out" "run 1 is still working" "says why" &&
-    assert_contains "$(db "SELECT refs_before FROM run WHERE id=1;")" "HEAD $(git -C "$CAMP" rev-parse HEAD) feature/CRM-8965" "the refs kept at dispatch" &&
+    assert_contains "$(db "SELECT refs_before FROM run WHERE id=1;")" "HEAD $(git -C "$CAMP" rev-parse HEAD) gm/run-1" "the refs kept when its worktree was made" &&
     assert_contains "$(db "SELECT refs_before FROM run WHERE id=1;")" "refs/remotes/origin/development " "remote-tracking refs too" || return 1
   # An ended run whose check has not run is not summoned until it has.
   db "UPDATE run SET ended_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=1;"
@@ -4155,6 +4301,350 @@ t_check_waits_for_the_run_and_the_summons_for_the_check() {
   rm -f "$GM_FAKE_RUN/hold"
   run_ended 1 || fail "never checked"
   assert_contains "$(gm summons)" "gm check: every rule kept." "after it"
+}
+
+# ---- Parallel contracts, surveys and the cap (vision/step-3-design.md, slice 4) ----
+
+t_parallel_contracts_land_one_at_a_time() {
+  check_setup land
+  local out tip f=feature/CRM-8965 cfg=$HOME/.claude.json wt1 wt2
+  wt1=$GM_HALL/camps/appt-v2.run-1 wt2=$GM_HALL/camps/appt-v2.run-2
+  : >"$GM_FAKE_RUN/hold"
+  act_for 1 "$(file_in a.txt alpha 'Add a')"
+  act_for 2 "$(file_in b.txt bravo 'Add b')"
+  started "add a" >/dev/null && started "add b" >/dev/null
+  gm dispatch 1 >/dev/null && gm dispatch 2 >/dev/null
+  wait_for "SELECT count(*) FROM run WHERE refs_before IS NOT NULL;" 2 || fail "the runs never started"
+  # Claude Code trusts each worktree, recorded for it alone while it lives.
+  assert_eq "$(json "SELECT json_extract(CAST(readfile('$cfg') AS TEXT), '\$.projects.\"$wt1\".hasTrustDialogAccepted');")" 1 "run 1's worktree trusted" &&
+    assert_eq "$(db "SELECT trust_added FROM run WHERE id=1;")" 1 "recorded on the run" || return 1
+  out=$(gm land 1 2>&1) && fail "landed a live run"
+  assert_contains "$out" "run 1 is still working" "says why" || return 1
+  rm -f "$GM_FAKE_RUN/hold"
+  { run_ended 1 && run_ended 2; } || fail "the runs never ended"
+  assert_eq "$(db "SELECT group_concat(check_result) FROM run;")" "passed,passed" "both checked" || return 1
+  tip=$(git -C "$CAMP" rev-parse HEAD)
+  # Refused: a dirty camp, uncommitted work in the run's worktree.
+  printf 'x\n' >>"$CAMP/README" && git -C "$CAMP" add README && git -C "$CAMP" commit -q -m readme && printf 'y\n' >>"$CAMP/README"
+  out=$(gm land 1 2>&1) && fail "landed into a dirty camp"
+  assert_contains "$out" "the camp has uncommitted changes to tracked files (README)" "names them" || return 1
+  git -C "$CAMP" checkout -q README
+  git -C "$CAMP" reset -q --hard HEAD~1
+  printf 'more\n' >>"$wt1/a.txt"
+  out=$(gm land 1 2>&1) && fail "landed uncommitted work"
+  assert_contains "$out" "uncommitted changes are never landed" "says why" || return 1
+  git -C "$wt1" checkout -q a.txt
+  # The first lands by fast-forward, the second with a merge commit, one at a time.
+  out=$(gm land 1) || fail "landing run 1: $out"
+  assert_contains "$out" "Run 1 landed on $f at" "says so" &&
+    assert_eq "$(git -C "$CAMP" rev-parse HEAD)" "$(git -C "$REPO" log -1 --format=%H --all --grep='^Add a$')" "fast-forward: the feature branch is run 1's commit" &&
+    assert_contains "$(gm show 1)" "appt-v2#1 add landed: run 1 at" "a landed notice" &&
+    assert_contains "$(gm show 1)" "(fast-forward)" "by fast-forward" &&
+    assert_eq "$(db "SELECT land_result||' '||outcome||' '||(cleaned_at IS NOT NULL) FROM run WHERE id=1;")" "ff accepted 1" "recorded, and cleaned up" &&
+    [ ! -e "$wt1" ] || fail "run 1's worktree is still there" || return 1
+  assert_eq "$(git -C "$REPO" branch --list gm/run-1)" "" "and its branch" &&
+    assert_eq "$(json "SELECT json_type(CAST(readfile('$cfg') AS TEXT), '\$.projects.\"$wt1\"');")" "" "and Claude Code's trust entry for it" || return 1
+  out=$(gm land 2) || fail "landing run 2: $out"
+  assert_eq "$(git -C "$CAMP" log -1 --format='%s|%P' | awk -F '|' '{ print $1, split($2, p, " ") }')" "Land run 2 (#2 add-b) on $f 2" "a merge commit with two parents" &&
+    assert_contains "$(gm show 2)" "(merge with run 1's work)" "says with what" &&
+    assert_eq "$(git -C "$CAMP" show HEAD:a.txt) $(git -C "$CAMP" show HEAD:b.txt)" "alpha bravo" "both runs' work on the feature branch" &&
+    assert_eq "$(git -C "$CAMP" status --porcelain)" "" "the camp clean" &&
+    [ ! -e "$wt2" ] || fail "run 2's worktree is still there" || return 1
+  assert_eq "$(git -C "$REPO" branch --list 'gm/*')" "" "every run branch gone" &&
+    assert_eq "$(git -C "$REPO" worktree list | grep -c 'run-')" 0 "and every run worktree" &&
+    assert_eq "$(git -C "$REMOTE" branch --list 'gm/*')" "" "never pushed" || return 1
+  out=$(gm land 2 2>&1) && fail "landed twice"
+  assert_contains "$out" "run 2 landed already" "once" || return 1
+  # A run with no commits is accepted with nothing to land.
+  gm notice 1 'done' >/dev/null && gm notice 2 'done' >/dev/null
+  started "nothing to change" >/dev/null && gm dispatch 3 >/dev/null
+  run_ended 3 || fail "run 3 never ended"
+  out=$(gm land 3) || fail "landing a run with no commits"
+  assert_contains "$out" "accepted with nothing to land" "says so" &&
+    assert_eq "$(db "SELECT land_result||' '||(cleaned_at IS NOT NULL) FROM run WHERE id=3;")" "nothing 1" "and cleans it up"
+}
+
+t_after_holds_a_run_until_its_posting_lands() {
+  check_setup after
+  local out
+  : >"$GM_FAKE_RUN/hold.appt-v2.run-1"
+  act_for 1 "$(file_in a.txt alpha 'Add a')"
+  started "the export" >/dev/null && started "the export header" >/dev/null
+  gm dispatch 1 >/dev/null
+  out=$(gm dispatch 2 --after 1 2>&1) || fail "dispatch --after: $out"
+  assert_contains "$out" "appt-v2#2 export-header dispatched: contract, run 2 at medium effort, waits for #1 (" "the notice says it waits" &&
+    assert_contains "$out" "Run 2 waits, unmade, until what it needs has landed" "and what for" &&
+    assert_eq "$(db "SELECT waiting||' '||COALESCE(worktree,'none') FROM run WHERE id=2;")" "after none" "recorded waiting, its worktree unmade" &&
+    assert_contains "$(gm runs)" "waiting since" "gm runs shows it waiting" || return 1
+  rm -f "$GM_FAKE_RUN/hold.appt-v2.run-1"
+  run_ended 1 || fail "run 1 never ended"
+  sleep 1
+  assert_eq "$(db "SELECT waiting FROM run WHERE id=2;")" after "run 1 ended, not landed: run 2 still waits" || return 1
+  gm land 1 >/dev/null || fail "landing run 1"
+  wait_for "SELECT waiting IS NULL AND base_commit IS NOT NULL FROM run WHERE id=2;" 1 || fail "run 2 never started"
+  assert_eq "$(db "SELECT base_commit FROM run WHERE id=2;")" "$(git -C "$CAMP" rev-parse HEAD)" "made from the tip that holds run 1's work" &&
+    assert_contains "$(gm show 2)" "run 2 started, now that what it needs has landed" "a notice when it starts" || return 1
+  run_ended 2 || fail "run 2 never ended"
+  # A need that cannot be met is summoned once; dispatching again without --after replaces the waiting run.
+  gm notice 1 'done' >/dev/null && gm notice 2 'done' >/dev/null
+  started "the import" >/dev/null && started "the import header" >/dev/null
+  gm dispatch 4 --after 3 >/dev/null
+  gm summons >/dev/null
+  gm notice 3 failed "not needed after all" >/dev/null
+  out=$(gm summons)
+  assert_contains "$out" "- run 3 for appt-v2#4 import-header waits for #3 import (failed), with nothing landed, so it cannot start as it is" "summoned" &&
+    assert_contains "$(gm summons)" "Nothing is waiting" "once" || return 1
+  gm dispatch 4 >/dev/null || fail "dispatch again"
+  assert_eq "$(db "SELECT result_subtype||' '||outcome FROM run WHERE id=3;")" "dropped redispatched" "the waiting run is replaced" &&
+    run_ended 4 || fail "run 4 never ended" || return 1
+  # Recording a state on a waiting run's posting drops it.
+  started "the search" >/dev/null
+  gm dispatch 5 --after 4 >/dev/null
+  gm notice 5 queued >/dev/null
+  assert_eq "$(db "SELECT result_subtype FROM run WHERE id=5;")" dropped "dropped by the posting's state" &&
+    assert_contains "$(gm runs)" "dropped before it started" "gm runs says so"
+}
+
+t_cap_holds_runs_and_starts_them_as_others_finish() {
+  check_setup cap
+  local out line
+  gm config set adventurers 1 >/dev/null || fail "config set adventurers"
+  : >"$GM_FAKE_RUN/hold"
+  started "one" >/dev/null && started "two" >/dev/null
+  gm dispatch 1 >/dev/null
+  out=$(gm dispatch 2 2>&1) || fail "dispatch over the cap: $out"
+  assert_contains "$out" "dispatched: contract, run 2 at medium effort, waits for a free Adventurer (1 at work)" "the notice says it waits" &&
+    assert_contains "$out" "Run 2 waits for a free Adventurer (1 at work, the cap in guild.conf)" "and says so" &&
+    assert_eq "$(db "SELECT waiting FROM run WHERE id=2;")" cap "recorded waiting" || return 1
+  line=$(printf '{}' | gm statusline | tail -n 1)
+  assert_contains "$line" "adventurers 1 running · 1 waiting" "the status line's guild row" || return 1
+  rm -f "$GM_FAKE_RUN/hold"
+  run_ended 1 || fail "run 1 never ended"
+  run_ended 2 || fail "the keeper that finished never started run 2"
+  assert_contains "$(gm show 2)" "run 2 started, now that an Adventurer is free" "a notice when it starts" || return 1
+  # A keeper that died starts nothing; whatever reaps its run (the muster, gm runs) starts the next.
+  gm notice 1 'done' >/dev/null && gm notice 2 'done' >/dev/null
+  started "three" >/dev/null && started "four" >/dev/null
+  : >"$GM_FAKE_RUN/hold"
+  gm dispatch 3 >/dev/null && gm dispatch 4 >/dev/null
+  wait_for "SELECT pid IS NOT NULL AND refs_before IS NOT NULL FROM run WHERE id=3;" 1 || fail "run 3 never started"
+  assert_eq "$(db "SELECT waiting FROM run WHERE id=4;")" cap "run 4 waits behind it" || return 1
+  kill "$(db "SELECT pid FROM run WHERE id=3;")" 2>/dev/null
+  pkill -f "session-id $(db "SELECT session_id FROM run WHERE id=3;")" 2>/dev/null
+  rm -f "$GM_FAKE_RUN/hold"
+  gm runs >/dev/null
+  run_ended 3 || fail "run 3 was never reaped"
+  run_ended 4 || fail "the reaper never started run 4"
+}
+
+t_rate_limit_pauses_dispatch() {
+  check_setup ratelimit
+  local out until
+  printf '%s\n' "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"num_turns\":3,\"result\":\"Claude AI usage limit reached|$(($(date +%s) + 3600))\"}" >"$GM_FAKE_RUN/stream.jsonl"
+  started "one" >/dev/null
+  gm dispatch 1 >/dev/null
+  run_ended 1 || fail "run 1 never ended"
+  until=$(db "SELECT rate_limited_until FROM run WHERE id=1;")
+  [ -n "$until" ] || fail "no pause recorded" || return 1
+  assert_contains "$(gm show 1)" "run 1 hit a rate limit: gm starts no Adventurer until" "a notice" || return 1
+  rm -f "$GM_FAKE_RUN/stream.jsonl"
+  started "two" >/dev/null
+  out=$(gm dispatch 2 2>&1)
+  assert_contains "$out" "waits: dispatch is paused until" "a dispatch during the pause waits" &&
+    assert_eq "$(db "SELECT waiting FROM run WHERE id=2;")" paused "recorded" &&
+    assert_contains "$(printf '{}' | gm statusline | tail -n 1)" "dispatch paused until" "the status line shows it" || return 1
+  db "UPDATE run SET rate_limited_until=strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 minute') WHERE id=1;"
+  gm runs >/dev/null
+  run_ended 2 || fail "run 2 never started once the pause ended"
+  # A limit whose reset time gm cannot read pauses dispatch for GM_RATE_PAUSE.
+  gm notice 1 'done' >/dev/null && gm notice 2 'done' >/dev/null
+  printf '%s\n' '{"type":"result","subtype":"success","is_error":true,"num_turns":1,"result":"5-hour limit reached ∙ resets 3pm"}' >"$GM_FAKE_RUN/stream.jsonl"
+  started "three" >/dev/null
+  gm dispatch 3 >/dev/null
+  run_ended 3 || fail "run 3 never ended"
+  assert_eq "$(db "SELECT rate_limited_until>strftime('%Y-%m-%dT%H:%M:%fZ','now','+25 minutes') AND rate_limited_until<strftime('%Y-%m-%dT%H:%M:%fZ','now','+35 minutes') FROM run WHERE id=3;")" 1 "paused for 30 minutes"
+}
+
+t_landing_conflict_sends_one_correction_then_needs_you() {
+  check_setup conflict
+  local out c wt3=$GM_HALL/camps/appt-v2.run-3 head
+  : >"$GM_FAKE_RUN/hold"
+  act_for 1 "$(file_in owner.txt 'from run one' 'Owner from run 1')"
+  act_for 2 "$(file_in owner.txt 'from run two' 'Owner from run 2')"
+  started "the owner field" >/dev/null && started "the owner label" >/dev/null
+  gm dispatch 1 >/dev/null && gm dispatch 2 >/dev/null
+  wait_for "SELECT count(*) FROM run WHERE refs_before IS NOT NULL;" 2 || fail "the runs never started"
+  rm -f "$GM_FAKE_RUN/hold"
+  { run_ended 1 && run_ended 2; } || fail "the runs never ended"
+  gm land 1 >/dev/null || fail "landing run 1"
+  head=$(git -C "$CAMP" rev-parse HEAD)
+  : >"$GM_FAKE_RUN/hold.appt-v2.run-3"
+  out=$(gm land 2 2>&1) && fail "a conflicting run landed"
+  assert_contains "$out" "appt-v2#2 owner-label run 2 did not land: merging it conflicted with what landed on feature/CRM-8965 since it started (owner.txt)" "the notice" &&
+    assert_contains "$out" "dispatched: correction, run 3 of run 2 (landing conflict with run 1)" "one correction run at once" &&
+    assert_contains "$out" "The camp is as it was" "says the camp is untouched" &&
+    assert_eq "$(git -C "$CAMP" rev-parse HEAD) $(git -C "$CAMP" status --porcelain | grep -c .)" "$head 0" "the camp as it was" &&
+    assert_eq "$(db "SELECT land_result FROM run WHERE id=2;")" conflict "recorded" &&
+    assert_eq "$(db "SELECT outcome FROM run WHERE id=2;")" corrected "run 2 corrected" || return 1
+  wait_for "SELECT refs_before IS NOT NULL FROM run WHERE id=3;" 1 || fail "the correction never started"
+  assert_eq "$(db "SELECT correction||' '||corrects_run||' '||base_commit FROM run WHERE id=3;")" "landing 2 $head" "made from the new tip" &&
+    git -C "$wt3" rev-parse -q --verify MERGE_HEAD >/dev/null || fail "its worktree holds no started merge" || return 1
+  assert_contains "$(cat "$wt3/owner.txt")" "<<<<<<<" "with the conflict markers" &&
+    assert_contains "$(cat "$GM_HALL/runs/3/writ.md")" "this was broken: landing: its work did not merge cleanly" "the writ says what" &&
+    assert_contains "$(cat "$GM_HALL/runs/3/writ.md")" "- merging gm/run-2 into feature/CRM-8965 conflicted in: owner.txt" "and quotes the evidence" || return 1
+  # The correction resolves it and commits, concluding the merge; it lands by fast-forward, and run 2 goes with it.
+  act_for 3 "printf 'from both\\n' >owner.txt && git add owner.txt && git -c user.name=t -c user.email=t@t commit -q --no-edit"
+  rm -f "$GM_FAKE_RUN/hold.appt-v2.run-3"
+  run_ended 3 || fail "the correction never ended"
+  assert_eq "$(db "SELECT check_result FROM run WHERE id=3;")" passed "its check passes" || return 1
+  out=$(gm land 3) || fail "landing the correction: $out"
+  assert_eq "$(git -C "$CAMP" show HEAD:owner.txt)" "from both" "the resolution landed" &&
+    assert_contains "$(gm show 2)" "(fast-forward)" "by fast-forward" || return 1
+  wait_for "SELECT cleaned_at IS NOT NULL FROM run WHERE id=2;" 1 || fail "run 2's worktree was kept once its work landed"
+  # A second failure on the same posting makes it needs-you: the correction itself conflicts.
+  gm notice 1 'done' >/dev/null && gm notice 2 'done' >/dev/null
+  started "the owner tooltip" >/dev/null && started "the owner hint" >/dev/null
+  act_for 4 "$(file_in hint.txt 'four' 'Hint from run 4')"
+  act_for 5 "$(file_in hint.txt 'five' 'Hint from run 5')"
+  gm dispatch 3 >/dev/null && gm dispatch 4 >/dev/null
+  { run_ended 4 && run_ended 5; } || fail "the runs never ended"
+  gm land 4 >/dev/null || fail "landing run 4"
+  : >"$GM_FAKE_RUN/hold.appt-v2.run-6"
+  gm land 5 >/dev/null 2>&1 && fail "run 5 landed over run 4"
+  wait_for "SELECT refs_before IS NOT NULL FROM run WHERE id=6;" 1 || fail "the correction never started"
+  act_for 6 "printf 'four and five\\n' >hint.txt && git add hint.txt && git -c user.name=t -c user.email=t@t commit -q --no-edit"
+  rm -f "$GM_FAKE_RUN/hold.appt-v2.run-6"
+  run_ended 6 || fail "the correction never ended"
+  # Something else lands first, touching the same file, so the correction's own landing conflicts.
+  started "the owner hint again" >/dev/null
+  act_for 7 "$(file_in hint.txt 'seven' 'Hint from run 7')"
+  gm dispatch 5 >/dev/null
+  run_ended 7 || fail "run 7 never ended"
+  gm land 7 >/dev/null || fail "landing run 7"
+  out=$(gm land 6 2>&1) && fail "the conflicting correction landed"
+  assert_eq "$(db "SELECT state FROM posting WHERE num=4;")" needs-you "a second failure is the patron's" &&
+    assert_contains "$(gm show 4)" "needs you: run 6's landing conflicted again" "with why" &&
+    assert_eq "$(db "SELECT count(*) FROM run WHERE corrects_run=6;")" 0 "no third run"
+}
+
+t_tests_after_a_merge_landing() {
+  check_setup tests
+  local out f=feature/CRM-8965
+  printf 'test-command: sh tests.sh\n' >>"$GM_HALL/rules/repo.md"
+  printf '[ ! -e a.txt ] || [ ! -e b.txt ] || { echo "a and b clash"; exit 3; }\n' >"$CAMP/tests.sh"
+  git -C "$CAMP" add tests.sh && git -C "$CAMP" commit -q -m "the tests"
+  : >"$GM_FAKE_RUN/hold"
+  act_for 1 "$(file_in a.txt alpha 'Add a')"
+  act_for 2 "$(file_in b.txt bravo 'Add b')"
+  started "add a" >/dev/null && started "add b" >/dev/null
+  gm dispatch 1 >/dev/null && gm dispatch 2 >/dev/null
+  wait_for "SELECT count(*) FROM run WHERE refs_before IS NOT NULL;" 2 || fail "the runs never started"
+  rm -f "$GM_FAKE_RUN/hold"
+  { run_ended 1 && run_ended 2; } || fail "the runs never ended"
+  out=$(gm land 1) || fail "landing run 1"
+  assert_eq "$(db "SELECT COALESCE(tests_result,'none') FROM run WHERE id=1;")" none "a fast-forward runs no tests" || return 1
+  gm notice 1 'done' >/dev/null
+  : >"$GM_FAKE_RUN/hold.appt-v2.run-3"
+  out=$(gm land 2) || fail "landing run 2"
+  assert_contains "$out" "once the tests pass: gm runs them now (sh tests.sh)" "a merge landing runs the tests" || return 1
+  gm notice 2 'done' >/dev/null
+  wait_for "SELECT tests_result FROM run WHERE id=2;" failed || fail "the tests never failed"
+  assert_contains "$(cat "$GM_HALL/runs/2/tests.txt")" "a and b clash" "what they printed is kept" &&
+    assert_contains "$(gm show 2)" "tests failed after run 2 landed (sh tests.sh, exit 3" "a notice" &&
+    assert_eq "$(decision "$(rules Bash "git push origin $f")")" deny "the feature branch is not pushed until they pass" &&
+    assert_contains "$(reason "$(rules Bash "git push origin $f")")" "the tests failed after run 2 landed" "says why" || return 1
+  wait_for "SELECT correction FROM run WHERE id=3;" tests || fail "no correction run"
+  assert_eq "$(db "SELECT state FROM posting WHERE num=2;")" active "the posting reopened for it" &&
+    assert_contains "$(gm summons)" "- the tests failed on $f after run 2 for appt-v2#2 add-b landed" "summoned" &&
+    assert_eq "$(db "SELECT cleaned_at IS NOT NULL FROM run WHERE id=2;")" 1 "run 2's worktree removed after its tests" || return 1
+  # The correction fixes it; its landing, a fast-forward, runs the tests again since they last failed, and they pass.
+  act_for 3 "git rm -q a.txt && git -c user.name=t -c user.email=t@t commit -q -m 'Drop a'"
+  rm -f "$GM_FAKE_RUN/hold.appt-v2.run-3"
+  run_ended 3 || fail "the correction never ended"
+  out=$(gm land 3) || fail "landing the correction: $out"
+  wait_for "SELECT tests_result FROM run WHERE id=3;" passed || fail "the tests never passed"
+  assert_contains "$(gm show 2)" "tests passed after run 3 landed" "a notice" &&
+    assert_eq "$(decision "$(rules Bash "git push origin $f")")" allow "the feature branch is pushed again" || return 1
+}
+
+t_survey_finds_out_beside_a_contract() {
+  check_setup survey
+  local out s f="CAST(readfile('$GM_HALL/runs/2/settings.json') AS TEXT)" wt2=$GM_HALL/camps/appt-v2.run-2
+  : >"$GM_FAKE_RUN/hold"
+  started "fix the export" >/dev/null && started "why is the export slow" >/dev/null
+  gm dispatch 1 >/dev/null
+  out=$(gm dispatch 2 --survey --brief "Find where the time goes." 2>&1) || fail "dispatch --survey: $out"
+  assert_contains "$out" "dispatched: survey, run 2 on sonnet at medium effort" "a survey, on survey-model" &&
+    assert_contains "$out" "a detached checkout of the feature branch's tip" "says where" || return 1
+  wait_for "SELECT count(*) FROM run WHERE refs_before IS NOT NULL;" 2 || fail "the runs never started"
+  assert_eq "$(git -C "$wt2" symbolic-ref -q HEAD || echo detached) $(git -C "$wt2" rev-parse HEAD)" "detached $(git -C "$CAMP" rev-parse HEAD)" "detached at the feature branch's tip" &&
+    assert_eq "$(git -C "$REPO" branch --list gm/run-2)" "" "with no branch" &&
+    assert_contains "$(cat "$GM_HALL/runs/2/writ.md")" "# Survey writ: appt-v2#2 why-export-slow" "its writ from survey.md" &&
+    assert_contains "$(cat "$GM_HALL/runs/2/writ.md")" "Change nothing" "which says so" || return 1
+  local rule
+  for rule in Edit Write MultiEdit NotebookEdit 'Bash(git commit*)'; do
+    assert_eq "$(json "SELECT count(*) FROM json_each(json_extract($f,'\$.permissions.deny')) WHERE value=$(sqlq "$rule")")" 1 "denies $rule" || return 1
+  done
+  assert_eq "$(decision "$(GM_RUN=2 rules Bash 'git commit -m x')")" deny "its rules hook denies a commit" || return 1
+  printf 'The export is slow because of N+1 queries in export.rb:12.\n' >"$WORK/survey/report"
+  printf '%s\n' "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"num_turns\":4,\"result\":\"The export is slow: N+1 queries.\"}" >"$GM_FAKE_RUN/stream.jsonl"
+  rm -f "$GM_FAKE_RUN/hold"
+  run_ended 2 || fail "the survey never ended"
+  wait_for "SELECT cleaned_at IS NOT NULL FROM run WHERE id=2;" 1 || fail "its worktree was kept"
+  [ ! -e "$wt2" ] || fail "its worktree is still there" || return 1
+  assert_eq "$(cat "$GM_HALL/reports/appt-v2/2-2.md")" "The export is slow: N+1 queries." "its field report kept in the Guildhall" &&
+    assert_contains "$(gm summons)" "- survey run 2 for appt-v2#2 why-export-slow finished: exit 0, 4 turns. Its field report: $GM_HALL/reports/appt-v2/2-2.md" "the summons names it" &&
+    assert_contains "$(gm runs)" "field report: $GM_HALL/reports/appt-v2/2-2.md" "gm runs too" || return 1
+  out=$(gm land 2 2>&1) && fail "landed a survey"
+  assert_contains "$out" "run 2 is a survey: it changes nothing" "says why"
+}
+
+t_drop_close_and_the_muster_sweep() {
+  check_setup sweep
+  initialized
+  local out wt1=$GM_HALL/camps/appt-v2.run-1
+  act_for 1 "$(file_in a.txt alpha 'Add a')"
+  started "add a" >/dev/null
+  gm dispatch 1 >/dev/null
+  run_ended 1 || fail "run 1 never ended"
+  # Reviewed without landing, its commit holds the worktree: shown, and gm close refuses.
+  gm notice 1 failed "not this way" >/dev/null
+  assert_eq "$(db "SELECT cleaned_at IS NULL FROM run WHERE id=1;")" 1 "a run holding commits is kept" &&
+    [ -d "$wt1" ] || fail "its worktree was removed" || return 1
+  assert_contains "$(gm runs)" "run 1 · holds 1 commit not landed: gm land 1, or gm drop 1 to discard it" "gm runs shows it" &&
+    assert_contains "$(gm where)" "its worktree $wt1 is kept" "and gm where" || return 1
+  out=$(gm close appt-v2 2>&1) && fail "closed a focus with work not landed"
+  assert_contains "$out" "run 1 (holds 1 commit not landed)" "names it" || return 1
+  out=$(gm drop 1) || fail "drop: $out"
+  assert_contains "$out" "appt-v2#1 add run 1 dropped: 1 commit not landed discarded" "recorded" &&
+    [ ! -e "$wt1" ] || fail "its worktree is still there" || return 1
+  assert_eq "$(git -C "$REPO" branch --list gm/run-1)" "" "and its branch" &&
+    [ "$(db "SELECT id FROM event WHERE verb='dropped' ORDER BY id LIMIT 1;")" -lt "$(db "SELECT id FROM event WHERE kind='run.cleaned' ORDER BY id LIMIT 1;")" ] || fail "the drop was not recorded before the removal" || return 1
+  # A lost run with no commits is cleaned up once reviewed.
+  gm notice 1 started >/dev/null
+  : >"$GM_FAKE_RUN/hold"
+  gm dispatch 1 >/dev/null
+  wait_for "SELECT refs_before IS NOT NULL FROM run WHERE id=2;" 1 || fail "run 2 never started"
+  kill "$(db "SELECT pid FROM run WHERE id=2;")" 2>/dev/null
+  pkill -f "session-id $(db "SELECT session_id FROM run WHERE id=2;")" 2>/dev/null
+  rm -f "$GM_FAKE_RUN/hold"
+  gm runs >/dev/null
+  run_ended 2 || fail "the lost run was never ended"
+  gm notice 1 failed "lost" >/dev/null
+  wait_for "SELECT cleaned_at IS NOT NULL FROM run WHERE id=2;" 1 || fail "the lost run with no commits was kept"
+  # The muster sweeps what a cut-off cleanup left, and reports a stray worktree folder.
+  gm notice 1 started >/dev/null
+  act_for 3 "$(file_in c.txt charlie 'Add c')"
+  gm dispatch 1 >/dev/null
+  run_ended 3 || fail "run 3 never ended"
+  printf 'scratch\n' >"$GM_HALL/camps/appt-v2.run-3/untracked.txt"
+  gm land 3 >/dev/null || fail "landing run 3"
+  assert_eq "$(db "SELECT cleaned_at IS NULL FROM run WHERE id=3;")" 1 "a worktree with an untracked file is kept" || return 1
+  rm -f "$GM_HALL/camps/appt-v2.run-3/untracked.txt"
+  mkdir -p "$GM_HALL/camps/appt-v2.run-99"
+  GM_INTERACTIVE=1 bash "$GM" up >/dev/null 2>&1
+  assert_eq "$(db "SELECT cleaned_at IS NOT NULL FROM run WHERE id=3;")" 1 "the muster cleaned up the landed run" &&
+    assert_contains "$(gm roster)" "strays: appt-v2.run-99 (no run holds it)" "the roster reports a stray folder"
 }
 
 t_shellcheck() {

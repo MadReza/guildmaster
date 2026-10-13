@@ -64,12 +64,12 @@ The Adventurer spans the design defines are built with step 3, where Adventurers
 | 1 | `gm dispatch`, one headless Adventurer, its result in the register, and the watch that summons the Party Leader (with issue #41) | In review |
 | 2 | `PreToolUse` push rules in every camp. Until the patron adds `development-branch:`, `integration-branch:` and `protected-branch:` to each `rules/<repository>.md` and the `push: feature merge in merge-request fix-loop sealed closed`, `push: feature allow`, `push: development merge`, `push: integration deny` and `push: protected deny` lines to `playbooks/ticket.md` ([the lines](step-3-design.md#the-lines-the-patron-adds)), every push is denied | In review |
 | 3 | `gm check` after every run, from git facts: a first failure on a posting dispatches one correction run, a second makes it `needs-you` ([what building it changed](step-3-design.md#what-building-slice-3-changed)) | In review |
-| 4 | Parallel surveys and the dispatch cap | Planned |
+| 4 | Parallel surveys and contracts, each in its own worktree and removed when done, landed on the feature branch one at a time, and the dispatch cap ([parallel contracts](step-3-design.md#parallel-contracts), [what building it changed](step-3-design.md#what-building-slice-4-changed)) | In review |
 | 5 | Adventurer spans, `TRACEPARENT` and writ hashes | Planned |
 
 **Goal.** The Party Leader stays answerable while Adventurers do the work, and the rules the playbook states are enforced, not only asked for.
 
-**Scope.** `gm dispatch` runs a headless `claude -p` Adventurer in the camp, one contract at a time per ticket and surveys in parallel; results land in the register and wake the Party Leader; `PreToolUse` rules in every camp allow or deny from the playbook's push rules; `gm check` runs after every Adventurer and reopens a posting that broke a rule; the dispatch cap; `TRACEPARENT` is set per posting.
+**Scope.** `gm dispatch` runs a headless `claude -p` Adventurer in the camp, contracts and surveys in parallel, each in its own worktree, with each accepted contract landed on the ticket's feature branch; results land in the register and wake the Party Leader; `PreToolUse` rules in every camp allow or deny from the playbook's push rules; `gm check` runs after every Adventurer and reopens a posting that broke a rule; the dispatch cap; `TRACEPARENT` is set per posting.
 With it come the Adventurer spans of [tracing-design.md](tracing-design.md#how-the-trace-context-travels) (the dispatch span, `TRACEPARENT`, a preassigned `--session-id`, the resource attributes, the run's result) and the hash of each writ and its template.
 
 **Done when** the patron can keep talking to the Party Leader while an Adventurer works, and a follow-up bug on the ticket lands on the same feature branch.

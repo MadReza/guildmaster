@@ -5,21 +5,41 @@
 # As an Adventurer (-p, with GM_FAKE_RUN set to a directory) it records the same there, with the writ it read on
 # standard input, waits while GM_FAKE_RUN/hold exists, prints GM_FAKE_RUN/stream.jsonl as its transcript when there
 # is one, and exits with the code in GM_FAKE_RUN/exit (default 0). Before it exits, in both forms, it runs the first
-# GM_FAKE_RUN/act.<n> script there is, in the camp, and removes it: what one run of the Adventurer does in git.
+# GM_FAKE_RUN/act.<n> script there is, where it runs, and removes it: what one run of the Adventurer does in git.
+# Runs work in worktrees of their own (camps/<focus>.run-<n>), several at once, so each also records what it was given
+# in GM_FAKE_RUN/by/<its folder's name>/, waits while GM_FAKE_RUN/hold.<its folder's name> exists too, and runs the
+# first GM_FAKE_RUN/act.<its folder's name>.<n> there is before any act.<n>.
+here=$(basename "$(pwd -P)")
 fake_act() {
-  for a in "$GM_FAKE_RUN"/act.*; do
+  for a in "$GM_FAKE_RUN"/act."$here".* "$GM_FAKE_RUN"/act.[0-9]*; do
     [ -f "$a" ] || continue
     sh "$a" >>"$GM_FAKE_RUN/act.log" 2>&1
     rm -f "$a"
     break
   done
 }
+# fake_record <args...>: what it was given, in GM_FAKE_RUN/by/<its folder> and then in GM_FAKE_RUN; the writ is on
+# standard input under -p, and its last argument in a pane.
+fake_record() {
+  by=$GM_FAKE_RUN/by/$here
+  mkdir -p "$by"
+  env >"$by/env"
+  printf '%s\n' "$@" >"$by/args"
+  pwd -P >"$by/pwd"
+  if [ "$1" = -p ]; then
+    cat >"$by/stdin"
+  else
+    for a in "$@"; do last=$a; done
+    printf '%s' "$last" >"$by/stdin"
+  fi
+  cp "$by/env" "$by/args" "$by/pwd" "$by/stdin" "$GM_FAKE_RUN/"
+}
+fake_hold() {
+  while [ -e "$GM_FAKE_RUN/hold" ] || [ -e "$GM_FAKE_RUN/hold.$here" ]; do sleep 0.1; done
+}
 if [ "${1:-}" = -p ] && [ -n "${GM_FAKE_RUN:-}" ]; then
-  env >"$GM_FAKE_RUN/env"
-  printf '%s\n' "$@" >"$GM_FAKE_RUN/args"
-  pwd -P >"$GM_FAKE_RUN/pwd"
-  cat >"$GM_FAKE_RUN/stdin"
-  while [ -e "$GM_FAKE_RUN/hold" ]; do sleep 0.1; done
+  fake_record "$@"
+  fake_hold
   fake_act
   [ ! -f "$GM_FAKE_RUN/stream.jsonl" ] || cat "$GM_FAKE_RUN/stream.jsonl"
   exit "$(cat "$GM_FAKE_RUN/exit" 2>/dev/null || echo 0)"
@@ -30,12 +50,8 @@ fi
 case " $* " in
   *" --session-id "*)
     if [ -n "${GM_FAKE_RUN:-}" ]; then
-      env >"$GM_FAKE_RUN/env"
-      printf '%s\n' "$@" >"$GM_FAKE_RUN/args"
-      pwd -P >"$GM_FAKE_RUN/pwd"
-      for a in "$@"; do last=$a; done
-      printf '%s' "$last" >"$GM_FAKE_RUN/stdin"
-      while [ -e "$GM_FAKE_RUN/hold" ]; do sleep 0.1; done
+      fake_record "$@"
+      fake_hold
       fake_act
       exit "$(cat "$GM_FAKE_RUN/exit" 2>/dev/null || echo 0)"
     fi ;;

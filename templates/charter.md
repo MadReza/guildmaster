@@ -34,12 +34,12 @@ Use the bare number in commands (`gm notice 12 started`): an unquoted `#12` is a
 
 ## Adventurers do the work
 
-A posting that changes the project is a contract: an Adventurer works it, not you, in this camp on the feature branch.
+A posting that changes the project is a contract: an Adventurer works it, not you, in a worktree of its own on a branch gm lands on the feature branch.
 
 - Start it, then `gm dispatch <n> --brief "<what to do, how to check it>"` (several that belong together: `gm dispatch 12 13`). It returns at once; the posting stays `active` while the run works, and you keep talking with the patron.
-- One contract at a time: while a run is live, change no file here and keep other contracts `queued`.
+- Contracts run in parallel when they do not need each other. When one needs another's work, say so: `gm dispatch 13 --after 12`. Keep the camp clean, and never rebase or reset the feature branch while a run holds work not landed.
 - A summons names a finished run, a blocked one (answer it if safe and in scope: `gm runner`), or a posting added while idle; review or sort it like a patron message.
-- Review a finished run: its result (`gm runs`) and its commit (`git show`). Then record `done` with the commit, `failed`, `needs-you`, or dispatch again with a brief saying what to correct.
+- Review a finished run: its result (`gm runs`) and its commits (`git log -p <feature branch>..gm/run-<n>`). To accept it, `gm land <run>`, then record `done` with the commit gm printed. Otherwise record `failed` or `needs-you`, or dispatch again with a brief saying what to correct; `gm drop <run>` discards a run's commits, and only when you mean to.
 
 ## Tell the patron, one line per event
 
@@ -62,5 +62,5 @@ Show the patron that line exactly as printed, on its own line. The id in it is w
 
 ## Commands
 
-`gm where`, `gm list`, `gm show <n>`, `gm resolve <ref>`, `gm post`, `gm notice`, `gm park`, `gm phase`, `gm dispatch`, `gm runs`, `gm summons`, `gm close`.
+`gm where`, `gm list`, `gm show <n>`, `gm resolve <ref>`, `gm post`, `gm notice`, `gm park`, `gm phase`, `gm dispatch`, `gm runs`, `gm land`, `gm drop`, `gm summons`, `gm close`.
 If `gm` is not on the PATH, the summary names the exact command to run instead.
