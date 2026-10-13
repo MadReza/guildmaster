@@ -3871,8 +3871,11 @@ t_rules_table_of_commands() {
     'deny	git branch other' \
     'deny	git branch -m renamed' \
     'deny	git worktree add -b other ../x' \
-    'ask	glab mr create --fill --target-branch integration' \
-    'ask	gh pr create --fill' \
+    '-	glab mr create --fill --target-branch integration' \
+    '-	glab mr merge 12' \
+    '-	glab mr approve 12' \
+    '-	gh pr create --fill' \
+    '-	gh pr merge 12 --squash' \
     '-	git branch' \
     '-	git branch -d old' \
     '-	git branch --show-current' \
@@ -3928,9 +3931,12 @@ EOF
   # A tag is not a branch.
   git -C "$CAMP" tag v1.0
   assert_eq "$(rules Bash 'git push origin v1.0')" "" "a tag is left alone" || return 1
-  # An Adventurer is denied the merge request outright.
-  assert_eq "$(decision "$(GM_RUN=1 rules Bash 'glab mr create --fill')")" deny "an Adventurer never opens a merge request" &&
-    assert_eq "$(decision "$(GM_RUN=1 rules Bash 'git push origin feature/CRM-8965')")" allow "and pushes as the playbook allows" || return 1
+  # An Adventurer is denied the merge request outright; a Party Leader gets no decision above, so its permission mode decides.
+  local mr
+  for mr in 'glab mr create --fill' 'glab mr merge 12' 'glab mr approve 12' 'gh pr create --fill' 'gh pr merge 12'; do
+    assert_eq "$(decision "$(GM_RUN=1 rules Bash "$mr")")" deny "an Adventurer never runs $mr" || return 1
+  done
+  assert_eq "$(decision "$(GM_RUN=1 rules Bash 'git push origin feature/CRM-8965')")" allow "and pushes as the playbook allows" || return 1
   # Once a merge request is open, the playbook's phase-scoped line keeps the feature branch from a force-push.
   db "UPDATE focus SET phase='fix-loop';"
   out=$(rules Bash 'git push --force origin feature/CRM-8965')
