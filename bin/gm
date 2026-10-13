@@ -6068,6 +6068,17 @@ gm_refs_snapshot() {
 # gm_check_ref <snapshot> <ref>: the commit the snapshot has for the ref, or nothing.
 gm_check_ref() { printf '%s\n' "$1" | awk -v r="$2" '$1 == r { print $2; exit }'; }
 
+# gm_check_reached <dir> <rev-list args...>: of the commits on stdin, those some ref or HEAD still reaches outside
+# what the args exclude. A commit only a reflog holds, such as the version an amend or rebase replaced, is no commit
+# off the line (#58); one another branch, a remote-tracking ref or a tag holds is.
+gm_check_reached() {
+  local d=$1 c
+  shift
+  c=$(cat)
+  [ -n "$c" ] || return 0
+  printf '%s\n' "$c" | grep -Fxf <(printf '%s\n' "$@" | gm_git "$d" rev-list --all --stdin 2>/dev/null || true) || true
+}
+
 gm_check_short() { [ -n "$1" ] && printf '%s' "${1:0:9}" || printf 'nothing'; }
 
 # gm_check_broke <rule> <evidence>: one broken rule, with what shows it, into GM_CK.
@@ -6165,7 +6176,8 @@ gm_check_facts() {
       gm_check_broke "$GM_CHECK_REMOTE" "$rem/$b moved from $(gm_check_short "$old") to $(gm_check_short "$new"), which does not contain it: not forward"
   done <<<"$pending"
   # No commit exists outside the feature branch's line: none made since the dispatch (each new entry of the camp's
-  # HEAD reflog, each local branch's tip, HEAD) that the feature branch does not contain, nor any branch had before.
+  # HEAD reflog, each local branch's tip, HEAD) that the feature branch does not contain, nor any branch had before,
+  # and that some ref still reaches: what an amend or rebase left behind in the reflog alone is not counted.
   # The development branch's new commits count as on the line when the playbook lets it move forward and it did.
   n0=$(gm_check_ref "$before" reflog) n1=$(gm_check_ref "$after" reflog)
   # macOS's head refuses -n 0: no new entry is no tips.
@@ -6188,6 +6200,7 @@ gm_check_facts() {
     if [ -n "$new" ] && { [ -z "$old" ] || gm_git "$camp" merge-base --is-ancestor "$old" "$new" 2>/dev/null; }; then refs+=("^$new"); fi
   fi
   commits=$( { printf '%s\n' "$tips" | grep . || true; printf '%s\n' "${refs[@]+"${refs[@]}"}"; } | gm_git "$camp" rev-list --stdin 2>/dev/null || true)
+  commits=$(printf '%s' "$commits" | gm_check_reached "$camp" "${refs[@]+"${refs[@]}"}")
   if [ -n "$commits" ]; then
     more=$(printf '%s\n' "$commits" | awk 'END { print NR - 5 }')
     while IFS= read -r line; do
@@ -6287,7 +6300,8 @@ gm_check_facts_run() {
     } | sort -u)"
   done <<<"$(gm_git "$camp" remote 2>/dev/null || true)"
   # No commit off the line: each new entry of the worktree's HEAD reflog, its HEAD and any branch made, less what its
-  # run branch (for a survey, its base) and every ref at its start already held.
+  # run branch (for a survey, its base) and every ref at its start already held, and less what no ref reaches (an
+  # amend's or rebase's leftovers).
   [ -d "$wt" ] || return 0
   n0=$(gm_check_ref "$before" reflog) n1=$(gm_check_ref "$after" reflog)
   # macOS's head refuses -n 0: no new entry is no tips.
@@ -6307,6 +6321,7 @@ gm_check_facts_run() {
   [ -z "$base" ] || refs+=("^$base")
   [ -z "$rb" ] || [ -z "$(gm_check_ref "$after" "refs/heads/$rb")" ] || refs+=("^$(gm_check_ref "$after" "refs/heads/$rb")")
   commits=$( { printf '%s\n' "$tips" | grep . || true; printf '%s\n' "${refs[@]+"${refs[@]}"}"; } | gm_git "$wt" rev-list --stdin 2>/dev/null || true)
+  commits=$(printf '%s' "$commits" | gm_check_reached "$wt" "${refs[@]+"${refs[@]}"}")
   if [ -n "$commits" ]; then
     more=$(printf '%s\n' "$commits" | awk 'END { print NR - 5 }')
     while IFS= read -r line; do

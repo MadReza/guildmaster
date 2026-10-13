@@ -4195,12 +4195,25 @@ t_check_after_every_run_from_git_facts() {
     assert_not_contains "$out" "no commit off" "its commit is on its run branch's line" || return 1
   run_ended $((r + 1)) || fail "no correction run"
   gm notice 5 'done' >/dev/null
-  check_act "git checkout -q --detach && $(commit_in stray) && git checkout -q -"
+  check_act "git checkout -q --detach && $(commit_in stray) && git tag kept && git checkout -q -"
   r=$(check_post "stray commit")
   assert_eq "$(db "SELECT check_rules FROM run WHERE id=$r;")" "no commit off the run branch's line, and none on the feature branch but through gm land" "a commit left off the line" &&
     assert_contains "$(db "SELECT check_evidence FROM run WHERE id=$r;")" "\"stray\" is not on gm/run-$r" "names the commit" || return 1
   run_ended $((r + 1)) || fail "no correction run"
   gm notice 6 'done' >/dev/null
+  # A commit amended, or a branch rebased onto its own base, leaves its old version in the reflog alone: on the line.
+  check_act "$(commit_in draft) && git -c user.name=t -c user.email=t@t commit -q --amend --allow-empty -m amended && $(commit_in second) && git -c user.name=t -c user.email=t@t rebase -q --force-rebase HEAD~2"
+  r=$(check_post "amended its commit")
+  assert_eq "$(db "SELECT check_result FROM run WHERE id=$r;")" passed "an amend and a rebase pass" &&
+    assert_eq "$(git -C "$GM_HALL/camps/appt-v2.run-$r" log --format=%s -2 "gm/run-$r" | tr '\n' '|')" "second|amended|" "with the amended commits on the run branch" || return 1
+  gm notice 7 'done' >/dev/null
+  # A commit on another branch is still off the line, though the branch was there before.
+  check_act "git checkout -q development && $(commit_in elsewhere) && git checkout -q -"
+  r=$(check_post "committed elsewhere")
+  assert_eq "$(db "SELECT check_rules FROM run WHERE id=$r;")" "no commit off the run branch's line, and none on the feature branch but through gm land" "a commit on another branch" &&
+    assert_contains "$(db "SELECT check_evidence FROM run WHERE id=$r;")" "\"elsewhere\" is not on gm/run-$r" "names the commit" || return 1
+  run_ended $((r + 1)) || fail "no correction run"
+  gm notice 8 'done' >/dev/null
   check_act "$(commit_in sneaked) && git update-ref refs/heads/$f HEAD"
   r=$(check_post "sneaked onto the feature branch")
   assert_contains "$(db "SELECT check_evidence FROM run WHERE id=$r;")" "\"sneaked\" reached $f outside gm land" "a commit put on the feature branch but through gm land" || return 1
