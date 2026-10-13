@@ -11,7 +11,8 @@ import type { Mark, Rule, Term } from './marks'
 // it can explain drawn underlined, the word alone and pressable: the terms of TERMINOLOGY.md,
 // posting references (#49, context-bar#1), run references (run 13), and code spans that name
 // something (GM_VEIL, guild.conf). A click on one, or /what over a phrase selected with the mouse, opens a small
-// popup with a TL;DR of it and where the meaning came from. What the guild already knows
+// popup with a TL;DR of it and where the meaning came from; while Claude asks a question (AskUserQuestion) and
+// the keys are the question's, a click on a line drawn above it does /what's work. What the guild already knows
 // answers first and costs nothing: TERMINOLOGY.md, the charter's named rules, gm show for a
 // posting, gm runs for a run. Anything else is asked of the model over this session's own
 // transcript ($.model.fork), and the answer is kept in $.store, by focus and phrase, so the
@@ -123,6 +124,18 @@ export async function ask($: EngineInterface, phrase: string): Promise<Known> {
   return { tldr: t, source: AI }
 }
 
+/** The phrase selected with the mouse, on one line; undefined with none. */
+async function selection($: EngineInterface) {
+  return (await $.ui.selection())?.text.replace(/\s+/g, ' ').trim() || undefined
+}
+
+/** Opens the popup on a phrase the patron chose: a reference when it reads as one. */
+function explainPhrase($: EngineInterface, phrase: string) {
+  return explain($, refOf(phrase) ?? { kind: 'phrase', key: phrase.length > 200 ? phrase.slice(0, 200) : phrase })
+}
+
+export const ASK_LINE = 'lexicon: select words above, then click here to see what they mean'
+
 const title = (phrase: string) => (phrase.length > 50 ? `${phrase.slice(0, 49)}…` : phrase)
 const failed = (err: unknown) => `The lookup failed: ${err instanceof Error ? err.message : String(err)}`
 
@@ -175,7 +188,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'what',
-      description: 'Explain the phrase you selected with the mouse: a short TL;DR, from the guild\'s records or this session',
+      description: 'Explain the phrase you selected with the mouse: a short TL;DR, from the guild\'s records or this session (while Claude asks a question, click the lexicon line above it instead)',
     })
     reading = undefined
     void knowledge($)
@@ -184,11 +197,14 @@ export const register: Register = on => {
 
   on('command.run', { command: 'what' }, async ($, e) => {
     const typed = e.args.trim()
-    const selected = typed || (await $.ui.selection())?.text.replace(/\s+/g, ' ').trim()
+    const selected = typed || (await selection($))
     if (!selected) {
-      return { text: 'Select a word or phrase in the chat with the mouse, then type /what (or /what <phrase>). A marked word in a reply opens the same popup at a click.' }
+      return {
+        text: 'Select a word or phrase in the chat with the mouse, then type /what (or /what <phrase>). A marked word in a reply opens the same popup at a click. '
+          + `While Claude asks you a question, the prompt is the question's: select the words, then click the line above the question (“${ASK_LINE}”); the popup closes with a click on its ✕, the question left as it was.`,
+      }
     }
-    await explain($, refOf(selected) ?? { kind: 'phrase', key: selected.length > 200 ? selected.slice(0, 200) : selected })
+    await explainPhrase($, selected)
     return { text: `“${title(selected)}” is in the lexicon popup (esc closes it).` }
   })
 
@@ -250,6 +266,27 @@ export const register: Register = on => {
     return (r.swapped ? r.tree : drawn) as typeof drawn
   })
 
+  // While Claude asks a question the dialog holds every key, so no chord and no /what reach the lexicon; a click
+  // does. One dim line is drawn above the dialog (the engine draws nothing of a plugin's below it), the dialog
+  // itself passed on as it came: a click there reads the selection and opens the popup, the question untouched.
+  // Only where Claude Code reports a mouse selection: the fullscreen layout.
+  on('ui.render', { component: 'AskUserQuestion' }, async ($, e, next) => {
+    const drawn = await next(e)
+    if (e.surface !== 'terminal' || e.viewport?.isFullscreen !== true) return drawn
+    const { Box, Button } = $.ui.resolve(e)
+    const press = async () => {
+      const selected = await selection($)
+      if (selected) await explainPhrase($, selected)
+      else $.ui.toast('lexicon: select a word or phrase with the mouse first, then click the line again')
+    }
+    return (
+      <Box flexDirection="column">
+        <Button key="lexicon:selection" plain dimColor onPress={press}>{ASK_LINE}</Button>
+        {drawn}
+      </Box>
+    ) as typeof drawn
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text } = $.ui.resolve(e)
     const now = await read($, shown)
@@ -260,7 +297,7 @@ export const register: Register = on => {
         {now.tldr === null
           ? <Text dimColor>{`Looking up “${title(now.phrase)}”…`}</Text>
           : <Text>{now.tldr}</Text>}
-        {now.tldr !== null && <Text dimColor wrap="truncate-end">{`from ${now.source} · esc closes`}</Text>}
+        {now.tldr !== null && <Text dimColor wrap="truncate-end">{`from ${now.source} · ${e.props.isFocused ? 'esc closes' : '✕ closes'}`}</Text>}
       </Box>
     )
   })

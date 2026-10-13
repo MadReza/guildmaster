@@ -3,7 +3,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { layout } from '../hooks/layout'
 import { findRule, findTerm, markSpans, parseCharter, parseTerminology, postingTldr, refOf, runTldr } from '../hooks/marks'
-import { AI, PANE } from '../hooks/register'
+import { AI, ASK_LINE, PANE } from '../hooks/register'
 
 const HOME = '/home/p'
 const GM = `${HOME}/.local/bin/gm`
@@ -335,5 +335,65 @@ describe('/what', () => {
     await $.command.run({ command: 'what', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
     expect(journal.opens).toHaveLength(1)
     expect(await popupText($)).toContain('A persistent supervisor')
+  })
+})
+
+const QUESTIONS = [{ question: 'Which fruit?', header: 'Fruit', multiSelect: false, options: [{ label: 'Apple', description: 'crisp' }, { label: 'Pear', description: 'soft' }] }]
+const question = (isFullscreen = true) => ({
+  plugin: 'guild-lexicon',
+  surface: 'terminal' as const,
+  component: 'AskUserQuestion' as const,
+  requestId: 'toolu_ask',
+  viewport: { ...viewport, isFullscreen },
+  props: { tool: 'AskUserQuestion', questions: QUESTIONS },
+})
+
+describe('while Claude asks a question', () => {
+  test('a click on the line above it opens the popup on the selection, and the question is left as it was', async ($, on) => {
+    // What reached Claude Code's own dialog, and anything that would answer it or type into the prompt.
+    const dialog: unknown[] = []
+    const touched: string[] = []
+    on('ui.render', { component: 'AskUserQuestion' }, async (_$, e) => {
+      dialog.push(e.props)
+      return { type: 'engine', ref: 2 } as never
+    })
+    const journal = world(on)
+    for (const ev of ['prompt.fill', 'prompt.edit', 'prompt.submit', 'session.send', 'turn.abort', 'ui.close'] as const) {
+      on(ev, async () => {
+        touched.push(ev)
+        return { value: undefined } as never
+      })
+    }
+    on('ui.selection', async () => ({ value: { text: 'the\n  veil' } }))
+    const ui = await $.ui.mount(question())
+    expect((await ui.findAll({ type: 'Button' })).map(b => b.text)).toEqual([ASK_LINE])
+    expect(await ui.findAll({ type: 'engine' } as never)).toHaveLength(1)
+    await click(ui, ASK_LINE)
+    expect(journal.opens).toEqual([{ id: PANE, focus: true, closeOnEscape: true, holdToasts: true }])
+    expect(await popupText($)).toContain('The chat\'s quiet view')
+    expect(dialog).toEqual([{ tool: 'AskUserQuestion', questions: QUESTIONS }])
+    expect(touched).toEqual([])
+    // The dialog holds the keys, so the popup does not: it says the ✕ closes it, never esc, which would cancel the question.
+    const popup = await $.ui.mount({ ...pane, props: { ...pane.props, isFocused: false, placement: 'dock' as const } })
+    const texts = (await popup.findAll({ type: 'Text' })).map(t => t.text).join('\n')
+    expect(texts).toContain('✕ closes')
+    expect(texts).not.toContain('esc')
+  })
+
+  test('with nothing selected it says so and opens nothing; off the fullscreen layout it draws no line', async ($, on) => {
+    const journal = world(on)
+    const toasts: string[] = []
+    on('ui.toast', async (_$, e) => {
+      toasts.push(e.text)
+      return { value: undefined } as never
+    })
+    on('ui.selection', async () => ({ value: undefined }))
+    const ui = await $.ui.mount(question())
+    await click(ui, ASK_LINE)
+    expect(journal.opens).toEqual([])
+    expect(toasts.join('\n')).toContain('select a word or phrase with the mouse first')
+    await ui.unmount()
+    const main = await $.ui.mount(question(false))
+    expect(await main.find({ type: 'Button' })).toBeUndefined()
   })
 })
