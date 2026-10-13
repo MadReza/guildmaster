@@ -527,8 +527,14 @@ t_charter_hook_loads_the_patron_files() {
   local out
   out=$(printf '{"session_id":"s1","source":"startup"}' | gm hook charter)
   assert_contains "$out" "PATRON-EDIT-MARKER" "the patron's charter" &&
-    assert_contains "$out" "phase: dev-test" "the playbook" &&
-    assert_contains "$out" "feature-branch:" "the rules"
+    assert_not_contains "$out" "too long" "whole" || return 1
+  # The playbook and rules come with a second handler: each stays under Claude Code's cap on one additionalContext.
+  out=$(printf '{"session_id":"s1","source":"startup"}' | gm hook charter --rules)
+  assert_contains "$out" "phase: dev-test" "the playbook" &&
+    assert_contains "$out" "feature-branch:" "the rules" &&
+    assert_not_contains "$out" "too long" "whole" &&
+    assert_contains "$(json "SELECT group_concat(h.value->>'command', ' | ') FROM json_each(json_extract(CAST(readfile('$CAMP/.claude/settings.local.json') AS TEXT),'\$.hooks.SessionStart')) s, json_each(s.value->'hooks') h;")" "hook charter | GM_HALL=" "in the camp's settings" &&
+    assert_contains "$(cat "$CAMP/.claude/settings.local.json")" "hook charter --rules" "both handlers"
   gm open appt-v2 --no-launch >/dev/null 2>&1
   grep -q PATRON-EDIT-MARKER "$GM_HALL/charter.md" || fail "gm overwrote the patron's charter"
 }

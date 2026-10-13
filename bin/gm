@@ -1016,6 +1016,7 @@ SELECT json_object(
     'SessionStart', json_array(json_object('hooks', json_array(
       json_object('type','command','command', $(gm_q "$prefix hook session-start")),
       json_object('type','command','command', $(gm_q "$prefix hook charter")),
+      json_object('type','command','command', $(gm_q "$prefix hook charter --rules")),
       json_object('type','command','command', $(gm_q "$prefix hook watch"), 'asyncRewake', json('true'), 'timeout', $GM_WATCH_TIMEOUT)))),
     'UserPromptSubmit', json_array(json_object('hooks', json_array(
       json_object('type','command','command', $(gm_q "$prefix hook prompt"))))),
@@ -4377,7 +4378,7 @@ gm_hook_session_start() {
 }
 
 gm_hook_charter() {
-  local focus=${GM_FOCUS:-} charter playbook rules text repo tmp t0
+  local part=${1:-} focus=${GM_FOCUS:-} charter playbook rules text repo tmp t0 files=() f
   t0=$(gm_now_ms)
   tmp=$(gm_tmp)
   cat >"$tmp"
@@ -4386,10 +4387,17 @@ gm_hook_charter() {
   charter=$(gm_charter_path)
   playbook=$(gm_playbook_path "$(gm_focus_field "$focus" kind)")
   rules=$(gm_rules_path "$repo")
-  # The Guildhall's path is in each file's heading below, so not here too: the room is the files'.
-  text="Your charter, playbook and rules, as the patron wrote them."
-  local f
-  for f in "$charter" "$playbook" "$rules"; do
+  # Two handlers, each under Claude Code's 10,000-character cap on one additionalContext: the charter alone, and
+  # (--rules) the playbook with the rules. The Guildhall's path is in each file's heading below, so not here too: the
+  # room is the files'.
+  if [ "$part" = --rules ]; then
+    text="Your playbook and rules, as the patron wrote them; your charter came with the hook before."
+    files=("$playbook" "$rules")
+  else
+    text="Your charter, as the patron wrote it; your playbook and rules come with the next hook."
+    files=("$charter")
+  fi
+  for f in "${files[@]}"; do
     if [ -f "$f" ]; then
       text="$text
 
@@ -4402,11 +4410,12 @@ $(cat "$f")"
     fi
   done
   if [ "${#text}" -gt 9500 ]; then
-    text="The charter, playbook and rules are too long to load here together. Read them before acting: $charter, $playbook, $rules.
+    text="These are too long to load here whole. Read them before acting: $(printf '%s, ' "${files[@]}" | sed 's/, $//').
 
-$(head -c 8000 "$charter")"
+$(head -c 8000 "${files[0]}")"
   fi
-  (gm_trace_charter "$tmp" "$t0" charter "$charter" playbook "$playbook" rules "$rules") >/dev/null 2>&1 || gm_span_dropped "guild.hook SessionStart"
+  # The charter's handler records the span, with all three files' hashes; the second adds nothing to it.
+  [ "$part" = --rules ] || (gm_trace_charter "$tmp" "$t0" charter "$charter" playbook "$playbook" rules "$rules") >/dev/null 2>&1 || gm_span_dropped "guild.hook SessionStart"
   rm -f "$tmp"
   gm_hook_json SessionStart "$text"
 }
@@ -4506,7 +4515,7 @@ gm_cmd_hook() {
   case $which in
     prompt) gm_hook_prompt ;;
     session-start) gm_hook_session_start ;;
-    charter) gm_hook_charter ;;
+    charter) gm_hook_charter "${2:-}" ;;
     stop) gm_hook_stop ;;
     precompact) gm_hook_precompact ;;
     watch) gm_hook_watch ;;
