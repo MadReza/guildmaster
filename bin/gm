@@ -63,6 +63,9 @@ start-tries	GM_START_TRIES	3	count	Starts in a row never seen alive before a Par
 repo-roots	-	-	text	Folders, separated by spaces, where gm repos looks for clones instead of the usual source folders.
 contract-model	-	party-leader	model	The model an Adventurer works a contract on: party-leader is the model its Party Leader runs on now; otherwise a Claude Code model name (sonnet, opus, claude-sonnet-5-5). gm dispatch --model overrides it once.
 contract-effort	-	medium	effort	The effort an Adventurer works a contract at: low, medium, high, xhigh or max. gm dispatch --effort overrides it once.
+survey-model	-	sonnet	model	The model an Adventurer works a survey on (gm dispatch --survey): party-leader, or a Claude Code model name. gm dispatch --model overrides it once.
+survey-effort	-	medium	effort	The effort an Adventurer works a survey at. gm dispatch --effort overrides it once.
+adventurers	-	3	count	How many Adventurers work at once, across every focus: a run dispatched beyond it waits, and gm starts it when another finishes.
 adventurer-permission-mode	-	bypass	permission	How every Adventurer gm starts meets Claude Code's permission prompts, as Firstmate starts its crew: bypass skips them all (--dangerously-skip-permissions); auto lets Claude Code's auto mode answer them (--permission-mode auto); acceptEdits accepts edits and leaves the rest to its Party Leader. In every mode the rules hook still denies a forbidden push, a new branch or a merge request. A run keeps the mode it was dispatched with.
 commit-attribution	-	off	onoff	Claude Code's attribution in an Adventurer's commits and pull requests: off leaves them as the patron's own; on puts Claude Code's back.
 editor	-	open	command	The command the spyglass opens a changed file with, the file's path given after it: open is the app the Mac opens its kind with; for one editor, open -a Zed, or code -g."
@@ -191,7 +194,7 @@ gm_conf_carried() {
   case $GM_CONF_VARS in *" $1 "*) return 1 ;; esac
   return 0
 }
-GM_SCHEMA_VERSION=10
+GM_SCHEMA_VERSION=11
 GM_STOP_BUDGET=${GM_STOP_BUDGET:-3}
 GM_NOW="strftime('%Y-%m-%dT%H:%M:%fZ','now')"
 GM_NOW_MS="CAST(ROUND((julianday('now')-2440587.5)*86400000) AS INTEGER)"
@@ -485,6 +488,37 @@ PRAGMA user_version=10;
 SQL
 }
 
+# Schema 10 to 11: parallel contracts and surveys (vision/step-3-design.md, slice 4). A run works in a git worktree of
+# its own (camps/<focus>.run-<n>), a contract on a run-local branch gm/run-<n> made from the feature branch's tip
+# (base_commit), and gm land puts what the Party Leader accepts on the feature branch. A run may wait before it starts
+# (waiting: for the postings in after_postings to land, for a free Adventurer under the cap, or for a rate limit's
+# pause to end). A correction says what it corrects (a check, a landing conflict, or the tests after a landing); a
+# survey keeps its field report. Only adds.
+gm_schema11_sql() {
+  cat <<'SQL'
+ALTER TABLE run ADD COLUMN worktree TEXT;
+ALTER TABLE run ADD COLUMN run_branch TEXT;
+ALTER TABLE run ADD COLUMN base_commit TEXT;
+ALTER TABLE run ADD COLUMN after_postings TEXT;
+ALTER TABLE run ADD COLUMN waiting TEXT;
+ALTER TABLE run ADD COLUMN after_summoned_at TEXT;
+ALTER TABLE run ADD COLUMN correction TEXT;
+ALTER TABLE run ADD COLUMN land_result TEXT;
+ALTER TABLE run ADD COLUMN land_evidence TEXT;
+ALTER TABLE run ADD COLUMN landed_at TEXT;
+ALTER TABLE run ADD COLUMN landed_commit TEXT;
+ALTER TABLE run ADD COLUMN tests_result TEXT;
+ALTER TABLE run ADD COLUMN tests_at TEXT;
+ALTER TABLE run ADD COLUMN tests_summoned_at TEXT;
+ALTER TABLE run ADD COLUMN trust_added INTEGER;
+ALTER TABLE run ADD COLUMN cleaned_at TEXT;
+ALTER TABLE run ADD COLUMN rate_limited_until TEXT;
+ALTER TABLE run ADD COLUMN report TEXT;
+CREATE INDEX run_live ON run(ended_at, waiting);
+PRAGMA user_version=11;
+SQL
+}
+
 gm_db_init() {
   mkdir -p "$GM_HALL"
   local tmp=$GM_DB.init.$$
@@ -502,6 +536,7 @@ $(gm_schema7_sql)
 $(gm_schema8_sql)
 $(gm_schema9_sql)
 $(gm_schema10_sql)
+$(gm_schema11_sql)
 COMMIT;
 SQL
   # ln refuses an existing target, so exactly one concurrent first caller installs its register.
@@ -514,15 +549,16 @@ SQL
 gm_db_migrate() {
   local from=$1 sql err
   case $from in
-    1) sql="$(gm_schema2_sql) $(gm_schema3_sql) $(gm_schema4_sql) $(gm_schema5_sql) $(gm_schema6_sql) $(gm_schema7_sql) $(gm_schema8_sql) $(gm_schema9_sql) $(gm_schema10_sql)" ;;
-    2) sql="$(gm_schema3_sql) $(gm_schema4_sql) $(gm_schema5_sql) $(gm_schema6_sql) $(gm_schema7_sql) $(gm_schema8_sql) $(gm_schema9_sql) $(gm_schema10_sql)" ;;
-    3) sql="$(gm_schema4_sql) $(gm_schema5_sql) $(gm_schema6_sql) $(gm_schema7_sql) $(gm_schema8_sql) $(gm_schema9_sql) $(gm_schema10_sql)" ;;
-    4) sql="$(gm_schema5_sql) $(gm_schema6_sql) $(gm_schema7_sql) $(gm_schema8_sql) $(gm_schema9_sql) $(gm_schema10_sql)" ;;
-    5) sql="$(gm_schema6_sql) $(gm_schema7_sql) $(gm_schema8_sql) $(gm_schema9_sql) $(gm_schema10_sql)" ;;
-    6) sql="$(gm_schema7_sql) $(gm_schema8_sql) $(gm_schema9_sql) $(gm_schema10_sql)" ;;
-    7) sql="$(gm_schema8_sql) $(gm_schema9_sql) $(gm_schema10_sql)" ;;
-    8) sql="$(gm_schema9_sql) $(gm_schema10_sql)" ;;
-    9) sql=$(gm_schema10_sql) ;;
+    1) sql="$(gm_schema2_sql) $(gm_schema3_sql) $(gm_schema4_sql) $(gm_schema5_sql) $(gm_schema6_sql) $(gm_schema7_sql) $(gm_schema8_sql) $(gm_schema9_sql) $(gm_schema10_sql) $(gm_schema11_sql)" ;;
+    2) sql="$(gm_schema3_sql) $(gm_schema4_sql) $(gm_schema5_sql) $(gm_schema6_sql) $(gm_schema7_sql) $(gm_schema8_sql) $(gm_schema9_sql) $(gm_schema10_sql) $(gm_schema11_sql)" ;;
+    3) sql="$(gm_schema4_sql) $(gm_schema5_sql) $(gm_schema6_sql) $(gm_schema7_sql) $(gm_schema8_sql) $(gm_schema9_sql) $(gm_schema10_sql) $(gm_schema11_sql)" ;;
+    4) sql="$(gm_schema5_sql) $(gm_schema6_sql) $(gm_schema7_sql) $(gm_schema8_sql) $(gm_schema9_sql) $(gm_schema10_sql) $(gm_schema11_sql)" ;;
+    5) sql="$(gm_schema6_sql) $(gm_schema7_sql) $(gm_schema8_sql) $(gm_schema9_sql) $(gm_schema10_sql) $(gm_schema11_sql)" ;;
+    6) sql="$(gm_schema7_sql) $(gm_schema8_sql) $(gm_schema9_sql) $(gm_schema10_sql) $(gm_schema11_sql)" ;;
+    7) sql="$(gm_schema8_sql) $(gm_schema9_sql) $(gm_schema10_sql) $(gm_schema11_sql)" ;;
+    8) sql="$(gm_schema9_sql) $(gm_schema10_sql) $(gm_schema11_sql)" ;;
+    9) sql="$(gm_schema10_sql) $(gm_schema11_sql)" ;;
+    10) sql=$(gm_schema11_sql) ;;
   esac
   if ! err=$(sqlite3 -bail -batch -cmd '.timeout 15000' "$GM_DB" "BEGIN IMMEDIATE; $sql COMMIT;" 2>&1 >/dev/null); then
     [ "$(gm_sql 'PRAGMA user_version;')" = "$GM_SCHEMA_VERSION" ] || gm_die "could not migrate the register at $GM_DB to schema $GM_SCHEMA_VERSION: $err"
@@ -535,8 +571,8 @@ gm_db_ensure() {
   local v
   v=$(gm_sql 'PRAGMA user_version;')
   case $v in
-    10) ;;
-    1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9) gm_db_migrate "$v" ;;
+    11) ;;
+    1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10) gm_db_migrate "$v" ;;
     *) gm_die "the register at $GM_DB is schema $v; this gm knows schema $GM_SCHEMA_VERSION" ;;
   esac
   GM_DB_READY=1
@@ -777,26 +813,40 @@ They are for advanced use, and for the Guildmaster.
   post [--focus F] [--slug S] [--from REF] [--follows REF] <words|->
                           add a posting to the current focus, or focus F (state received); one made anywhere
                           but in its own Party Leader's session is summoned to it by its watch
-  dispatch <posting>... [--brief TEXT|-] [--model M] [--effort E]
-                          hand started postings to one Adventurer: claude in the camp, on the feature branch,
-                          with a writ from prompts/adventurer/contract.md in the Guildhall, in a herdr workspace
-                          of its own under the Party Leader's, titled with the run (claude -p, unseen, when the
-                          Party Leader has no herdr pane); returns at once, and the Party Leader's watch summons
-                          it when the run finishes. The workspace stays open until a notice on its posting, or
-                          another dispatch, reviews the run. One contract run at a time per focus
+  dispatch <posting>... [--survey] [--after <posting>]... [--brief TEXT|-] [--model M] [--effort E]
+                          hand started postings to one Adventurer: claude in a git worktree of its own beside
+                          the camp (camps/<focus>.run-<n>), a contract on its own branch gm/run-<n> made from the
+                          feature branch's tip, with a writ from prompts/adventurer/contract.md in the Guildhall,
+                          in a herdr workspace of its own under the Party Leader's, titled with the run (claude
+                          -p, unseen, when the Party Leader has no herdr pane); returns at once, and the Party
+                          Leader's watch summons it when the run finishes. Runs go side by side, up to the
+                          guild's cap (adventurers: 3 in guild.conf); beyond it, or while a rate limit pauses
+                          dispatch, a run waits and gm starts it when it may. --after holds it, unmade, until
+                          that posting has a run that landed. --survey finds things out and changes nothing,
+                          detached at the feature branch's tip, its field report kept in reports/ in the Guildhall
+  land <run>              accept a finished contract run and land it on the feature branch, one at a time: by
+                          fast-forward when the branch has not moved, with a merge commit when it has, never a
+                          rebase or squash; refuses a failed check, uncommitted work, or a dirty camp. A conflict
+                          is aborted and sends one correction run; after a merge commit gm runs the rules file's
+                          test-command: in the background, and the feature branch is not pushed until it passes.
+                          The run's worktree and branch are then removed
+  drop <run>              discard a run: one waiting never starts, an ended one's worktree and branch are removed
+                          with the commits they hold, recorded first
   runs [--all]            the focus's runs: postings, how each ended, model and effort, result, outcome, check
-  check <run>             a run's check from git facts: still on the feature branch, no new local branch, no
-                          remote branch moved but the feature branch (and the development branch forward, when the
-                          playbook allows it), no commit off the feature branch's line; its keeper runs it when the
-                          run ends. A first failure on a posting dispatches a correction run at once
-                          (prompts/adventurer/correction.md); a second makes it needs-you, for the patron
+  check <run>             a run's check from git facts: its worktree still on its run branch, which still holds its
+                          base, no new local branch, no remote branch moved by this clone but the Party Leader's
+                          own pushes, no commit off the run branch's line; its keeper runs it when the run ends. A
+                          first failure on a posting (a failed check, a landing conflict, or failing tests after a
+                          landing) dispatches a correction run at once (prompts/adventurer/correction.md); a second
+                          makes it needs-you, for the patron
   runner <run> [--keys KEYS | --text WORDS]
                           what a live run's herdr pane shows; or answer it, as its Party Leader: key presses
                           ("down enter") or words typed and sent, recorded first
   summons                 what is waiting for this Party Leader (a finished run, a run blocked on an answer, a
                           posting added from outside its chat), recorded as heard; what gm types as
                           /guild-chat:summons when its watch died
-  run <run>               the keeper gm dispatch starts; never run by hand
+  run <run>               the keeper gm starts when a run starts; never run by hand
+  land-tests <run>        the tests gm land starts after a merge landing; never run by hand
   adventurer <run> --pane ID
                           what an Adventurer's herdr pane runs: claude with its writ (only in that run's pane)
   resolve <ref>           print the one record a reference names: 12, #12, focus#12, focus#slug, focus, KEY-123
@@ -1497,6 +1547,9 @@ gm_record_notice() {
 BEGIN IMMEDIATE;
 UPDATE posting SET $state_sql $slug_sql $park_sql updated_at=$GM_NOW WHERE id=$pid;
 UPDATE message SET sorted_at=$GM_NOW WHERE posting_id=$pid AND sorted_at IS NULL;
+UPDATE run SET ended_at=$GM_NOW, result_subtype='dropped', checked_at=$GM_NOW, check_result='unchecked', summoned_at=$GM_NOW
+  WHERE ended_at IS NULL AND waiting IS NOT NULL AND $(gm_q "$state") IN ('queued','needs-you','done','failed','closed','parked')
+  AND id IN (SELECT run_id FROM run_posting WHERE posting_id=$pid);
 UPDATE run SET reviewed_at=COALESCE(reviewed_at,$GM_NOW),
   outcome=COALESCE(outcome, CASE $(gm_q "$verb") WHEN 'done' THEN 'accepted' WHEN 'failed' THEN 'failed' WHEN 'needs-you' THEN 'escalated' END)
   WHERE ended_at IS NOT NULL AND id IN (SELECT run_id FROM run_posting WHERE posting_id=$pid);
@@ -1508,7 +1561,7 @@ INSERT INTO event(at, actor, kind, focus_id, posting_id, session_id, verb, detai
 SELECT line FROM event WHERE id=last_insert_rowid();
 COMMIT;
 SQL
-  gm_run_panes_close "$(gm_sql "SELECT focus_id FROM posting WHERE id=$pid;")"
+  gm_runs_tidy "$(gm_sql "SELECT focus_id FROM posting WHERE id=$pid;")"
   local word=notice
   [ "$verb" != parked ] || word=park
   (gm_trace_notice "$pid" "$verb" "$before" "$state" "$detail" "$t0" "$word") >/dev/null 2>&1 || gm_span_dropped "guild.notice $verb"
@@ -1719,12 +1772,23 @@ SELECT '- #'||num||' '||slug||', the patron''s words ('||created_at||'): "'||sub
                FROM (SELECT at, words FROM message WHERE posting_id=p.id AND disposition='addition' ORDER BY id)),'')
   ||COALESCE(char(10)||'  last notice: '||(SELECT line FROM event WHERE posting_id=p.id AND kind='notice' ORDER BY id DESC LIMIT 1),'')
 FROM posting p WHERE focus_id=$fid AND state='active' ORDER BY num;
-SELECT char(10)||'Runs (gm runs lists them all):' WHERE EXISTS (SELECT 1 FROM run WHERE focus_id=$fid AND (ended_at IS NULL OR reviewed_at IS NULL));
-SELECT '- run '||r.id||' for '||$(gm_run_postings_sql r.id)||CASE WHEN r.ended_at IS NULL
-    THEN ': an Adventurer is working in the camp since '||r.started_at||'; change no file there until it finishes, and gm summons you then'
+SELECT char(10)||'Runs (gm runs lists them all):' WHERE EXISTS (SELECT 1 FROM run WHERE focus_id=$fid AND (ended_at IS NULL OR reviewed_at IS NULL
+  OR (kind='contract' AND worktree IS NOT NULL AND cleaned_at IS NULL AND landed_at IS NULL) OR tests_result IN ('running','failed')));
+SELECT '- run '||r.id||' for '||$(gm_run_postings_sql r.id)||CASE WHEN r.ended_at IS NULL AND r.waiting IS NOT NULL
+    THEN ': waits to start ('||CASE r.waiting WHEN 'after' THEN 'for what --after names to land' WHEN 'paused' THEN 'dispatch is paused after a rate limit' ELSE 'for a free Adventurer' END||'); gm starts it'
+    WHEN r.ended_at IS NULL
+    THEN ': an Adventurer is working in its own worktree '||COALESCE(r.worktree,'(being made)')||' since '||r.started_at||'; gm summons you when it finishes'
       ||COALESCE('. It is blocked since '||r.blocked_at||', waiting for your answer: gm runner '||r.id||' shows its pane','')
-    ELSE ' '||$(gm_run_end_sql r)||', not reviewed yet: read '||$(gm_q "$GM_HALL/runs/")||r.id||'/result.md, then record what you decided on its posting' END
-FROM run r WHERE r.focus_id=$fid AND (r.ended_at IS NULL OR r.reviewed_at IS NULL) ORDER BY r.id;
+    WHEN r.reviewed_at IS NULL
+    THEN ' '||$(gm_run_end_sql r)||', not reviewed yet: read '||COALESCE(r.report,$(gm_q "$GM_HALL/runs/")||r.id||'/result.md')
+      ||CASE WHEN r.kind='contract' AND r.worktree IS NOT NULL THEN ' and its commits (git log -p '||(SELECT branch FROM focus WHERE id=r.focus_id)||'..gm/run-'||r.id||'), then gm land '||r.id||' or record what you decided on its posting'
+        ELSE ', then record what you decided on its posting' END
+    WHEN r.tests_result='running' THEN ' landed; gm is running the tests, and the feature branch is not pushed until they pass'
+    WHEN r.tests_result='failed' THEN ' landed, and the tests failed after it: the feature branch is not pushed until they pass'
+    ELSE ' ended, and its worktree '||r.worktree||' is kept: it may hold work not landed (gm runs says); gm land '||r.id||', or gm drop '||r.id||' to discard it' END
+FROM run r WHERE r.focus_id=$fid AND (r.ended_at IS NULL OR r.reviewed_at IS NULL
+  OR (r.kind='contract' AND r.worktree IS NOT NULL AND r.cleaned_at IS NULL AND r.landed_at IS NULL)
+  OR (r.tests_result IN ('running','failed') AND r.id=(SELECT id FROM run WHERE focus_id=$fid AND tests_result IS NOT NULL ORDER BY landed_at DESC, id DESC LIMIT 1))) ORDER BY r.id;
 SELECT char(10)||'Needs the patron:' WHERE EXISTS (SELECT 1 FROM posting WHERE focus_id=$fid AND state='needs-you');
 SELECT '- #'||num||' '||slug||': '||COALESCE((SELECT detail FROM event WHERE posting_id=p.id AND verb='needs-you' ORDER BY id DESC LIMIT 1),'')
   ||char(10)||'  the patron''s words ('||created_at||'): "'||substr(words,1,500)||CASE WHEN length(words)>500 THEN '…' ELSE '' END||'"'
@@ -1874,7 +1938,7 @@ gm_cmd_statusline() {
   fi
   # An Adventurer's own line: its run and postings, and whose camp it works in; never its Party Leader's.
   if [[ ${GM_RUN:-} =~ ^[0-9]+$ ]]; then
-    gm_sql "SELECT '⛨ adventurer · '||$(gm_q "$(gm_run_title "$GM_RUN" 2>/dev/null)")||' · for '||f.name||' on '||f.branch
+    gm_sql "SELECT '⛨ adventurer · '||$(gm_q "$(gm_run_title "$GM_RUN" 2>/dev/null)")||' · '||$(gm_q "$(gm_run_branches "$GM_RUN" 2>/dev/null)")||' · for '||f.name
       ||CASE WHEN r.ended_at IS NOT NULL THEN ' · its run ended' WHEN r.blocked_at IS NOT NULL THEN ' · blocked: its Party Leader answers' ELSE '' END
       ||$(gm_q "${ctx:+ · ctx $ctx%}${model:+ · $model}") FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$GM_RUN;" 2>/dev/null || true
     return 0
@@ -1904,6 +1968,10 @@ SELECT 'postings '||COALESCE((
   ||' · '||(SELECT count(*) FROM posting WHERE focus_id=$fid AND state IN ('done','closed'))||' done'
   ||COALESCE(' · next #'||(SELECT num||' '||slug FROM posting WHERE focus_id=$fid AND state='queued' ORDER BY num LIMIT 1),'');
 SELECT 'guild '||(SELECT count(*) FROM focus)||' focus'||CASE WHEN (SELECT count(*) FROM focus)=1 THEN '' ELSE 'es' END
+  ||COALESCE(' · adventurers '||NULLIF((SELECT count(*) FROM run WHERE ended_at IS NULL AND waiting IS NULL),0)||' running','')
+  ||COALESCE(CASE WHEN (SELECT count(*) FROM run WHERE ended_at IS NULL AND waiting IS NULL)=0 THEN ' · adventurers ' ELSE ' · ' END
+    ||NULLIF((SELECT count(*) FROM run WHERE ended_at IS NULL AND waiting IS NOT NULL),0)||' waiting','')
+  ||COALESCE(' · dispatch paused until '||(SELECT substr(max(rate_limited_until),12,5) FROM run WHERE rate_limited_until>$GM_NOW),'')
   ||COALESCE(' · need you elsewhere: '||(SELECT group_concat(name||' '||n, ', ') FROM (
       SELECT f.name, count(*) n FROM posting p JOIN focus f ON f.id=p.focus_id WHERE f.id<>$fid AND p.state='needs-you' GROUP BY f.name)),'')
   ||$(gm_q "${ctx:+ · ctx $ctx%}${model:+ · $model}");
@@ -4581,8 +4649,8 @@ gm_run_postings_sql() {
 # How a finished run ended, in a few words: "exit 0, 22 turns, \$1.41", or why it has no result.
 # An Adventurer in a herdr pane finishes at its turn's end, with no exit code, so then none is named.
 gm_run_end_sql() {
-  printf "CASE WHEN %s.result_subtype='lost' THEN 'lost: its keeper ended without recording a result' ELSE 'finished'||COALESCE(': '||NULLIF(ltrim(CASE WHEN COALESCE(%s.result_subtype,'success')<>'success' THEN ', '||%s.result_subtype ELSE '' END||CASE WHEN %s.exit_code IS NOT NULL OR %s.result_subtype IS NULL THEN ', exit '||COALESCE(%s.exit_code,'?') ELSE '' END||COALESCE(', '||%s.turns||' turns','')||COALESCE(', '||%s,'')||CASE WHEN %s.result_subtype IS NULL THEN ', no result' ELSE '' END, ', '),''),'') END" \
-    "$1" "$1" "$1" "$1" "$1" "$1" "$1" "$(gm_usd_sql "$1.cost_usd")" "$1"
+  printf "CASE WHEN %s.result_subtype='lost' THEN 'lost: its keeper ended without recording a result' WHEN %s.result_subtype='dropped' THEN 'dropped before it started' WHEN %s.result_subtype='not_started' THEN 'could not start' ELSE 'finished'||COALESCE(': '||NULLIF(ltrim(CASE WHEN COALESCE(%s.result_subtype,'success')<>'success' THEN ', '||%s.result_subtype ELSE '' END||CASE WHEN %s.exit_code IS NOT NULL OR %s.result_subtype IS NULL THEN ', exit '||COALESCE(%s.exit_code,'?') ELSE '' END||COALESCE(', '||%s.turns||' turns','')||COALESCE(', '||%s,'')||CASE WHEN %s.result_subtype IS NULL THEN ', no result' ELSE '' END, ', '),''),'') END" \
+    "$1" "$1" "$1" "$1" "$1" "$1" "$1" "$1" "$1" "$(gm_usd_sql "$1.cost_usd")" "$1"
 }
 
 # gm_run_end <run> <exit code or ''> <result.json or ''>: the run's end, recorded once, with a notice on each of its
@@ -4616,24 +4684,30 @@ SQL
 }
 
 # A run whose keeper is gone without recording its end (the machine restarted, the keeper was killed) is ended as
-# lost, so it neither blocks the next contract nor waits for ever; its summons then reaches the Party Leader. A run
-# whose keeper has not yet written its pid gets 30 seconds.
+# lost, so it neither holds a place under the cap nor waits for ever; its summons then reaches the Party Leader. A run
+# whose keeper has not yet written its pid gets 30 seconds; a run still waiting has no keeper yet. A place freed
+# starts the oldest run waiting for one.
 gm_runs_reap() {
-  local id pid
+  local id pid reaped=''
   [ -s "$GM_DB" ] || return 0
   while IFS=$'\t' read -r id pid; do
     [ -n "$id" ] || continue
     ! gm_keeper_alive "$pid" "$id" || continue
     gm_run_end "$id" '' '' >/dev/null
     gm_check_spawn "$id"
-  done <<<"$(gm_sql "SELECT id, COALESCE(pid,'') FROM run WHERE ended_at IS NULL AND (pid IS NOT NULL OR started_at<strftime('%Y-%m-%dT%H:%M:%fZ','now','-30 seconds'));" 2>/dev/null || true)"
+    reaped=1
+  done <<<"$(gm_sql "SELECT id, COALESCE(pid,'') FROM run WHERE ended_at IS NULL AND waiting IS NULL AND (pid IS NOT NULL OR started_at<strftime('%Y-%m-%dT%H:%M:%fZ','now','-30 seconds'));" 2>/dev/null || true)"
+  if [ -n "$reaped" ] || [ -n "$(gm_sql "SELECT 1 FROM run WHERE ended_at IS NULL AND waiting IS NOT NULL LIMIT 1;" 2>/dev/null || true)" ]; then
+    gm_runs_start_waiting >/dev/null 2>&1 || true
+  fi
 }
 
-# The model a contract runs on: --model, else contract-model; party-leader is the model the focus's Party Leader ran
-# on last (from its status line), or Claude Code's own default when gm has not seen one.
+# The model a run of kind $2 (contract, the default, or survey) runs on: --model, else contract-model or survey-model;
+# party-leader is the model the focus's Party Leader ran on last (from its status line), or Claude Code's own default
+# when gm has not seen one.
 gm_dispatch_model() {
   local focus=$1 m
-  m=$(gm_conf_value contract-model)
+  m=$(gm_conf_value "${2:-contract}-model")
   [ "$m" = party-leader ] || { printf '%s' "$m"; return; }
   gm_sql "SELECT model FROM model_sample WHERE model IS NOT NULL AND session_id IN (
     SELECT session_id FROM event WHERE focus_id=(SELECT id FROM focus WHERE name=$(gm_q "$focus")) AND kind='session.start' AND session_id IS NOT NULL)
@@ -4689,15 +4763,18 @@ SQL
 # skipDangerousModePermissionPrompt from --settings too. Its model-drafted feedback is off (feedbackDrafts), as
 # CLAUDE_CODE_SEND_FEEDBACK=0 also turns it off where gm starts it, so it never drafts a bug report for the patron.
 # With pane (an Adventurer in a herdr pane, not claude -p), Stop and StopFailure run gm hook run-stop, which records
-# the run's end, since no result event comes.
+# the run's end, since no result event comes. It works in its run's own worktree (slice 4), where its scratchpad is
+# kept too. A survey changes nothing: Edit, Write, MultiEdit, NotebookEdit and git add and commit are denied it, deny
+# rules that hold in every permission mode, and its rules hook denies a commit as well.
 gm_run_settings() {
-  local id=$1 focus=$2 rules=$3 out=$4 pane=${5:-} allow='' rule attribution='' env stop='' sid camp scratch title
-  sid=$(gm_sql "SELECT session_id FROM run WHERE id=$id;")
-  camp=$(gm_focus_field "$focus" camp)
-  camp=$(cd "$camp" 2>/dev/null && pwd -P || printf '%s' "$camp")
-  scratch="claude-$(id -u)/$(printf '%s' "$camp" | sed 's/[^A-Za-z0-9]/-/g')/$sid"
+  local id=$1 focus=$2 rules=$3 out=$4 pane=${5:-} allow='' rule attribution='' env stop='' sid wt scratch title kind
+  local change=('Bash(git add*)' 'Bash(git commit*)')
+  IFS=$'\t' read -r sid kind <<<"$(gm_sql "SELECT session_id, kind FROM run WHERE id=$id;")"
+  wt=$(gm_run_worktree_path "$focus" "$id")
+  scratch="claude-$(id -u)/$(printf '%s' "$wt" | sed 's/[^A-Za-z0-9]/-/g')/$sid"
   title=$(gm_run_title "$id")
-  for rule in 'Bash(git status*)' 'Bash(git diff*)' 'Bash(git log*)' 'Bash(git show*)' 'Bash(git add*)' 'Bash(git commit*)' \
+  [ "$kind" != survey ] || change=()
+  for rule in 'Bash(git status*)' 'Bash(git diff*)' 'Bash(git log*)' 'Bash(git show*)' "${change[@]+"${change[@]}"}" \
     'Bash(git rev-parse*)' 'Bash(git ls-files*)' 'Bash(git grep*)' 'Bash(git blame*)' \
     "Read(/$rules)" "Read(/$GM_HALL/playbooks/**)" \
     'Bash(gh issue view*)' 'Bash(gh issue list*)' 'Bash(gh pr view*)' 'Bash(gh pr list*)' 'Bash(gh pr diff*)' \
@@ -4716,6 +4793,9 @@ gm_run_settings() {
     'Bash(gh pr create*)' 'Bash(gh pr merge*)' 'Bash(gh pr review*)' 'Bash(gh-axi pr create*)' 'Bash(gh-axi pr merge*)' 'Bash(gh-axi pr review*)'; do
     deny="$deny${deny:+, }$(gm_q "$rule")"
   done
+  if [ "$kind" = survey ]; then
+    for rule in Edit Write MultiEdit NotebookEdit 'Bash(git add*)' 'Bash(git commit*)'; do deny="$deny, $(gm_q "$rule")"; done
+  fi
   [ "$(gm_conf_value commit-attribution)" = on ] || attribution=", 'attribution', json_object('commit', '', 'pr', ''), 'includeCoAuthoredBy', json('false')"
   env="GM_HALL=$(gm_shq "$GM_HALL") GM_FOCUS=$(gm_shq "$focus") GM_RUN=$(gm_shq "$id") bash $(gm_shq "$GM_SELF") hook"
   if [ -n "$pane" ]; then
@@ -4927,11 +5007,40 @@ gm_rules_set() {
   GM_RV=$1 GM_RW=$2
 }
 
+# gm_rules_holders: the focus's contract runs that are live, or whose run branch holds commits not landed on the
+# feature branch or whose worktree holds uncommitted changes, as "run 9, run 10"; read only when a command would rewrite
+# or force the feature branch. A run made from its old tip would bring back what a rewrite removed.
+gm_rules_holders() {
+  local id rb wt held=''
+  [ -n "${GM_R_FID:-}" ] || return 0
+  while IFS=$'\t' read -r id rb wt; do
+    [ -n "$id" ] || continue
+    if [ "$rb" = - ] || [ -n "$(gm_run_holds "$id")" ]; then held="$held${held:+, }run $id"; fi
+  done <<<"$(gm_sql "SELECT id, CASE WHEN ended_at IS NULL THEN '-' ELSE COALESCE(run_branch,'') END, COALESCE(worktree,'') FROM run
+    WHERE focus_id=$GM_R_FID AND kind='contract' AND ((ended_at IS NULL AND waiting IS NULL)
+      OR (ended_at IS NOT NULL AND worktree IS NOT NULL AND cleaned_at IS NULL AND landed_at IS NULL)) ORDER BY id;" 2>/dev/null || true)"
+  printf '%s' "$held"
+}
+
+# gm_rules_tests_hold: the tests gm runs after a landing are running, or failed, on the focus's feature branch; prints
+# which, with the run, or nothing.
+gm_rules_tests_hold() {
+  [ -n "${GM_R_FID:-}" ] || return 0
+  gm_sql "SELECT CASE tests_result WHEN 'running' THEN 'the tests gm runs after run '||id||' landed are still running'
+    WHEN 'failed' THEN 'the tests failed after run '||id||' landed' END FROM run WHERE focus_id=$GM_R_FID AND tests_result IS NOT NULL
+    ORDER BY landed_at DESC, id DESC LIMIT 1;" 2>/dev/null || true
+}
+
 # gm_rules_push <dir> <args after push>
 gm_rules_push() {
-  local dir=$1 a force=0 del=0 every='' tags=0 remote='' skip=0 ref plus src dst cls vl v line cur t
+  local dir=$1 a force=0 del=0 every='' tags=0 remote='' skip=0 ref plus src dst cls vl v line cur t held
   local refs=()
   shift
+  # An Adventurer's commits reach the feature branch only through gm land, after its Party Leader's review.
+  if [ -n "${GM_RUN:-}" ]; then
+    gm_rules_set deny "gm rules: an Adventurer pushes nothing: your commits stay on your run's own branch, and gm lands them on the feature branch after your Party Leader's review. Say in your report that the work is ready."
+    return
+  fi
   if [ -n "$GM_R_MISSING" ]; then
     gm_rules_set deny "gm rules: every push is denied until the patron adds what the rules hook reads, and these are missing: $GM_R_MISSING. Tell the patron; the lines are in $GM_ROOT/vision/step-3-design.md, slice 2."
     return
@@ -4995,6 +5104,20 @@ gm_rules_push() {
     if [ -z "$src" ]; then t='deleting'
     elif [ "$force" = 1 ] || [ "$plus" = 1 ]; then t='a forced push to'
     else t='a push to'; fi
+    if [ "$cls" = feature ]; then
+      if [ -z "$src" ] || [ "$force" = 1 ] || [ "$plus" = 1 ]; then
+        held=$(gm_rules_holders)
+        if [ -n "$held" ]; then
+          gm_rules_set deny "gm rules: $t $dst is denied while $held of this focus hold work made from its tip: a run made from the old tip would bring back what a forced push removed. Land or drop them first (gm land, gm drop)."
+          return
+        fi
+      fi
+      held=$(gm_rules_tests_hold)
+      if [ -n "$held" ]; then
+        gm_rules_set deny "gm rules: $t $dst is denied: $held, and the feature branch is not pushed until they pass (gm runs shows them)."
+        return
+      fi
+    fi
     case ${vl:+$v} in
       '') gm_rules_set deny "gm rules: no push: $cls line in $GM_R_PLAYBOOK applies in phase $GM_R_PHASE, so $t $dst ($cls) is denied."; return ;;
       allow) ;;
@@ -5007,6 +5130,7 @@ gm_rules_push() {
       *) gm_rules_set deny "gm rules: \"push: $line\" in $GM_R_PLAYBOOK says $v, which is not allow, merge or deny; $t $dst is denied until it is."; return ;;
     esac
     gm_rules_set allow "gm rules: the playbook allows it (\"push: $line\")."
+    GM_R_PUSHED="${GM_R_PUSHED:-} $dst"
   done
 }
 
@@ -5051,29 +5175,70 @@ gm_rules_git() {
         esac
       done
       [ "$pos" = 0 ] || gm_rules_new_branch ;;
-    rebase | reset)
-      [ -n "$GM_R_DEV" ] || return 0
-      if [ "$sub" = reset ]; then
-        b=''
-        for a in "$@"; do [ "$a" != --hard ] || b=1; done
-        [ -n "$b" ] || return 0
-      else
-        for a in "$@"; do case $a in --abort | --quit | --show-current-patch | --edit-todo) return 0 ;; esac; done
-      fi
-      cur=$(gm_rules_current_branch "$dir")
-      # git rebase <upstream> <branch> checks out <branch> first.
-      b='' pos=0
-      [ "$sub" = reset ] || for a in "$@"; do case $a in -*) ;; *) b=$a pos=$((pos + 1)) ;; esac; done
-      if [ "$cur" = "$GM_R_DEV" ] || { [ "$pos" -ge 2 ] && [ "$b" = "$GM_R_DEV" ]; }; then
-        b='git rebase'
-        [ "$sub" = rebase ] || b='git reset --hard'
-        gm_rules_set deny "gm rules: $b rewrites the shared development branch $GM_R_DEV, which the rules never allow: it only ever moves forward, by a merge."
-      fi ;;
+    rebase | reset) gm_rules_dev_rewrite "$dir" "$sub" "$@" ;;
     commit)
-      if [ -n "$GM_R_LIVE" ] && [ "$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)" = "$GM_R_CAMP" ]; then
-        gm_rules_set deny "gm rules: run $GM_R_LIVE is working in this camp, and only it commits here until it ends; gm summons you then."
+      if [ "${GM_R_KIND:-}" = survey ]; then
+        gm_rules_set deny "gm rules: a survey changes nothing, so it never commits: what you found goes in your field report, your last message."
+      elif [ -n "${GM_R_LANDING:-}" ] && [ "$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)" = "$GM_R_CAMP" ]; then
+        gm_rules_set deny "gm rules: gm is landing a run on the feature branch in this camp; commit nothing here until it has, in a few seconds."
       fi ;;
   esac
+  # The feature branch is never rewritten under a run: a rebase of it, or a reset that moves it, while a run of the
+  # focus is live or holds commits not landed. Only the Party Leader's own command is read here: an Adventurer works
+  # on its run branch, never the feature branch.
+  [ -z "${GM_RUN:-}" ] && [ -n "${GM_R_FID:-}" ] || return 0
+  case $sub in rebase | reset) ;; *) return 0 ;; esac
+  [ "$GM_RV" != deny ] || return 0
+  gm_rules_feature_rewrite "$dir" "$sub" "$@"
+}
+
+# gm_rules_dev_rewrite <dir> <rebase|reset> <args>: denies a rebase or a hard reset of the shared development branch.
+gm_rules_dev_rewrite() {
+  local dir=$1 sub=$2 a b pos cur
+  shift 2
+  [ -n "$GM_R_DEV" ] || return 0
+  if [ "$sub" = reset ]; then
+    b=''
+    for a in "$@"; do [ "$a" != --hard ] || b=1; done
+    [ -n "$b" ] || return 0
+  else
+    for a in "$@"; do case $a in --abort | --quit | --show-current-patch | --edit-todo) return 0 ;; esac; done
+  fi
+  cur=$(gm_rules_current_branch "$dir")
+  # git rebase <upstream> <branch> checks out <branch> first.
+  b='' pos=0
+  [ "$sub" = reset ] || for a in "$@"; do case $a in -*) ;; *) b=$a pos=$((pos + 1)) ;; esac; done
+  if [ "$cur" = "$GM_R_DEV" ] || { [ "$pos" -ge 2 ] && [ "$b" = "$GM_R_DEV" ]; }; then
+    b='git rebase'
+    [ "$sub" = rebase ] || b='git reset --hard'
+    gm_rules_set deny "gm rules: $b rewrites the shared development branch $GM_R_DEV, which the rules never allow: it only ever moves forward, by a merge."
+  fi
+}
+
+# gm_rules_feature_rewrite <dir> <rebase|reset> <args>: denies the command when it would rewrite the feature branch while
+# runs hold work made from its tip.
+gm_rules_feature_rewrite() {
+  local dir=$1 sub=$2 a b='' pos=0 cur moves=0 head target held
+  shift 2
+  cur=$(gm_rules_current_branch "$dir")
+  if [ "$sub" = rebase ]; then
+    for a in "$@"; do case $a in --abort | --quit | --show-current-patch | --edit-todo) return 0 ;; -*) ;; *) b=$a pos=$((pos + 1)) ;; esac; done
+    if [ "$cur" = "$GM_R_FEATURE" ] || { [ "$pos" -ge 2 ] && [ "$b" = "$GM_R_FEATURE" ]; }; then moves=1; fi
+  else
+    [ "$cur" = "$GM_R_FEATURE" ] || return 0
+    head=$(gm_git "$dir" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null || true)
+    for a in "$@"; do
+      case $a in --) break ;; -*) continue ;; esac
+      target=$(gm_git "$dir" rev-parse -q --verify "$a^{commit}" 2>/dev/null || true)
+      [ -z "$target" ] || [ "$target" = "$head" ] || moves=1
+      break
+    done
+  fi
+  [ "$moves" = 1 ] || return 0
+  held=$(gm_rules_holders)
+  [ -n "$held" ] || return 0
+  gm_rules_set deny "gm rules: git $sub would rewrite the feature branch $GM_R_FEATURE while $held of this focus hold work made from its tip; they would bring back what a rewrite removed. Land or drop them first (gm land, gm drop)."
+  return 0
 }
 
 # gm_rules_command <command> <cwd>: GM_RV and GM_RW for the whole command, one simple command at a time: any deny
@@ -5151,7 +5316,7 @@ gm_rules_simple() {
 
 # gm hook rules: reads the hook's JSON, prints its decision or nothing.
 gm_hook_rules() {
-  local input tool focus fid camp branch repo kind phase cmd cwd path
+  local input tool focus fid camp branch repo kind phase cmd cwd path b
   input=$(cat)
   focus=${GM_FOCUS:-}
   [ -n "$focus" ] && [ -s "$GM_DB" ] || return 0
@@ -5159,13 +5324,13 @@ gm_hook_rules() {
   case $tool in Bash | Edit | Write | MultiEdit | NotebookEdit) ;; *) return 0 ;; esac
   IFS=$'\t' read -r fid camp branch repo kind phase <<<"$(gm_sql "SELECT id, camp, branch, repo, kind, COALESCE(phase,'') FROM focus WHERE name=$(gm_q "$focus");" 2>/dev/null || true)"
   [ -n "$fid" ] || return 0
-  GM_R_FEATURE=$branch GM_R_PHASE=$phase GM_R_CAMP=$camp GM_R_LIVE=''
-  if [ -z "${GM_RUN:-}" ]; then
-    GM_R_LIVE=$(gm_sql "SELECT id FROM run WHERE focus_id=$fid AND kind='contract' AND ended_at IS NULL ORDER BY id LIMIT 1;" 2>/dev/null || true)
-    if [ -n "$GM_R_LIVE" ]; then
-      gm_runs_reap 2>/dev/null || true
-      GM_R_LIVE=$(gm_sql "SELECT id FROM run WHERE focus_id=$fid AND kind='contract' AND ended_at IS NULL ORDER BY id LIMIT 1;" 2>/dev/null || true)
-    fi
+  # Runs work in worktrees of their own (slice 4), so the camp is the Party Leader's: it is held only while gm lands a
+  # run there, for seconds.
+  GM_R_FEATURE=$branch GM_R_PHASE=$phase GM_R_CAMP=$camp GM_R_FID=$fid GM_R_LANDING='' GM_R_KIND='' GM_R_PUSHED=''
+  if [[ ${GM_RUN:-} =~ ^[0-9]+$ ]]; then
+    GM_R_KIND=$(gm_sql "SELECT kind FROM run WHERE id=$GM_RUN;" 2>/dev/null || true)
+  elif [ -z "${GM_RUN:-}" ] && gm_locked "land-$focus"; then
+    GM_R_LANDING=1
   fi
   cwd=$(gm_guard_field "$input" cwd)
   [ -n "$cwd" ] || cwd=$PWD
@@ -5176,14 +5341,20 @@ gm_hook_rules() {
       gm_rules_load "$(gm_rules_path "$repo")" "$(gm_playbook_path "$kind")"
       GM_RV='' GM_RW=''
       gm_rules_command "$cmd" "$cwd"
-      [ -z "$GM_RV" ] || gm_guard_json "$GM_RV" "$GM_RW" ;;
+      [ -z "$GM_RV" ] || gm_guard_json "$GM_RV" "$GM_RW"
+      # The Party Leader's own pushes are recorded, branch and time, so gm check never counts them as a run's.
+      if [ -z "${GM_RUN:-}" ] && [ "$GM_RV" != deny ] && [ -n "$GM_R_PUSHED" ]; then
+        for b in $GM_R_PUSHED; do
+          gm_sql "BEGIN IMMEDIATE; INSERT INTO event(at, actor, kind, focus_id, detail) VALUES ($GM_NOW, 'hook', 'push.allowed', $fid, $(gm_q "$b")); COMMIT;" >/dev/null 2>&1 || true
+        done
+      fi ;;
     *)
-      [ -n "${GM_R_LIVE:-}" ] && [ -z "${GM_RUN:-}" ] || return 0
+      [ -n "$GM_R_LANDING" ] || return 0
       path=$(gm_guard_field "$input" tool_input.file_path)
       [ -n "$path" ] || path=$(gm_guard_field "$input" tool_input.notebook_path)
       case $path in /*) ;; *) path=$cwd/$path ;; esac
       case $path/ in
-        "$camp"/*) gm_guard_json deny "gm rules: run $GM_R_LIVE is working in this camp; change no file in it until the run ends. gm summons you then." ;;
+        "$camp"/*) gm_guard_json deny "gm rules: gm is landing a run on the feature branch in this camp; change no file in it until it has, in a few seconds." ;;
       esac ;;
   esac
   return 0
@@ -5265,10 +5436,29 @@ SELECT EXISTS (SELECT 1 FROM c, json_each(c.j, '\$.projects') p JOIN k ON k.k = 
     return 1
   fi
   [ "$(gm_claude_trusted)" = 1 ] || { printf 'the camp is still not trusted in %s after gm recorded it' "$cfg"; return 1; }
+  GM_TRUST_ADDED=1
+}
+
+# gm_claude_untrust <dir>: the entry gm recorded for a run's worktree in Claude Code's store is removed with the
+# worktree, so the store does not grow by one key per run; anything gm cannot read or write is left as it is.
+gm_claude_untrust() {
+  local dir cfg tmp
+  dir=${CLAUDE_CONFIG_DIR:-$HOME}
+  cfg=$dir/.claude.json
+  [ ! -L "$cfg" ] && [ -f "$cfg" ] && [ -O "$cfg" ] || return 0
+  case $1 in *'"'*) return 0 ;; esac
+  [ "$(sqlite3 -batch :memory: "SELECT json_type(CAST(readfile($(gm_q "$cfg")) AS TEXT), $(gm_q "\$.projects.\"$1\""));" 2>/dev/null)" = object ] || return 0
+  tmp=$(mktemp "$cfg.gm.XXXXXX") || return 0
+  if sqlite3 -batch :memory: "SELECT writefile($(gm_q "$tmp"), json_remove(CAST(readfile($(gm_q "$cfg")) AS TEXT), $(gm_q "\$.projects.\"$1\"")));" >/dev/null 2>&1 &&
+    [ "$(sqlite3 -batch :memory: "SELECT json_valid(CAST(readfile($(gm_q "$tmp")) AS TEXT));" 2>/dev/null)" = 1 ]; then
+    mv -f "$tmp" "$cfg"
+  else
+    rm -f "$tmp"
+  fi
 }
 
 gm_cmd_dispatch() {
-  local refs=() model='' effort='' brief='' r pid pf st num canon focus fid ids=''
+  local refs=() after=() model='' effort='' brief='' kind=contract r pid pf st num canon focus fid ids='' aids='' a
   while [ $# -gt 0 ]; do
     case $1 in
       --model) model=${2:?--model needs a model}; shift 2 ;;
@@ -5277,12 +5467,13 @@ gm_cmd_dispatch() {
         brief=${2:?--brief needs your instructions, or - to read them from standard input}
         [ "$brief" != - ] || brief=$(cat)
         shift 2 ;;
-      --survey) gm_die "dispatch: surveys come with a later slice of step 3 (vision/step-3-design.md, slice 4); find it out yourself for now" ;;
+      --survey) kind=survey; shift ;;
+      --after) after+=("${2:?--after needs the posting this run needs landed first}"); shift 2 ;;
       -*) gm_die "dispatch: unknown option $1" ;;
       *) refs+=("$1"); shift ;;
     esac
   done
-  [ "${#refs[@]}" -gt 0 ] || gm_die "dispatch: gm dispatch <posting>... [--brief TEXT|-] [--model M] [--effort E]"
+  [ "${#refs[@]}" -gt 0 ] || gm_die "dispatch: gm dispatch <posting>... [--survey] [--after <posting>]... [--brief TEXT|-] [--model M] [--effort E]"
   gm_db_ensure
   focus=$(gm_require_focus)
   fid=$(gm_focus_id "$focus")
@@ -5293,79 +5484,161 @@ gm_cmd_dispatch() {
     [ "$st" = active ] || gm_die "dispatch: $canon is $st; start it first (gm notice $num started), then dispatch it"
     case ",$ids," in *",$pid,"*) ;; *) ids=${ids:+$ids,}$pid ;; esac
   done
+  for a in "${after[@]+"${after[@]}"}"; do
+    pid=$(gm_resolve_posting "$a")
+    IFS=$'\t' read -r pf canon <<<"$(gm_sql "SELECT p.focus_id, f.name||'#'||p.num||' '||p.slug FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.id=$pid;")"
+    [ "$pf" = "$fid" ] || gm_die "dispatch: --after $a: $canon is not a posting of $focus"
+    case ",$ids," in *",$pid,"*) gm_die "dispatch: --after $a: $canon is one of this run's own postings" ;; esac
+    case ",$aids," in *",$pid,"*) ;; *) aids=${aids:+$aids,}$pid ;; esac
+  done
   if [ -n "$effort" ]; then
     gm_conf_norm effort "$effort" || gm_die "dispatch: --effort is low, medium, high, xhigh or max"
   else
-    effort=$(gm_conf_value contract-effort)
+    effort=$(gm_conf_value "$kind-effort")
   fi
   if [ -n "$model" ]; then
     gm_conf_norm model "$model" || gm_die "dispatch: '$model' is not a model name"
   else
-    model=$(gm_dispatch_model "$focus")
+    model=$(gm_dispatch_model "$focus" "$kind")
   fi
-  gm_dispatch_start "$focus" "$ids" "$brief" "$model" "$effort"
-  printf 'Run %s works in the camp now; its writ is %s. gm summons you when it finishes: until then the posting stays active, and you can talk with the patron, but change no file in the camp.\n' "$GM_DISPATCHED" "$(gm_run_dir "$GM_DISPATCHED")/writ.md"
+  gm_dispatch_start "$focus" "$ids" "$brief" "$model" "$effort" '' '' '' "$kind" "$aids"
+  gm_dispatch_says "$GM_DISPATCHED"
+}
+
+# What gm dispatch says of the run it recorded, by where it stands: started, or waiting and for what.
+gm_dispatch_says() {
+  local id=$1 waiting kind wt rb
+  IFS=$'\t' read -r waiting kind <<<"$(gm_sql "SELECT COALESCE(waiting,'-'), kind FROM run WHERE id=$id;")"
+  wt=$(gm_run_worktree_path "$(gm_sql "SELECT f.name FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")" "$id")
+  rb="its own branch gm/run-$id"
+  [ "$kind" != survey ] || rb="a detached checkout of the feature branch's tip; it changes nothing, and its field report is kept in the Guildhall"
+  case $waiting in
+    -) printf 'Run %s works in a worktree of its own, %s, on %s; its writ is %s. gm summons you when it finishes: until then the posting stays active, and you can talk with the patron.\n' "$id" "$wt" "$rb" "$(gm_run_dir "$id")/writ.md" ;;
+    after) printf 'Run %s waits, unmade, until what it needs has landed; gm then makes its worktree from the tip that holds it and starts it.\n' "$id" ;;
+    paused) printf 'Run %s waits: dispatch is paused after a rate limit; gm starts it when the pause ends.\n' "$id" ;;
+    *) printf 'Run %s waits for a free Adventurer (%s at work, the cap in guild.conf); gm starts it when one finishes.\n' "$id" "$(gm_conf_value adventurers)" ;;
+  esac
+  [ "$kind" = survey ] || [ "$waiting" != - ] || printf 'Review it when it finishes, then land it on the feature branch with gm land %s.\n' "$id"
 }
 
 # gm_dispatch_start <focus> <posting ids, comma-separated> <brief> <model> <effort> [<run> <rules file> <evidence
-# file>]: one contract run on the postings, recorded with the camp's refs as they are now (for gm check), its writ
-# rendered and its keeper started; prints its notice lines and sets GM_DISPATCHED to the run. With a run whose check
-# failed, it is that run's correction (slice 3): dispatched by gm, its writ from prompts/adventurer/correction.md with
-# the rules broken and their evidence quoted.
+# file> [<kind> [<after posting ids> [<check|landing|tests> [<note>]]]]]: one run on the postings, a contract or a
+# survey, recorded with its writ rendered and started, or left waiting: for the postings --after names to land, for a
+# free Adventurer under the guild's cap, or for a rate limit's pause to end (gm_runs_start_waiting starts it then). The
+# keeper makes its worktree when it starts, not now. Prints its notice lines and sets GM_DISPATCHED to the run. With a
+# run, it is that run's correction (slices 3 and 4): dispatched by gm, its writ from prompts/adventurer/correction.md,
+# for a failed check, a landing conflict, or the tests failing after a landing, quoting what gm found. A run still
+# waiting on one of the postings is replaced by this one.
 GM_DISPATCHED=''
 gm_dispatch_start() {
-  local focus=$1 ids=$2 brief=$3 model=$4 effort=$5 corrects=${6:-} fid mode why live actor=party-leader what=contract
-  local template writ id dir sid out snap
+  local focus=$1 ids=$2 brief=$3 model=$4 effort=$5 corrects=${6:-} kind=${9:-contract} afters=${10:-} correction=${11:-}
+  local note=${12:-} fid mode why actor=party-leader what template writ id dir sid out waiting suffix=''
+  [ -z "$corrects" ] || correction=${correction:-check}
   fid=$(gm_focus_id "$focus")
   mode=$(gm_dispatch_permission_mode) || exit 1
   why=$(gm_claude_trust "$(gm_focus_field "$focus" camp)") ||
     gm_die "dispatch: Claude Code would ask an Adventurer whether to trust the camp, and gm could not record that it is trusted: $why. Open claude in the camp once and say yes, then dispatch again"
   gm_runs_reap
-  live=$(gm_sql "SELECT id FROM run WHERE focus_id=$fid AND kind='contract' AND ended_at IS NULL ORDER BY id LIMIT 1;")
-  [ -z "$live" ] || gm_die "dispatch: run $live is still working in $focus's camp, and only one contract at a time changes it; keep the posting queued (gm notice <n> queued) and dispatch it when run $live ends"
+  what=$kind
   if [ -n "$corrects" ]; then
     actor=gm what=correction
     template=$(gm_hall_file prompts/adventurer/correction.md "$GM_TEMPLATES/prompts/adventurer/correction.md")
   else
-    template=$(gm_hall_file prompts/adventurer/contract.md "$GM_TEMPLATES/prompts/adventurer/contract.md")
+    template=$(gm_hall_file "prompts/adventurer/$kind.md" "$GM_TEMPLATES/prompts/adventurer/$kind.md")
   fi
   writ=$(gm_tmp)
   gm_writ_render "$template" "$ids" "$brief" "$writ" ${corrects:+"$corrects" "$7" "$8"} || { rm -f "$writ"; gm_die "dispatch: could not write the writ from $template"; }
   sid=$(gm_uuid)
-  snap=$(gm_refs_snapshot "$(gm_focus_field "$focus" camp)")
-  # The run is recorded with its postings; a finished run already on one of them is reviewed now, and was not enough
-  # (a run whose check failed was corrected). Its postings name it by its session id: last_insert_rowid() changes
-  # with each run_posting row inserted.
+  # The run is recorded with its postings, waiting until gm_runs_start_waiting starts it; a finished run already on one
+  # of them is reviewed now, and was not enough (a run whose check failed, or whose landing conflicted, was corrected),
+  # and one still waiting on them is replaced. Its postings name it by its session id: last_insert_rowid() changes with
+  # each run_posting row inserted.
   out=$(gm_sql <<SQL
 BEGIN IMMEDIATE;
+UPDATE run SET ended_at=$GM_NOW, result_subtype='dropped', checked_at=$GM_NOW, check_result='unchecked', summoned_at=$GM_NOW,
+  reviewed_at=COALESCE(reviewed_at,$GM_NOW), outcome=COALESCE(outcome,'redispatched')
+  WHERE ended_at IS NULL AND waiting IS NOT NULL AND id IN (SELECT run_id FROM run_posting WHERE posting_id IN ($ids));
 UPDATE run SET reviewed_at=COALESCE(reviewed_at,$GM_NOW), outcome=COALESCE(outcome,CASE WHEN id=$(gm_qn "$corrects") THEN 'corrected' ELSE 'redispatched' END)
   WHERE ended_at IS NOT NULL AND id IN (SELECT run_id FROM run_posting WHERE posting_id IN ($ids));
-INSERT INTO run(focus_id, kind, model, effort, permission_mode, template_sha256, brief, session_id, started_at, refs_before, corrects_run)
-  VALUES ($fid, 'contract', $(gm_qn "$model"), $(gm_qn "$effort"), $(gm_q "$mode"), $(gm_qn "$(gm_sha256_file "$template")"),
-          $(gm_qn "$brief"), $(gm_q "$sid"), $GM_NOW, $(gm_qn "$snap"), $(gm_qn "$corrects"));
+INSERT INTO run(focus_id, kind, model, effort, permission_mode, template_sha256, brief, session_id, started_at, corrects_run, correction, after_postings, waiting)
+  VALUES ($fid, $(gm_q "$kind"), $(gm_qn "$model"), $(gm_qn "$effort"), $(gm_q "$mode"), $(gm_qn "$(gm_sha256_file "$template")"),
+          $(gm_qn "$brief"), $(gm_q "$sid"), $GM_NOW, $(gm_qn "$corrects"), $(gm_qn "$correction"), $(gm_qn "$afters"), 'new');
 INSERT INTO run_posting(run_id, posting_id) SELECT (SELECT id FROM run WHERE session_id=$(gm_q "$sid")), id FROM posting WHERE id IN ($ids);
 SELECT max(id) FROM run WHERE session_id=$(gm_q "$sid");
 COMMIT;
 SQL
 ) || { rm -f "$writ"; exit 1; }
   id=$out
-  gm_run_panes_close "$fid"
   dir=$(gm_run_dir "$id")
   mkdir -p "$dir"
   mv "$writ" "$dir/writ.md"
+  # {{run_branch}} is known once the run has its number.
+  sqlite3 -batch :memory: "SELECT writefile($(gm_q "$dir/writ.md"), replace(CAST(readfile($(gm_q "$dir/writ.md")) AS TEXT), '{{run_branch}}',
+    $(gm_q "$([ "$kind" = survey ] && printf 'no branch (a detached checkout)' || printf 'gm/run-%s' "$id")")));" >/dev/null
   gm_run_settings "$id" "$focus" "$(gm_rules_path "$(gm_focus_field "$focus" repo)")" "$dir/settings.json"
+  gm_sql "BEGIN IMMEDIATE; UPDATE run SET writ=$(gm_q "$dir/writ.md") WHERE id=$id; COMMIT;"
+  gm_runs_tidy "$fid"
+  gm_runs_start_waiting
+  waiting=$(gm_sql "SELECT COALESCE(waiting,'') FROM run WHERE id=$id;")
+  case $waiting in
+    '') ;;
+    after) suffix=", waits for $(gm_sql "SELECT group_concat('#'||num, ', ') FROM (SELECT num FROM posting WHERE id IN ($afters) ORDER BY num);")" ;;
+    paused) suffix=", waits: dispatch is paused until $(gm_sql "SELECT replace(substr(max(rate_limited_until),12,5),'T',' ') FROM run;") after a rate limit" ;;
+    *) suffix=", waits for a free Adventurer ($(gm_conf_value adventurers) at work)" ;;
+  esac
   gm_sql <<SQL
 BEGIN IMMEDIATE;
-UPDATE run SET writ=$(gm_q "$dir/writ.md") WHERE id=$id;
 INSERT INTO event(at, actor, kind, focus_id, posting_id, verb, detail, line)
   SELECT $GM_NOW, $(gm_q "$actor"), 'notice', p.focus_id, p.id, 'dispatched', 'run '||$id,
-         f.name||'#'||p.num||' '||p.slug||' dispatched: $what, run '||$id||COALESCE(' of run '||$(gm_qn "$corrects"),'')||COALESCE(' on '||$(gm_qn "$model"),'')||' at '||$(gm_q "$effort")||' effort ("'||$(gm_summary_sql p.words)||'")'
+         f.name||'#'||p.num||' '||p.slug||' dispatched: $what, run '||$id||COALESCE(' of run '||$(gm_qn "$corrects"),'')||$(gm_q "$note")||COALESCE(' on '||$(gm_qn "$model"),'')||' at '||$(gm_q "$effort")||' effort'||$(gm_q "$suffix")||' ("'||$(gm_summary_sql p.words)||'")'
   FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.id IN ($ids) ORDER BY p.num;
 SELECT line FROM event WHERE verb='dispatched' AND detail='run '||$id ORDER BY id;
 COMMIT;
 SQL
-  gm_keeper_spawn "$id"
   GM_DISPATCHED=$id
+}
+
+# gm_after_ready_sql <run alias>: every posting the run waits for (--after) has a run that has landed.
+gm_after_ready_sql() {
+  printf "(%s.after_postings IS NULL OR NOT EXISTS (SELECT 1 FROM json_each('['||%s.after_postings||']') a WHERE NOT EXISTS (SELECT 1 FROM run_posting rp JOIN run x ON x.id=rp.run_id WHERE rp.posting_id=a.value AND x.landed_at IS NOT NULL)))" "$1" "$1"
+}
+
+# gm_runs_start_waiting: each waiting run that may start now is started, oldest first, its keeper spawned; the rest
+# keep waiting, and say for what: the postings --after names to land (a run waiting on them is not in the cap's line
+# until they have), a rate limit's pause, or a free Adventurer under the guild-wide cap (adventurers: in guild.conf).
+# Run by gm dispatch, by every keeper and landing that ends, and by the muster, in case a keeper died; under the
+# dispatch lock, so the cap is counted by one gm at a time.
+gm_runs_start_waiting() {
+  local cap live until id ready old why
+  [ -s "$GM_DB" ] || return 0
+  [ -n "$(gm_sql "SELECT 1 FROM run WHERE ended_at IS NULL AND waiting IS NOT NULL LIMIT 1;")" ] || return 0
+  gm_lock dispatch 30 || return 0
+  cap=$(gm_conf_value adventurers)
+  until=$(gm_sql "SELECT max(rate_limited_until) FROM run WHERE rate_limited_until>$GM_NOW;")
+  live=$(gm_sql "SELECT count(*) FROM run WHERE ended_at IS NULL AND waiting IS NULL;")
+  while IFS=$'\t' read -r id ready old; do
+    [ -n "$id" ] || continue
+    if [ "$ready" = 0 ]; then why=after
+    elif [ -n "$until" ]; then why=paused
+    elif [ "$live" -ge "$cap" ]; then why=cap
+    else why=''; fi
+    if [ -n "$why" ]; then
+      [ "$why" = "$old" ] || gm_sql "BEGIN IMMEDIATE; UPDATE run SET waiting=$(gm_q "$why") WHERE id=$id AND ended_at IS NULL AND waiting IS NOT NULL; COMMIT;"
+      continue
+    fi
+    gm_sql <<SQL
+BEGIN IMMEDIATE;
+UPDATE run SET waiting=NULL, started_at=$GM_NOW WHERE id=$id AND ended_at IS NULL AND waiting IS NOT NULL;
+INSERT INTO event(at, actor, kind, focus_id, posting_id, verb, detail, line)
+  SELECT $GM_NOW, 'gm', 'notice', p.focus_id, p.id, 'run-started', 'run $id',
+         f.name||'#'||p.num||' '||p.slug||' run $id started, '||CASE $(gm_q "$old") WHEN 'after' THEN 'now that what it needs has landed' WHEN 'paused' THEN 'now that the rate limit''s pause is over' ELSE 'now that an Adventurer is free' END||' ("'||$(gm_summary_sql p.words)||'")'
+  FROM run_posting rp JOIN posting p ON p.id=rp.posting_id JOIN focus f ON f.id=p.focus_id WHERE rp.run_id=$id AND $(gm_q "$old")<>'new' ORDER BY p.num;
+COMMIT;
+SQL
+    gm_keeper_spawn "$id"
+    live=$((live + 1))
+  done <<<"$(gm_sql "SELECT id, $(gm_after_ready_sql run), waiting FROM run WHERE ended_at IS NULL AND waiting IS NOT NULL ORDER BY id;")"
+  gm_unlock dispatch
 }
 
 # What an Adventurer's pane is titled: "run 3 · #28 visible-adventurer-pane".
@@ -5404,11 +5677,25 @@ gm_run_args() {
 }
 
 # gm_run_label <run> <title>: an Adventurer's workspace label, one step deeper than its Party Leader's (└ <focus>) in
-# herdr's sidebar: its postings without the run number ("  └ #28 visible-adventurer-pane"). A posting never has two live
-# runs, and gm finds a run's workspace by the id recorded on the run, never by its label.
-gm_run_label() { printf '  └ %s' "${2#"run $1 · "}"; }
+# herdr's sidebar: its postings without the run number, and the branch it works on with the one gm lands it on
+# ("  └ #28 visible-adventurer-pane · gm/run-3 → feature/adventurers"). gm finds a run's workspace by the id recorded
+# on the run, never by its label.
+gm_run_label() { printf '  └ %s · %s' "${2#"run $1 · "}" "$(gm_run_branches "$1")"; }
 
-# gm_run_pane_open <run> <focus> <camp>: the Adventurer's own herdr workspace on the camp, labelled with its postings one
+# gm_run_branches <run>: "gm/run-9 → feature/x" for a contract, "a survey of feature/x" for a survey.
+gm_run_branches() {
+  gm_sql "SELECT CASE r.kind WHEN 'survey' THEN 'a survey of '||f.branch ELSE 'gm/run-'||r.id||' → '||f.branch END FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$1;"
+}
+
+# gm_run_worktree_path <focus> <run>: where the run works, a git worktree of its own beside the camp,
+# camps/<focus>.run-<n> in the Guildhall, as a physical path (the keeper makes it when the run starts).
+gm_run_worktree_path() {
+  local d
+  d=$(cd "$GM_HALL/camps" 2>/dev/null && pwd -P) || d=$GM_HALL/camps
+  printf '%s/%s.run-%s' "$d" "$1" "$2"
+}
+
+# gm_run_pane_open <run> <focus> <worktree>: the Adventurer's own herdr workspace on its run's worktree, labelled with its postings one
 # step under its Party Leader's and placed right after it, never focused, its pane titled with the run and running gm
 # adventurer; prints session<TAB>pane. The Party Leader's pane stays whole, for the patron to talk to it. Under the
 # herdr lock, so no muster relaunches the Party Leader's pane meanwhile. Fails, and the keeper runs claude -p instead,
@@ -5416,6 +5703,7 @@ gm_run_label() { printf '  └ %s' "${2#"run $1 · "}"; }
 # make the workspace.
 gm_run_pane_open() {
   local id=$1 focus=$2 camp=$3 s ws pane out new nws title line v val
+  # camp is the run's own worktree (slice 4): the Party Leader's camp stays its own.
   command -v "$GM_HERDR" >/dev/null 2>&1 || return 1
   IFS=$'\t' read -r s ws _ pane _ _ <<<"$(gm_endpoint "party-leader:$focus")"
   [ -n "$pane" ] && gm_herdr_running "$s" || return 1
@@ -5456,7 +5744,7 @@ gm_run_lost() {
   local dir
   dir=$(gm_run_dir "$1")
   [ -z "$(gm_sql "SELECT 1 FROM run WHERE id=$1 AND ended_at IS NULL;")" ] && return 0
-  printf 'The Adventurer was lost: %s, before its turn ended. What it did is in its commits and git status in the camp.\n' "$2" >"$dir/result.md"
+  printf 'The Adventurer was lost: %s, before its turn ended. What it did is in its commits and git status in its worktree, %s.\n' "$2" "$(gm_sql "SELECT COALESCE(worktree,'(none was made)') FROM run WHERE id=$1;")" >"$dir/result.md"
   gm_run_end "$1" '' ''
 }
 
@@ -5501,7 +5789,7 @@ gm_run_panes_close() {
   done <<<"$(gm_sql "SELECT id, pane_session, COALESCE(pane_workspace,'-'), pane_id FROM run WHERE focus_id=$1 AND pane_id IS NOT NULL AND pane_closed_at IS NULL AND reviewed_at IS NOT NULL;")"
 }
 
-# gm adventurer <run> --pane ID: what an Adventurer's herdr pane runs: claude in the camp, a session the patron can
+# gm adventurer <run> --pane ID: what an Adventurer's herdr pane runs: claude in its run's worktree, a session the patron can
 # read and type in, with the run's own settings and its writ as the first prompt. Only in the pane the keeper opened
 # for that run, and only while the run is live. When claude ends before its turn did, the run is lost.
 gm_cmd_adventurer() {
@@ -5515,7 +5803,7 @@ gm_cmd_adventurer() {
   done
   [[ $id =~ ^[0-9]+$ ]] || gm_die "adventurer: gm adventurer <run> --pane ID is what the keeper runs in a run's herdr pane"
   gm_db_ensure
-  IFS=$'\t' read -r camp rpane ended <<<"$(gm_sql "SELECT f.camp, COALESCE(r.pane_id,''), COALESCE(r.ended_at,'-') FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
+  IFS=$'\t' read -r camp rpane ended <<<"$(gm_sql "SELECT COALESCE(r.worktree,f.camp), COALESCE(r.pane_id,''), COALESCE(r.ended_at,'-') FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
   [ -n "$camp" ] || gm_die "adventurer: no run $id"
   [ -n "$pane" ] && [ "$pane" = "$rpane" ] || gm_die "adventurer: gm adventurer runs only in run $id's own herdr pane"
   [ "$ended" = - ] || gm_die "adventurer: run $id ended at $ended"
@@ -5564,29 +5852,36 @@ SQL
   return 0
 }
 
-# gm run <run>: the keeper, started by gm dispatch. Runs the Adventurer where the patron can see it, in a herdr
+# gm run <run>: the keeper, started when the run starts (gm dispatch, or gm_runs_start_waiting for one that waited).
+# Makes the run's own worktree (gm_run_prepare), then runs the Adventurer there where the patron can see it, in a herdr
 # workspace of its own under its Party Leader's (gm_run_pane_open), and waits for its turn to end; or, when the Party
-# Leader has no herdr pane, headless: claude -p in the camp with the run's own settings, the writ on its standard input
-# and its stream-json transcript kept. Then records how it ended.
+# Leader has no herdr pane, headless: claude -p in the worktree with the run's own settings, the writ on its standard
+# input and its stream-json transcript kept. Then records how it ended, and gm_run_after does the rest.
 gm_cmd_run() {
-  local id=${1:-} camp ended dir rc args focus visible s pane claude=${GM_CLAUDE:-claude}
-  [[ $id =~ ^[0-9]+$ ]] || gm_die "run: gm run <run> is the keeper gm dispatch starts"
+  local id=${1:-} wt ended waiting dir rc args focus visible s pane claude=${GM_CLAUDE:-claude}
+  [[ $id =~ ^[0-9]+$ ]] || gm_die "run: gm run <run> is the keeper gm starts"
   gm_db_ensure
-  IFS=$'\t' read -r camp focus ended <<<"$(gm_sql "SELECT f.camp, f.name, COALESCE(r.ended_at,'-') FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
-  [ -n "$camp" ] || gm_die "run: no run $id"
+  IFS=$'\t' read -r focus ended waiting <<<"$(gm_sql "SELECT f.name, COALESCE(r.ended_at,'-'), COALESCE(r.waiting,'-') FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
+  [ -n "$focus" ] || gm_die "run: no run $id"
   [ "$ended" = - ] || gm_die "run: run $id ended at $ended"
+  [ "$waiting" = - ] || gm_die "run: run $id is still waiting ($waiting)"
   dir=$(gm_run_dir "$id")
   gm_sql "BEGIN IMMEDIATE; UPDATE run SET pid=$$ WHERE id=$id; COMMIT;"
-  if visible=$(gm_run_pane_open "$id" "$focus" "$camp"); then
+  if ! gm_run_prepare "$id"; then
+    gm_run_after "$id"
+    return 0
+  fi
+  wt=$(gm_sql "SELECT worktree FROM run WHERE id=$id;")
+  if visible=$(gm_run_pane_open "$id" "$focus" "$wt"); then
     IFS=$'\t' read -r s pane <<<"$visible"
     gm_run_pane_wait "$id" "$s" "$pane"
-    gm_check "$id" || true
+    gm_run_after "$id"
     return 0
   fi
   gm_run_args "$id"
   args=(-p "${GM_RUN_ARGS[@]:0:2}" --output-format stream-json --verbose "${GM_RUN_ARGS[@]:2}")
   rc=0
-  (cd "$camp" && exec env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_SESSION_ID -u TRACEPARENT -u GM_CHAT_FOCUS \
+  (cd "$wt" && exec env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_SESSION_ID -u TRACEPARENT -u GM_CHAT_FOCUS \
     GM_HALL="$GM_HALL" "${GM_RUN_ENV[@]}" "$claude" "${args[@]}" <"$dir/writ.md" >"$dir/stream.jsonl" 2>"$dir/stderr.txt") || rc=$?
   # The result event is the stream's last line with a top-level "type":"result"; inside a message's text the same
   # words would be escaped.
@@ -5599,7 +5894,144 @@ gm_cmd_run() {
     printf 'The Adventurer ended (exit %s) without a result. Its transcript is %s and what it printed is %s.\n' "$rc" "$dir/stream.jsonl" "$dir/stderr.txt" >"$dir/result.md"
   fi
   gm_run_end "$id" "$rc" "$dir/result.json"
+  gm_run_after "$id"
+}
+
+# gm_run_after <run>: the keeper's last steps once the run has ended: a rate limit pauses all dispatch; gm check judges
+# it; a survey's field report is kept in the Guildhall and its throwaway worktree removed; and a place freed under the
+# cap starts the oldest run waiting for one.
+gm_run_after() {
+  local id=$1
+  gm_run_rate_limit "$id" || true
   gm_check "$id" || true
+  if [ "$(gm_sql "SELECT kind FROM run WHERE id=$id;")" = survey ]; then
+    gm_run_report "$id"
+    gm_run_cleanup "$id" force || true
+  fi
+  gm_runs_start_waiting
+}
+
+# gm_run_unstarted <run> <why>: the run ends before its Adventurer started, its result saying why.
+gm_run_unstarted() {
+  local dir
+  dir=$(gm_run_dir "$1")
+  mkdir -p "$dir"
+  printf 'The Adventurer never started: %s.\n' "$2" >"$dir/result.md"
+  printf '{"type":"result","subtype":"not_started","is_error":true}\n' >"$dir/result.json"
+  gm_run_end "$1" '' "$dir/result.json" >/dev/null
+}
+
+# gm_run_prepare <run>: the run's own place, made when it starts, under the clone's lock: a git worktree beside the
+# camp (camps/<focus>.run-<n>), for a contract on its run-local branch gm/run-<n> made from the feature branch's local
+# tip (holding every run already landed and every commit in the camp, pushed or not), for a survey detached at that
+# tip. A correction of a failed check starts from the failed run's branch, so its good commits are kept, and that
+# run's worktree is then removed; a correction of a landing conflict starts from the tip and holds gm's started merge
+# of the conflicting run's branch, its conflict markers left for the Adventurer. Then the refs gm check compares
+# with, Claude Code's trust of the worktree (recorded for it alone, and removed with it, when the clone's does not
+# cover it), and the rules file's worktree-setup: command, before the Adventurer starts. Fails, with the run ended and
+# why in its result, when any of it cannot be done.
+gm_run_prepare() {
+  local id=$1 focus camp repo branch kind correction corrects wt rb='' base src out setup dir tf
+  IFS=$'\t' read -r focus camp repo branch kind correction corrects <<<"$(gm_sql "SELECT f.name, f.camp, f.repo, f.branch, r.kind, COALESCE(r.correction,'-'), COALESCE(r.corrects_run,'-') FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
+  dir=$(gm_run_dir "$id")
+  wt=$(gm_run_worktree_path "$focus" "$id")
+  [ "$kind" = survey ] || rb=gm/run-$id
+  if ! gm_lock "$(gm_clone_lock_name "$repo")" 120; then
+    gm_run_unstarted "$id" "gm could not take the clone's lock to add its worktree"
+    return 1
+  fi
+  base=$(gm_git "$camp" rev-parse -q --verify "refs/heads/$branch^{commit}" 2>/dev/null || true)
+  if [ "$correction" = check ] && [ "$corrects" != - ]; then
+    src=$(gm_sql "SELECT COALESCE(run_branch,'') FROM run WHERE id=$corrects;")
+    [ -z "$src" ] || src=$(gm_git "$camp" rev-parse -q --verify "refs/heads/$src^{commit}" 2>/dev/null || true)
+    [ -z "$src" ] || base=$src
+  fi
+  if [ -z "$base" ]; then
+    gm_unlock "$(gm_clone_lock_name "$repo")"
+    gm_run_unstarted "$id" "the feature branch $branch has no commit gm can read in the camp $camp"
+    return 1
+  fi
+  if [ -e "$wt" ]; then
+    gm_unlock "$(gm_clone_lock_name "$repo")"
+    gm_run_unstarted "$id" "$wt is already there, and gm never works over what another run left"
+    return 1
+  fi
+  if [ -n "$rb" ]; then
+    out=$(gm_git "$camp" worktree add -q -b "$rb" "$wt" "$base" 2>&1) || out="!$out"
+  else
+    out=$(gm_git "$camp" worktree add -q --detach "$wt" "$base" 2>&1) || out="!$out"
+  fi
+  gm_unlock "$(gm_clone_lock_name "$repo")"
+  if [ "${out:0:1}" = '!' ]; then
+    gm_run_unstarted "$id" "git would not add its worktree $wt: ${out#!}"
+    return 1
+  fi
+  gm_sql "BEGIN IMMEDIATE;
+UPDATE run SET worktree=$(gm_q "$wt"), run_branch=$(gm_qn "$rb"), base_commit=$(gm_q "$base") WHERE id=$id;
+INSERT INTO event(at, actor, kind, focus_id, detail) SELECT $GM_NOW, 'keeper', 'run.worktree', focus_id, $(gm_q "run $id in $wt${rb:+ on $rb}, from ${base:0:9}") FROM run WHERE id=$id;
+COMMIT;"
+  if [ "$correction" = landing ] && [ "$corrects" != - ]; then
+    gm_git "$wt" merge --no-ff --no-commit "gm/run-$corrects" >"$dir/merge.txt" 2>&1 || true
+  fi
+  # The refs are kept when the worktree is made, not at dispatch, so a run that waited is judged from its own start.
+  gm_sql "BEGIN IMMEDIATE; UPDATE run SET refs_before=$(gm_q "$(gm_refs_snapshot "$wt")") WHERE id=$id; COMMIT;"
+  tf=$(gm_tmp)
+  GM_TRUST_ADDED=''
+  if ! gm_claude_trust "$wt" >"$tf"; then
+    gm_run_unstarted "$id" "Claude Code would ask whether to trust its worktree, and gm could not record that it is trusted: $(cat "$tf")"
+    rm -f "$tf"
+    return 1
+  fi
+  rm -f "$tf"
+  [ -z "$GM_TRUST_ADDED" ] || gm_sql "BEGIN IMMEDIATE; UPDATE run SET trust_added=1 WHERE id=$id; COMMIT;"
+  setup=$(gm_setting "$(gm_rules_path "$repo")" worktree-setup)
+  if [ -n "$setup" ]; then
+    if ! (cd "$wt" && exec bash -c "$setup") >"$dir/setup.txt" 2>&1 </dev/null; then
+      gm_run_unstarted "$id" "the rules file's worktree-setup: $setup failed in $wt; what it printed is $dir/setup.txt"
+      return 1
+    fi
+  fi
+  [ "$correction" != check ] || gm_runs_tidy "$(gm_focus_id "$focus")"
+  return 0
+}
+
+# gm_run_rate_limit <run>: a run that ended on a rate limit (StopFailure's rate_limit, or a result that says its
+# usage limit was reached) pauses all dispatch until the limit resets: the time its result names (Claude Code's
+# "limit reached|<epoch seconds>"), else GM_RATE_PAUSE from now. Runs dispatched meanwhile wait, and start after.
+GM_RATE_PAUSE=${GM_RATE_PAUSE:-30 minutes}
+gm_run_rate_limit() {
+  local id=$1 subtype iserr text epoch until
+  IFS=$'\t' read -r subtype iserr <<<"$(gm_sql "SELECT COALESCE(result_subtype,''), COALESCE(is_error,0) FROM run WHERE id=$id;")"
+  text=$(head -c 4000 "$(gm_run_dir "$id")/result.md" 2>/dev/null || true)
+  case $subtype in
+    rate_limit) ;;
+    *)
+      [ "$iserr" = 1 ] || return 0
+      printf '%s' "$text" | grep -Eqi 'rate.limit|usage limit|limit reached' || return 0 ;;
+  esac
+  epoch=$(printf '%s' "$text" | grep -Eo '\|[0-9]{10}' | head -n 1 | tr -d '|' || true)
+  if [ -n "$epoch" ]; then until="strftime('%Y-%m-%dT%H:%M:%fZ',$epoch,'unixepoch')"
+  else until="strftime('%Y-%m-%dT%H:%M:%fZ','now',$(gm_q "+$GM_RATE_PAUSE"))"; fi
+  gm_sql <<SQL
+BEGIN IMMEDIATE;
+UPDATE run SET rate_limited_until=$until WHERE id=$id;
+INSERT INTO event(at, actor, kind, focus_id, posting_id, verb, detail, line)
+  SELECT $GM_NOW, 'keeper', 'notice', p.focus_id, p.id, 'paused', 'run $id rate limit',
+         f.name||'#'||p.num||' '||p.slug||' run $id hit a rate limit: gm starts no Adventurer until '||replace(substr(r.rate_limited_until,1,16),'T',' ')||' UTC ("'||$(gm_summary_sql p.words)||'")'
+  FROM run r JOIN run_posting rp ON rp.run_id=r.id JOIN posting p ON p.id=rp.posting_id JOIN focus f ON f.id=p.focus_id WHERE r.id=$id ORDER BY p.num;
+COMMIT;
+SQL
+}
+
+# gm_run_report <run>: a survey's field report, its result, kept as reports/<focus>/<n>-<run>.md in the Guildhall
+# (n its first posting's number), so it survives its throwaway worktree.
+gm_run_report() {
+  local id=$1 focus num dest
+  IFS=$'\t' read -r focus num <<<"$(gm_sql "SELECT f.name, (SELECT min(p.num) FROM run_posting rp JOIN posting p ON p.id=rp.posting_id WHERE rp.run_id=r.id) FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
+  dest=$GM_HALL/reports/$focus/$num-$id.md
+  mkdir -p "$(dirname "$dest")"
+  cp "$(gm_run_dir "$id")/result.md" "$dest" 2>/dev/null || printf 'The survey ended with no report.\n' >"$dest"
+  gm_sql "BEGIN IMMEDIATE; UPDATE run SET report=$(gm_q "$dest") WHERE id=$id; COMMIT;"
 }
 
 # ---- gm check: the git facts after every run (vision/step-3-design.md, slice 3) ----
@@ -5735,7 +6167,9 @@ gm_check_facts() {
   # HEAD reflog, each local branch's tip, HEAD) that the feature branch does not contain, nor any branch had before.
   # The development branch's new commits count as on the line when the playbook lets it move forward and it did.
   n0=$(gm_check_ref "$before" reflog) n1=$(gm_check_ref "$after" reflog)
-  tips=$( (gm_git "$camp" reflog show --format=%H HEAD 2>/dev/null || true) | head -n "$(( ${n1:-0} > ${n0:-0} ? ${n1:-0} - ${n0:-0} : 0 ))")
+  # macOS's head refuses -n 0: no new entry is no tips.
+  tips=''
+  [ "${n1:-0}" -le "${n0:-0}" ] || tips=$( (gm_git "$camp" reflog show --format=%H HEAD 2>/dev/null || true) | head -n "$((n1 - n0))")
   while read -r ref sha _; do
     case $ref in HEAD | refs/heads/*) ;; *) continue ;; esac
     b=${ref#refs/heads/}
@@ -5762,11 +6196,141 @@ gm_check_facts() {
   fi
 }
 
+GM_CHECK_RUN="the run stays in its own worktree, on its own branch, which only grows"
+GM_CHECK_PUSH="an Adventurer pushes nothing"
+GM_CHECK_RLINE="no commit off the run branch's line, and none on the feature branch but through gm land"
+GM_CHECK_SURVEY="a survey changes nothing: its checkout stays at the feature branch's tip, with no commit"
+
+# gm_check_facts_run <run>: the rules a run with a worktree of its own broke (slice 4), from git alone, into GM_CK and
+# GM_CK_NOTE: its worktree is still on its run branch, which still descends from the run's base (a survey's checkout
+# is still at its base); no local branch was made but the run branches gm records; no remote branch moved by a push
+# from this clone, but those the Party Leader's rules hook recorded as its own; and no commit the run made (the new
+# entries of its worktree's own HEAD reflog, which git keeps per worktree) is off its run branch's line, nor reached
+# the feature branch but through gm land.
+gm_check_facts_run() {
+  local id=$1 fid camp branch repo kind since wt rb base before after others head cur ref sha b tip ftip rem ls lsok
+  local old new pre n0 n1 tips commits more line refs=() own=''
+  GM_CK='' GM_CK_NOTE=''
+  IFS=$'\t' read -r fid camp branch repo kind since wt rb base <<<"$(gm_sql "SELECT r.focus_id, f.camp, f.branch, f.repo, r.kind, CAST(strftime('%s', r.started_at) AS INTEGER), r.worktree, COALESCE(r.run_branch,'-'), COALESCE(r.base_commit,'') FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
+  [ "$rb" != - ] || rb=''
+  before=$(gm_sql "SELECT COALESCE(refs_before,'') FROM run WHERE id=$id;")
+  # A run branch is gm's own whether or not its keeper has recorded it yet: another run's may appear while this
+  # one is checked.
+  others=$( { gm_sql "SELECT branch FROM focus WHERE id<>$fid AND repo=$(gm_q "$repo");"; gm_sql "SELECT 'gm/run-'||id FROM run WHERE id<>$id AND kind='contract';"; } )
+  gm_check_other() { [ -n "$others" ] && printf '%s\n' "$others" | grep -qxF "$1"; }
+  if [ -d "$wt" ]; then
+    after=$(gm_refs_snapshot "$wt")
+  else
+    after=$(printf 'HEAD\nreflog 0\n'; gm_refs_snapshot "$camp" | sed 1,2d)
+    gm_check_broke "$GM_CHECK_RUN" "its worktree $wt is gone"
+  fi
+  read -r _ head cur <<<"$(printf '%s\n' "$after" | sed -n 1p)"
+  ftip=$(gm_check_ref "$after" "refs/heads/$branch")
+  if [ "$kind" = survey ]; then
+    if [ -d "$wt" ] && [ -n "$cur" ]; then
+      gm_check_broke "$GM_CHECK_SURVEY" "its checkout is on the branch $cur"
+    elif [ -d "$wt" ] && [ "$head" != "$base" ]; then
+      gm_check_broke "$GM_CHECK_SURVEY" "its checkout moved from $(gm_check_short "$base") to $(gm_check_short "$head")"
+    fi
+  else
+    if [ -d "$wt" ] && [ -z "$cur" ]; then
+      gm_check_broke "$GM_CHECK_RUN" "HEAD is detached at $(gm_check_short "$head"), not on $rb"
+    elif [ -d "$wt" ] && [ "$cur" != "$rb" ]; then
+      gm_check_broke "$GM_CHECK_RUN" "its worktree is on $cur, not $rb"
+    fi
+    tip=$(gm_check_ref "$after" "refs/heads/$rb")
+    if [ -z "$tip" ]; then
+      gm_check_broke "$GM_CHECK_RUN" "its branch $rb was deleted"
+    elif ! gm_git "$camp" merge-base --is-ancestor "$base" "$tip" 2>/dev/null; then
+      gm_check_broke "$GM_CHECK_RUN" "$rb is at $(gm_check_short "$tip"), which no longer holds its base $(gm_check_short "$base"): it was rewritten"
+    fi
+  fi
+  # No local branch was made, but the feature branch, other focuses' and the run branches gm records.
+  while read -r ref sha; do
+    case $ref in refs/heads/*) ;; *) continue ;; esac
+    b=${ref#refs/heads/}
+    [ -z "$(gm_check_ref "$before" "$ref")" ] || continue
+    if [ "$b" = "$branch" ] || [ "$b" = "$rb" ] || gm_check_other "$b"; then continue; fi
+    gm_check_broke "$GM_CHECK_NEW" "the branch $b was created, at $(gm_check_short "$sha")"
+  done <<<"$(printf '%s\n' "$after" | sed 1,2d)"
+  # No remote branch moved by a push from this clone since the run started (a push in the remote-tracking ref's
+  # reflog, or a new tip that was already a commit here while nothing fetched it), but the Party Leader's own, which
+  # its rules hook records, and another focus's branch.
+  while IFS= read -r rem; do
+    [ -n "$rem" ] || continue
+    lsok=1
+    ls=$(GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND=${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o ConnectTimeout=15} gm_git "$camp" ls-remote --heads "$rem" 2>/dev/null) || lsok=0
+    [ "$lsok" = 1 ] || GM_CK_NOTE="$GM_CK_NOTE${GM_CK_NOTE:+; }gm could not reach the remote $rem, so only pushes this clone recorded were checked there"
+    while IFS= read -r b; do
+      [ -n "$b" ] || continue
+      old=$(gm_check_ref "$before" "refs/remotes/$rem/$b")
+      pre=$(gm_check_ref "$after" "refs/remotes/$rem/$b")
+      if [ "$lsok" = 1 ]; then new=$(printf '%s\n' "$ls" | awk -v r="refs/heads/$b" '$2 == r { print $1; exit }'); else new=$pre; fi
+      [ "$old" != "$new" ] || continue
+      if ! { [ "$pre" != "$old" ] && { [ -z "$pre" ] || gm_check_pushed "$camp" "refs/remotes/$rem/$b" "$since"; }; } &&
+        ! { [ "$pre" = "$old" ] && [ -n "$new" ] && gm_git "$camp" cat-file -e "$new^{commit}" 2>/dev/null; }; then
+        continue
+      fi
+      ! gm_check_other "$b" || continue
+      [ -z "$(gm_sql "SELECT 1 FROM event WHERE kind='push.allowed' AND detail=$(gm_q "$b") AND at>=(SELECT started_at FROM run WHERE id=$id) LIMIT 1;")" ] || continue
+      if [ -z "$new" ]; then
+        gm_check_broke "$GM_CHECK_PUSH" "$rem/$b was deleted (it was at $(gm_check_short "$old"))"
+      elif [ -z "$old" ]; then
+        gm_check_broke "$GM_CHECK_PUSH" "$rem/$b was created, at $(gm_check_short "$new")"
+      else
+        gm_check_broke "$GM_CHECK_PUSH" "$rem/$b moved from $(gm_check_short "$old") to $(gm_check_short "$new")"
+      fi
+    done <<<"$({
+      printf '%s\n%s\n' "$before" "$after" | awk -v p="refs/remotes/$rem/" 'index($1, p) == 1 { print substr($1, length(p) + 1) }'
+      printf '%s\n' "$ls" | awk '$2 ~ /^refs\/heads\// { print substr($2, 12) }'
+    } | sort -u)"
+  done <<<"$(gm_git "$camp" remote 2>/dev/null || true)"
+  # No commit off the line: each new entry of the worktree's HEAD reflog, its HEAD and any branch made, less what its
+  # run branch (for a survey, its base) and every ref at its start already held.
+  [ -d "$wt" ] || return 0
+  n0=$(gm_check_ref "$before" reflog) n1=$(gm_check_ref "$after" reflog)
+  # macOS's head refuses -n 0: no new entry is no tips.
+  tips=''
+  [ "${n1:-0}" -le "${n0:-0}" ] || tips=$( (gm_git "$wt" reflog show --format=%H HEAD 2>/dev/null || true) | head -n "$((n1 - n0))")
+  tips="$tips"$'\n'"$head"
+  while read -r ref sha; do
+    case $ref in refs/heads/*) ;; *) continue ;; esac
+    b=${ref#refs/heads/}
+    [ -z "$(gm_check_ref "$before" "$ref")" ] || continue
+    [ "$b" = "$branch" ] || [ "$b" = "$rb" ] || gm_check_other "$b" || tips="$tips"$'\n'"$sha"
+  done <<<"$(printf '%s\n' "$after" | sed 1,2d)"
+  refs=()
+  while read -r ref sha; do
+    case $ref in refs/*) refs+=("^$sha") ;; esac
+  done <<<"$before"
+  [ -z "$base" ] || refs+=("^$base")
+  [ -z "$rb" ] || [ -z "$(gm_check_ref "$after" "refs/heads/$rb")" ] || refs+=("^$(gm_check_ref "$after" "refs/heads/$rb")")
+  commits=$( { printf '%s\n' "$tips" | grep . || true; printf '%s\n' "${refs[@]+"${refs[@]}"}"; } | gm_git "$wt" rev-list --stdin 2>/dev/null || true)
+  if [ -n "$commits" ]; then
+    more=$(printf '%s\n' "$commits" | awk 'END { print NR - 5 }')
+    while IFS= read -r line; do
+      if [ "$kind" = survey ]; then gm_check_broke "$GM_CHECK_SURVEY" "commit $line was made"
+      else gm_check_broke "$GM_CHECK_RLINE" "commit $line is not on $rb"; fi
+    done <<<"$(printf '%s\n' "$commits" | head -n 5 | gm_git "$wt" log --no-walk=unsorted --stdin --format='%h "%s"' 2>/dev/null || true)"
+    [ "$more" -le 0 ] || gm_check_broke "$([ "$kind" = survey ] && printf '%s' "$GM_CHECK_SURVEY" || printf '%s' "$GM_CHECK_RLINE")" "and $more more commits"
+  fi
+  # None of the run's own commits is on the feature branch already: they get there only through gm land.
+  tip=$(gm_check_ref "$after" "refs/heads/$rb")
+  if [ -n "$rb" ] && [ -n "$tip" ] && [ -n "$ftip" ] && [ -n "$base" ]; then
+    own=$(gm_git "$wt" rev-list "$tip" "^$base" 2>/dev/null | grep -Fxf <(gm_git "$wt" rev-list "$ftip" "^$base" 2>/dev/null || true) | head -n 3 || true)
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      gm_check_broke "$GM_CHECK_RLINE" "commit $(gm_git "$wt" log -1 --format='%h "%s"' "$line" 2>/dev/null) reached $branch outside gm land"
+    done <<<"$own"
+  fi
+}
+
 # gm_check <run>: checks an ended run once, records the result on the run (runs/<run>/check.txt too) with a notice on
-# each of its postings, and prints the notice lines; then, on a failure, a correction run or needs-you. Another
-# caller already checking it, or a run not ended, leaves it alone.
+# each of its postings, and prints the notice lines; then, on a failure, a correction run or needs-you
+# (gm_run_failure); a survey's failure is the Party Leader's to judge. Another caller already checking it, or a run
+# not ended, leaves it alone.
 gm_check() {
-  local id=$1 dir result rules ev evf rf prior out pid model effort brief focus ids
+  local id=$1 dir result rules ev
   [ -n "$(gm_sql "SELECT 1 FROM run WHERE id=$id;")" ] || return 0
   [ "$(gm_sql "BEGIN IMMEDIATE; UPDATE run SET check_started_at=$GM_NOW WHERE id=$id AND ended_at IS NOT NULL AND check_started_at IS NULL AND checked_at IS NULL; SELECT changes(); COMMIT;")" = 1 ] || return 0
   dir=$(gm_run_dir "$id")
@@ -5775,7 +6339,7 @@ gm_check() {
     GM_CK='' GM_CK_NOTE='gm dispatch kept no refs for this run, so there was nothing to check against'
     result=unchecked
   else
-    gm_check_facts "$id"
+    if [ -n "$(gm_sql "SELECT 1 FROM run WHERE id=$id AND worktree IS NOT NULL;")" ]; then gm_check_facts_run "$id"; else gm_check_facts "$id"; fi
     if [ -n "$GM_CK" ]; then result=failed; else result=passed; fi
   fi
   rules=$(printf '%s' "$GM_CK" | cut -f 1 | awk 'NF && !seen[$0]++' | paste -sd ';' - | sed 's/;/; /g')
@@ -5793,18 +6357,37 @@ SELECT line FROM event WHERE verb='checked' AND detail LIKE 'run '||$id||' check
 COMMIT;
 SQL
   [ "$result" = failed ] || return 0
-  # A first failure on its postings is corrected at once; a second is the patron's.
-  prior=$(gm_sql "SELECT count(*) FROM run r JOIN run_posting rp ON rp.run_id=r.id WHERE r.id<>$id AND r.check_result='failed'
+  [ "$(gm_sql "SELECT kind FROM run WHERE id=$id;")" != survey ] || return 0
+  gm_run_failure "$id" check "$rules" "$ev"
+}
+
+# gm_run_failure <run> <check|landing|tests> <rule> <evidence> [<note>]: a run failed gm's check, its landing
+# conflicted, or the tests failed after it landed. A first failure on its postings, of any of these kinds, is
+# corrected at once by a correction run (a posting already recorded done or failed is reopened for it); a second is
+# the patron's, needs-you with the evidence. No model decides either.
+gm_run_failure() {
+  local id=$1 what=$2 rule=$3 ev=$4 note=${5:-} prior focus model effort ids brief rf evf out pid label st
+  prior=$(gm_sql "SELECT count(DISTINCT r.id) FROM run r JOIN run_posting rp ON rp.run_id=r.id WHERE r.id<>$id
+    AND (r.check_result='failed' OR r.land_result='conflict' OR r.tests_result='failed')
     AND rp.posting_id IN (SELECT posting_id FROM run_posting WHERE run_id=$id);")
+  case $what in
+    check) label="run $id's check failed" ;;
+    landing) label="run $id's landing conflicted" ;;
+    *) label="the tests failed after run $id landed" ;;
+  esac
   if [ "$prior" = 0 ]; then
     IFS=$'\t' read -r focus model effort ids <<<"$(gm_sql "SELECT f.name, COALESCE(r.model,'-'), COALESCE(r.effort,'-'), (SELECT group_concat(posting_id) FROM run_posting WHERE run_id=r.id) FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
+    while IFS=$'\t' read -r pid st; do
+      [ -n "$pid" ] || continue
+      gm_record_notice "$pid" started "reopened by gm: $label" active '' '' '' gm >/dev/null
+    done <<<"$(gm_sql "SELECT id, state FROM posting WHERE id IN ($ids) AND state<>'active' ORDER BY id;")"
     rf=$(gm_tmp) evf=$(gm_tmp)
-    printf '%s\n' "$rules" >"$rf"
+    printf '%s\n' "$rule" >"$rf"
     printf '%s\n' "$ev" >"$evf"
     [ "$model" != - ] || model=''
     [ "$effort" != - ] || effort=$(gm_conf_value contract-effort)
     brief=$(gm_sql "SELECT COALESCE(brief,'') FROM run WHERE id=$id;")
-    if out=$(gm_dispatch_start "$focus" "$ids" "$brief" "$model" "$effort" "$id" "$rf" "$evf" 2>&1); then
+    if out=$(gm_dispatch_start "$focus" "$ids" "$brief" "$model" "$effort" "$id" "$rf" "$evf" contract '' "$what" "$note" 2>&1); then
       rm -f "$rf" "$evf"
       printf '%s\n' "$out"
       return 0
@@ -5814,13 +6397,14 @@ SQL
   fi
   while IFS= read -r pid; do
     [ -n "$pid" ] || continue
-    gm_record_notice "$pid" needs-you "run $id's check failed$([ "$prior" = 0 ] || printf ' again'): $(printf '%s' "$ev" | tr '\n' ' ' | sed 's/ $//')" needs-you '' '' '' gm
+    gm_record_notice "$pid" needs-you "$label$([ "$prior" = 0 ] || printf ' again'): $(printf '%s' "$ev" | tr '\n' ' ' | sed 's/ $//')" needs-you '' '' '' gm
   done <<<"$(gm_sql "SELECT posting_id FROM run_posting WHERE run_id=$id ORDER BY posting_id;")"
 }
 
 # gm_check_spawn <run>: gm check for a run whose keeper is gone, in the background, so the hook or command that found
 # it never waits on a fetch.
 gm_check_spawn() {
+  mkdir -p "$(gm_run_dir "$1")"
   (
     set -m
     cd /
@@ -5843,9 +6427,389 @@ gm_cmd_check() {
   [ ! -f "$(gm_run_dir "$id")/check.txt" ] || cat "$(gm_run_dir "$id")/check.txt"
 }
 
-# gm runs [--all]: the focus's runs, newest first.
+# ---- Landing and cleanup: parallel contracts (vision/step-3-design.md, slice 4) ----
+# Each run works in a worktree of its own on its run-local branch gm/run-<n>, never pushed; gm land puts what the Party
+# Leader accepts on the feature branch, one run at a time, by fast-forward when it can and with a merge commit when it
+# must, never a rebase or a squash, so what lands is what gm check judged. A run's worktree and branch are removed
+# once its work has landed, or was nothing, or is dropped; never while they hold work not landed.
+
+# gm_run_holds <run>: what the run's worktree and branch hold that is not on the feature branch ("3 commits not
+# landed", "uncommitted changes"), or nothing.
+gm_run_holds() {
+  local id=$1 camp branch wt rb cleaned n out=''
+  IFS=$'\t' read -r camp branch wt rb cleaned <<<"$(gm_sql "SELECT f.camp, f.branch, COALESCE(r.worktree,'-'), COALESCE(r.run_branch,'-'), COALESCE(r.cleaned_at,'-') FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
+  [ "$cleaned" = - ] && [ "$wt" != - ] || return 0
+  if [ "$rb" != - ] && gm_git "$camp" rev-parse -q --verify "refs/heads/$rb" >/dev/null 2>&1; then
+    n=$(gm_git "$camp" rev-list --count "refs/heads/$rb" "^refs/heads/$branch" 2>/dev/null || echo 0)
+    [ "$n" = 0 ] || out="$n commit$([ "$n" = 1 ] || printf s) not landed"
+  fi
+  if [ -d "$wt" ] && [ -n "$(gm_git "$wt" status --porcelain 2>/dev/null | head -n 1)" ]; then
+    out="${out:+$out, }uncommitted changes"
+  fi
+  printf '%s' "$out"
+}
+
+# gm_run_reap_procs <dir>: every process whose current directory is inside the folder is ended, TERM and then KILL,
+# as Firstmate reaps a crewmate's worktree before removing it; never this gm itself.
+gm_run_reap_procs() {
+  local dir=$1 pids p i
+  command -v lsof >/dev/null 2>&1 || return 0
+  pids=$(lsof -w -nP -a -d cwd -Fpn 2>/dev/null | awk -v w="$dir" '/^p/ { p = substr($0, 2) } /^n/ { n = substr($0, 2); if (n == w || index(n, w "/") == 1) print p }' | sort -u | grep -vx "$$" || true)
+  [ -n "$pids" ] || return 0
+  # shellcheck disable=SC2086 # the pids, one word each
+  kill -TERM $pids 2>/dev/null || true
+  for i in 1 2 3; do
+    sleep 1
+    for p in $pids; do kill -0 "$p" 2>/dev/null && continue 2; done
+    return 0
+  done
+  # shellcheck disable=SC2086
+  kill -KILL $pids 2>/dev/null || true
+}
+
+# gm_run_cleanup <run> [force]: the run's worktree and run-local branch removed, under the clone's lock: its herdr
+# workspace closed first if still open, any process working inside ended, a removal held by git's index.lock retried
+# (the lock removed only when nobody holds it and it is over 30 seconds old: the fix is patience), Claude Code's
+# trust entry for it removed when gm added one. Without force, only when nothing would be lost: the worktree is clean
+# and its branch and HEAD are on the feature branch, or held by the correction run that continues it. gm drop and a
+# survey's end force it. Fails, removing nothing, when it is not safe.
+gm_run_cleanup() {
+  local id=$1 force=${2:-} camp repo branch wt rb cleaned s ws pane closed trust tip ftip head out lock n=0 c age
+  IFS=$'\t' read -r camp repo branch wt rb cleaned s ws pane closed trust <<<"$(gm_sql "SELECT f.camp, f.repo, f.branch, COALESCE(r.worktree,'-'), COALESCE(r.run_branch,'-'), COALESCE(r.cleaned_at,'-'),
+    COALESCE(r.pane_session,'-'), COALESCE(r.pane_workspace,'-'), COALESCE(r.pane_id,'-'), COALESCE(r.pane_closed_at,'-'), COALESCE(r.trust_added,0) FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
+  [ "$cleaned" = - ] && [ "$wt" != - ] || return 0
+  [ "$rb" != - ] || rb=''
+  tip=''
+  [ -z "$rb" ] || tip=$(gm_git "$camp" rev-parse -q --verify "refs/heads/$rb^{commit}" 2>/dev/null || true)
+  if [ -z "$force" ]; then
+    ftip=$(gm_git "$camp" rev-parse -q --verify "refs/heads/$branch^{commit}" 2>/dev/null || true)
+    [ -n "$ftip" ] || return 1
+    # gm_run_kept <commit>: the commit is on the feature branch, or the base a check's correction of this run started from.
+    gm_run_kept() {
+      gm_git "$camp" merge-base --is-ancestor "$1" "$ftip" 2>/dev/null && return 0
+      for c in $(gm_sql "SELECT base_commit FROM run WHERE corrects_run=$id AND correction='check' AND base_commit IS NOT NULL AND cleaned_at IS NULL;"); do
+        gm_git "$camp" merge-base --is-ancestor "$1" "$c" 2>/dev/null && return 0
+      done
+      return 1
+    }
+    [ -z "$tip" ] || gm_run_kept "$tip" || return 1
+    if [ -d "$wt" ]; then
+      [ -z "$(gm_git "$wt" status --porcelain 2>/dev/null | head -n 1)" ] || return 1
+      head=$(gm_git "$wt" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null || true)
+      [ -z "$head" ] || gm_run_kept "$head" || return 1
+    fi
+  fi
+  if [ "$pane" != - ] && [ "$closed" = - ] && command -v "$GM_HERDR" >/dev/null 2>&1; then
+    if [ "$ws" != - ]; then gm_herdr "$s" workspace close "$ws" >/dev/null; else gm_herdr "$s" pane close "$pane" >/dev/null; fi
+    gm_sql "BEGIN IMMEDIATE; UPDATE run SET pane_closed_at=$GM_NOW WHERE id=$id; COMMIT;"
+  fi
+  [ ! -d "$wt" ] || gm_run_reap_procs "$wt"
+  gm_lock "$(gm_clone_lock_name "$repo")" 120 || return 1
+  if [ -d "$wt" ]; then
+    while ! out=$(gm_git "$camp" worktree remove ${force:+--force} "$wt" 2>&1); do
+      lock=$(gm_git "$wt" rev-parse --absolute-git-dir 2>/dev/null)/index.lock
+      if [ -f "$lock" ] && [ "$n" -lt 40 ]; then
+        age=$(( $(date +%s) - $(stat -f %m "$lock" 2>/dev/null || stat -c %Y "$lock" 2>/dev/null || date +%s) ))
+        if [ "$age" -gt 30 ] && ! { command -v lsof >/dev/null 2>&1 && lsof -w "$lock" >/dev/null 2>&1; }; then
+          rm -f "$lock"
+        else
+          sleep 1
+        fi
+        n=$((n + 1))
+        continue
+      fi
+      gm_unlock "$(gm_clone_lock_name "$repo")"
+      printf 'gm could not remove the worktree %s: %s\n' "$wt" "$out" >&2
+      return 1
+    done
+  fi
+  gm_git "$camp" worktree prune >/dev/null 2>&1 || true
+  [ -z "$tip" ] || gm_git "$camp" branch -q -D "$rb" >/dev/null 2>&1 || true
+  gm_unlock "$(gm_clone_lock_name "$repo")"
+  [ "$trust" != 1 ] || gm_claude_untrust "$wt"
+  gm_sql "BEGIN IMMEDIATE;
+UPDATE run SET cleaned_at=$GM_NOW WHERE id=$id;
+INSERT INTO event(at, actor, kind, focus_id, detail) SELECT $GM_NOW, 'gm', 'run.cleaned', focus_id, $(gm_q "run $id: its worktree $wt${rb:+ and its branch $rb} removed") FROM run WHERE id=$id;
+COMMIT;"
+}
+
+# gm_runs_tidy <focus id>: what the Party Leader's review lets go: the workspaces of reviewed runs closed, and the
+# worktree and branch of every ended, reviewed contract run that holds nothing not on the feature branch removed
+# (a run that made no commits, lost ones included, or one whose work landed or a check's correction carries on). A
+# run whose tests still run after its landing keeps its worktree until they end.
+gm_runs_tidy() {
+  local fid=$1 id
+  gm_run_panes_close "$fid"
+  for id in $(gm_sql "SELECT id FROM run WHERE focus_id=$fid AND kind='contract' AND ended_at IS NOT NULL AND reviewed_at IS NOT NULL
+      AND worktree IS NOT NULL AND cleaned_at IS NULL AND COALESCE(tests_result,'')<>'running' ORDER BY id;"); do
+    gm_run_cleanup "$id" >/dev/null 2>&1 || true
+  done
+}
+
+# gm_runs_sweep <focus>: the muster's sweep of what was left, in plain code: what the review lets go (gm_runs_tidy); a
+# survey whose keeper died before keeping its report; a landed run whose cleanup was cut off; a run whose worktree is
+# gone, its branch deleted when the feature branch holds it, and git's record of a vanished worktree pruned. A live
+# run's worktree, and another focus's, are never touched.
+gm_runs_sweep() {
+  local focus=$1 fid camp branch id wt rb kind report
+  fid=$(gm_focus_id "$focus")
+  IFS=$'\t' read -r camp branch <<<"$(gm_sql "SELECT camp, branch FROM focus WHERE id=$fid;")"
+  [ -d "$camp" ] || return 0
+  gm_runs_tidy "$fid"
+  while IFS=$'\t' read -r id wt rb kind report; do
+    [ -n "$id" ] || continue
+    if [ "$kind" = survey ]; then
+      [ "$report" != - ] || gm_run_report "$id"
+      gm_run_cleanup "$id" force >/dev/null 2>&1 || true
+    elif [ ! -d "$wt" ]; then
+      gm_git "$camp" worktree prune >/dev/null 2>&1 || true
+      gm_run_cleanup "$id" >/dev/null 2>&1 || true
+    fi
+  done <<<"$(gm_sql "SELECT id, worktree, COALESCE(run_branch,'-'), kind, COALESCE(report,'-') FROM run WHERE focus_id=$fid AND ended_at IS NOT NULL
+    AND worktree IS NOT NULL AND cleaned_at IS NULL AND COALESCE(tests_result,'')<>'running' ORDER BY id;")"
+}
+
+# gm_runs_strays <focus>: what the sweep cannot settle, for the roster: a folder camps/<focus>.run-<n> no run record
+# names, and a run whose worktree is gone while its branch holds commits not landed.
+gm_runs_strays() {
+  local focus=$1 d n out='' id
+  for d in "$GM_HALL/camps/$focus".run-*; do
+    [ -d "$d" ] || continue
+    n=${d##*.run-}
+    [ -z "$(gm_sql "SELECT 1 FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$(gm_q "$n") AND f.name=$(gm_q "$focus") AND r.cleaned_at IS NULL;" 2>/dev/null)" ] ||
+      continue
+    out="${out:+$out, }$(basename "$d") (no run holds it)"
+  done
+  for id in $(gm_sql "SELECT id FROM run WHERE focus_id=(SELECT id FROM focus WHERE name=$(gm_q "$focus")) AND worktree IS NOT NULL AND cleaned_at IS NULL AND ended_at IS NOT NULL;"); do
+    [ ! -d "$(gm_sql "SELECT worktree FROM run WHERE id=$id;")" ] || continue
+    out="${out:+$out, }run $id's worktree is gone ($(gm_run_holds "$id"))"
+  done
+  [ -z "$out" ] || printf ' · strays: %s' "$out"
+}
+
+# gm land <run>: the Party Leader accepts a run and lands it on the feature branch, in plain code, under the focus's
+# landing lock so landings go one at a time in the order they were asked for. Refuses a run not ended or not checked,
+# whose check failed, a camp not on the feature branch or with uncommitted changes to tracked files, uncommitted
+# changes in the run's worktree (they are never landed), and a feature branch rewritten since the run started. A run
+# with no commits is accepted with nothing to land. The feature branch still at the run's base is fast-forwarded;
+# otherwise gm merges with a merge commit, as the camp's git identity. A conflict is aborted, the camp left as it was,
+# and is the posting's failure: one correction run first, then needs-you. After a merge commit (or while the last
+# tests failed), gm runs the rules file's test-command: in the background; until they pass, the feature branch is not
+# pushed. Then the run's worktree and branch are removed.
+gm_cmd_land() {
+  local id=${1:-} focus fid rfid kind ended waiting checkres landed cleaned wt rb base camp branch repo cur dirty tip ftip
+  local how out conflicts msg commit posts ev with cmd tests='' note line fbase
+  [[ $id =~ ^[0-9]+$ ]] && [ $# -eq 1 ] || gm_die "land: gm land <run>"
+  gm_db_ensure
+  focus=$(gm_require_focus)
+  fid=$(gm_focus_id "$focus")
+  gm_runs_reap
+  IFS=$'\t' read -r rfid kind ended waiting checkres landed cleaned wt rb base <<<"$(gm_sql "SELECT focus_id, kind, COALESCE(ended_at,'-'), COALESCE(waiting,'-'), COALESCE(check_result,'-'),
+    COALESCE(landed_at,'-'), COALESCE(cleaned_at,'-'), COALESCE(worktree,'-'), COALESCE(run_branch,'-'), COALESCE(base_commit,'-') FROM run WHERE id=$id;")"
+  [ -n "$rfid" ] || gm_die "land: no run $id"
+  [ "$rfid" = "$fid" ] || gm_die "land: run $id is not a run of $focus"
+  [ "$kind" = contract ] || gm_die "land: run $id is a survey: it changes nothing, so nothing lands; its field report is $(gm_sql "SELECT COALESCE(report,'not kept yet') FROM run WHERE id=$id;")"
+  [ "$landed" = - ] || gm_die "land: run $id landed already, at $landed"
+  if [ "$ended" = - ]; then
+    [ "$waiting" = - ] || gm_die "land: run $id has not started: it is waiting ($waiting)"
+    gm_die "land: run $id is still working; gm summons you when it finishes"
+  fi
+  [ "$wt" != - ] || gm_die "land: run $id has no worktree of its own: it worked in the camp before slice 4, or never started, so there is nothing to land; its commits, if any, are on $(gm_focus_field "$focus" branch) already"
+  [ "$cleaned" = - ] || gm_die "land: run $id's worktree and branch were removed at $cleaned: nothing of it is left to land"
+  case $checkres in
+    passed) ;;
+    failed) gm_die "land: run $id's check failed ($(gm_sql "SELECT COALESCE(check_rules,'') FROM run WHERE id=$id;")); what it did is not landed. gm check $id shows the evidence" ;;
+    -) gm_die "land: gm has not checked run $id yet; land it once gm check $id has" ;;
+    *) gm_die "land: gm could not check run $id ($checkres), so it does not land it; gm drop $id discards it" ;;
+  esac
+  IFS=$'\t' read -r camp branch repo <<<"$(gm_sql "SELECT camp, branch, repo FROM focus WHERE id=$fid;")"
+  gm_lock "land-$focus" 600 || gm_die "land: another landing on $focus has held the camp for ten minutes; try again"
+  cur=$(gm_rules_current_branch "$camp")
+  [ "$cur" = "$branch" ] || gm_die "land: the camp is on ${cur:-a detached HEAD}, not the feature branch $branch; put it back first"
+  dirty=$(gm_git "$camp" status --porcelain --untracked-files=no 2>/dev/null | cut -c 4- | head -n 10 | paste -sd ',' - | sed 's/,/, /g')
+  [ -z "$dirty" ] || gm_die "land: the camp has uncommitted changes to tracked files ($dirty); commit them or set them aside, then land again"
+  [ -d "$wt" ] || gm_die "land: run $id's worktree $wt is gone; gm drop $id records that its work is lost"
+  if gm_git "$wt" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+    gm_die "land: run $id's worktree holds a merge it never concluded; it is not landed. Dispatch again to finish it, or gm drop $id"
+  fi
+  dirty=$(gm_git "$wt" status --porcelain --untracked-files=no 2>/dev/null | cut -c 4- | head -n 10 | paste -sd ',' - | sed 's/,/, /g')
+  [ -z "$dirty" ] || gm_die "land: run $id's worktree has uncommitted changes to tracked files ($dirty): uncommitted changes are never landed. Dispatch again to commit them, or gm drop $id"
+  tip=$(gm_git "$camp" rev-parse -q --verify "refs/heads/$rb^{commit}" 2>/dev/null) || gm_die "land: run $id's branch $rb is gone"
+  ftip=$(gm_git "$camp" rev-parse -q --verify "refs/heads/$branch^{commit}")
+  # A check's correction started from the failed run's branch: where its work left the feature branch is where that
+  # run (or the first of a chain of them) started.
+  fbase=$(gm_sql "WITH RECURSIVE c(id, base, corrects, correction) AS (SELECT id, base_commit, corrects_run, correction FROM run WHERE id=$id
+    UNION ALL SELECT r.id, r.base_commit, r.corrects_run, r.correction FROM run r JOIN c ON r.id=c.corrects WHERE c.correction='check')
+    SELECT base FROM c WHERE base IS NOT NULL AND (correction IS NOT 'check' OR corrects IS NULL) ORDER BY id LIMIT 1;")
+  [ -n "$fbase" ] || fbase=$base
+  gm_git "$camp" merge-base --is-ancestor "$fbase" "$ftip" 2>/dev/null ||
+    gm_die "land: $branch no longer holds ${fbase:0:9}, where run $id's work started: it was rewritten since. gm drop $id, and dispatch the posting again"
+  posts=$(gm_sql "SELECT group_concat('#'||p.num||' '||p.slug, ', ') FROM (SELECT p.num, p.slug FROM run_posting rp JOIN posting p ON p.id=rp.posting_id WHERE rp.run_id=$id ORDER BY p.num) p;")
+  if gm_git "$camp" merge-base --is-ancestor "$tip" "$ftip" 2>/dev/null; then
+    how=nothing commit=$ftip note="nothing to land: it made no commits"
+    [ "$tip" = "$base" ] || note="nothing to land: $branch holds its commits already"
+  elif [ "$ftip" = "$fbase" ]; then
+    out=$(gm_git "$camp" merge --ff-only -q "$rb" 2>&1) || gm_die "land: git would not fast-forward $branch to $rb: $out"
+    how=ff note="fast-forward"
+  else
+    msg="Land run $id ($posts) on $branch"
+    if ! out=$(gm_git "$camp" merge --no-ff --no-edit -m "$msg" "$rb" 2>&1); then
+      conflicts=$(gm_git "$camp" diff --name-only --diff-filter=U 2>/dev/null | head -n 20)
+      gm_git "$camp" merge --abort >/dev/null 2>&1 || gm_git "$camp" reset -q --merge >/dev/null 2>&1 || true
+      with=$(gm_sql "SELECT group_concat('run '||r.id||' ('||(SELECT group_concat('#'||p.num||' '||p.slug, ', ') FROM run_posting rp JOIN posting p ON p.id=rp.posting_id WHERE rp.run_id=r.id)||')', '; ')
+        FROM run r WHERE r.focus_id=$fid AND r.landed_at IS NOT NULL AND r.id<>$id AND r.land_result IN ('ff','merge') AND r.landed_at>=(SELECT started_at FROM run WHERE id=$id);")
+      ev="- merging $rb into $branch conflicted$([ -z "$conflicts" ] || printf ' in: %s' "$(printf '%s' "$conflicts" | paste -sd ',' - | sed 's/,/, /g')")"$'\n'"- run $id carries $posts"$'\n'"- $branch has, since run $id started: ${with:-commits of its own}"
+      [ -n "$conflicts" ] || ev="$ev"$'\n'"- git said: $(printf '%s' "$out" | tail -n 3 | tr '\n' ' ')"
+      gm_sql <<SQL
+BEGIN IMMEDIATE;
+UPDATE run SET land_result='conflict', land_evidence=$(gm_q "$ev") WHERE id=$id;
+INSERT INTO event(at, actor, kind, focus_id, posting_id, verb, detail, line)
+  SELECT $GM_NOW, 'gm', 'notice', p.focus_id, p.id, 'land-conflict', 'run $id',
+         f.name||'#'||p.num||' '||p.slug||' run $id did not land: merging it conflicted with what landed on $branch since it started'||$(gm_q "$([ -z "$conflicts" ] || printf ' (%s)' "$(printf '%s' "$conflicts" | paste -sd ',' - | sed 's/,/, /g')")")||' ("'||$(gm_summary_sql p.words)||'")'
+  FROM run_posting rp JOIN posting p ON p.id=rp.posting_id JOIN focus f ON f.id=p.focus_id WHERE rp.run_id=$id ORDER BY p.num;
+SELECT line FROM event WHERE verb='land-conflict' AND detail='run $id' ORDER BY id;
+COMMIT;
+SQL
+      gm_unlock "land-$focus"
+      printf '%s\n' "$ev"
+      gm_run_failure "$id" landing "landing: its work did not merge cleanly into $branch, the feature branch, with what landed there since it started" "$ev" \
+        " (landing conflict$([ -z "$with" ] || printf ' with %s' "$(printf '%s' "$with" | sed 's/ (#[^)]*)//g')"))"
+      printf 'The camp is as it was: gm aborted the merge. A first conflict on a posting gets one correction run; a second makes it needs-you.\n'
+      exit 1
+    fi
+    how=merge
+    with=$(gm_sql "SELECT group_concat('run '||id, ', ') FROM run WHERE focus_id=$fid AND landed_at IS NOT NULL AND id<>$id AND land_result IN ('ff','merge') AND landed_at>=(SELECT started_at FROM run WHERE id=$id);")
+    if [ -n "$with" ]; then note="merge with $with's work"; else note="merge with the feature branch's new commits"; fi
+  fi
+  [ "$how" = nothing ] || commit=$(gm_git "$camp" rev-parse HEAD)
+  cmd=$(gm_setting "$(gm_rules_path "$repo")" test-command)
+  if [ -n "$cmd" ] && [ "$how" != nothing ] && { [ "$how" = merge ] || [ -n "$(gm_sql "SELECT 1 FROM run WHERE focus_id=$fid AND tests_result IS NOT NULL AND id=(SELECT id FROM run WHERE focus_id=$fid AND tests_result IS NOT NULL ORDER BY landed_at DESC, id DESC LIMIT 1) AND tests_result<>'passed';")" ]; }; then
+    tests=1
+  fi
+  gm_sql <<SQL
+BEGIN IMMEDIATE;
+UPDATE run SET landed_at=$GM_NOW, landed_commit=$(gm_q "$commit"), land_result=$(gm_q "$how"), reviewed_at=COALESCE(reviewed_at,$GM_NOW),
+  outcome=COALESCE(outcome,'accepted'), tests_result=$([ -n "$tests" ] && printf "'running'" || printf NULL) WHERE id=$id;
+INSERT INTO event(at, actor, kind, focus_id, posting_id, verb, detail, line)
+  SELECT $GM_NOW, 'party-leader', 'notice', p.focus_id, p.id, 'landed', 'run $id at ${commit:0:9}',
+         f.name||'#'||p.num||' '||p.slug||' landed: run $id at ${commit:0:7} ('||$(gm_q "$note")||')'||$(gm_q "$([ -z "$tests" ] || printf '; gm runs the tests, %s' "$cmd")")||' ("'||$(gm_summary_sql p.words)||'")'
+  FROM run_posting rp JOIN posting p ON p.id=rp.posting_id JOIN focus f ON f.id=p.focus_id WHERE rp.run_id=$id ORDER BY p.num;
+SELECT line FROM event WHERE verb='landed' AND detail LIKE 'run $id at %' ORDER BY id;
+COMMIT;
+SQL
+  if [ -n "$tests" ]; then
+    # The tests run in the run's own worktree, detached at what landed, where its worktree-setup already ran; its
+    # branch is on the feature branch now, so it goes.
+    gm_git "$wt" checkout -q --detach "$commit" >/dev/null 2>&1 || true
+    gm_git "$camp" branch -q -D "$rb" >/dev/null 2>&1 || true
+    gm_land_tests_spawn "$id"
+  else
+    gm_run_cleanup "$id" || printf 'gm kept run %s'\''s worktree %s: %s\n' "$id" "$wt" "$(gm_run_holds "$id")"
+  fi
+  gm_unlock "land-$focus"
+  gm_runs_tidy "$fid"
+  gm_runs_start_waiting
+  if [ "$how" = nothing ]; then
+    printf 'Run %s is accepted with nothing to land. Record what you decided on its postings.\n' "$id"
+  else
+    printf 'Run %s landed on %s at %s. Record done on its postings with that commit%s.\n' "$id" "$branch" "${commit:0:9}" \
+      "$([ -z "$tests" ] || printf ' once the tests pass: gm runs them now (%s), and the feature branch is not pushed until they do; gm summons you if they fail' "$cmd")"
+  fi
+}
+
+# Starts the tests after run $1 landed, in the background like a keeper, so gm land returns at once.
+gm_land_tests_spawn() {
+  local dir
+  dir=$(gm_run_dir "$1")
+  (
+    set -m
+    cd /
+    env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_SESSION_ID -u TRACEPARENT -u GM_FOCUS -u GM_RUN GM_HALL="$GM_HALL" \
+      nohup bash "$GM_SELF" land-tests "$1" </dev/null >>"$dir/keeper.log" 2>&1 &
+  )
+}
+
+# gm land-tests <run>: the rules file's test-command: in the landed run's worktree, detached at what landed; what it
+# printed is runs/<run>/tests.txt. A pass is a notice; a failure is the posting's failure (one correction run, then
+# needs-you), and its Party Leader is summoned. Either way the worktree then goes.
+gm_cmd_land_tests() {
+  local id=${1:-} wt repo cmd dir rc=0 result ev
+  [[ $id =~ ^[0-9]+$ ]] || gm_die "land-tests: gm land-tests <run> is what gm land starts"
+  gm_db_ensure
+  IFS=$'\t' read -r wt repo <<<"$(gm_sql "SELECT r.worktree, f.repo FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id AND r.tests_result='running';")"
+  [ -n "$wt" ] || gm_die "land-tests: run $id has no tests running"
+  dir=$(gm_run_dir "$id")
+  cmd=$(gm_setting "$(gm_rules_path "$repo")" test-command)
+  if [ -z "$cmd" ]; then
+    printf 'The rules file names no test-command: now.\n' >"$dir/tests.txt"
+    rc=1
+  elif [ ! -d "$wt" ]; then
+    printf 'The worktree %s is gone.\n' "$wt" >"$dir/tests.txt"
+    rc=1
+  else
+    (cd "$wt" && exec env -u GM_FOCUS -u GM_RUN bash -c "$cmd") >"$dir/tests.txt" 2>&1 </dev/null || rc=$?
+  fi
+  result=passed
+  [ "$rc" = 0 ] || result=failed
+  gm_sql <<SQL
+BEGIN IMMEDIATE;
+UPDATE run SET tests_result=$(gm_q "$result"), tests_at=$GM_NOW WHERE id=$id;
+INSERT INTO event(at, actor, kind, focus_id, posting_id, verb, detail, line)
+  SELECT $GM_NOW, 'gm', 'notice', p.focus_id, p.id, 'tested', 'run $id tests $result',
+         f.name||'#'||p.num||' '||p.slug||' tests $result after run $id landed ('||$(gm_q "$cmd")||$(gm_q "$([ "$rc" = 0 ] || printf ', exit %s; the feature branch is not pushed until they pass' "$rc")")||') ("'||$(gm_summary_sql p.words)||'")'
+  FROM run_posting rp JOIN posting p ON p.id=rp.posting_id JOIN focus f ON f.id=p.focus_id WHERE rp.run_id=$id ORDER BY p.num;
+SELECT line FROM event WHERE verb='tested' AND detail='run $id tests $result' ORDER BY id;
+COMMIT;
+SQL
+  cd /
+  gm_run_cleanup "$id" force || true
+  if [ "$result" = failed ]; then
+    ev="- $cmd exited $rc on $(gm_sql "SELECT f.branch||' at '||substr(r.landed_commit,1,9) FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;"), after run $id landed; its last lines:"$'\n'"$(tail -n 30 "$dir/tests.txt" | sed 's/^/    /')"
+    gm_run_failure "$id" tests "the tests pass on the feature branch after a landing (test-command: $cmd)" "$ev" " (the tests failed after it landed)"
+  fi
+  gm_runs_start_waiting
+}
+
+# gm drop <run>: the Party Leader discards a run: one waiting is never started; an ended one's worktree and branch are
+# removed with whatever they hold, the one way unlanded work is discarded, recorded in the ledger before anything is
+# removed.
+gm_cmd_drop() {
+  local id=${1:-} focus fid rfid ended waiting landed cleaned holds
+  [[ $id =~ ^[0-9]+$ ]] && [ $# -eq 1 ] || gm_die "drop: gm drop <run>"
+  gm_db_ensure
+  focus=$(gm_require_focus)
+  fid=$(gm_focus_id "$focus")
+  gm_runs_reap
+  IFS=$'\t' read -r rfid ended waiting landed cleaned <<<"$(gm_sql "SELECT focus_id, COALESCE(ended_at,'-'), COALESCE(waiting,'-'), COALESCE(landed_at,'-'), COALESCE(cleaned_at,'-') FROM run WHERE id=$id;")"
+  [ -n "$rfid" ] || gm_die "drop: no run $id"
+  [ "$rfid" = "$fid" ] || gm_die "drop: run $id is not a run of $focus"
+  if [ "$ended" = - ] && [ "$waiting" = - ]; then
+    gm_die "drop: run $id is still working; gm summons you when it ends, then drop it"
+  fi
+  [ "$cleaned" = - ] || gm_die "drop: run $id's worktree was removed at $cleaned; nothing is left to drop"
+  [ "$landed" = - ] || gm_die "drop: run $id landed at $landed; its work is on the feature branch"
+  holds=$(gm_run_holds "$id")
+  gm_sql <<SQL
+BEGIN IMMEDIATE;
+UPDATE run SET ended_at=COALESCE(ended_at,$GM_NOW), result_subtype=CASE WHEN ended_at IS NULL THEN 'dropped' ELSE result_subtype END,
+  checked_at=COALESCE(checked_at,$GM_NOW), check_result=COALESCE(check_result,'unchecked'), summoned_at=COALESCE(summoned_at,$GM_NOW),
+  reviewed_at=COALESCE(reviewed_at,$GM_NOW), outcome=COALESCE(outcome,'failed') WHERE id=$id;
+INSERT INTO event(at, actor, kind, focus_id, posting_id, verb, detail, line)
+  SELECT $GM_NOW, 'party-leader', 'notice', p.focus_id, p.id, 'dropped', 'run $id',
+         f.name||'#'||p.num||' '||p.slug||' run $id dropped'||$(gm_q "$([ "$waiting" = - ] || printf ' before it started')$([ -z "$holds" ] || printf ': %s discarded' "$holds")")||' ("'||$(gm_summary_sql p.words)||'")'
+  FROM run_posting rp JOIN posting p ON p.id=rp.posting_id JOIN focus f ON f.id=p.focus_id WHERE rp.run_id=$id ORDER BY p.num;
+SELECT line FROM event WHERE verb='dropped' AND detail='run $id' ORDER BY id;
+COMMIT;
+SQL
+  [ "$waiting" != - ] || gm_run_cleanup "$id" force || gm_die "drop: run $id is recorded as dropped, but its worktree could not be removed yet; the muster tries again"
+  gm_runs_start_waiting
+}
+
+# gm runs [--all]: the focus's runs, newest first, each with where it stands: waiting and for what, working in its
+# worktree, or how it ended, its check, its landing and the tests after it; then each run whose worktree holds work
+# not landed.
 gm_cmd_runs() {
-  local all=0 focus fid lim='LIMIT 10'
+  local all=0 focus fid lim='LIMIT 10' id holds
   case ${1:-} in
     '') ;;
     --all) all=1 ;;
@@ -5857,19 +6821,30 @@ gm_cmd_runs() {
   fid=$(gm_focus_id "$focus")
   gm_runs_reap
   gm_sql <<SQL
-SELECT 'run '||r.id||'  '||r.kind||'  '||$(gm_run_postings_sql r.id)||'  '
-  ||CASE WHEN r.ended_at IS NULL THEN 'working since '||replace(substr(r.started_at,1,16),'T',' ')
+SELECT 'run '||r.id||'  '||CASE WHEN r.correction IS NOT NULL THEN 'correction' ELSE r.kind END||'  '||$(gm_run_postings_sql r.id)||'  '
+  ||CASE WHEN r.ended_at IS NULL AND r.waiting IS NOT NULL THEN 'waiting since '||replace(substr(r.started_at,1,16),'T',' ')||', '
+      ||CASE r.waiting WHEN 'after' THEN 'for '||(SELECT group_concat('#'||num, ', ') FROM posting WHERE id IN (SELECT value FROM json_each('['||r.after_postings||']')))||' to land'
+        WHEN 'paused' THEN 'for the rate limit''s pause to end' ELSE 'for a free Adventurer' END
+    WHEN r.ended_at IS NULL THEN 'working since '||replace(substr(r.started_at,1,16),'T',' ')||COALESCE(' in '||r.worktree,'')
       ||COALESCE(', blocked since '||replace(substr(r.blocked_at,1,16),'T',' ')||': gm runner '||r.id||' shows it','')
     ELSE $(gm_run_end_sql r)||' at '||replace(substr(r.ended_at,1,16),'T',' ') END
   ||'  '||COALESCE(r.model||' · ','')||COALESCE(r.effort||' effort','')
   ||CASE WHEN r.ended_at IS NOT NULL AND r.reviewed_at IS NULL THEN '  · not reviewed' ELSE '' END
   ||COALESCE('  · '||r.outcome,'')
   ||CASE r.check_result WHEN 'passed' THEN '  · check passed' WHEN 'failed' THEN '  · check failed: '||COALESCE(r.check_rules,'') ELSE '' END
-  ||COALESCE('  · corrects run '||r.corrects_run,'')
-  ||char(10)||'        '||CASE WHEN r.ended_at IS NULL THEN COALESCE(r.writ,'') ELSE $(gm_q "$GM_HALL/runs/")||r.id||'/result.md' END
+  ||COALESCE('  · corrects run '||r.corrects_run||CASE r.correction WHEN 'landing' THEN ' (landing conflict)' WHEN 'tests' THEN ' (tests)' ELSE '' END,'')
+  ||CASE r.land_result WHEN 'conflict' THEN '  · its landing conflicted' WHEN 'nothing' THEN '  · accepted, nothing to land'
+    WHEN 'ff' THEN '  · landed at '||substr(r.landed_commit,1,9) WHEN 'merge' THEN '  · landed at '||substr(r.landed_commit,1,9)||' (merge)' ELSE '' END
+  ||CASE r.tests_result WHEN 'running' THEN '  · tests running' WHEN 'passed' THEN '  · tests passed' WHEN 'failed' THEN '  · tests failed' ELSE '' END
+  ||char(10)||'        '||CASE WHEN r.ended_at IS NULL THEN COALESCE(r.writ,'')
+    WHEN r.report IS NOT NULL THEN 'field report: '||r.report ELSE $(gm_q "$GM_HALL/runs/")||r.id||'/result.md' END
 FROM run r WHERE r.focus_id=$fid ORDER BY r.id DESC $lim;
 SELECT 'No runs yet in '||$(gm_q "$focus")||'.' WHERE NOT EXISTS (SELECT 1 FROM run WHERE focus_id=$fid);
 SQL
+  for id in $(gm_sql "SELECT id FROM run WHERE focus_id=$fid AND kind='contract' AND ended_at IS NOT NULL AND worktree IS NOT NULL AND cleaned_at IS NULL AND landed_at IS NULL ORDER BY id;"); do
+    holds=$(gm_run_holds "$id")
+    [ -z "$holds" ] || printf 'run %s · holds %s: gm land %s, or gm drop %s to discard it\n' "$id" "$holds" "$id" "$id"
+  done
 }
 
 # gm runner <run> [--keys KEYS | --text WORDS]: a runner to an Adventurer, from its Party Leader. Alone, what the run's
@@ -5934,6 +6909,12 @@ UNION ALL
 SELECT 'blocked', r.id, r.blocked_at FROM run r WHERE r.focus_id=$fid AND r.ended_at IS NULL AND r.blocked_at IS NOT NULL AND r.blocked_summoned_at IS NULL
 UNION ALL
 SELECT 'posting', p.id, p.created_at FROM posting p WHERE p.focus_id=$fid AND p.state='received' AND p.origin='outside' AND p.summoned_at IS NULL
+UNION ALL
+SELECT 'tests', r.id, r.tests_at FROM run r WHERE r.focus_id=$fid AND r.tests_result='failed' AND r.tests_summoned_at IS NULL
+UNION ALL
+SELECT 'stuck', r.id, r.started_at FROM run r WHERE r.focus_id=$fid AND r.ended_at IS NULL AND r.waiting IS NOT NULL AND r.after_summoned_at IS NULL
+  AND EXISTS (SELECT 1 FROM json_each('['||COALESCE(r.after_postings,'')||']') a JOIN posting q ON q.id=a.value
+    WHERE q.state IN ('failed','closed','needs-you') AND NOT EXISTS (SELECT 1 FROM run_posting rp JOIN run x ON x.id=rp.run_id WHERE rp.posting_id=q.id AND x.landed_at IS NOT NULL))
 SQL
 }
 
@@ -5970,10 +6951,13 @@ gm_summons_take() {
 CREATE TEMP TABLE s(kind TEXT, id INTEGER, at TEXT);
 BEGIN IMMEDIATE;
 INSERT INTO s $(gm_summons_sql "$fid");
-SELECT '- run '||r.id||' for '||$(gm_run_postings_sql r.id)||' '||$(gm_run_end_sql r)||'. Its result: '||$(gm_q "$GM_HALL/runs/")||r.id||'/result.md'
+SELECT '- '||CASE r.kind WHEN 'survey' THEN 'survey ' ELSE '' END||'run '||r.id||' for '||$(gm_run_postings_sql r.id)||' '||$(gm_run_end_sql r)
+  ||CASE WHEN r.report IS NOT NULL THEN '. Its field report: '||r.report ELSE '. Its result: '||$(gm_q "$GM_HALL/runs/")||r.id||'/result.md' END
   ||CASE r.check_result WHEN 'passed' THEN '. gm check: every rule kept.'
     WHEN 'failed' THEN '. gm check found rules broken, from git:'||char(10)||'    '||replace(COALESCE(r.check_evidence,''),char(10),char(10)||'    ')||char(10)||'  '
-      ||COALESCE('gm dispatched correction run '||(SELECT c.id FROM run c WHERE c.corrects_run=r.id)||' at once, its writ quoting them; it summons you when that run ends.',
+      ||CASE WHEN r.kind='survey' THEN 'It was a survey, so gm sent no correction: judge its report with that in mind.' ELSE '' END
+      ||COALESCE('gm dispatched correction run '||(SELECT c.id FROM run c WHERE c.corrects_run=r.id AND c.correction='check')||' at once, its writ quoting them; it summons you when that run ends.',
+                 CASE WHEN r.kind='survey' THEN '' END,
                  'gm made its postings needs-you, with this evidence, for the patron: it was not the first failure on them, or the correction could not start.')
     WHEN 'unchecked' THEN '. gm check had nothing to check it against.'
     ELSE '. gm check has not finished yet.' END
@@ -5984,7 +6968,18 @@ SELECT '- run '||r.id||' for '||$(gm_run_postings_sql r.id)||' is blocked: its p
 FROM s JOIN run r ON r.id=s.id WHERE s.kind='blocked' ORDER BY r.id;
 SELECT '- '||f.name||'#'||p.num||' '||p.slug||' was posted from outside your chat (received): "'||$(gm_summary_sql p.words)||'"'
 FROM s JOIN posting p ON p.id=s.id JOIN focus f ON f.id=p.focus_id WHERE s.kind='posting' ORDER BY p.num;
+SELECT '- the tests failed on '||f.branch||' after run '||r.id||' for '||$(gm_run_postings_sql r.id)||' landed; what they printed is '||$(gm_q "$GM_HALL/runs/")||r.id||'/tests.txt. '
+  ||COALESCE('gm dispatched correction run '||(SELECT c.id FROM run c WHERE c.corrects_run=r.id AND c.correction='tests')||' at once; it summons you when that run ends. ',
+             'gm made its postings needs-you, for the patron: it was not the first failure on them, or the correction could not start. ')
+  ||'Until the tests pass, the feature branch is not pushed.'
+FROM s JOIN run r ON r.id=s.id JOIN focus f ON f.id=r.focus_id WHERE s.kind='tests' ORDER BY r.id;
+SELECT '- run '||r.id||' for '||$(gm_run_postings_sql r.id)||' waits for '||(SELECT group_concat('#'||q.num||' '||q.slug||' ('||q.state||')', ', ') FROM json_each('['||r.after_postings||']') a JOIN posting q ON q.id=a.value
+    WHERE q.state IN ('failed','closed','needs-you') AND NOT EXISTS (SELECT 1 FROM run_posting rp JOIN run x ON x.id=rp.run_id WHERE rp.posting_id=q.id AND x.landed_at IS NOT NULL))
+  ||', with nothing landed, so it cannot start as it is: dispatch its posting again without --after, which replaces it, or record its posting''s state, which drops it.'
+FROM s JOIN run r ON r.id=s.id WHERE s.kind='stuck' ORDER BY r.id;
 UPDATE run SET summoned_at=$GM_NOW WHERE id IN (SELECT id FROM s WHERE kind='run');
+UPDATE run SET tests_summoned_at=$GM_NOW WHERE id IN (SELECT id FROM s WHERE kind='tests');
+UPDATE run SET after_summoned_at=$GM_NOW WHERE id IN (SELECT id FROM s WHERE kind='stuck');
 UPDATE run SET blocked_summoned_at=$GM_NOW WHERE id IN (SELECT id FROM s WHERE kind='blocked');
 UPDATE posting SET summoned_at=$GM_NOW WHERE id IN (SELECT id FROM s WHERE kind='posting');
 UPDATE focus SET unheard_at=NULL WHERE id=$fid AND EXISTS (SELECT 1 FROM s);
@@ -5994,7 +6989,7 @@ COMMIT;
 SQL
 }
 
-gm_summons_tail="Answer each blocked run; review each finished run (its result, and its commit in git log) and record what you decided on its postings; sort each posting as your charter says; show the patron each notice line."
+gm_summons_tail="Answer each blocked run; review each finished run (its result, and its commits: git log -p <feature branch>..gm/run-<n>), then land it (gm land <n>) or record what you decided on its postings; sort each posting as your charter says; show the patron each notice line."
 
 # gm summons: what is waiting for this Party Leader, recorded as heard. What /guild-chat:summons runs.
 gm_cmd_summons() {
@@ -6580,7 +7575,9 @@ gm_reconcile() {
   gm_runs_reap
   for focus in $(gm_sql "SELECT name FROM focus WHERE closed_at IS NULL ORDER BY name;"); do
     gm_muster_one "party-leader:$focus" "$show"
+    gm_runs_sweep "$focus" 2>/dev/null || true
   done
+  gm_runs_start_waiting 2>/dev/null || true
 }
 
 # gm_muster_one <endpoint key> <show>: one Guildmaster or Party Leader, checked and acted on.
@@ -6815,8 +7812,61 @@ gm_herdr_lock() {
   done
   printf '%s' "$$" >"$dir/pid"
   GM_HERDR_LOCKED=$dir
-  trap gm_herdr_unlock EXIT
+  trap gm_locks_release EXIT
 }
+
+# gm_lock <name> <seconds>: one of gm's own locks in the Guildhall (locks/<name>.lock), waited for up to that long; a
+# lock whose holder is gone is taken over. A lock this process already holds is held again at no cost. They are
+# released on exit, with the herdr lock: the clone's lock (two git worktree add on one clone must not interleave), a
+# focus's landing lock (landings go one at a time), and the dispatch lock (the cap is counted by one gm at a time).
+GM_LOCKS=''
+gm_lock() {
+  local dir=$GM_HALL/locks/$1.lock pid waited=0
+  case " $GM_LOCKS " in *" $dir "*) return 0 ;; esac
+  mkdir -p "$GM_HALL/locks"
+  while ! mkdir "$dir" 2>/dev/null; do
+    pid=$(cat "$dir/pid" 2>/dev/null || true)
+    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+      rm -f "$dir/pid"
+      rmdir "$dir" 2>/dev/null || true
+      continue
+    fi
+    [ "$waited" -lt "$2" ] || return 1
+    sleep 1
+    waited=$((waited + 1))
+  done
+  printf '%s' "$$" >"$dir/pid"
+  GM_LOCKS="$GM_LOCKS $dir"
+  trap gm_locks_release EXIT
+}
+
+gm_unlock() {
+  local dir=$GM_HALL/locks/$1.lock
+  case " $GM_LOCKS " in *" $dir "*) ;; *) return 0 ;; esac
+  rm -f "$dir/pid"
+  rmdir "$dir" 2>/dev/null || true
+  GM_LOCKS=$(printf '%s' "$GM_LOCKS" | sed "s# $dir##")
+}
+
+# gm_locked <name>: another live gm holds the lock now.
+gm_locked() {
+  local pid
+  pid=$(cat "$GM_HALL/locks/$1.lock/pid" 2>/dev/null || true)
+  [ -n "$pid" ] && [ "$pid" != "$$" ] && kill -0 "$pid" 2>/dev/null
+}
+
+gm_locks_release() {
+  local d
+  gm_herdr_unlock
+  for d in $GM_LOCKS; do
+    rm -f "$d/pid"
+    rmdir "$d" 2>/dev/null || true
+  done
+  GM_LOCKS=''
+}
+
+# The lock name of a clone: one per repository, whichever focus's camp a worktree is added in.
+gm_clone_lock_name() { printf 'clone-%s' "$(printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g' | tail -c 80)"; }
 
 gm_herdr_unlock() {
   [ -n "$GM_HERDR_LOCKED" ] || return 0
@@ -6996,7 +8046,7 @@ gm_cmd_roster() {
       fi
     fi
     [ -n "$closed" ] || [ -z "$(gm_focus_field "$focus" close_requested_at)" ] || detail="${detail:+$detail · }closing, as its Party Leader asked"
-    [ -n "$closed" ] || detail="${detail:+$detail}$(gm_roster_unheard "$focus")"
+    [ -n "$closed" ] || detail="${detail:+$detail}$(gm_roster_unheard "$focus")$(gm_runs_strays "$focus")"
     [ -z "$last" ] || detail="${detail:+$detail · }last started $last"
     gm_roster_line "$focus" "party leader" "$st" "${pane:--}" "$detail"
   done <<<"$(gm_sql "SELECT f.name, COALESCE(f.closed_at,'-'), COALESCE(f.held_at,'-'), f.start_attempts,
@@ -7008,7 +8058,7 @@ gm_cmd_roster() {
 gm_roster_unheard() {
   local fid
   fid=$(gm_focus_id "$1")
-  gm_sql "SELECT ' · unheard: '||group_concat(CASE kind WHEN 'run' THEN 'run '||id WHEN 'blocked' THEN 'run '||id||' blocked' ELSE '#'||(SELECT num FROM posting WHERE posting.id=s.id) END, ', ')
+  gm_sql "SELECT ' · unheard: '||group_concat(CASE kind WHEN 'run' THEN 'run '||id WHEN 'blocked' THEN 'run '||id||' blocked' WHEN 'tests' THEN 'run '||id||' tests' WHEN 'stuck' THEN 'run '||id||' stuck' ELSE '#'||(SELECT num FROM posting WHERE posting.id=s.id) END, ', ')
     ||' since '||(SELECT substr(unheard_at,12,5) FROM focus WHERE id=$fid)
     FROM ($(gm_summons_sql "$fid")) s WHERE (SELECT unheard_at FROM focus WHERE id=$fid) IS NOT NULL HAVING count(*)>0;"
 }
@@ -7039,6 +8089,7 @@ gm_cmd_close() {
     gm_close_finish "$focus"
     return
   fi
+  gm_close_runs "$focus"
   if gm_close_self "$focus"; then
     open=$(gm_sql "SELECT group_concat('#'||num||' '||slug||' '||state, ', ') FROM (SELECT num, slug, state FROM posting
       WHERE focus_id=(SELECT id FROM focus WHERE name=$(gm_q "$focus")) AND state NOT IN ('done','failed','closed') ORDER BY num);")
@@ -7063,6 +8114,20 @@ gm_cmd_close() {
   gm_close_done "$focus" "$st" patron
   gm_herdr_unlock
   printf '%s is closed: its Party Leader is not started again. Its camp %s and its postings are kept; gm open %s reopens it.\n' "$focus" "$(gm_focus_field "$focus" camp)" "$focus"
+}
+
+# gm_close_runs <focus>: gm close refuses while a run of the focus is working or waiting, or holds work not landed, as
+# Firstmate's teardown refuses a worktree whose work has not landed.
+gm_close_runs() {
+  local fid id out='' holds
+  fid=$(gm_focus_id "$1")
+  gm_runs_reap
+  out=$(gm_sql "SELECT group_concat('run '||id||CASE WHEN waiting IS NOT NULL THEN ' (waiting)' ELSE ' (working)' END, ', ') FROM run WHERE focus_id=$fid AND ended_at IS NULL;")
+  for id in $(gm_sql "SELECT id FROM run WHERE focus_id=$fid AND kind='contract' AND ended_at IS NOT NULL AND worktree IS NOT NULL AND cleaned_at IS NULL AND landed_at IS NULL;"); do
+    holds=$(gm_run_holds "$id")
+    [ -z "$holds" ] || out="${out:+$out, }run $id (holds $holds)"
+  done
+  [ -z "$out" ] || gm_die "close: $1 still has runs whose work is not settled: $out; wait for each to end, then land it (gm land <run>) or drop it (gm drop <run>), then gm close $1"
 }
 
 # gm_close_self <focus>: this is that focus's Party Leader: GM_FOCUS names it, and herdr's own variables put this
@@ -7521,7 +8586,7 @@ cmd=${1:-front-desk}
 [ $# -eq 0 ] || shift
 # Settings left in setup.conf move to guild.conf here; never from a hook or the status line, which only read them.
 case $cmd in
-  hook | statusline | run | help | -h | --help) ;;
+  hook | statusline | run | land-tests | help | -h | --help) ;;
   *) gm_conf_migrate ;;
 esac
 case $cmd in
@@ -7541,7 +8606,7 @@ if [ -s "$GM_DB" ]; then
   esac
 fi
 case $cmd in
-  front-desk | open | up | close | start | autostart | install | hook | statusline | welcome | collector | config | repos | visit | run | help | -h | --help) ;;
+  front-desk | open | up | close | start | autostart | install | hook | statusline | welcome | collector | config | repos | visit | run | land-tests | help | -h | --help) ;;
   *) gm_auto_reconcile ;;
 esac
 case $cmd in
@@ -7557,6 +8622,9 @@ case $cmd in
   install) gm_cmd_install "$@" ;;
   post) gm_cmd_post "$@" ;;
   dispatch) gm_cmd_dispatch "$@" ;;
+  land) gm_cmd_land "$@" ;;
+  land-tests) gm_cmd_land_tests "$@" ;;
+  drop) gm_cmd_drop "$@" ;;
   run) gm_cmd_run "$@" ;;
   adventurer) gm_cmd_adventurer "$@" ;;
   runs) gm_cmd_runs "$@" ;;
