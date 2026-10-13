@@ -12,7 +12,8 @@ import type { Mark, Rule, Term } from './marks'
 // posting references (#49, context-bar#1), run references (run 13), and code spans that name
 // something (GM_VEIL, guild.conf). A click on one, or /what over a phrase selected with the mouse, opens a small
 // popup with a TL;DR of it and where the meaning came from; while Claude asks a question (AskUserQuestion) and
-// the keys are the question's, a click on a line drawn above it does /what's work. What the guild already knows
+// the keys are the question's, a click on a line drawn above it does /what's work, and one on the line under
+// that sets the question aside for Claude to explain the words and ask again. What the guild already knows
 // answers first and costs nothing: TERMINOLOGY.md, the charter's named rules, gm show for a
 // posting, gm runs for a run. Anything else is asked of the model over this session's own
 // transcript ($.model.fork), and the answer is kept in $.store, by focus and phrase, so the
@@ -135,6 +136,14 @@ function explainPhrase($: EngineInterface, phrase: string) {
 }
 
 export const ASK_LINE = 'lexicon: select words above, then click here to see what they mean'
+export const ASIDE_LINE = 'lexicon: set this question aside and ask about the selected words'
+
+/** What Claude reads when the patron sets its question aside to ask about `phrase`: the question comes back by itself. */
+export const asideReason = (phrase: string) =>
+  `The user set this question aside to ask what "${phrase}" means. Explain it briefly, then ask the same question again with AskUserQuestion.`
+
+// Each AskUserQuestion call still open, by its tool_use_id (the dialog's requestId): what settles it from outside the dialog.
+const openAsks = new Map<string, (r: { deny: string }) => void>()
 
 const title = (phrase: string) => (phrase.length > 50 ? `${phrase.slice(0, 49)}…` : phrase)
 const failed = (err: unknown) => `The lookup failed: ${err instanceof Error ? err.message : String(err)}`
@@ -195,13 +204,27 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // An open question is settled by the dialog, or by the set-aside line drawn above it, whichever comes first: the
+  // line's press refuses the call, and Claude reads the refusal's reason as the tool's error result.
+  on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
+    let settle!: (r: { deny: string }) => void
+    const pressed = new Promise<{ deny: string }>(r => { settle = r })
+    openAsks.set(e.tool_use_id, settle)
+    try {
+      return await Promise.race([next(e), pressed])
+    } finally {
+      openAsks.delete(e.tool_use_id)
+    }
+  })
+
   on('command.run', { command: 'what' }, async ($, e) => {
     const typed = e.args.trim()
     const selected = typed || (await selection($))
     if (!selected) {
       return {
         text: 'Select a word or phrase in the chat with the mouse, then type /what (or /what <phrase>). A marked word in a reply opens the same popup at a click. '
-          + `While Claude asks you a question, the prompt is the question's: select the words, then click the line above the question (“${ASK_LINE}”); the popup closes with a click on its ✕, the question left as it was.`,
+          + `While Claude asks you a question, the prompt is the question's: select the words, then click the line above the question (“${ASK_LINE}”); the popup closes with a click on its ✕, the question left as it was. `
+          + `Or click the line under it (“${ASIDE_LINE}”): the question closes, Claude explains the words, then asks the same question again.`,
       }
     }
     await explainPhrase($, selected)
@@ -267,8 +290,8 @@ export const register: Register = on => {
   })
 
   // While Claude asks a question the dialog holds every key, so no chord and no /what reach the lexicon; a click
-  // does. One dim line is drawn above the dialog (the engine draws nothing of a plugin's below it), the dialog
-  // itself passed on as it came: a click there reads the selection and opens the popup, the question untouched.
+  // does. Two dim lines are drawn above the dialog (the engine draws nothing of a plugin's below it), the dialog
+  // itself passed on as it came: a click on the first reads the selection and opens the popup, the question untouched.
   // Only where Claude Code reports a mouse selection: the fullscreen layout.
   on('ui.render', { component: 'AskUserQuestion' }, async ($, e, next) => {
     const drawn = await next(e)
@@ -279,9 +302,19 @@ export const register: Register = on => {
       if (selected) await explainPhrase($, selected)
       else $.ui.toast('lexicon: select a word or phrase with the mouse first, then click the line again')
     }
+    // The second line sets the question aside: Claude explains the words, then asks the same question again. It
+    // settles only the call this dialog was drawn for (its requestId), so a press that lands after Claude has
+    // asked again cannot settle the new question in the old one's place.
+    const call = e.requestId
+    const aside = async () => {
+      const selected = await selection($)
+      if (!selected) return $.ui.toast('lexicon: select a word or phrase with the mouse first, then click the line again')
+      openAsks.get(call)?.({ deny: asideReason(selected.length > 200 ? selected.slice(0, 200) : selected) })
+    }
     return (
       <Box flexDirection="column">
         <Button key="lexicon:selection" plain dimColor onPress={press}>{ASK_LINE}</Button>
+        <Button key={`lexicon:aside:${call}`} plain dimColor onPress={aside}>{ASIDE_LINE}</Button>
         {drawn}
       </Box>
     ) as typeof drawn

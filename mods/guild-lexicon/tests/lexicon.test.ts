@@ -3,7 +3,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { layout } from '../hooks/layout'
 import { findRule, findTerm, markSpans, parseCharter, parseTerminology, postingTldr, refOf, runTldr } from '../hooks/marks'
-import { AI, ASK_LINE, PANE } from '../hooks/register'
+import { AI, ASIDE_LINE, ASK_LINE, asideReason, PANE } from '../hooks/register'
 
 const HOME = '/home/p'
 const GM = `${HOME}/.local/bin/gm`
@@ -339,11 +339,11 @@ describe('/what', () => {
 })
 
 const QUESTIONS = [{ question: 'Which fruit?', header: 'Fruit', multiSelect: false, options: [{ label: 'Apple', description: 'crisp' }, { label: 'Pear', description: 'soft' }] }]
-const question = (isFullscreen = true) => ({
+const question = (isFullscreen = true, requestId = 'toolu_ask') => ({
   plugin: 'guild-lexicon',
   surface: 'terminal' as const,
   component: 'AskUserQuestion' as const,
-  requestId: 'toolu_ask',
+  requestId,
   viewport: { ...viewport, isFullscreen },
   props: { tool: 'AskUserQuestion', questions: QUESTIONS },
 })
@@ -366,7 +366,7 @@ describe('while Claude asks a question', () => {
     }
     on('ui.selection', async () => ({ value: { text: 'the\n  veil' } }))
     const ui = await $.ui.mount(question())
-    expect((await ui.findAll({ type: 'Button' })).map(b => b.text)).toEqual([ASK_LINE])
+    expect((await ui.findAll({ type: 'Button' })).map(b => b.text)).toEqual([ASK_LINE, ASIDE_LINE])
     expect(await ui.findAll({ type: 'engine' } as never)).toHaveLength(1)
     await click(ui, ASK_LINE)
     expect(journal.opens).toEqual([{ id: PANE, focus: true, closeOnEscape: true, holdToasts: true }])
@@ -395,5 +395,74 @@ describe('while Claude asks a question', () => {
     await ui.unmount()
     const main = await $.ui.mount(question(false))
     expect(await main.find({ type: 'Button' })).toBeUndefined()
+  })
+})
+
+// Claude Code's own dialog beneath the lexicon's hook: each AskUserQuestion call it opens stays open, by its tool_use_id.
+function dialogs(on: On) {
+  const open: string[] = []
+  on('tool.call', { tool: 'AskUserQuestion' }, async (_$, e) => {
+    open.push(e.tool_use_id)
+    return new Promise<never>(() => {})
+  })
+  return open
+}
+// Whether a call settled in a moment, and how.
+const settled = (call: Promise<unknown>) => Promise.race([call, new Promise<'open'>(r => setTimeout(() => r('open'), 50))])
+// Claude asks: the call, once its dialog is open (a call still open when the test ends is let go).
+async function ask($: { tool: { call: (args: never) => Promise<unknown> } }, open: string[]) {
+  const was = open.length
+  const call = $.tool.call({ tool: 'AskUserQuestion', questions: QUESTIONS } as never)
+  call.catch(() => {})
+  for (let i = 0; open.length === was && i < 100; i++) await new Promise(r => setTimeout(r, 5))
+  expect(open).toHaveLength(was + 1)
+  return { call }
+}
+
+describe('setting a question aside', () => {
+  test('a click on the second line with words selected settles the question, telling Claude to explain them and ask again', async ($, on) => {
+    world(on)
+    const open = dialogs(on)
+    on('ui.selection', async () => ({ value: { text: 'the\n  veil' } }))
+    const { call } = await ask($, open)
+    const ui = await $.ui.mount(question(true, open[0]!))
+    await click(ui, ASIDE_LINE)
+    expect(await settled(call)).toEqual({ deny: asideReason('the veil') })
+    expect(asideReason('the veil')).toBe('The user set this question aside to ask what "the veil" means. Explain it briefly, then ask the same question again with AskUserQuestion.')
+  })
+
+  test('with nothing selected it says so and the question stays open', async ($, on) => {
+    world(on)
+    const open = dialogs(on)
+    const toasts: string[] = []
+    on('ui.toast', async (_$, e) => {
+      toasts.push(e.text)
+      return { value: undefined } as never
+    })
+    on('ui.selection', async () => ({ value: undefined }))
+    const { call } = await ask($, open)
+    const ui = await $.ui.mount(question(true, open[0]!))
+    await click(ui, ASIDE_LINE)
+    expect(await settled(call)).toBe('open')
+    expect(toasts.join('\n')).toContain('select a word or phrase with the mouse first')
+  })
+
+  test('a click settles only the question its line was drawn above, never the one Claude asks again in its place', async ($, on) => {
+    world(on)
+    const open = dialogs(on)
+    on('ui.selection', async () => ({ value: { text: 'write-ahead log' } }))
+    const { call: first } = await ask($, open)
+    const old = await $.ui.mount(question(true, open[0]!))
+    await click(old, ASIDE_LINE)
+    expect(await settled(first)).not.toBe('open')
+    // Claude explains and asks again; a second click lands on the first question's line, still on screen.
+    const { call: again } = await ask($, open)
+    expect(open[1]).not.toBe(open[0])
+    await click(old, ASIDE_LINE)
+    expect(await settled(again)).toBe('open')
+    // The line drawn above the new question settles it.
+    const now = await $.ui.mount(question(true, open[1]!))
+    await click(now, ASIDE_LINE)
+    expect(await settled(again)).not.toBe('open')
   })
 })
