@@ -1,8 +1,8 @@
 // The guild's welcome: the card drawn above the prompt when the Guildmaster or a Party Leader starts, until the
-// patron's first message folds it to one rule. It says who answers, what needs the patron, where the work stands and
-// what the patron can type; the model never reads it. ../hooks/register.tsx owns when it is drawn and where its data
-// comes from (gm welcome --json); this file owns what it says and how its art looks, which is why it has no `$` in it
-// and tests read it directly.
+// session's first message, the patron's or gm's, folds it to one rule. It says who answers, what needs the patron,
+// where the work stands and what the patron can type; the model never reads it. ../hooks/register.tsx owns when it is
+// drawn and where its data comes from (gm welcome --json); this file owns what it says and how its art looks, which is
+// why it has no `$` in it and tests read it directly.
 //
 // The art is pixel art in half blocks: each terminal cell is two pixels, its top the glyph's colour and its bottom the
 // cell's background, so a 16×16 crest takes 16 columns by 8 rows. A piece is a grid of palette letters, '.' empty;
@@ -488,7 +488,7 @@ export function placeCard(card: Card, artRows: number, sideColumns: number, tigh
   return { side, below }
 }
 
-/** The one line the card folds to after the patron's first message. */
+/** The one line the card folds to after the session's first message. */
 export function foldedOf(d: WelcomeData, columns: number): Line {
   const bits: string[] = []
   if (!isBare(d)) {

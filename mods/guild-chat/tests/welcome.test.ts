@@ -322,6 +322,16 @@ describe('the welcome on screen', () => {
     expect(kept.get('tutorial-usage')).toEqual({ ref: { uses: 1, sessions: ['session-1'] } })
   })
 
+  test('a message gm sends a Party Leader folds it too, and teaches the tutorial nothing', async ($, on) => {
+    const kept = world(on, 'chat: banners\nsprites: off\n', FOCUS, { env: { GM_FOCUS: 'crm-1234' } })
+    await $.session.start(sessionStart)
+    await settle()
+    await $.prompt.submit({ text: '#7 start on this one', wait: false, origin: { kind: 'peer' as const } })
+    const rows = await drawn($)
+    expect(rows).toEqual([expect.stringMatching(/^━━ ⚔ PARTY LEADER · crm-1234 ━ build 3\/8 · nothing needs you ━+$/), STOCK])
+    expect(kept.get('tutorial-usage')).toBeUndefined()
+  })
+
   test('welcome-fold: vanish gives the band back to the engine, or to the idle sprite', async ($, on) => {
     world(on, 'chat: banners\nsprites: off\nwelcome-fold: vanish\n', GUILD)
     await $.session.start(sessionStart)
