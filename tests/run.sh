@@ -3298,6 +3298,67 @@ t_a_blocked_adventurer_summons_its_party_leader() {
     assert_contains "$(gm runner 1)" "Do you want to proceed?" "though its pane can still be read"
 }
 
+# Claude Code's question dialog, as an Adventurer's pane shows it while herdr says idle or done.
+question_screen() {
+  printf '%s\n' '☐ Charter size' '' 'The charter is over the cap. Which way?' '❯ 1. Split the hook' '  2. Trim the wording' '' '' >"$HERDR_STUB/screen.$1"
+}
+
+t_an_adventurer_waiting_on_a_question_summons_its_party_leader() {
+  setup question
+  gm open appt-v2 >/dev/null 2>&1
+  export GM_FOCUS=appt-v2 GM_RUN_POLL=1
+  fake_run "$WORK/question/run"
+  : >"$GM_FAKE_RUN/hold"
+  gm post "the owner field is empty after save" >/dev/null && gm notice 1 started >/dev/null
+  gm dispatch 1 >/dev/null
+  run_pane 1 || fail "the run got no pane" || return 1
+  local pane out rc
+  pane=$(db "SELECT pane_id FROM run WHERE id=1;")
+  stub_proc "$pane" claude
+  # Idle before its writ is submitted: never waiting, however many polls.
+  printf 'idle' >"$HERDR_STUB/agent-status.$pane"
+  gm up >/dev/null 2>&1; gm up >/dev/null 2>&1
+  rc=0; out=$(printf '{}' | as_watch env GM_WATCH_TIMEOUT=33 bash "$GM" hook watch 2>&1) || rc=$?
+  assert_eq "$rc" 0 "an Adventurer still starting summons nobody" &&
+    assert_eq "$(db "SELECT blocked_at IS NULL FROM run WHERE id=1;")" 1 "and is not waiting" || return 1
+  # Working, then idle on its question: one poll is not enough, two in a row are.
+  printf 'working' >"$HERDR_STUB/agent-status.$pane"
+  gm up >/dev/null 2>&1
+  printf 'idle' >"$HERDR_STUB/agent-status.$pane"
+  question_screen "$pane"
+  gm up >/dev/null 2>&1
+  assert_eq "$(db "SELECT blocked_at IS NULL FROM run WHERE id=1;")" 1 "idle on one poll is not waiting" || return 1
+  rc=0; out=$(printf '{}' | as_watch env GM_WATCH_TIMEOUT=40 bash "$GM" hook watch 2>&1) || rc=$?
+  assert_eq "$rc" 2 "idle on the next poll summons the Party Leader" &&
+    assert_contains "$out" "- run 1 for appt-v2#1 owner-field-empty-after is blocked: its pane waits for an answer. It shows:" "naming the run" &&
+    assert_contains "$out" "    The charter is over the cap. Which way?
+    ❯ 1. Split the hook" "with the question's last lines" &&
+    assert_eq "$(db "SELECT count(*) FROM event WHERE kind='run.blocked';")" 1 "recorded once" || return 1
+  rc=0; out=$(printf '{}' | as_watch env GM_WATCH_TIMEOUT=33 bash "$GM" hook watch 2>&1) || rc=$?
+  assert_eq "$rc" 0 "the same wait never summons twice" && assert_eq "$out" "" "and says nothing" || return 1
+  # Working again clears it; a second question that herdr shows as done summons again.
+  printf 'working' >"$HERDR_STUB/agent-status.$pane"
+  gm up >/dev/null 2>&1
+  assert_eq "$(db "SELECT blocked_at IS NULL FROM run WHERE id=1;")" 1 "working again clears it" || return 1
+  printf 'done' >"$HERDR_STUB/agent-status.$pane"
+  rc=0; out=$(printf '{}' | as_watch env GM_WATCH_TIMEOUT=40 bash "$GM" hook watch 2>&1) || rc=$?
+  assert_eq "$rc" 2 "done on two polls summons again" &&
+    assert_eq "$(db "SELECT count(*) FROM event WHERE kind='run.blocked';")" 2 "a second wait, recorded" || return 1
+  # An answer clears it, and the dialog's last idle moment is not a new wait.
+  gm runner 1 --keys 1 >/dev/null || fail "runner --keys failed"
+  gm up >/dev/null 2>&1
+  assert_eq "$(db "SELECT blocked_at IS NULL FROM run WHERE id=1;")" 1 "one idle poll after an answer is not waiting" || return 1
+  printf 'working' >"$HERDR_STUB/agent-status.$pane"
+  gm up >/dev/null 2>&1
+  assert_eq "$(db "SELECT blocked_at IS NULL FROM run WHERE id=1;")" 1 "working after the answer" || return 1
+  # Its turn ends: an ended run is never waiting, idle or not.
+  printf 'idle' >"$HERDR_STUB/agent-status.$pane"
+  run_stop 1 "Done." >/dev/null
+  run_ended 1 || fail "the run never ended" || return 1
+  gm up >/dev/null 2>&1; gm up >/dev/null 2>&1
+  assert_eq "$(db "SELECT count(*) FROM event WHERE kind='run.blocked';")" 2 "an ended run is not waiting"
+}
+
 t_dispatch_hands_a_posting_to_an_adventurer() {
   setup dispatch
   export GM_FOCUS=appt-v2

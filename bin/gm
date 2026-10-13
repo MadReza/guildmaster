@@ -4610,6 +4610,7 @@ gm_cmd_hook() {
 GM_WATCH_TIMEOUT=${GM_WATCH_TIMEOUT:-86400}
 GM_WATCH_POLL=${GM_WATCH_POLL:-2}
 GM_BLOCKED_LINES=${GM_BLOCKED_LINES:-15}
+GM_IDLE_GRACE=${GM_IDLE_GRACE:-30}
 GM_RUN_POLL=${GM_RUN_POLL:-2}
 GM_NUDGE_AFTER=${GM_NUDGE_AFTER:-120}
 GM_NUDGE_IDLE_GAP=${GM_NUDGE_IDLE_GAP:-1}
@@ -6884,6 +6885,8 @@ gm_cmd_runner() {
 INSERT INTO event(at, actor, kind, focus_id, detail) VALUES ($GM_NOW, 'party-leader', 'runner', $fid, $(gm_q "$detail"));
 UPDATE run SET blocked_at=NULL, blocked_summoned_at=NULL WHERE id=$id;
 COMMIT;"
+  # A question answered is idle for a moment before it works again: two more idle polls before it counts as waiting.
+  rm -f "$(gm_run_dir "$id")/pane.idle"
   if [ "$how" = keys ]; then
     # shellcheck disable=SC2086 # the keys, one word each
     out=$(gm_herdr "$s" pane send-keys "$pane" $keys)
@@ -6918,26 +6921,44 @@ SELECT 'stuck', r.id, r.started_at FROM run r WHERE r.focus_id=$fid AND r.ended_
 SQL
 }
 
-# gm_runs_blocked <focus id>: each live run in a herdr pane that herdr says is blocked (a permission prompt, a
-# question) is recorded as blocked once, with the last lines its pane shows, for the watch to summon its Party
-# Leader; one herdr says is no longer blocked is cleared, so its next block summons again. Asks herdr only while such
-# a run lives.
+# gm_runs_blocked <focus id>: each live run in a herdr pane that waits for an answer is recorded as blocked once,
+# with the last lines its pane shows, for the watch to summon its Party Leader; one that is working again is cleared,
+# so its next wait summons again. herdr says blocked only for a permission prompt: a question dialog shows as idle or
+# done (#57). An interactive Adventurer's first turn end ends its run, so a live run whose pane is idle or done on two
+# polls in a row waits too, once its pane has been seen working or GM_IDLE_GRACE seconds after gm first saw it, so the
+# seconds before its writ is submitted never count. The run's directory keeps what the polls saw: pane.seen (when),
+# pane.worked, pane.idle. Asks herdr only while such a run lives.
 gm_runs_blocked() {
-  local fid=$1 id s pane blocked st dir
+  local fid=$1 id s pane blocked st dir now wait working
   command -v "$GM_HERDR" >/dev/null 2>&1 || return 0
   while IFS=$'\t' read -r id s pane blocked; do
     [ -n "$pane" ] || continue
     st=$(gm_hj "$(gm_herdr "$s" agent get "$pane")" '$.result.agent.agent_status')
-    if [ "$st" = blocked ] && [ "$blocked" = 0 ]; then
-      dir=$(gm_run_dir "$id")
-      mkdir -p "$dir"
+    [ -n "$st" ] || continue
+    dir=$(gm_run_dir "$id")
+    mkdir -p "$dir"
+    now=$(date +%s)
+    [ -s "$dir/pane.seen" ] || printf '%s\n' "$now" >"$dir/pane.seen"
+    wait=0 working=0
+    case $st in
+      blocked) wait=1 ;;
+      idle | done)
+        if [ -e "$dir/pane.worked" ] || [ $((now - $(cat "$dir/pane.seen" 2>/dev/null || echo "$now"))) -ge "$GM_IDLE_GRACE" ]; then
+          if [ -e "$dir/pane.idle" ]; then wait=1; else : >"$dir/pane.idle"; fi
+        fi ;;
+      *)
+        working=1
+        : >"$dir/pane.worked"
+        rm -f "$dir/pane.idle" ;;
+    esac
+    if [ "$wait" = 1 ] && [ "$blocked" = 0 ]; then
       "$GM_HERDR" pane read "$pane" --source recent --lines 60 --session "$s" </dev/null 2>/dev/null |
         awk '{ l[NR] = $0 } NF { last = NR } END { for (i = 1; i <= last; i++) print l[i] }' | tail -n "$GM_BLOCKED_LINES" >"$dir/blocked.txt" || true
       gm_sql "BEGIN IMMEDIATE;
 UPDATE run SET blocked_at=$GM_NOW, blocked_summoned_at=NULL WHERE id=$id AND ended_at IS NULL AND blocked_at IS NULL;
 INSERT INTO event(at, actor, kind, focus_id, detail) SELECT $GM_NOW, 'gm', 'run.blocked', $fid, $(gm_q "run $id: its herdr pane $pane waits for an answer") WHERE changes()>0;
 COMMIT;"
-    elif [ -n "$st" ] && [ "$st" != blocked ] && [ "$blocked" = 1 ]; then
+    elif [ "$working" = 1 ] && [ "$blocked" = 1 ]; then
       gm_sql "BEGIN IMMEDIATE; UPDATE run SET blocked_at=NULL, blocked_summoned_at=NULL WHERE id=$id; COMMIT;"
     fi
   done <<<"$(gm_sql "SELECT id, pane_session, pane_id, blocked_at IS NOT NULL FROM run WHERE focus_id=$fid AND ended_at IS NULL AND pane_id IS NOT NULL AND pane_closed_at IS NULL;")"
