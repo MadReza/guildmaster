@@ -5,7 +5,7 @@ This file is the patron's. `gm` copied it into the Guildhall once and never over
 
 phase: intake — the ticket is understood and its first postings are on the board.
 phase: camp — the camp exists on the ticket's feature branch, and that branch is recorded.
-phase: build — postings are worked one at a time and committed on the feature branch.
+phase: build — postings are worked by Adventurers, in parallel when they do not need each other, and each accepted run is landed on the feature branch.
 phase: dev-test — the feature branch is pushed and merged into the shared development branch for testing.
 phase: merge-request — a merge request from the feature branch to integration is open.
 phase: fix-loop — bugs found in testing or review are fixed on the same feature branch and re-tested on development.
@@ -16,7 +16,7 @@ phase: closed — the ticket is finished and its camp can be removed.
 
 - **intake → camp:** `gm open` made the camp and recorded the branch.
 - **camp → build:** the patron has given at least one posting to work on.
-- **build → dev-test:** the postings meant for this round are done and committed; tests pass locally.
+- **build → dev-test:** the postings meant for this round are done and landed on the feature branch, no run holds work not landed, and tests pass locally.
 - **dev-test → merge-request:** the change works on the development environment, and the patron has said yes to opening the merge request.
 - **merge-request → fix-loop:** a bug or review comment arrives. It becomes a posting on this same focus.
 - **fix-loop → merge-request:** the fix is committed on the feature branch, pushed, and re-tested on development.

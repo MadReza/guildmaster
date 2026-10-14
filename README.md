@@ -92,26 +92,33 @@ Start a message with an id (`#1 also the edit form`) to add to that posting inst
 The status line shows the focus, phase, and posting counts.
 A Stop guard keeps the turn going until every posting has a recorded state.
 
-Work that changes the project goes to an Adventurer: the Party Leader runs `gm dispatch`, and a Claude Code session, in a herdr workspace of its own, listed right under the Party Leader's in the sidebar and titled with its run (so you can click into it, read its chat and type to it, while the Party Leader's pane stays whole), works the posting in the camp, on the feature branch, and commits there as you, with Claude Code's attribution off (`commit-attribution` in `guild.conf`).
+Work that changes the project goes to an Adventurer: the Party Leader runs `gm dispatch`, and a Claude Code session, in a herdr workspace of its own, listed right under the Party Leader's in the sidebar and titled with its run (so you can click into it, read its chat and type to it, while the Party Leader's pane stays whole), works the posting in a git worktree of its own beside the camp (`camps/<focus>.run-<n>` in the Guildhall), on its own branch `gm/run-<n>` made from the feature branch's tip, and commits there as you, with Claude Code's attribution off (`commit-attribution` in `guild.conf`).
+Contracts that do not need each other run side by side, up to 3 Adventurers across the guild at once (`adventurers` in `guild.conf`); one that needs another's work waits for it (`gm dispatch 13 --after 12`), and a run over the cap, or dispatched while a rate limit pauses dispatch, waits until gm can start it.
+A survey (`gm dispatch 12 --survey`) only finds things out, in a throwaway checkout, and its field report is kept in `reports/` in the Guildhall.
 It starts as Firstmate starts its crew, skipping Claude Code's permission prompts, so it does not stop at one: `adventurer-permission-mode` in `guild.conf` chooses `bypass` (the default), `auto` or `acceptEdits`, read at every dispatch, and in every mode gm's rules hook still denies a forbidden push, a new branch or a merge request.
 The Party Leader stays free while it works, so keep talking to it.
-When the run finishes, gm wakes the Party Leader, which reviews the result and the commit and tells you:
+When the run finishes, gm wakes the Party Leader, which reviews the result and the commits, lands what it accepts on the feature branch (`gm land <run>`) and tells you:
 
 ```
 appt-v2#1 fix-owner-empty dispatched: contract, run 1 on claude-opus-5-5[1m] at medium effort ("the owner field is empty…")
 appt-v2#1 fix-owner-empty run 1 finished: exit 0, 14 turns, $0.22 ("the owner field is empty…")
 appt-v2#1 fix-owner-empty run 1 check passed ("the owner field is empty…")
+appt-v2#1 fix-owner-empty landed: run 1 at 6b6a581 (fast-forward) ("the owner field is empty…")
 appt-v2#1 fix-owner-empty done: fixed in 6b6a581 ("the owner field is empty…")
 ```
 
-Before the Party Leader hears of a finished run, gm checks it from git, never from what the Adventurer says: the camp is still on the feature branch, no local branch was made, no remote branch moved but the feature branch (and the development branch, forward, when the playbook's `push:` lines allow it), and no commit sits off the feature branch's line.
+`gm land` lands one run at a time: by fast-forward when the feature branch has not moved since the run started, with a merge commit when another run landed first, never a rebase or a squash, so what lands is what gm checked.
+A conflict leaves the camp as it was and sends one correction run to resolve it; after a merge commit gm runs the rules file's `test-command:` and the feature branch is not pushed until it passes.
+A run's worktree and branch are removed once its work has landed, or was nothing; one holding commits not landed stays until it lands or the Party Leader drops it (`gm drop <run>`), and `gm close` refuses while one does.
+
+Before the Party Leader hears of a finished run, gm checks it from git, never from what the Adventurer says: its worktree is still on its own branch, which still holds where it started, no local branch was made, no remote branch moved by a push from this clone but the Party Leader's own, and no commit sits off its branch's line.
 A first failure on a posting sends a correction run at once, its writ (`prompts/adventurer/correction.md` in the Guildhall) quoting the broken rule and the evidence; a second makes the posting `needs-you`, for you, with the evidence.
 
 An Adventurer that stops at a permission prompt or a question waits for its Party Leader, not you: gm wakes the Party Leader with the prompt's last lines, and it answers what is safe and in the posting's scope from its own pane (`gm runner <run> --keys 1`, or `--text` for words), asking you only what is yours to decide.
 Each answer is recorded before it is sent.
 
 A job the Guildmaster hands a focus for you (`gm post --focus`, or `gm open --brief` for a new focus) wakes its Party Leader the same way, with nobody in its workspace.
-An Adventurer may edit, read and commit; to let it run the repository's build and tests, add `adventurer-allow:` lines to the repository's rules file in the Guildhall.
+An Adventurer may edit, read and commit, and pushes nothing; to let it run the repository's build and tests, add `adventurer-allow:` lines to the repository's rules file in the Guildhall, and `worktree-setup:` for what a fresh checkout needs first (`npm ci`).
 Pushes, in the Party Leader's camp and every Adventurer's, are answered by the playbook's `push:` lines and the rules file's `development-branch:`, `integration-branch:` and `protected-branch:` lines; until those are there every push is denied ([the lines to add](vision/step-3-design.md#the-lines-the-patron-adds)).
 
 #### Kill it and come back
@@ -186,6 +193,8 @@ Settings, from /Users/you/.guildmaster/guild.conf (gm config set <key> <value> c
 | `launch-grace` | seconds a fresh start may hold only a shell | 60 | `GM_LAUNCH_GRACE` |
 | `start-tries` | starts in a row before something is held | 3 | `GM_START_TRIES` |
 | `repo-roots` | folders where `gm repos` looks | the usual source folders | |
+| `adventurers` | how many Adventurers work at once, across every focus; more wait | 3 | |
+| `contract-model`, `survey-model` | the model a contract's or a survey's Adventurer works on (`party-leader`: its Party Leader's) | `party-leader`, `sonnet` | |
 | `adventurer-permission-mode` | `bypass` (`--dangerously-skip-permissions`), `auto` (`--permission-mode auto`), `acceptEdits`; a value gm cannot take refuses `gm dispatch` instead of being ignored | bypass | |
 | `editor` | the command the spyglass opens a changed file with (see The spyglass, below) | `open` | |
 
