@@ -124,9 +124,9 @@ t_schema_created_on_first_use() {
   [ ! -e "$GM_HALL" ] || return 1
   gm list >/dev/null || fail "first gm call failed"
   assert_eq "$(db 'PRAGMA journal_mode;')" wal "journal mode" &&
-    assert_eq "$(db 'PRAGMA user_version;')" 11 "schema version" &&
+    assert_eq "$(db 'PRAGMA user_version;')" 12 "schema version" &&
     assert_eq "$(db "SELECT group_concat(name, ' ') FROM (SELECT name FROM sqlite_master WHERE type='table' ORDER BY name);")" \
-      "endpoint event focus guard message model_sample open_span posting prompt_version run run_posting span span_link ticket" "tables"
+      "endpoint event focus focus_repo guard message model_sample open_span posting prompt_version run run_posting span span_link ticket" "tables"
 }
 
 t_home_is_configurable() {
@@ -967,8 +967,8 @@ t_migration_keeps_schema1_data() {
   for i in 1 2 3 4 5 6; do gm list --all >/dev/null 2>"$WORK/migrate/err$i" & done
   wait
   for i in 1 2 3 4 5 6; do assert_eq "$(cat "$WORK/migrate/err$i")" "" "migration $i ran clean"; done
-  assert_eq "$(db 'PRAGMA user_version;')" 11 "migrated to schema 11" &&
-    assert_eq "$(for t in $tables; do db "SELECT $(db "SELECT group_concat(name, ',') FROM pragma_table_info('$t') WHERE name NOT IN ('trace_id','span_id','span_start_ms','follows_id','closed_at','start_attempts','held_at','held_told','close_requested_at','origin','summoned_at','unheard_at');") FROM $t ORDER BY rowid;"; done)" "$before" "every schema-1 row kept as it was" &&
+  assert_eq "$(db 'PRAGMA user_version;')" 12 "migrated to schema 12" &&
+    assert_eq "$(for t in $tables; do db "SELECT $(db "SELECT group_concat(name, ',') FROM pragma_table_info('$t') WHERE name NOT IN ('trace_id','span_id','span_start_ms','follows_id','closed_at','start_attempts','held_at','held_told','close_requested_at','origin','summoned_at','unheard_at') AND NOT ('$t'='event' AND name='repo');") FROM $t ORDER BY rowid;"; done)" "$before" "every schema-1 row kept as it was" &&
     assert_eq "$(db "SELECT count(*) FROM posting WHERE trace_id IS NULL;")" 2 "old postings have no trace" &&
     assert_eq "$(db "SELECT group_concat(name, ' ') FROM (SELECT name FROM sqlite_master WHERE type='table' AND name IN ('span','span_link','open_span','prompt_version','model_sample') ORDER BY name);")" \
       "model_sample open_span prompt_version span span_link" "the tracing tables" &&
@@ -4651,6 +4651,245 @@ t_drop_close_and_the_muster_sweep() {
   GM_INTERACTIVE=1 bash "$GM" up >/dev/null 2>&1
   assert_eq "$(db "SELECT cleaned_at IS NOT NULL FROM run WHERE id=3;")" 1 "the muster cleaned up the landed run" &&
     assert_contains "$(gm roster)" "strays: appt-v2.run-99 (no run holds it)" "the roster reports a stray folder"
+}
+
+# ---- Focuses on several repositories (multi-repository focuses, slice 1) ----
+
+# remote_repo <name>: a clone whose origin is a bare remote holding its main; prints the clone's path.
+remote_repo() {
+  local dir
+  dir=$(new_repo "$1")
+  git init -q --bare -b main "$WORK/$1.git"
+  git -C "$dir" remote add origin "$WORK/$1.git"
+  git -C "$dir" push -q origin main 2>/dev/null
+  git -C "$dir" fetch -q origin
+  printf '%s' "$dir"
+}
+
+# remote_advance <name>: a teammate pushes a commit to the remote's main, which the clone has not fetched; prints it.
+remote_advance() {
+  local mate=$WORK/$1.mate
+  rm -rf "$mate"
+  git clone -q "$WORK/$1.git" "$mate" 2>/dev/null
+  git -C "$mate" -c user.name=m -c user.email=m@m commit -q --allow-empty -m "a teammate's work"
+  git -C "$mate" push -q origin main 2>/dev/null
+  git -C "$mate" rev-parse HEAD
+}
+
+t_open_several_repos_makes_a_folder_of_worktrees() {
+  export GM_HALL=$WORK/multi/hall
+  local api web out c
+  api=$(remote_repo multi/api)
+  web=$(remote_repo multi/web)
+  out=$(gm open crm-1 --repo "$api" --repo "$web" --ticket CRM-1 --no-launch 2>&1) || fail "open with two repositories: $out"
+  c=$GM_HALL/camps/crm-1
+  [ -d "$c" ] || fail "no camp folder"
+  ! git -C "$c" rev-parse --git-dir >/dev/null 2>&1 || fail "the camp is a git repository"
+  assert_eq "$(git -C "$c/projects/api" rev-parse --abbrev-ref HEAD)" feature/CRM-1 "api on its feature branch" &&
+    assert_eq "$(git -C "$c/projects/web" rev-parse --abbrev-ref HEAD)" feature/CRM-1 "web on its feature branch" &&
+    assert_eq "$(git -C "$api" rev-parse --abbrev-ref HEAD)" main "the patron's clone stays on its branch" &&
+    assert_eq "$(git -C "$c/projects/api" rev-parse --abbrev-ref '@{upstream}' 2>&1)" "fatal: no upstream configured for branch 'feature/CRM-1'" "a new branch tracks nothing yet" &&
+    assert_eq "$(json "SELECT json_extract(CAST(readfile('$c/.claude/settings.local.json') AS TEXT),'\$.env.GM_FOCUS');")" crm-1 "settings in the folder" &&
+    assert_eq "$(git -C "$c/projects/api" status --porcelain)" "" "the worktree is clean" &&
+    assert_contains "$out" "projects/web on branch feature/CRM-1" "says what it holds" || return 1
+  assert_eq "$(db "SELECT name||' '||repo||' '||camp||' '||branch||' '||phase||' '||position FROM focus_repo ORDER BY position;")" \
+    "api $api $c/projects/api feature/CRM-1 intake 1
+web $web $c/projects/web feature/CRM-1 intake 2" "a row for each repository" &&
+    assert_eq "$(db "SELECT camp||' '||repo||' '||branch FROM focus;")" "$c $api feature/CRM-1" "the focus's camp is the folder, and the first repository's" || return 1
+  out=$(cd "$c/projects/web" && unset GM_FOCUS && gm where)
+  assert_contains "$out" "Camp: $c, holding a worktree of each repository:" "where: the camp" &&
+    assert_contains "$out" "- api: $c/projects/api on branch feature/CRM-1 (repository $api), phase intake" "where: a line for api" &&
+    assert_contains "$out" "- web: $c/projects/web on branch feature/CRM-1 (repository $web), phase intake" "where: a line for web" || return 1
+  # Reopening rebuilds a missing project; a changed set of repositories is refused.
+  git -C "$web" worktree remove --force "$c/projects/web"
+  gm open crm-1 --no-launch >/dev/null 2>&1 || fail "reopen"
+  assert_eq "$(git -C "$c/projects/web" rev-parse --abbrev-ref HEAD)" feature/CRM-1 "web made again" || return 1
+  gm open crm-1 --repo "$api" --repo "$web" --no-launch >/dev/null 2>&1 || fail "reopen naming the same repositories"
+  local other
+  other=$(new_repo multi/other)
+  out=$(gm open crm-1 --repo "$api" --repo "$other" --no-launch 2>&1) && fail "a changed set of repositories was accepted"
+  assert_contains "$out" "gm repo add" "points at gm repo add"
+}
+
+t_open_starts_from_the_remote_tip_never_the_stale_clone() {
+  export GM_HALL=$WORK/fresh/hall
+  local api web tip_api tip_web stale
+  api=$(remote_repo fresh/api)
+  web=$(remote_repo fresh/web)
+  stale=$(git -C "$api" rev-parse main)
+  tip_api=$(remote_advance fresh/api)
+  tip_web=$(remote_advance fresh/web)
+  gm open two --repo "$api" --repo "$web" --no-launch >/dev/null 2>&1 || fail "open"
+  assert_eq "$(git -C "$GM_HALL/camps/two/projects/api" rev-parse HEAD)" "$tip_api" "api starts at the remote's tip" &&
+    assert_eq "$(git -C "$GM_HALL/camps/two/projects/web" rev-parse HEAD)" "$tip_web" "web too" &&
+    assert_eq "$(git -C "$api" rev-parse main)" "$stale" "the clone's own main is left as it was" || return 1
+  # One repository, the camp being the worktree, the same.
+  local one tip
+  one=$(remote_repo fresh/one)
+  tip=$(remote_advance fresh/one)
+  gm open one --repo "$one" --no-launch >/dev/null 2>&1 || fail "open one"
+  assert_eq "$(git -C "$GM_HALL/camps/one" rev-parse HEAD)" "$tip" "a single camp starts at the remote's tip" || return 1
+  # The remote's default is what origin says now, even when the clone's HEAD and origin/HEAD say another.
+  local dev devtip
+  dev=$(remote_repo fresh/dev)
+  git -C "$dev" checkout -q -b development
+  git -C "$dev" -c user.name=t -c user.email=t@t commit -q --allow-empty -m "local only"
+  git -C "$dev" push -q origin development 2>/dev/null
+  git --git-dir="$WORK/fresh/dev.git" symbolic-ref HEAD refs/heads/development
+  devtip=$(git -C "$dev" rev-parse development)
+  git -C "$dev" checkout -q main
+  gm open dev --repo "$dev" --no-launch >/dev/null 2>&1 || fail "open dev"
+  assert_eq "$(git -C "$GM_HALL/camps/dev" rev-parse HEAD)" "$devtip" "origin's own HEAD names the default" || return 1
+  # --base names a remote branch: it starts from origin's, not the clone's local branch of that name.
+  local base basetip
+  base=$(remote_repo fresh/base)
+  git -C "$base" push -q origin main:release 2>/dev/null
+  git -C "$base" branch release main
+  basetip=$(remote_advance fresh/base)
+  git --git-dir="$WORK/fresh/base.git" update-ref refs/heads/release "$basetip"
+  gm open based --repo "$base" --base release --no-launch >/dev/null 2>&1 || fail "open based"
+  assert_eq "$(git -C "$GM_HALL/camps/based" rev-parse HEAD)" "$basetip" "--base on origin" || return 1
+  # An existing remote feature branch is checked out tracking it.
+  local feat ftip
+  feat=$(remote_repo fresh/feat)
+  git -C "$feat" push -q origin main:feature/CRM-7 2>/dev/null
+  ftip=$(remote_advance fresh/feat)
+  git --git-dir="$WORK/fresh/feat.git" update-ref refs/heads/feature/CRM-7 "$ftip"
+  gm open crm-7 --repo "$feat" --ticket CRM-7 --no-launch >/dev/null 2>&1 || fail "open crm-7"
+  assert_eq "$(git -C "$GM_HALL/camps/crm-7" rev-parse HEAD)" "$ftip" "the remote feature branch's tip" &&
+    assert_eq "$(git -C "$GM_HALL/camps/crm-7" rev-parse --abbrev-ref '@{upstream}')" origin/feature/CRM-7 "tracking it"
+}
+
+t_open_refuses_when_the_fetch_fails_and_leaves_nothing() {
+  export GM_HALL=$WORK/nofetch/hall
+  local api web out
+  api=$(remote_repo nofetch/api)
+  web=$(remote_repo nofetch/web)
+  git -C "$web" remote set-url origin "$WORK/nofetch/gone.git"
+  out=$(gm open broken --repo "$api" --repo "$web" --ticket CRM-2 --no-launch 2>&1) && fail "opened without a fetch"
+  assert_contains "$out" "could not fetch origin in $web" "says the fetch failed" &&
+    [ ! -e "$GM_HALL/camps/broken" ] || fail "the camp was left behind"
+  assert_eq "$(git -C "$api" worktree list | wc -l | tr -d ' ')" 1 "no worktree of api left" &&
+    assert_eq "$(git -C "$api" branch --list 'feature/*')" "" "nor the branch made for it" &&
+    assert_eq "$(db "SELECT count(*) FROM focus;")" 0 "nothing recorded" &&
+    assert_eq "$(db "SELECT count(*) FROM ticket;")" 0 "no ticket attached" || return 1
+  out=$(gm open single --repo "$web" --no-launch 2>&1) && fail "a single camp opened without a fetch"
+  assert_contains "$out" "could not fetch origin" "the same with one repository" &&
+    [ ! -e "$GM_HALL/camps/single" ] || fail "the single camp was left behind"
+}
+
+t_open_refuses_two_repositories_of_one_name() {
+  export GM_HALL=$WORK/dupname/hall
+  local a b out
+  a=$(new_repo dupname/one/app)
+  b=$(new_repo dupname/two/app)
+  out=$(gm open dup --repo "$a" --repo "$b" --no-launch 2>&1) && fail "two repositories named app were accepted"
+  assert_contains "$out" "two repositories are named app" "says why" &&
+    [ ! -e "$GM_HALL/camps/dup" ] || fail "a camp was made"
+}
+
+t_repo_add_takes_one_more_repository() {
+  export GM_HALL=$WORK/repoadd/hall
+  local api web db3 tip out c
+  api=$(remote_repo repoadd/api)
+  web=$(remote_repo repoadd/web)
+  db3=$(remote_repo repoadd/db)
+  tip=$(remote_advance repoadd/db)
+  gm open crm-3 --repo "$api" --repo "$web" --ticket CRM-3 --no-launch >/dev/null 2>&1 || fail "open"
+  c=$GM_HALL/camps/crm-3
+  gm phase crm-3 build >/dev/null
+  out=$(cd "$c" && unset GM_FOCUS && gm repo add "$db3" 2>&1) || fail "repo add: $out"
+  assert_eq "$(git -C "$c/projects/db" rev-parse --abbrev-ref HEAD)" feature/CRM-3 "on the branch its rules name" &&
+    assert_eq "$(git -C "$c/projects/db" rev-parse HEAD)" "$tip" "from the remote's tip" &&
+    assert_eq "$(db "SELECT name||' '||position||' '||phase FROM focus_repo WHERE name='db';")" "db 3 intake" "recorded third, at the first phase" &&
+    assert_eq "$(db "SELECT phase FROM focus;")" intake "the focus is as far as its least advanced" &&
+    assert_eq "$(db "SELECT repo FROM event WHERE kind='focus.repo-added';")" db "the event names it" || return 1
+  out=$(gm repo add "$db3" --focus crm-3 2>&1) && fail "the same repository twice"
+  assert_contains "$out" "already works on" "says so" || return 1
+  local other
+  other=$(new_repo repoadd/elsewhere/api)
+  out=$(gm repo add "$other" --focus crm-3 2>&1) && fail "a second repository named api"
+  assert_contains "$out" "already holds a repository named api" "refused by name" || return 1
+  # A focus opened with one camp cannot take another yet.
+  local solo
+  solo=$(new_repo repoadd/solo)
+  gm open solo --repo "$solo" --no-launch >/dev/null 2>&1 || fail "open solo"
+  out=$(gm repo add "$other" --focus solo 2>&1) && fail "a single camp took a second repository"
+  assert_contains "$out" "opens with one camp" "says why" &&
+    assert_eq "$(db "SELECT count(*) FROM focus_repo WHERE focus_id=(SELECT id FROM focus WHERE name='solo');")" 1 "still one" || return 1
+  out=$(gm open solo --repo "$solo" --repo "$other" --no-launch 2>&1) && fail "gm open gave a single camp a second repository"
+  assert_contains "$out" "opens with one camp" "the same from gm open"
+}
+
+t_phase_per_repository_and_the_focus_follows_the_least() {
+  export GM_HALL=$WORK/repophase/hall
+  local api web
+  api=$(new_repo repophase/api)
+  web=$(new_repo repophase/web)
+  gm open crm-4 --repo "$api" --repo "$web" --ticket CRM-4 --no-launch >/dev/null 2>&1 || fail "open"
+  export GM_FOCUS=crm-4
+  assert_eq "$(gm phase build)" "crm-4 phase: build (3/8)" "every repository" &&
+    assert_eq "$(db "SELECT group_concat(phase, ' ') FROM focus_repo;")" "build build" "both set" || return 1
+  assert_eq "$(gm phase dev-test --repo api)" "crm-4 phase of api: dev-test (4/8); the focus: build" "one repository" &&
+    assert_eq "$(db "SELECT phase FROM focus;")" build "the focus stays at the least advanced" &&
+    assert_eq "$(db "SELECT repo FROM event WHERE kind='phase' ORDER BY id DESC LIMIT 1;")" api "the event names the repository" || return 1
+  gm phase dev-test --repo web >/dev/null
+  assert_eq "$(db "SELECT phase FROM focus;")" dev-test "once both are there, so is the focus" || return 1
+  gm phase camp --repo web >/dev/null
+  assert_eq "$(db "SELECT phase FROM focus;")" camp "and back with the one that went back" || return 1
+  local out
+  out=$(gm phase)
+  assert_contains "$out" "crm-4 phase: camp (2/8)" "the focus's" &&
+    assert_contains "$out" "  api: dev-test (4/8)" "api's" &&
+    assert_contains "$out" "  web: camp (2/8)" "web's" &&
+    assert_eq "$(gm phase --repo api | head -n 1)" "crm-4 phase of api: dev-test (4/8)" "one repository shown" &&
+    assert_contains "$(gm where)" "Phase: camp (2/8 of the playbook), the least advanced of its repositories." "where" || return 1
+  gm phase build --repo nope >/dev/null 2>&1 && fail "a repository the focus does not have"
+  assert_contains "$(gm statusline <<<'{}')" "phase 2/8 camp" "the status line reads the focus's phase"
+}
+
+# schema12_undo: the register as schema 11 had it, main's parallel runs and no focus_repo, no event.repo.
+schema12_undo() {
+  db "DROP TABLE focus_repo; ALTER TABLE event DROP COLUMN repo; PRAGMA user_version=11;"
+}
+
+# schema11_undo: the register as schema 10 had it, without schema 11's run columns either.
+schema11_undo() {
+  local c
+  db "DROP INDEX run_live;"
+  for c in worktree run_branch base_commit after_postings waiting after_summoned_at correction land_result land_evidence landed_at \
+    landed_commit tests_result tests_at tests_summoned_at trust_added cleaned_at rate_limited_until report; do
+    db "ALTER TABLE run DROP COLUMN $c;"
+  done
+  db "PRAGMA user_version=10;"
+}
+
+migrated_focus_repo() {
+  assert_eq "$(db 'PRAGMA user_version;')" 12 "migrated to schema 12" &&
+    assert_eq "$(db "SELECT name||' '||repo||' '||camp||' '||branch||' '||phase||' '||position FROM focus_repo;")" \
+      "repo $REPO $CAMP feature/CRM-8965 build 1" "one row from the focus's own columns" &&
+    assert_eq "$(gm phase dev-test)" "appt-v2 phase: dev-test (4/8)" "the phase still sets" &&
+    assert_eq "$(db "SELECT phase FROM focus_repo;")" dev-test "on its repository too"
+}
+
+t_migration_from_schema10_backfills_focus_repo() {
+  setup migrate10
+  export GM_FOCUS=appt-v2
+  gm phase build >/dev/null
+  schema12_undo
+  schema11_undo
+  gm list >/dev/null || fail "gm on a schema-10 register"
+  migrated_focus_repo &&
+    assert_eq "$(db "SELECT count(*) FROM pragma_table_info('run') WHERE name IN ('worktree','waiting','report');")" 3 "schema 11's run columns too"
+}
+
+t_migration_from_schema11_backfills_focus_repo() {
+  setup migrate11
+  export GM_FOCUS=appt-v2
+  gm phase build >/dev/null
+  schema12_undo
+  gm list >/dev/null || fail "gm on a schema-11 register"
+  migrated_focus_repo
 }
 
 t_shellcheck() {
