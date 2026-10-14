@@ -523,7 +523,8 @@ SQL
 # one repository of a focus: the patron's clone, the camp gm made of it, its feature branch and its own phase, in
 # the order given. Every focus so far works on one, and gets its row from its own columns, which stay: for a focus of
 # several, focus.camp is the folder holding them and focus.repo and focus.branch are the first one's. An event
-# records the repository it is about, when it is about one. Only adds.
+# records the repository it is about, when it is about one. A run records the repository it works in (multi-repository
+# focuses, slice 3), every run so far its focus's one; a run across every repository of its focus has none. Only adds.
 gm_schema12_sql() {
   cat <<'SQL'
 CREATE TABLE focus_repo(
@@ -543,6 +544,8 @@ ALTER TABLE event ADD COLUMN repo TEXT;
 INSERT INTO focus_repo(focus_id, name, repo, camp, branch, phase, position, opened_at)
   SELECT id, substr(rtrim(repo, '/'), length(rtrim(rtrim(repo, '/'), replace(rtrim(repo, '/'), '/', '')))+1), repo, camp, branch, phase, 1, opened_at
   FROM focus ORDER BY id;
+ALTER TABLE run ADD COLUMN repo TEXT;
+UPDATE run SET repo=(SELECT name FROM focus_repo WHERE focus_id=run.focus_id ORDER BY position LIMIT 1);
 PRAGMA user_version=12;
 SQL
 }
@@ -851,7 +854,7 @@ They are for advanced use, and for the Guildmaster.
   post [--focus F] [--slug S] [--from REF] [--follows REF] <words|->
                           add a posting to the current focus, or focus F (state received); one made anywhere
                           but in its own Party Leader's session is summoned to it by its watch
-  dispatch <posting>... [--survey] [--after <posting>]... [--brief TEXT|-] [--model M] [--effort E]
+  dispatch <posting>... [--repo NAME | --across] [--survey] [--after <posting>]... [--brief TEXT|-] [--model M] [--effort E]
                           hand started postings to one Adventurer: claude in a git worktree of its own beside
                           the camp (camps/<focus>.run-<n>), a contract on its own branch gm/run-<n> made from the
                           feature branch's tip, with a writ from prompts/adventurer/contract.md in the Guildhall,
@@ -861,13 +864,18 @@ They are for advanced use, and for the Guildmaster.
                           guild's cap (adventurers: 3 in guild.conf); beyond it, or while a rate limit pauses
                           dispatch, a run waits and gm starts it when it may. --after holds it, unmade, until
                           that posting has a run that landed. --survey finds things out and changes nothing,
-                          detached at the feature branch's tip, its field report kept in reports/ in the Guildhall
+                          detached at the feature branch's tip, its field report kept in reports/ in the Guildhall.
+                          In a focus of several repositories, --repo names the one a contract or survey works in,
+                          its worktree made from that clone; --across is a survey of them all, from the focus's
+                          folder with no worktree (writ from prompts/adventurer/across.md), only while no
+                          contract works or waits, and none starts beside it
   land <run>              accept a finished contract run and land it on the feature branch, one at a time: by
                           fast-forward when the branch has not moved, with a merge commit when it has, never a
                           rebase or squash; refuses a failed check, uncommitted work, or a dirty camp. A conflict
                           is aborted and sends one correction run; after a merge commit gm runs the rules file's
                           test-command: in the background, and the feature branch is not pushed until it passes.
-                          The run's worktree and branch are then removed
+                          The run's worktree and branch are then removed. In a focus of several repositories, it
+                          lands on its repository's feature branch, in projects/<name>
   drop <run>              discard a run: one waiting never starts, an ended one's worktree and branch are removed
                           with the commits they hold, recorded first
   runs [--all]            the focus's runs: postings, how each ended, model and effort, result, outcome, check
@@ -2034,12 +2042,14 @@ SELECT char(10)||'Runs (gm runs lists them all):' WHERE EXISTS (SELECT 1 FROM ru
   OR (kind='contract' AND worktree IS NOT NULL AND cleaned_at IS NULL AND landed_at IS NULL) OR tests_result IN ('running','failed')));
 SELECT '- run '||r.id||' for '||$(gm_run_postings_sql r.id)||CASE WHEN r.ended_at IS NULL AND r.waiting IS NOT NULL
     THEN ': waits to start ('||CASE r.waiting WHEN 'after' THEN 'for what --after names to land' WHEN 'paused' THEN 'dispatch is paused after a rate limit' ELSE 'for a free Adventurer' END||'); gm starts it'
+    WHEN r.ended_at IS NULL AND $(gm_run_across_sql r)
+    THEN ': an Adventurer is reading across the repositories from the focus''s folder since '||r.started_at||'; no contract starts until it finishes, and gm summons you then'
     WHEN r.ended_at IS NULL
-    THEN ': an Adventurer is working in its own worktree '||COALESCE(r.worktree,'(being made)')||' since '||r.started_at||'; gm summons you when it finishes'
+    THEN ': an Adventurer is working in its own worktree '||COALESCE(r.worktree,'(being made)')||$(gm_run_in_sql r)||' since '||r.started_at||'; gm summons you when it finishes'
       ||COALESCE('. It is blocked since '||r.blocked_at||', waiting for your answer: gm runner '||r.id||' shows its pane','')
     WHEN r.reviewed_at IS NULL
     THEN ' '||$(gm_run_end_sql r)||', not reviewed yet: read '||COALESCE(r.report,$(gm_q "$GM_HALL/runs/")||r.id||'/result.md')
-      ||CASE WHEN r.kind='contract' AND r.worktree IS NOT NULL THEN ' and its commits (git log -p '||(SELECT branch FROM focus WHERE id=r.focus_id)||'..gm/run-'||r.id||'), then gm land '||r.id||' or record what you decided on its posting'
+      ||CASE WHEN r.kind='contract' AND r.worktree IS NOT NULL THEN ' and its commits (git log -p '||COALESCE((SELECT branch FROM focus_repo WHERE focus_id=r.focus_id AND name=r.repo),(SELECT branch FROM focus WHERE id=r.focus_id))||'..gm/run-'||r.id||$(gm_run_in_sql r)||'), then gm land '||r.id||' or record what you decided on its posting'
         ELSE ', then record what you decided on its posting' END
     WHEN r.tests_result='running' THEN ' landed; gm is running the tests, and the feature branch is not pushed until they pass'
     WHEN r.tests_result='failed' THEN ' landed, and the tests failed after it: the feature branch is not pushed until they pass'
@@ -2194,7 +2204,8 @@ gm_cmd_statusline() {
       WHERE NOT EXISTS (SELECT 1 FROM (SELECT prompt_id, model, effort, cost_usd FROM model_sample WHERE session_id=$(gm_q "$sid") ORDER BY id DESC LIMIT 1) l
                         WHERE l.prompt_id IS $(gm_qn "$pid") AND l.model IS $(gm_qn "$mid") AND l.effort IS $(gm_qn "$effort") AND l.cost_usd IS $c);" >/dev/null 2>&1 || true
   fi
-  # An Adventurer's own line: its run and postings, and whose camp it works in; never its Party Leader's.
+  # An Adventurer's own line: its run and postings, and whose camp it works in; never its Party Leader's. In a focus of
+  # several repositories, the one it works in, or across them.
   if [[ ${GM_RUN:-} =~ ^[0-9]+$ ]]; then
     gm_sql "SELECT '⛨ adventurer · '||$(gm_q "$(gm_run_title "$GM_RUN" 2>/dev/null)")||' · '||$(gm_q "$(gm_run_branches "$GM_RUN" 2>/dev/null)")||' · for '||f.name
       ||CASE WHEN r.ended_at IS NOT NULL THEN ' · its run ended' WHEN r.blocked_at IS NOT NULL THEN ' · blocked: its Party Leader answers' ELSE '' END
@@ -4886,6 +4897,33 @@ gm_conf_value() {
 
 gm_run_dir() { printf '%s/runs/%s' "$GM_HALL" "$1"; }
 
+# A run across every repository of its focus (multi-repository focuses, slice 3) is a survey with no repository of its
+# own: it starts at the focus's folder, reads, builds and tests in each project, and changes none. A contract works in
+# one repository, its run's.
+gm_run_across_sql() { printf "(%s.kind='survey' AND %s.repo IS NULL)" "$1" "$1"; }
+
+# gm_run_cwd <run>: where the run works: its own worktree (slice 4), or, for a run across the repositories, the
+# focus's folder; a run from before worktrees, its repository's camp.
+gm_run_cwd() {
+  gm_sql "SELECT COALESCE(r.worktree, (SELECT camp FROM focus_repo WHERE focus_id=r.focus_id AND name=r.repo), f.camp) FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$1;"
+}
+
+# gm_run_place <run>: the run's repository as "camp<TAB>feature branch<TAB>clone<TAB>name": in a focus of several, its
+# project in projects/<name>, where gm makes its worktree and lands it; else the focus's camp. A run across the
+# repositories has none of its own, and gets the focus's.
+gm_run_place() {
+  gm_sql "SELECT COALESCE(fr.camp, f.camp), COALESCE(fr.branch, f.branch), COALESCE(fr.repo, f.repo), COALESCE(fr.name, '')
+    FROM run r JOIN focus f ON f.id=r.focus_id LEFT JOIN focus_repo fr ON fr.focus_id=r.focus_id AND fr.name=r.repo WHERE r.id=$1;"
+}
+
+# gm_run_branch_sql <run alias> <focus alias>: the feature branch the run lands on, its repository's.
+gm_run_branch_sql() { printf "COALESCE((SELECT branch FROM focus_repo WHERE focus_id=%s.focus_id AND name=%s.repo), %s.branch)" "$1" "$1" "$2"; }
+
+# gm_run_in_sql <run alias>: " in <repository>" for a run in a focus of several repositories, else nothing.
+gm_run_in_sql() {
+  printf "CASE WHEN %s.repo IS NOT NULL AND EXISTS (SELECT 1 FROM focus_repo WHERE focus_id=%s.focus_id AND camp<>(SELECT camp FROM focus WHERE id=%s.focus_id)) THEN ' in '||%s.repo ELSE '' END" "$1" "$1" "$1" "$1"
+}
+
 gm_uuid() {
   if command -v uuidgen >/dev/null 2>&1; then
     uuidgen | tr '[:upper:]' '[:lower:]'
@@ -4973,48 +5011,63 @@ gm_dispatch_model() {
     ORDER BY id DESC LIMIT 1;"
 }
 
-# gm_writ_render <template> <posting ids, comma-separated> <brief> <out>: the writ, the patron's template with its
-# slots filled and nothing added: {{posting}}, {{original_words}} (each posting's words and every addition,
-# verbatim), {{branch}}, {{phase}}, {{rules}} and {{playbook}} (paths), {{brief}}. A comment the template starts
-# with is the patron's note on the file, and stays out of the writ. A correction's writ (slice 3) also fills {{run}},
-# the run whose check failed, {{rule}}, the rules it broke, and {{evidence}}, the git facts that show it, from
-# <run> <rules file> <evidence file>.
+# gm_writ_render <template> <posting ids, comma-separated> <brief> <out> <repository, or '' across them>: the writ,
+# the patron's template with its slots filled and nothing added: {{posting}}, {{original_words}} (each posting's words
+# and every addition, verbatim), {{branch}}, {{phase}}, {{rules}} and {{playbook}} (paths), {{brief}}, and
+# {{repositories}}, one line each: its name, where it is, its feature branch, phase and rules file. The branch, phase
+# and rules are the repository's; across them, each one's, named. A comment the template starts with is the patron's
+# note on the file, and stays out of the writ. A correction's writ (slice 3) also fills {{run}}, the run whose check
+# failed, {{rule}}, the rules it broke, and {{evidence}}, the git facts that show it, from <run> <rules file>
+# <evidence file>.
 gm_writ_render() {
-  local template=$1 ids=$2 brief=$3 out=$4 bf t
+  local template=$1 ids=$2 brief=$3 out=$4 repo=$5 bf t fid kind folder name rrepo camp branch phase rf
+  local b='' ph='' rules='' list=''
   bf=$(gm_tmp)
   printf '%s' "${brief:-(none)}" >"$bf"
+  IFS=$'\t' read -r fid kind folder <<<"$(gm_sql "SELECT id, kind, camp FROM focus WHERE id=(SELECT focus_id FROM posting WHERE id IN ($ids) LIMIT 1);")"
+  while IFS=$'\t' read -r name rrepo camp branch phase; do
+    [ -n "$name" ] || continue
+    rf=$(gm_rules_path "$rrepo")
+    list="$list${list:+$'\n'}- $name: ${camp#"$folder"/}, on \`$branch\`, phase $phase, rules $rf"
+    if [ -z "$repo" ]; then
+      b="$b${b:+, }$name: $branch" ph="$ph${ph:+, }$name: $phase" rules="$rules${rules:+, }$rf"
+    elif [ "$name" = "$repo" ]; then
+      b=$branch ph=$phase rules=$rf list="- $name: ${camp#"$folder"/}, on \`$branch\`, phase $phase, rules $rf"
+      break
+    fi
+  done <<<"$(gm_sql "SELECT r.name, r.repo, r.camp, r.branch, COALESCE(r.phase, f.phase, 'unset') FROM focus_repo r JOIN focus f ON f.id=r.focus_id WHERE r.focus_id=$fid ORDER BY r.position;")"
   t="CAST(readfile($(gm_q "$template")) AS TEXT)"
-  [ -z "${5:-}" ] || t="replace(replace(replace($t, '{{run}}', $(gm_q "$5")), '{{rule}}', rtrim(CAST(readfile($(gm_q "$6")) AS TEXT),char(10))), '{{evidence}}', rtrim(CAST(readfile($(gm_q "$7")) AS TEXT),char(10)))"
+  [ -z "${6:-}" ] || t="replace(replace(replace($t, '{{run}}', $(gm_q "$6")), '{{rule}}', rtrim(CAST(readfile($(gm_q "$7")) AS TEXT),char(10))), '{{evidence}}', rtrim(CAST(readfile($(gm_q "$8")) AS TEXT),char(10)))"
   gm_sql >/dev/null <<SQL
-WITH f AS (SELECT f.* FROM focus f WHERE f.id=(SELECT focus_id FROM posting WHERE id IN ($ids) LIMIT 1)),
-words AS (SELECT group_concat(block, char(10)||char(10)) AS t FROM (
+WITH words AS (SELECT group_concat(block, char(10)||char(10)) AS t FROM (
   SELECT '### '||g.name||'#'||p.num||' '||p.slug||char(10)||char(10)||p.words
     ||COALESCE((SELECT group_concat(char(10)||char(10)||'The patron added, '||m.at||':'||char(10)||char(10)||m.words, '')
                 FROM (SELECT at, words FROM message WHERE posting_id=p.id AND disposition='addition' ORDER BY id) m),'') AS block
   FROM posting p JOIN focus g ON g.id=p.focus_id WHERE p.id IN ($ids) ORDER BY p.num))
 SELECT writefile($(gm_q "$out"),
-  replace(replace(replace(replace(replace(replace(replace((SELECT CASE WHEN t GLOB '<!--*-->*' THEN ltrim(substr(t,instr(t,'-->')+3),char(10)) ELSE t END
+  replace(replace(replace(replace(replace(replace(replace(replace((SELECT CASE WHEN t GLOB '<!--*-->*' THEN ltrim(substr(t,instr(t,'-->')+3),char(10)) ELSE t END
     FROM (SELECT $t AS t)),
     '{{posting}}', (SELECT group_concat(CASE WHEN n=1 THEN g.name ELSE '' END||'#'||p.num||' '||p.slug, ', ') FROM
       (SELECT id, row_number() OVER (ORDER BY num) n FROM posting WHERE id IN ($ids)) x JOIN posting p ON p.id=x.id JOIN focus g ON g.id=p.focus_id)),
     '{{original_words}}', (SELECT t FROM words)),
-    '{{branch}}', (SELECT branch FROM f)),
-    '{{phase}}', (SELECT COALESCE(phase,'unset') FROM f)),
-    '{{rules}}', $(gm_q "$(gm_rules_path "$(gm_sql "SELECT repo FROM focus WHERE id=(SELECT focus_id FROM posting WHERE id IN ($ids) LIMIT 1);")")")),
-    '{{playbook}}', $(gm_q "$(gm_playbook_path "$(gm_sql "SELECT kind FROM focus WHERE id=(SELECT focus_id FROM posting WHERE id IN ($ids) LIMIT 1);")")")),
+    '{{branch}}', $(gm_q "$b")),
+    '{{phase}}', $(gm_q "$ph")),
+    '{{rules}}', $(gm_q "$rules")),
+    '{{repositories}}', $(gm_q "$list")),
+    '{{playbook}}', $(gm_q "$(gm_playbook_path "$kind")")),
     '{{brief}}', CAST(readfile($(gm_q "$bf")) AS TEXT)));
 SQL
   rm -f "$bf"
   [ -s "$out" ]
 }
 
-# gm_run_settings <run> <focus> <rules file> <out>: an Adventurer's own settings, passed with --settings while
+# gm_run_settings <run> <out> [pane]: an Adventurer's own settings, passed with --settings while
 # --setting-sources user,project leaves the camp's (the Party Leader's) out: no charter, capture, Stop guard or status
 # line. Slice 1's permissions: edits, the read-only and local git commands, and each adventurer-allow: rule in the
 # repository's rules file (its build and test commands); never a merge, rebase, new branch or merge request. What it
 # predictably reads is allowed too, so its Party Leader is not asked: the rules file and the playbooks in the
 # Guildhall, the issue and pull request views of gh and gh-axi, ps and shellcheck, and its own scratchpad, which
-# Claude Code keeps at /tmp/claude-<uid>/<the camp's path, each other character a dash>/<session id>/. A push is the
+# Claude Code keeps at /tmp/claude-<uid>/<where it works, each other character a dash>/<session id>/. A push is the
 # rules hook's to answer (slice 2): it allows what the playbook allows, and denies the rest; a deny rule here would
 # outweigh its allow. Claude Code's commit attribution is off unless guild.conf says commit-attribution: on. Its
 # status line names its run and postings (gm statusline with GM_RUN), never its Party Leader's. In bypass it never
@@ -5024,18 +5077,29 @@ SQL
 # With pane (an Adventurer in a herdr pane, not claude -p), Stop and StopFailure run gm hook run-stop, which records
 # the run's end, since no result event comes. It works in its run's own worktree (slice 4), where its scratchpad is
 # kept too. A survey changes nothing: Edit, Write, MultiEdit, NotebookEdit and git add and commit are denied it, deny
-# rules that hold in every permission mode, and its rules hook denies a commit as well.
+# rules that hold in every permission mode, and its rules hook denies a commit as well. A run's rules file and
+# adventurer-allow: lines are its repository's. A run across the repositories (multi-repository focuses, slice 3) works
+# at the focus's folder, with no worktree, reads every rules file and runs every repository's adventurer-allow:
+# commands, never commits, and has the rules hook on its edits too, which keeps it out of every tracked file.
 gm_run_settings() {
-  local id=$1 focus=$2 rules=$3 out=$4 pane=${5:-} allow='' rule attribution='' env stop='' sid wt scratch title kind
-  local change=('Bash(git add*)' 'Bash(git commit*)')
-  IFS=$'\t' read -r sid kind <<<"$(gm_sql "SELECT session_id, kind FROM run WHERE id=$id;")"
-  wt=$(gm_run_worktree_path "$focus" "$id")
+  local id=$1 out=$2 pane=${3:-} allow='' rule attribution='' env stop='' sid wt scratch title kind focus repo rules='' f
+  local change=('Bash(git add*)' 'Bash(git commit*)') edits=''
+  IFS=$'\t' read -r sid kind focus repo <<<"$(gm_sql "SELECT r.session_id, r.kind, f.name, COALESCE(r.repo,'') FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
+  while IFS= read -r f; do
+    [ -z "$f" ] || rules="$rules${rules:+$'\n'}$(gm_rules_path "$f")"
+  done <<<"$(gm_sql "SELECT repo FROM focus_repo WHERE focus_id=(SELECT focus_id FROM run WHERE id=$id) AND ($(gm_q "$repo")='' OR name=$(gm_q "$repo")) ORDER BY position;")"
+  if [ -n "$repo" ]; then
+    wt=$(gm_run_worktree_path "$focus" "$id")
+  else
+    wt=$(gm_focus_field "$focus" camp)
+    wt=$(cd "$wt" 2>/dev/null && pwd -P || printf '%s' "$wt")
+  fi
   scratch="claude-$(id -u)/$(printf '%s' "$wt" | sed 's/[^A-Za-z0-9]/-/g')/$sid"
   title=$(gm_run_title "$id")
   [ "$kind" != survey ] || change=()
   for rule in 'Bash(git status*)' 'Bash(git diff*)' 'Bash(git log*)' 'Bash(git show*)' "${change[@]+"${change[@]}"}" \
     'Bash(git rev-parse*)' 'Bash(git ls-files*)' 'Bash(git grep*)' 'Bash(git blame*)' \
-    "Read(/$rules)" "Read(/$GM_HALL/playbooks/**)" \
+    "Read(/$GM_HALL/playbooks/**)" \
     'Bash(gh issue view*)' 'Bash(gh issue list*)' 'Bash(gh pr view*)' 'Bash(gh pr list*)' 'Bash(gh pr diff*)' \
     'Bash(gh-axi issue view*)' 'Bash(gh-axi issue list*)' 'Bash(gh-axi pr view*)' 'Bash(gh-axi pr list*)' \
     'Bash(ps)' 'Bash(ps *)' 'Bash(shellcheck *)' \
@@ -5043,13 +5107,19 @@ gm_run_settings() {
     "Read(//private/tmp/$scratch/**)" "Edit(//private/tmp/$scratch/**)" "Write(//private/tmp/$scratch/**)"; do
     allow="$allow${allow:+, }$(gm_q "$rule")"
   done
+  while IFS= read -r f; do
+    [ -z "$f" ] || allow="$allow, $(gm_q "Read(/$f)")"
+  done <<<"$rules"
   while IFS= read -r rule; do
     [ -z "$rule" ] || allow="$allow, $(gm_q "$rule")"
-  done <<<"$(sed -n 's/^adventurer-allow:[[:space:]]*\(.*[^[:space:]]\)[[:space:]]*$/\1/p' "$rules" 2>/dev/null)"
-  local deny=''
-  for rule in 'Bash(git merge*)' 'Bash(git rebase*)' 'Bash(git reset --hard*)' 'Bash(git checkout -b*)' \
+  done <<<"$(while IFS= read -r f; do [ -z "$f" ] || sed -n 's/^adventurer-allow:[[:space:]]*\(.*[^[:space:]]\)[[:space:]]*$/\1/p' "$f" 2>/dev/null; done <<<"$rules" | awk '!seen[$0]++')"
+  local deny='' denies=('Bash(git merge*)' 'Bash(git rebase*)' 'Bash(git reset --hard*)' 'Bash(git checkout -b*)' \
     'Bash(git checkout -B*)' 'Bash(git switch*)' 'Bash(git branch*)' 'Bash(git worktree*)' 'Bash(git tag*)' 'Bash(glab *)' \
-    'Bash(gh pr create*)' 'Bash(gh pr merge*)' 'Bash(gh pr review*)' 'Bash(gh-axi pr create*)' 'Bash(gh-axi pr merge*)' 'Bash(gh-axi pr review*)'; do
+    'Bash(gh pr create*)' 'Bash(gh pr merge*)' 'Bash(gh pr review*)' 'Bash(gh-axi pr create*)' 'Bash(gh-axi pr merge*)' 'Bash(gh-axi pr review*)')
+  # Across the repositories nothing is committed or pushed, so no deny here outweighs an allow of the rules hook's.
+  # (A survey's git add and commit are denied below.)
+  [ -n "$repo" ] || denies+=('Bash(git push*)' 'Bash(git stash*)' 'Bash(git restore*)')
+  for rule in "${denies[@]}"; do
     deny="$deny${deny:+, }$(gm_q "$rule")"
   done
   if [ "$kind" = survey ]; then
@@ -5061,11 +5131,13 @@ gm_run_settings() {
     stop="json_array(json_object('hooks', json_array(json_object('type','command','command', $(gm_q "$env run-stop"), 'timeout', 30))))"
     stop=", 'Stop', $stop, 'StopFailure', $stop"
   fi
+  [ -n "$repo" ] || edits=", json_object('matcher', 'Edit|Write|MultiEdit|NotebookEdit', 'hooks', json_array(
+    json_object('type','command','command', $(gm_q "$env rules"), 'timeout', 10)))"
   sqlite3 -batch :memory: "SELECT writefile($(gm_q "$out"), json_object(
   'env', json_object('GM_HALL', $(gm_q "$GM_HALL"), 'GM_FOCUS', $(gm_q "$focus"), 'GM_RUN', $(gm_q "$id"), 'GM_RUN_TITLE', $(gm_q "$title")),
   'permissions', json_object('allow', json_array($allow), 'deny', json_array($deny)),
   'hooks', json_object('PreToolUse', json_array(json_object('matcher', 'Bash', 'hooks', json_array(
-    json_object('type','command','command', $(gm_q "$env rules"), 'timeout', 10))))$stop),
+    json_object('type','command','command', $(gm_q "$env rules"), 'timeout', 10)))$edits)$stop),
   'statusLine', json_object('type','command','command', $(gm_q "${env% hook} statusline"), 'refreshInterval', 5),
   'skipDangerousModePermissionPrompt', json('true'), 'feedbackDrafts', 'off'$attribution));" >/dev/null
 }
@@ -5296,6 +5368,7 @@ gm_rules_target() {
   fi
   [ -n "$pick" ] || pick=$first
   IFS=$'\t' read -r name repo camp branch phase <<<"$pick"
+  GM_R_REPO=$name
   [ -z "$GM_R_LAYERED" ] || GM_R_LABEL=$name
   [ "$pick" != "${GM_R_PICKED:-}" ] || return 0
   GM_R_PICKED=$pick GM_R_FEATURE=$branch GM_R_PHASE=$phase
@@ -5306,11 +5379,12 @@ gm_rules_target() {
 # naming where to go.
 gm_rules_at_folder() {
   local projects
-  projects=$(printf '%s\n' "$GM_R_ROWS" | awk -F '\t' -v f="$GM_R_FOLDER/" 'NF { c = $3; if (index(c, f) == 1) c = substr(c, length(f) + 1); print c }' | paste -sd ' ' - | sed 's/ /, /g')
+  projects=$(printf '%s\n' "$GM_R_ROWS" | awk -F '\t' -v f="$GM_R_FOLDER/" 'NF && index($3, f) == 1 { print substr($3, length(f) + 1) }' | paste -sd ' ' - | sed 's/ /, /g')
   gm_rules_set deny "gm rules: $GM_R_FOLDER is the focus's folder, not a repository; cd into the project the change is for first ($projects), and its own rules answer there."
 }
 
-# gm_rules_holders: the focus's contract runs that are live, or whose run branch holds commits not landed on the
+# gm_rules_holders: the focus's contract runs (in a focus of several repositories, those of the repository the command
+# is about, GM_R_REPO) that are live, or whose run branch holds commits not landed on the
 # feature branch or whose worktree holds uncommitted changes, as "run 9, run 10"; read only when a command would rewrite
 # or force the feature branch. A run made from its old tip would bring back what a rewrite removed.
 gm_rules_holders() {
@@ -5320,18 +5394,20 @@ gm_rules_holders() {
     [ -n "$id" ] || continue
     if [ "$rb" = - ] || [ -n "$(gm_run_holds "$id")" ]; then held="$held${held:+, }run $id"; fi
   done <<<"$(gm_sql "SELECT id, CASE WHEN ended_at IS NULL THEN '-' ELSE COALESCE(run_branch,'') END, COALESCE(worktree,'') FROM run
-    WHERE focus_id=$GM_R_FID AND kind='contract' AND ((ended_at IS NULL AND waiting IS NULL)
+    WHERE focus_id=$GM_R_FID AND kind='contract' AND (repo IS NULL OR repo=$(gm_q "${GM_R_REPO:-}") OR $(gm_q "${GM_R_REPO:-}")='')
+      AND ((ended_at IS NULL AND waiting IS NULL)
       OR (ended_at IS NOT NULL AND worktree IS NOT NULL AND cleaned_at IS NULL AND landed_at IS NULL)) ORDER BY id;" 2>/dev/null || true)"
   printf '%s' "$held"
 }
 
-# gm_rules_tests_hold: the tests gm runs after a landing are running, or failed, on the focus's feature branch; prints
+# gm_rules_tests_hold: the tests gm runs after a landing are running, or failed, on the feature branch (its
+# repository's, GM_R_REPO); prints
 # which, with the run, or nothing.
 gm_rules_tests_hold() {
   [ -n "${GM_R_FID:-}" ] || return 0
   gm_sql "SELECT CASE tests_result WHEN 'running' THEN 'the tests gm runs after run '||id||' landed are still running'
     WHEN 'failed' THEN 'the tests failed after run '||id||' landed' END FROM run WHERE focus_id=$GM_R_FID AND tests_result IS NOT NULL
-    ORDER BY landed_at DESC, id DESC LIMIT 1;" 2>/dev/null || true
+    AND (repo IS NULL OR repo=$(gm_q "${GM_R_REPO:-}") OR $(gm_q "${GM_R_REPO:-}")='') ORDER BY landed_at DESC, id DESC LIMIT 1;" 2>/dev/null || true
 }
 
 # gm_rules_push <dir> <args after push>
@@ -5456,6 +5532,10 @@ gm_rules_git() {
   done
   sub=${1:-}
   [ $# = 0 ] || shift
+  if [ -n "${GM_R_ACROSS:-}" ]; then
+    gm_rules_across_git "$sub" "$@"
+    return
+  fi
   gm_rules_target "$dir"
   if [ -n "$GM_R_AT_FOLDER" ]; then
     case $sub in
@@ -5513,6 +5593,51 @@ gm_rules_git_sub() {
   case $sub in rebase | reset) ;; *) return 0 ;; esac
   [ "$GM_RV" != deny ] || return 0
   gm_rules_feature_rewrite "$dir" "$sub" "$@"
+}
+
+# A run across the repositories reads, builds and tests, and changes none (multi-repository focuses, slice 3): a git
+# command that would commit, push, make or switch a branch, or change a tracked file, is denied wherever it runs.
+gm_rules_across_git() {
+  local sub=$1 a
+  shift
+  case $sub in
+    push | commit | merge | rebase | cherry-pick | revert | am | pull | tag | reset | checkout | switch | restore | stash | \
+      apply | rm | mv | clean | worktree | add | update-ref | notes | replace | filter-branch | gc | prune) ;;
+    branch)
+      for a in "$@"; do
+        case $a in
+          -l | --list | -a | --all | -r | --remotes | -v | -vv | --verbose | --show-current | --contains* | --no-contains* | \
+            --merged* | --no-merged* | --points-at* | --format* | --sort* | --column* | --no-column | --color* | --no-color) ;;
+          *) sub="branch $a"; break ;;
+        esac
+      done
+      [ "$sub" != branch ] || return 0 ;;
+    *) return 0 ;;
+  esac
+  gm_rules_set deny "gm rules: run $GM_RUN reads across the focus's repositories and changes none of them, so no git $sub; say in your report what should change and in which repository, and a contract there makes it."
+}
+
+# gm_rules_across_edit <path>: a run across the repositories edits no tracked file of any of them, and nothing in the
+# focus's folder outside its projects (the Party Leader's); what a build makes, untracked, and its scratchpad are its own.
+gm_rules_across_edit() {
+  local path=$1 name repo camp d cp fp
+  fp=$(cd "$GM_R_FOLDER" 2>/dev/null && pwd -P) || fp=$GM_R_FOLDER
+  while IFS=$'\t' read -r name repo camp _; do
+    [ -n "$name" ] || continue
+    for d in "$camp" "$repo"; do
+      cp=$(cd "$d" 2>/dev/null && pwd -P) || cp=$d
+      case $path/ in
+        "$d"/* | "$cp"/*)
+          gm_git "$d" ls-files --error-unmatch -- "$path" >/dev/null 2>&1 || return 0
+          gm_guard_json deny "gm rules: run $GM_RUN reads across the focus's repositories and changes none of them: $path is tracked in $name. Say in your report what should change, and a contract in $name makes it."
+          return 0 ;;
+      esac
+    done
+  done <<<"$GM_R_ROWS"
+  case $path/ in
+    "$GM_R_FOLDER"/* | "$fp"/*)
+      gm_guard_json deny "gm rules: run $GM_RUN reads across the focus's repositories, and $GM_R_FOLDER outside its projects is the Party Leader's; write what you find in your report." ;;
+  esac
 }
 
 # gm_rules_dev_rewrite <dir> <rebase|reset> <args>: denies a rebase or a hard reset of the shared development branch.
@@ -5640,6 +5765,7 @@ gm_rules_simple() {
 gm_hook_rules() {
   local input tool focus fid camp branch repo kind phase cmd cwd path b
   local GM_R_ROWS GM_R_FOLDER GM_R_LAYERED='' GM_R_PICKED='' GM_R_AT_FOLDER='' GM_R_LABEL='' GM_R_PLAYBOOK_PATH
+  local GM_R_ACROSS='' GM_R_REPO=''
   input=$(cat)
   focus=${GM_FOCUS:-}
   [ -n "$focus" ] && [ -s "$GM_DB" ] || return 0
@@ -5654,8 +5780,13 @@ gm_hook_rules() {
   GM_R_ROWS=$(gm_sql "SELECT name, repo, camp, branch, COALESCE(phase,'') FROM focus_repo WHERE focus_id=$fid ORDER BY position;" 2>/dev/null || true)
   [ -n "$GM_R_ROWS" ] || GM_R_ROWS=$(basename "$repo")$'\t'$repo$'\t'$camp$'\t'$branch$'\t'$phase
   ! printf '%s\n' "$GM_R_ROWS" | cut -f 3 | grep -qvxF "$camp" || GM_R_LAYERED=1
+  # A run's own worktree is its repository's too, for the Adventurer working there and the Party Leader reviewing it.
+  GM_R_ROWS="$GM_R_ROWS$(gm_sql "SELECT char(10)||fr.name||char(9)||fr.repo||char(9)||r.worktree||char(9)||fr.branch||char(9)||COALESCE(fr.phase,'')
+    FROM run r JOIN focus_repo fr ON fr.focus_id=r.focus_id AND fr.name=r.repo WHERE r.focus_id=$fid AND r.worktree IS NOT NULL AND r.cleaned_at IS NULL ORDER BY r.id;" 2>/dev/null || true)"
   if [[ ${GM_RUN:-} =~ ^[0-9]+$ ]]; then
     GM_R_KIND=$(gm_sql "SELECT kind FROM run WHERE id=$GM_RUN;" 2>/dev/null || true)
+    # A run across the repositories changes nothing anywhere.
+    [ "$(gm_sql "SELECT $(gm_run_across_sql r) FROM run r WHERE r.id=$GM_RUN AND r.focus_id=$fid;" 2>/dev/null)" != 1 ] || GM_R_ACROSS=1
   elif [ -z "${GM_RUN:-}" ] && gm_locked "land-$focus"; then
     GM_R_LANDING=1
   fi
@@ -5676,13 +5807,17 @@ gm_hook_rules() {
         done
       fi ;;
     *)
-      [ -n "$GM_R_LANDING" ] || return 0
+      [ -n "$GM_R_LANDING" ] || [ -n "$GM_R_ACROSS" ] || return 0
       path=$(gm_guard_field "$input" tool_input.file_path)
       [ -n "$path" ] || path=$(gm_guard_field "$input" tool_input.notebook_path)
       case $path in /*) ;; *) path=$cwd/$path ;; esac
-      case $path/ in
-        "$camp"/*) gm_guard_json deny "gm rules: gm is landing a run on the feature branch in this camp; change no file in it until it has, in a few seconds." ;;
-      esac ;;
+      if [ -n "$GM_R_ACROSS" ]; then
+        gm_rules_across_edit "$path"
+      else
+        case $path/ in
+          "$camp"/*) gm_guard_json deny "gm rules: gm is landing a run on the feature branch in this camp; change no file in it until it has, in a few seconds." ;;
+        esac
+      fi ;;
   esac
   return 0
 }
@@ -5785,7 +5920,7 @@ gm_claude_untrust() {
 }
 
 gm_cmd_dispatch() {
-  local refs=() after=() model='' effort='' brief='' kind=contract r pid pf st num canon focus fid ids='' aids='' a
+  local refs=() after=() model='' effort='' brief='' kind=contract repo='' across=0 r pid pf st num canon focus fid ids='' aids='' a names
   while [ $# -gt 0 ]; do
     case $1 in
       --model) model=${2:?--model needs a model}; shift 2 ;;
@@ -5796,11 +5931,13 @@ gm_cmd_dispatch() {
         shift 2 ;;
       --survey) kind=survey; shift ;;
       --after) after+=("${2:?--after needs the posting this run needs landed first}"); shift 2 ;;
+      --repo) repo=${2:?--repo needs the name of one repository of the focus}; shift 2 ;;
+      --across) across=1 kind=survey; shift ;;
       -*) gm_die "dispatch: unknown option $1" ;;
       *) refs+=("$1"); shift ;;
     esac
   done
-  [ "${#refs[@]}" -gt 0 ] || gm_die "dispatch: gm dispatch <posting>... [--survey] [--after <posting>]... [--brief TEXT|-] [--model M] [--effort E]"
+  [ "${#refs[@]}" -gt 0 ] || gm_die "dispatch: gm dispatch <posting>... [--repo NAME | --across] [--survey] [--after <posting>]... [--brief TEXT|-] [--model M] [--effort E]"
   gm_db_ensure
   focus=$(gm_require_focus)
   fid=$(gm_focus_id "$focus")
@@ -5818,6 +5955,20 @@ gm_cmd_dispatch() {
     case ",$ids," in *",$pid,"*) gm_die "dispatch: --after $a: $canon is one of this run's own postings" ;; esac
     case ",$aids," in *",$pid,"*) ;; *) aids=${aids:+$aids,}$pid ;; esac
   done
+  # A contract or a survey works in one repository: in a focus of several, the one --repo names; a focus of one has
+  # only its own. A run across them (--across) is a survey of every one, from the focus's folder.
+  names=$(gm_sql "SELECT group_concat(name, ', ') FROM (SELECT name FROM focus_repo WHERE focus_id=$fid ORDER BY position);")
+  if [ "$across" = 1 ]; then
+    [ -z "$repo" ] || gm_die "dispatch: --across reads every repository of $focus, and --repo names one; give one or the other"
+    gm_focus_layered "$focus" || gm_die "dispatch: $focus works on one repository, $names, so there is nothing to read across; dispatch a survey there (--survey)"
+  elif [ -n "$repo" ]; then
+    [ -n "$(gm_sql "SELECT 1 FROM focus_repo WHERE focus_id=$fid AND name=$(gm_q "$repo");")" ] ||
+      gm_die "dispatch: $focus has no repository named $repo (it has: $names)"
+  elif gm_focus_layered "$focus"; then
+    gm_die "dispatch: $focus works on several repositories ($names); name the one this $kind $([ "$kind" = survey ] && printf reads || printf changes) with --repo <name>, or read across them all with --across"
+  else
+    repo=$names
+  fi
   if [ -n "$effort" ]; then
     gm_conf_norm effort "$effort" || gm_die "dispatch: --effort is low, medium, high, xhigh or max"
   else
@@ -5828,53 +5979,82 @@ gm_cmd_dispatch() {
   else
     model=$(gm_dispatch_model "$focus" "$kind")
   fi
-  gm_dispatch_start "$focus" "$ids" "$brief" "$model" "$effort" '' '' '' "$kind" "$aids"
+  [ "$across" = 0 ] || repo=''
+  gm_dispatch_start "$focus" "$ids" "$brief" "$model" "$effort" "$repo" '' '' '' "$kind" "$aids"
   gm_dispatch_says "$GM_DISPATCHED"
 }
 
 # What gm dispatch says of the run it recorded, by where it stands: started, or waiting and for what.
 gm_dispatch_says() {
-  local id=$1 waiting kind wt rb
-  IFS=$'\t' read -r waiting kind <<<"$(gm_sql "SELECT COALESCE(waiting,'-'), kind FROM run WHERE id=$id;")"
-  wt=$(gm_run_worktree_path "$(gm_sql "SELECT f.name FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")" "$id")
+  local id=$1 waiting kind wt rb focus repo from=''
+  IFS=$'\t' read -r waiting kind focus repo <<<"$(gm_sql "SELECT COALESCE(r.waiting,'-'), r.kind, f.name, COALESCE(r.repo,'') FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
+  wt=$(gm_run_worktree_path "$focus" "$id")
   rb="its own branch gm/run-$id"
   [ "$kind" != survey ] || rb="a detached checkout of the feature branch's tip; it changes nothing, and its field report is kept in the Guildhall"
-  case $waiting in
-    -) printf 'Run %s works in a worktree of its own, %s, on %s; its writ is %s. gm summons you when it finishes: until then the posting stays active, and you can talk with the patron.\n' "$id" "$wt" "$rb" "$(gm_run_dir "$id")/writ.md" ;;
-    after) printf 'Run %s waits, unmade, until what it needs has landed; gm then makes its worktree from the tip that holds it and starts it.\n' "$id" ;;
-    paused) printf 'Run %s waits: dispatch is paused after a rate limit; gm starts it when the pause ends.\n' "$id" ;;
+  ! gm_focus_layered "$focus" || from=", made from projects/$repo"
+  case $waiting/$repo in
+    -/)
+      printf 'Run %s reads across every repository of %s (%s), from its folder with no worktree, and changes none; its writ is %s. gm summons you when it finishes: until then the posting stays active, no contract starts in %s, and you can talk with the patron.\n' \
+        "$id" "$focus" "$(gm_sql "SELECT group_concat(name, ', ') FROM (SELECT name FROM focus_repo WHERE focus_id=(SELECT id FROM focus WHERE name=$(gm_q "$focus")) ORDER BY position);")" "$(gm_run_dir "$id")/writ.md" "$focus" ;;
+    -/*) printf 'Run %s works in a worktree of its own, %s%s, on %s; its writ is %s. gm summons you when it finishes: until then the posting stays active, and you can talk with the patron.\n' "$id" "$wt" "$from" "$rb" "$(gm_run_dir "$id")/writ.md" ;;
+    after/*) printf 'Run %s waits, unmade, until what it needs has landed; gm then makes its worktree from the tip that holds it and starts it.\n' "$id" ;;
+    paused/*) printf 'Run %s waits: dispatch is paused after a rate limit; gm starts it when the pause ends.\n' "$id" ;;
     *) printf 'Run %s waits for a free Adventurer (%s at work, the cap in guild.conf); gm starts it when one finishes.\n' "$id" "$(gm_conf_value adventurers)" ;;
   esac
   [ "$kind" = survey ] || [ "$waiting" != - ] || printf 'Review it when it finishes, then land it on the feature branch with gm land %s.\n' "$id"
 }
 
-# gm_dispatch_start <focus> <posting ids, comma-separated> <brief> <model> <effort> [<run> <rules file> <evidence
-# file> [<kind> [<after posting ids> [<check|landing|tests> [<note>]]]]]: one run on the postings, a contract or a
-# survey, recorded with its writ rendered and started, or left waiting: for the postings --after names to land, for a
-# free Adventurer under the guild's cap, or for a rate limit's pause to end (gm_runs_start_waiting starts it then). The
-# keeper makes its worktree when it starts, not now. Prints its notice lines and sets GM_DISPATCHED to the run. With a
-# run, it is that run's correction (slices 3 and 4): dispatched by gm, its writ from prompts/adventurer/correction.md,
-# for a failed check, a landing conflict, or the tests failing after a landing, quoting what gm found. A run still
-# waiting on one of the postings is replaced by this one.
+# gm_dispatch_start <focus> <posting ids, comma-separated> <brief> <model> <effort> <repository, or '' across them>
+# [<run> <rules file> <evidence file> [<kind> [<after posting ids> [<check|landing|tests> [<note>]]]]]: one run on the
+# postings, a contract or a survey, recorded with its writ rendered and started, or left waiting: for the postings
+# --after names to land, for a free Adventurer under the guild's cap, or for a rate limit's pause to end
+# (gm_runs_start_waiting starts it then). The keeper makes its worktree when it starts, not now, from its repository's
+# clone; a run across the repositories (multi-repository focuses, slice 3) is a survey with no worktree, at the
+# focus's folder, and neither it nor a contract is dispatched while the other works or waits. Prints its notice lines
+# and sets GM_DISPATCHED to the run. With a run, it is that run's correction (slices 3 and 4): dispatched by gm, its
+# writ from prompts/adventurer/correction.md, for a failed check, a landing conflict, or the tests failing after a
+# landing, quoting what gm found, in the repository that run worked in. A run still waiting on one of the postings is
+# replaced by this one.
 GM_DISPATCHED=''
 gm_dispatch_start() {
-  local focus=$1 ids=$2 brief=$3 model=$4 effort=$5 corrects=${6:-} kind=${9:-contract} afters=${10:-} correction=${11:-}
-  local note=${12:-} fid mode why actor=party-leader what template writ id dir sid out waiting suffix=''
+  local focus=$1 ids=$2 brief=$3 model=$4 effort=$5 repo=$6 corrects=${7:-} kind=${10:-contract} afters=${11:-} correction=${12:-}
+  local note=${13:-} fid mode why actor=party-leader what template writ id dir sid out waiting suffix='' cwd layered='' live
   [ -z "$corrects" ] || correction=${correction:-check}
   fid=$(gm_focus_id "$focus")
+  ! gm_focus_layered "$focus" || layered=1
+  if [ -n "$repo" ]; then
+    cwd=$(gm_sql "SELECT camp FROM focus_repo WHERE focus_id=$fid AND name=$(gm_q "$repo");")
+    [ -n "$cwd" ] || gm_die "dispatch: $focus has no repository named $repo"
+  else
+    kind=survey
+    cwd=$(gm_focus_field "$focus" camp)
+  fi
   mode=$(gm_dispatch_permission_mode) || exit 1
-  why=$(gm_claude_trust "$(gm_focus_field "$focus" camp)") ||
+  why=$(gm_claude_trust "$cwd") ||
     gm_die "dispatch: Claude Code would ask an Adventurer whether to trust the camp, and gm could not record that it is trusted: $why. Open claude in the camp once and say yes, then dispatch again"
   gm_runs_reap
+  # A run across the repositories reads them as they are: it starts only while no contract works or waits in them,
+  # and no contract starts beside it.
+  if [ -z "$repo" ]; then
+    live=$(gm_sql "SELECT group_concat('run '||id, ', ') FROM run r WHERE focus_id=$fid AND ended_at IS NULL AND (kind='contract' OR $(gm_run_across_sql r));")
+    [ -z "$live" ] || gm_die "dispatch: $live of $focus still works or waits, and a run across its repositories starts only when no contract does; keep the posting queued (gm notice <n> queued) and dispatch it when they end"
+  elif [ "$kind" = contract ]; then
+    live=$(gm_sql "SELECT id FROM run r WHERE focus_id=$fid AND ended_at IS NULL AND $(gm_run_across_sql r) ORDER BY id LIMIT 1;")
+    [ -z "$live" ] || gm_die "dispatch: run $live is reading across $focus's repositories, and no contract starts until it ends; keep the posting queued (gm notice <n> queued) and dispatch it when run $live ends"
+  fi
   what=$kind
   if [ -n "$corrects" ]; then
     actor=gm what=correction
     template=$(gm_hall_file prompts/adventurer/correction.md "$GM_TEMPLATES/prompts/adventurer/correction.md")
+  elif [ -z "$repo" ]; then
+    what="survey across $(gm_sql "SELECT group_concat(name, ', ') FROM (SELECT name FROM focus_repo WHERE focus_id=$fid ORDER BY position);")"
+    template=$(gm_hall_file prompts/adventurer/across.md "$GM_TEMPLATES/prompts/adventurer/across.md")
   else
     template=$(gm_hall_file "prompts/adventurer/$kind.md" "$GM_TEMPLATES/prompts/adventurer/$kind.md")
   fi
+  [ -z "$layered" ] || [ -z "$repo" ] || what="$what in $repo"
   writ=$(gm_tmp)
-  gm_writ_render "$template" "$ids" "$brief" "$writ" ${corrects:+"$corrects" "$7" "$8"} || { rm -f "$writ"; gm_die "dispatch: could not write the writ from $template"; }
+  gm_writ_render "$template" "$ids" "$brief" "$writ" "$repo" ${corrects:+"$corrects" "$8" "$9"} || { rm -f "$writ"; gm_die "dispatch: could not write the writ from $template"; }
   sid=$(gm_uuid)
   # The run is recorded with its postings, waiting until gm_runs_start_waiting starts it; a finished run already on one
   # of them is reviewed now, and was not enough (a run whose check failed, or whose landing conflicted, was corrected),
@@ -5887,8 +6067,8 @@ UPDATE run SET ended_at=$GM_NOW, result_subtype='dropped', checked_at=$GM_NOW, c
   WHERE ended_at IS NULL AND waiting IS NOT NULL AND id IN (SELECT run_id FROM run_posting WHERE posting_id IN ($ids));
 UPDATE run SET reviewed_at=COALESCE(reviewed_at,$GM_NOW), outcome=COALESCE(outcome,CASE WHEN id=$(gm_qn "$corrects") THEN 'corrected' ELSE 'redispatched' END)
   WHERE ended_at IS NOT NULL AND id IN (SELECT run_id FROM run_posting WHERE posting_id IN ($ids));
-INSERT INTO run(focus_id, kind, model, effort, permission_mode, template_sha256, brief, session_id, started_at, corrects_run, correction, after_postings, waiting)
-  VALUES ($fid, $(gm_q "$kind"), $(gm_qn "$model"), $(gm_qn "$effort"), $(gm_q "$mode"), $(gm_qn "$(gm_sha256_file "$template")"),
+INSERT INTO run(focus_id, kind, repo, model, effort, permission_mode, template_sha256, brief, session_id, started_at, corrects_run, correction, after_postings, waiting)
+  VALUES ($fid, $(gm_q "$kind"), $(gm_qn "$repo"), $(gm_qn "$model"), $(gm_qn "$effort"), $(gm_q "$mode"), $(gm_qn "$(gm_sha256_file "$template")"),
           $(gm_qn "$brief"), $(gm_q "$sid"), $GM_NOW, $(gm_qn "$corrects"), $(gm_qn "$correction"), $(gm_qn "$afters"), 'new');
 INSERT INTO run_posting(run_id, posting_id) SELECT (SELECT id FROM run WHERE session_id=$(gm_q "$sid")), id FROM posting WHERE id IN ($ids);
 SELECT max(id) FROM run WHERE session_id=$(gm_q "$sid");
@@ -5902,7 +6082,7 @@ SQL
   # {{run_branch}} is known once the run has its number.
   sqlite3 -batch :memory: "SELECT writefile($(gm_q "$dir/writ.md"), replace(CAST(readfile($(gm_q "$dir/writ.md")) AS TEXT), '{{run_branch}}',
     $(gm_q "$([ "$kind" = survey ] && printf 'no branch (a detached checkout)' || printf 'gm/run-%s' "$id")")));" >/dev/null
-  gm_run_settings "$id" "$focus" "$(gm_rules_path "$(gm_focus_field "$focus" repo)")" "$dir/settings.json"
+  gm_run_settings "$id" "$dir/settings.json"
   gm_sql "BEGIN IMMEDIATE; UPDATE run SET writ=$(gm_q "$dir/writ.md") WHERE id=$id; COMMIT;"
   gm_runs_tidy "$fid"
   gm_runs_start_waiting
@@ -5915,9 +6095,10 @@ SQL
   esac
   gm_sql <<SQL
 BEGIN IMMEDIATE;
-INSERT INTO event(at, actor, kind, focus_id, posting_id, verb, detail, line)
+INSERT INTO event(at, actor, kind, focus_id, posting_id, verb, detail, line, repo)
   SELECT $GM_NOW, $(gm_q "$actor"), 'notice', p.focus_id, p.id, 'dispatched', 'run '||$id,
-         f.name||'#'||p.num||' '||p.slug||' dispatched: $what, run '||$id||COALESCE(' of run '||$(gm_qn "$corrects"),'')||$(gm_q "$note")||COALESCE(' on '||$(gm_qn "$model"),'')||' at '||$(gm_q "$effort")||' effort'||$(gm_q "$suffix")||' ("'||$(gm_summary_sql p.words)||'")'
+         f.name||'#'||p.num||' '||p.slug||' dispatched: '||$(gm_q "$what")||', run '||$id||COALESCE(' of run '||$(gm_qn "$corrects"),'')||$(gm_q "$note")||COALESCE(' on '||$(gm_qn "$model"),'')||' at '||$(gm_q "$effort")||' effort'||$(gm_q "$suffix")||' ("'||$(gm_summary_sql p.words)||'")',
+         $(gm_qn "$repo")
   FROM posting p JOIN focus f ON f.id=p.focus_id WHERE p.id IN ($ids) ORDER BY p.num;
 SELECT line FROM event WHERE verb='dispatched' AND detail='run '||$id ORDER BY id;
 COMMIT;
@@ -6009,20 +6190,26 @@ gm_run_args() {
 # on the run, never by its label.
 gm_run_label() { printf '  └ %s · %s' "${2#"run $1 · "}" "$(gm_run_branches "$1")"; }
 
-# gm_run_branches <run>: "gm/run-9 → feature/x" for a contract, "a survey of feature/x" for a survey.
+# gm_run_branches <run>: "gm/run-9 → feature/x" for a contract, "a survey of feature/x" for a survey; in a focus of
+# several repositories, the run's repository's branch and its name ("gm/run-9 → feature/x in web"), and "across api,
+# web" for a run across them.
 gm_run_branches() {
-  gm_sql "SELECT CASE r.kind WHEN 'survey' THEN 'a survey of '||f.branch ELSE 'gm/run-'||r.id||' → '||f.branch END FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$1;"
+  gm_sql "SELECT CASE WHEN $(gm_run_across_sql r) THEN 'across '||(SELECT group_concat(name, ', ') FROM (SELECT name FROM focus_repo WHERE focus_id=r.focus_id ORDER BY position))
+    ELSE CASE r.kind WHEN 'survey' THEN 'a survey of '||$(gm_run_branch_sql r f) ELSE 'gm/run-'||r.id||' → '||$(gm_run_branch_sql r f) END||$(gm_run_in_sql r) END
+    FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$1;"
 }
 
 # gm_run_worktree_path <focus> <run>: where the run works, a git worktree of its own beside the camp,
-# camps/<focus>.run-<n> in the Guildhall, as a physical path (the keeper makes it when the run starts).
+# camps/<focus>.run-<n> in the Guildhall, as a physical path (the keeper makes it when the run starts). In a focus of
+# several repositories it is a worktree of the run's repository's clone, beside the focus's folder all the same.
 gm_run_worktree_path() {
   local d
   d=$(cd "$GM_HALL/camps" 2>/dev/null && pwd -P) || d=$GM_HALL/camps
   printf '%s/%s.run-%s' "$d" "$1" "$2"
 }
 
-# gm_run_pane_open <run> <focus> <worktree>: the Adventurer's own herdr workspace on its run's worktree, labelled with its postings one
+# gm_run_pane_open <run> <focus> <worktree>: the Adventurer's own herdr workspace on its run's worktree (a run across
+# the repositories: the focus's folder), labelled with its postings one
 # step under its Party Leader's and placed right after it, never focused, its pane titled with the run and running gm
 # adventurer; prints session<TAB>pane. The Party Leader's pane stays whole, for the patron to talk to it. Under the
 # herdr lock, so no muster relaunches the Party Leader's pane meanwhile. Fails, and the keeper runs claude -p instead,
@@ -6048,7 +6235,7 @@ gm_run_pane_open() {
     return 1
   fi
   gm_herdr "$s" pane rename "$new" "$title" >/dev/null
-  gm_run_settings "$id" "$focus" "$(gm_rules_path "$(gm_focus_field "$focus" repo)")" "$(gm_run_dir "$id")/settings.json" pane
+  gm_run_settings "$id" "$(gm_run_dir "$id")/settings.json" pane
   gm_sql "BEGIN IMMEDIATE;
 UPDATE run SET pane_session=$(gm_q "$s"), pane_workspace=$(gm_q "$nws"), pane_id=$(gm_q "$new") WHERE id=$id;
 INSERT INTO event(at, actor, kind, focus_id, detail) SELECT $GM_NOW, 'keeper', 'run.pane', focus_id, $(gm_q "run $id in herdr pane $new, in workspace $nws under the Party Leader's $ws: $title") FROM run WHERE id=$id;
@@ -6130,8 +6317,9 @@ gm_cmd_adventurer() {
   done
   [[ $id =~ ^[0-9]+$ ]] || gm_die "adventurer: gm adventurer <run> --pane ID is what the keeper runs in a run's herdr pane"
   gm_db_ensure
-  IFS=$'\t' read -r camp rpane ended <<<"$(gm_sql "SELECT COALESCE(r.worktree,f.camp), COALESCE(r.pane_id,''), COALESCE(r.ended_at,'-') FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
-  [ -n "$camp" ] || gm_die "adventurer: no run $id"
+  IFS=$'\t' read -r rpane ended <<<"$(gm_sql "SELECT COALESCE(r.pane_id,''), COALESCE(r.ended_at,'-') FROM run r WHERE r.id=$id;")"
+  [ -n "$ended" ] || gm_die "adventurer: no run $id"
+  camp=$(gm_run_cwd "$id")
   [ -n "$pane" ] && [ "$pane" = "$rpane" ] || gm_die "adventurer: gm adventurer runs only in run $id's own herdr pane"
   [ "$ended" = - ] || gm_die "adventurer: run $id ended at $ended"
   dir=$(gm_run_dir "$id")
@@ -6182,8 +6370,9 @@ SQL
 # gm run <run>: the keeper, started when the run starts (gm dispatch, or gm_runs_start_waiting for one that waited).
 # Makes the run's own worktree (gm_run_prepare), then runs the Adventurer there where the patron can see it, in a herdr
 # workspace of its own under its Party Leader's (gm_run_pane_open), and waits for its turn to end; or, when the Party
-# Leader has no herdr pane, headless: claude -p in the worktree with the run's own settings, the writ on its standard
-# input and its stream-json transcript kept. Then records how it ended, and gm_run_after does the rest.
+# Leader has no herdr pane, headless: claude -p in the worktree (for a run across the repositories, the focus's
+# folder) with the run's own settings, the writ on its standard input and its stream-json transcript kept. Then
+# records how it ended, and gm_run_after does the rest.
 gm_cmd_run() {
   local id=${1:-} wt ended waiting dir rc args focus visible s pane claude=${GM_CLAUDE:-claude}
   [[ $id =~ ^[0-9]+$ ]] || gm_die "run: gm run <run> is the keeper gm starts"
@@ -6198,7 +6387,7 @@ gm_cmd_run() {
     gm_run_after "$id"
     return 0
   fi
-  wt=$(gm_sql "SELECT worktree FROM run WHERE id=$id;")
+  wt=$(gm_run_cwd "$id")
   if visible=$(gm_run_pane_open "$id" "$focus" "$wt"); then
     IFS=$'\t' read -r s pane <<<"$visible"
     gm_run_pane_wait "$id" "$s" "$pane"
@@ -6255,12 +6444,21 @@ gm_run_unstarted() {
 # run's worktree is then removed; a correction of a landing conflict starts from the tip and holds gm's started merge
 # of the conflicting run's branch, its conflict markers left for the Adventurer. Then the refs gm check compares
 # with, Claude Code's trust of the worktree (recorded for it alone, and removed with it, when the clone's does not
-# cover it), and the rules file's worktree-setup: command, before the Adventurer starts. Fails, with the run ended and
-# why in its result, when any of it cannot be done.
+# cover it), and the rules file's worktree-setup: command, before the Adventurer starts. In a focus of several
+# repositories, the worktree is of the run's repository's clone, from its feature branch in projects/<name>, and its
+# rules file's; a run across them makes none. Fails, with the run ended and why in its result, when any of it cannot be
+# done.
 gm_run_prepare() {
-  local id=$1 focus camp repo branch kind correction corrects wt rb='' base src out setup dir tf
-  IFS=$'\t' read -r focus camp repo branch kind correction corrects <<<"$(gm_sql "SELECT f.name, f.camp, f.repo, f.branch, r.kind, COALESCE(r.correction,'-'), COALESCE(r.corrects_run,'-') FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
+  local id=$1 focus camp repo branch kind correction corrects wt rb='' base src out setup dir tf name
+  IFS=$'\t' read -r focus kind correction corrects <<<"$(gm_sql "SELECT f.name, r.kind, COALESCE(r.correction,'-'), COALESCE(r.corrects_run,'-') FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
+  IFS=$'\t' read -r camp branch repo name <<<"$(gm_run_place "$id")"
   dir=$(gm_run_dir "$id")
+  # A run across the repositories works at the focus's folder, with no worktree: the refs of each repository are kept,
+  # and gm check finds each where it was.
+  if [ "$(gm_sql "SELECT $(gm_run_across_sql r) FROM run r WHERE r.id=$id;")" = 1 ]; then
+    gm_sql "BEGIN IMMEDIATE; UPDATE run SET refs_before=$(gm_q "$(gm_refs_snapshot_focus "$focus")") WHERE id=$id; COMMIT;"
+    return 0
+  fi
   wt=$(gm_run_worktree_path "$focus" "$id")
   [ "$kind" = survey ] || rb=gm/run-$id
   if ! gm_lock "$(gm_clone_lock_name "$repo")" 120; then
@@ -6433,12 +6631,13 @@ gm_check_pushed() {
 }
 
 # gm_check_facts <run>: the rules run $1 broke, from git alone, into GM_CK ("rule<TAB>evidence" lines), and into
-# GM_CK_NOTE what gm could not see: for each repository of its focus, in its own camp, by its own rules and phase. In a
-# focus of several, each piece of evidence starts with the repository it is about.
+# GM_CK_NOTE what gm could not see: for the repository it worked in, or, for a run across them, each repository of its
+# focus, in its own camp, by its own rules and phase. In a focus of several, each piece of evidence starts with the
+# repository it is about.
 gm_check_facts() {
-  local id=$1 fid kind since folder all layered=0 name repo camp branch phase before
+  local id=$1 fid kind since folder all layered=0 name repo camp branch phase before only across
   GM_CK='' GM_CK_NOTE=''
-  IFS=$'\t' read -r fid kind since folder <<<"$(gm_sql "SELECT r.focus_id, f.kind, CAST(strftime('%s', r.started_at) AS INTEGER), f.camp FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
+  IFS=$'\t' read -r fid kind since folder across only <<<"$(gm_sql "SELECT r.focus_id, f.kind, CAST(strftime('%s', r.started_at) AS INTEGER), f.camp, $(gm_run_across_sql r), COALESCE(r.repo,'') FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
   all=$(gm_sql "SELECT COALESCE(refs_before,'') FROM run WHERE id=$id;")
   [ -z "$(gm_sql "SELECT 1 FROM focus_repo WHERE focus_id=$fid AND camp<>$(gm_q "$folder") LIMIT 1;")" ] || layered=1
   while IFS=$'\t' read -r name repo camp branch phase; do
@@ -6448,12 +6647,31 @@ gm_check_facts() {
     else
       before=$(printf '%s\n' "$all" | awk -v n="$name" '$1 == "repo" { on = ($2 == n); next } on')
       if ! printf '%s\n' "$all" | grep -qxF "repo $name"; then
-        GM_CK_NOTE="$GM_CK_NOTE${GM_CK_NOTE:+; }gm dispatch kept no refs for $name, so it was not checked"
+        GM_CK_NOTE="$GM_CK_NOTE${GM_CK_NOTE:+; }gm kept no refs for $name, so it was not checked"
         continue
       fi
     fi
     gm_check_repo "$fid" "$kind" "$since" "$name" "$repo" "$camp" "$branch" "$phase" "$before" "$([ "$layered" = 0 ] || printf '%s: ' "$name")"
-  done <<<"$(gm_sql "SELECT name, repo, camp, branch, COALESCE(phase,'') FROM focus_repo WHERE focus_id=$fid ORDER BY position;")"
+    [ "$across" = 0 ] || gm_check_unchanged "$name" "$camp" "$before" "$([ "$layered" = 0 ] || printf '%s: ' "$name")"
+  done <<<"$(gm_sql "SELECT name, repo, camp, branch, COALESCE(phase,'') FROM focus_repo WHERE focus_id=$fid AND ($(gm_q "$only")='' OR name=$(gm_q "$only")) ORDER BY position;")"
+}
+
+GM_CHECK_ACROSS="a run across the repositories changes none of them"
+
+# gm_check_unchanged <name> <camp> <refs before> <label>: a run across the repositories left the camp where it found
+# it: HEAD on the same commit and branch, nothing new in its reflog, every local branch where it was.
+gm_check_unchanged() {
+  local camp=$2 before=$3 label=$4 after ref sha
+  after=$(gm_refs_snapshot "$camp")
+  [ "$(printf '%s\n' "$before" | sed -n 1p)" = "$(printf '%s\n' "$after" | sed -n 1p)" ] ||
+    gm_check_broke "$GM_CHECK_ACROSS" "${label}HEAD was $(printf '%s\n' "$before" | sed -n 1p | cut -d' ' -f2-), and is $(printf '%s\n' "$after" | sed -n 1p | cut -d' ' -f2-)"
+  [ "$(gm_check_ref "$before" reflog)" = "$(gm_check_ref "$after" reflog)" ] ||
+    gm_check_broke "$GM_CHECK_ACROSS" "${label}the camp's HEAD moved $(( $(gm_check_ref "$after" reflog) - $(gm_check_ref "$before" reflog) )) times"
+  while read -r ref sha; do
+    case $ref in refs/heads/*) ;; *) continue ;; esac
+    [ "$(gm_check_ref "$before" "$ref")" = "$sha" ] || [ -z "$(gm_check_ref "$before" "$ref")" ] ||
+      gm_check_broke "$GM_CHECK_ACROSS" "${label}${ref#refs/heads/} moved from $(gm_check_short "$(gm_check_ref "$before" "$ref")") to $(gm_check_short "$sha")"
+  done <<<"$(printf '%s\n' "$after" | sed 1,2d)"
 }
 
 # gm_check_repo <focus id> <kind> <since> <name> <repo> <camp> <branch> <phase> <refs before> <label>: gm_check_facts
@@ -6590,12 +6808,12 @@ gm_check_facts_run() {
   local id=$1 fid camp branch repo kind since wt rb base before after others head cur ref sha b tip ftip rem ls lsok
   local old new pre n0 n1 tips commits more line refs=() own=''
   GM_CK='' GM_CK_NOTE=''
-  IFS=$'\t' read -r fid camp branch repo kind since wt rb base <<<"$(gm_sql "SELECT r.focus_id, f.camp, f.branch, f.repo, r.kind, CAST(strftime('%s', r.started_at) AS INTEGER), r.worktree, COALESCE(r.run_branch,'-'), COALESCE(r.base_commit,'') FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
+  IFS=$'\t' read -r fid camp branch repo kind since wt rb base <<<"$(gm_sql "SELECT r.focus_id, COALESCE(fr.camp,f.camp), COALESCE(fr.branch,f.branch), COALESCE(fr.repo,f.repo), r.kind, CAST(strftime('%s', r.started_at) AS INTEGER), r.worktree, COALESCE(r.run_branch,'-'), COALESCE(r.base_commit,'') FROM run r JOIN focus f ON f.id=r.focus_id LEFT JOIN focus_repo fr ON fr.focus_id=r.focus_id AND fr.name=r.repo WHERE r.id=$id;")"
   [ "$rb" != - ] || rb=''
   before=$(gm_sql "SELECT COALESCE(refs_before,'') FROM run WHERE id=$id;")
   # A run branch is gm's own whether or not its keeper has recorded it yet: another run's may appear while this
   # one is checked.
-  others=$( { gm_sql "SELECT branch FROM focus WHERE id<>$fid AND repo=$(gm_q "$repo");"; gm_sql "SELECT 'gm/run-'||id FROM run WHERE id<>$id AND kind='contract';"; } )
+  others=$( { gm_sql "SELECT branch FROM focus_repo WHERE focus_id<>$fid AND repo=$(gm_q "$repo");"; gm_sql "SELECT 'gm/run-'||id FROM run WHERE id<>$id AND kind='contract';"; } )
   gm_check_other() { [ -n "$others" ] && printf '%s\n' "$others" | grep -qxF "$1"; }
   if [ -d "$wt" ]; then
     after=$(gm_refs_snapshot "$wt")
@@ -6747,7 +6965,7 @@ SQL
 # corrected at once by a correction run (a posting already recorded done or failed is reopened for it); a second is
 # the patron's, needs-you with the evidence. No model decides either.
 gm_run_failure() {
-  local id=$1 what=$2 rule=$3 ev=$4 note=${5:-} prior focus model effort ids brief rf evf out pid label st
+  local id=$1 what=$2 rule=$3 ev=$4 note=${5:-} prior focus model effort ids brief rf evf out pid label st repo
   prior=$(gm_sql "SELECT count(DISTINCT r.id) FROM run r JOIN run_posting rp ON rp.run_id=r.id WHERE r.id<>$id
     AND (r.check_result='failed' OR r.land_result='conflict' OR r.tests_result='failed')
     AND rp.posting_id IN (SELECT posting_id FROM run_posting WHERE run_id=$id);")
@@ -6757,7 +6975,8 @@ gm_run_failure() {
     *) label="the tests failed after run $id landed" ;;
   esac
   if [ "$prior" = 0 ]; then
-    IFS=$'\t' read -r focus model effort ids <<<"$(gm_sql "SELECT f.name, COALESCE(r.model,'-'), COALESCE(r.effort,'-'), (SELECT group_concat(posting_id) FROM run_posting WHERE run_id=r.id) FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
+    # The correction works in the repository the run worked in.
+    IFS=$'\t' read -r focus model effort ids repo <<<"$(gm_sql "SELECT f.name, COALESCE(r.model,'-'), COALESCE(r.effort,'-'), (SELECT group_concat(posting_id) FROM run_posting WHERE run_id=r.id), COALESCE(r.repo,'') FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
     while IFS=$'\t' read -r pid st; do
       [ -n "$pid" ] || continue
       gm_record_notice "$pid" started "reopened by gm: $label" active '' '' '' gm >/dev/null
@@ -6768,7 +6987,7 @@ gm_run_failure() {
     [ "$model" != - ] || model=''
     [ "$effort" != - ] || effort=$(gm_conf_value contract-effort)
     brief=$(gm_sql "SELECT COALESCE(brief,'') FROM run WHERE id=$id;")
-    if out=$(gm_dispatch_start "$focus" "$ids" "$brief" "$model" "$effort" "$id" "$rf" "$evf" contract '' "$what" "$note" 2>&1); then
+    if out=$(gm_dispatch_start "$focus" "$ids" "$brief" "$model" "$effort" "$repo" "$id" "$rf" "$evf" contract '' "$what" "$note" 2>&1); then
       rm -f "$rf" "$evf"
       printf '%s\n' "$out"
       return 0
@@ -6818,7 +7037,7 @@ gm_cmd_check() {
 # landed", "uncommitted changes"), or nothing.
 gm_run_holds() {
   local id=$1 camp branch wt rb cleaned n out=''
-  IFS=$'\t' read -r camp branch wt rb cleaned <<<"$(gm_sql "SELECT f.camp, f.branch, COALESCE(r.worktree,'-'), COALESCE(r.run_branch,'-'), COALESCE(r.cleaned_at,'-') FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
+  IFS=$'\t' read -r camp branch wt rb cleaned <<<"$(gm_sql "SELECT COALESCE(fr.camp,f.camp), COALESCE(fr.branch,f.branch), COALESCE(r.worktree,'-'), COALESCE(r.run_branch,'-'), COALESCE(r.cleaned_at,'-') FROM run r JOIN focus f ON f.id=r.focus_id LEFT JOIN focus_repo fr ON fr.focus_id=r.focus_id AND fr.name=r.repo WHERE r.id=$id;")"
   [ "$cleaned" = - ] && [ "$wt" != - ] || return 0
   if [ "$rb" != - ] && gm_git "$camp" rev-parse -q --verify "refs/heads/$rb" >/dev/null 2>&1; then
     n=$(gm_git "$camp" rev-list --count "refs/heads/$rb" "^refs/heads/$branch" 2>/dev/null || echo 0)
@@ -6856,8 +7075,8 @@ gm_run_reap_procs() {
 # survey's end force it. Fails, removing nothing, when it is not safe.
 gm_run_cleanup() {
   local id=$1 force=${2:-} camp repo branch wt rb cleaned s ws pane closed trust tip ftip head out lock n=0 c age
-  IFS=$'\t' read -r camp repo branch wt rb cleaned s ws pane closed trust <<<"$(gm_sql "SELECT f.camp, f.repo, f.branch, COALESCE(r.worktree,'-'), COALESCE(r.run_branch,'-'), COALESCE(r.cleaned_at,'-'),
-    COALESCE(r.pane_session,'-'), COALESCE(r.pane_workspace,'-'), COALESCE(r.pane_id,'-'), COALESCE(r.pane_closed_at,'-'), COALESCE(r.trust_added,0) FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
+  IFS=$'\t' read -r camp repo branch wt rb cleaned s ws pane closed trust <<<"$(gm_sql "SELECT COALESCE(fr.camp,f.camp), COALESCE(fr.repo,f.repo), COALESCE(fr.branch,f.branch), COALESCE(r.worktree,'-'), COALESCE(r.run_branch,'-'), COALESCE(r.cleaned_at,'-'),
+    COALESCE(r.pane_session,'-'), COALESCE(r.pane_workspace,'-'), COALESCE(r.pane_id,'-'), COALESCE(r.pane_closed_at,'-'), COALESCE(r.trust_added,0) FROM run r JOIN focus f ON f.id=r.focus_id LEFT JOIN focus_repo fr ON fr.focus_id=r.focus_id AND fr.name=r.repo WHERE r.id=$id;")"
   [ "$cleaned" = - ] && [ "$wt" != - ] || return 0
   [ "$rb" != - ] || rb=''
   tip=''
@@ -6943,7 +7162,7 @@ gm_runs_sweep() {
       [ "$report" != - ] || gm_run_report "$id"
       gm_run_cleanup "$id" force >/dev/null 2>&1 || true
     elif [ ! -d "$wt" ]; then
-      gm_git "$camp" worktree prune >/dev/null 2>&1 || true
+      gm_git "$(gm_run_place "$id" | cut -f 1)" worktree prune >/dev/null 2>&1 || true
       gm_run_cleanup "$id" >/dev/null 2>&1 || true
     fi
   done <<<"$(gm_sql "SELECT id, worktree, COALESCE(run_branch,'-'), kind, COALESCE(report,'-') FROM run WHERE focus_id=$fid AND ended_at IS NOT NULL
@@ -7003,7 +7222,8 @@ gm_cmd_land() {
     -) gm_die "land: gm has not checked run $id yet; land it once gm check $id has" ;;
     *) gm_die "land: gm could not check run $id ($checkres), so it does not land it; gm drop $id discards it" ;;
   esac
-  IFS=$'\t' read -r camp branch repo <<<"$(gm_sql "SELECT camp, branch, repo FROM focus WHERE id=$fid;")"
+  # In a focus of several repositories, the run lands in its own repository's project, on its feature branch.
+  IFS=$'\t' read -r camp branch repo _ <<<"$(gm_run_place "$id")"
   gm_lock "land-$focus" 600 || gm_die "land: another landing on $focus has held the camp for ten minutes; try again"
   cur=$(gm_rules_current_branch "$camp")
   [ "$cur" = "$branch" ] || gm_die "land: the camp is on ${cur:-a detached HEAD}, not the feature branch $branch; put it back first"
@@ -7117,7 +7337,7 @@ gm_cmd_land_tests() {
   local id=${1:-} wt repo cmd dir rc=0 result ev
   [[ $id =~ ^[0-9]+$ ]] || gm_die "land-tests: gm land-tests <run> is what gm land starts"
   gm_db_ensure
-  IFS=$'\t' read -r wt repo <<<"$(gm_sql "SELECT r.worktree, f.repo FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id AND r.tests_result='running';")"
+  IFS=$'\t' read -r wt repo <<<"$(gm_sql "SELECT r.worktree, COALESCE(fr.repo,f.repo) FROM run r JOIN focus f ON f.id=r.focus_id LEFT JOIN focus_repo fr ON fr.focus_id=r.focus_id AND fr.name=r.repo WHERE r.id=$id AND r.tests_result='running';")"
   [ -n "$wt" ] || gm_die "land-tests: run $id has no tests running"
   dir=$(gm_run_dir "$id")
   cmd=$(gm_setting "$(gm_rules_path "$repo")" test-command)
@@ -7145,7 +7365,7 @@ SQL
   cd /
   gm_run_cleanup "$id" force || true
   if [ "$result" = failed ]; then
-    ev="- $cmd exited $rc on $(gm_sql "SELECT f.branch||' at '||substr(r.landed_commit,1,9) FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;"), after run $id landed; its last lines:"$'\n'"$(tail -n 30 "$dir/tests.txt" | sed 's/^/    /')"
+    ev="- $cmd exited $rc on $(gm_sql "SELECT COALESCE(fr.branch,f.branch)||' at '||substr(r.landed_commit,1,9) FROM run r JOIN focus f ON f.id=r.focus_id LEFT JOIN focus_repo fr ON fr.focus_id=r.focus_id AND fr.name=r.repo WHERE r.id=$id;"), after run $id landed; its last lines:"$'\n'"$(tail -n 30 "$dir/tests.txt" | sed 's/^/    /')"
     gm_run_failure "$id" tests "the tests pass on the feature branch after a landing (test-command: $cmd)" "$ev" " (the tests failed after it landed)"
   fi
   gm_runs_start_waiting
@@ -7202,7 +7422,10 @@ gm_cmd_runs() {
   fid=$(gm_focus_id "$focus")
   gm_runs_reap
   gm_sql <<SQL
-SELECT 'run '||r.id||'  '||CASE WHEN r.correction IS NOT NULL THEN 'correction' ELSE r.kind END||'  '||$(gm_run_postings_sql r.id)||'  '
+SELECT 'run '||r.id||'  '||CASE WHEN r.correction IS NOT NULL THEN 'correction' ELSE r.kind END
+  ||CASE WHEN NOT EXISTS (SELECT 1 FROM focus_repo WHERE focus_id=r.focus_id AND camp<>(SELECT camp FROM focus WHERE id=r.focus_id)) THEN ''
+    WHEN r.repo IS NULL THEN ' across' ELSE ' in '||r.repo END
+  ||'  '||$(gm_run_postings_sql r.id)||'  '
   ||CASE WHEN r.ended_at IS NULL AND r.waiting IS NOT NULL THEN 'waiting since '||replace(substr(r.started_at,1,16),'T',' ')||', '
       ||CASE r.waiting WHEN 'after' THEN 'for '||(SELECT group_concat('#'||num, ', ') FROM posting WHERE id IN (SELECT value FROM json_each('['||r.after_postings||']')))||' to land'
         WHEN 'paused' THEN 'for the rate limit''s pause to end' ELSE 'for a free Adventurer' END
@@ -7369,7 +7592,7 @@ SELECT '- run '||r.id||' for '||$(gm_run_postings_sql r.id)||' is blocked: its p
 FROM s JOIN run r ON r.id=s.id WHERE s.kind='blocked' ORDER BY r.id;
 SELECT '- '||f.name||'#'||p.num||' '||p.slug||' was posted from outside your chat (received): "'||$(gm_summary_sql p.words)||'"'
 FROM s JOIN posting p ON p.id=s.id JOIN focus f ON f.id=p.focus_id WHERE s.kind='posting' ORDER BY p.num;
-SELECT '- the tests failed on '||f.branch||' after run '||r.id||' for '||$(gm_run_postings_sql r.id)||' landed; what they printed is '||$(gm_q "$GM_HALL/runs/")||r.id||'/tests.txt. '
+SELECT '- the tests failed on '||$(gm_run_branch_sql r f)||' after run '||r.id||' for '||$(gm_run_postings_sql r.id)||' landed; what they printed is '||$(gm_q "$GM_HALL/runs/")||r.id||'/tests.txt. '
   ||COALESCE('gm dispatched correction run '||(SELECT c.id FROM run c WHERE c.corrects_run=r.id AND c.correction='tests')||' at once; it summons you when that run ends. ',
              'gm made its postings needs-you, for the patron: it was not the first failure on them, or the correction could not start. ')
   ||'Until the tests pass, the feature branch is not pushed.'
