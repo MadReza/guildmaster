@@ -5292,11 +5292,10 @@ gm_rules_simple() {
     glab | gh)
       case ${1##*/}/${2:-}/${3:-} in
         glab/mr/create | glab/mr/merge | glab/mr/approve | gh/pr/create | gh/pr/merge)
-          if [ -n "${GM_RUN:-}" ]; then
-            gm_rules_set deny "gm rules: an Adventurer never opens, approves or merges a merge request; say in your report that the work is ready for one, and the Party Leader asks the patron."
-          else
-            gm_rules_set ask "gm rules: opening, approving or merging a merge request needs the patron's word (the playbook's gate)."
-          fi ;;
+          # A Party Leader's merge request gets no word from here: the playbook's gate is its charter's, and Claude
+          # Code's own permission mode decides.
+          [ -z "${GM_RUN:-}" ] ||
+            gm_rules_set deny "gm rules: an Adventurer never opens, approves or merges a merge request; say in your report that the work is ready for one, and the Party Leader asks the patron." ;;
       esac ;;
     bash | sh | zsh | eval)
       if [ "$1" = eval ]; then
