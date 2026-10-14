@@ -818,6 +818,7 @@ They are for advanced use, and for the Guildmaster.
                           folder holding projects/<name>/, a worktree of each, on the branch its own rules name.
                           A worktree starts from the remote's latest: gm fetches origin first and refuses when it
                           cannot, and a new branch starts from origin's default branch (or --base on origin).
+                          The repo commands below add a repository later and record each one's merge request
                           With --ticket, the focus name may be left out: it is the first ticket key in lower case
                           (crm-1234). --brief records the patron's words as the focus's first posting before
                           its Party Leader starts, which its watch then summons
@@ -825,11 +826,12 @@ They are for advanced use, and for the Guildmaster.
                           missing one starts again (a fresh session resumes from records), a missing camp or
                           project worktree is made again; reopens a closed focus
   repo add <path> [--focus F] [--branch NAME] [--base REF]
-                          one more repository for the current focus, or focus F, opened on several: a worktree
-                          of it in projects/<name>/ of the camp, made as gm open makes them
+                          one more repository for the current focus, or focus F, when it was opened on several:
+                          a worktree of it in projects/<name>/ of the camp, made as gm open makes them; a focus
+                          opened on one repository refuses it
   repo mr <name> <url> [--focus F]
-                          records the merge request of the focus's repository <name>, which gm where, gm show
-                          and the welcome card then show
+                          record the merge request of the focus's repository <name> (the folder name, as in
+                          projects/<name>), which gm where, gm show and the welcome card then show
   up [--quiet]            the muster, plain code with no model: start the front desk's Guildmaster, every open
                           focus's Party Leader and, while guild.conf says collector: on, the tracing collector,
                           whichever is dead or missing, and leave the running ones alone; one that fails to start
@@ -870,10 +872,12 @@ They are for advanced use, and for the Guildmaster.
                           dispatch, a run waits and gm starts it when it may. --after holds it, unmade, until
                           that posting has a run that landed. --survey finds things out and changes nothing,
                           detached at the feature branch's tip, its field report kept in reports/ in the Guildhall.
-                          In a focus of several repositories, --repo names the one a contract or survey works in,
-                          its worktree made from that clone; --across is a survey of them all, from the focus's
-                          folder with no worktree (writ from prompts/adventurer/across.md), only while no
-                          contract works or waits, and none starts beside it
+                          A focus of several repositories needs --repo NAME for a contract or a survey (NAME as
+                          in projects/NAME): its worktree is made from that clone, from that project's feature
+                          branch. --across is a survey of every repository at once instead, from the focus's
+                          folder with no worktree (writ from prompts/adventurer/across.md): it reads, builds and
+                          tests in each and changes none, starts only while no contract works or waits, and no
+                          contract starts beside it
   land <run>              accept a finished contract run and land it on the feature branch, one at a time: by
                           fast-forward when the branch has not moved, with a merge commit when it has, never a
                           rebase or squash; refuses a failed check, uncommitted work, or a dirty camp. A conflict
@@ -912,8 +916,8 @@ They are for advanced use, and for the Guildmaster.
   park <ref> --why TEXT [--until TIME-OR-EVENT]
                           set a posting aside, visibly, with a reason
   phase [focus] [phase] [--repo NAME]
-                          show or set the focus's playbook phase: with --repo, one repository's; without, every
-                          repository's. A focus's phase is the least advanced of its repositories'
+                          show or set the focus's playbook phase: with --repo NAME, one repository's; without,
+                          every repository's. A focus's phase is the least advanced of its repositories'
   where [focus]           the resume summary, built from the register
   welcome --json [focus]  what the welcome card shows, as JSON: a focus's Party Leader, or with none the
                           Guildmaster's guild (needs, roster, trouble); the guild-chat mod reads it at start-up
