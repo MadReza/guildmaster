@@ -283,12 +283,16 @@ export type PartyLeaderData = {
   branch: string
   upstream: string | null
   ahead: number | null
+  /** Each repository of the focus, from a gm that says them: one for a focus of one, whose branch is the one above. */
+  repos?: readonly RepoData[]
   counts: Readonly<Record<string, number>>
   needs: readonly Need[]
   active: string | null
   next: string | null
   last: { at: string; line: string } | null
 }
+/** One repository of a focus: its feature branch, its own phase, its merge request, and how far ahead of its upstream. */
+export type RepoData = { name: string; branch: string; phase: string | null; mr: string | null; upstream: string | null; ahead: number | null }
 /** What the card shows when gm could not say: the seat, and why. */
 export type BareData = { seat: Seat; focus?: string; why: string }
 export type WelcomeData = GuildmasterData | PartyLeaderData | BareData
@@ -458,7 +462,8 @@ export function cardOf(d: WelcomeData, o: CardOptions): Card {
     const kind = d.tickets.length ? `${d.tickets.join(', ')} · ${d.kind}` : `${d.kind} focus`
     side.push([dim(kind)])
     if (d.phases.length) side.push(phaseRoad(d.phases, d.phase))
-    side.push([dim('⎇ '), seg(d.branch), ...(d.ahead !== null && d.upstream ? [dim(`  ${d.ahead} ahead of ${d.upstream}`)] : [])])
+    if (d.repos && d.repos.length > 1) side.push(...repoLines(d.repos, o.columns))
+    else side.push([dim('⎇ '), seg(d.branch), ...(d.ahead !== null && d.upstream ? [dim(`  ${d.ahead} ahead of ${d.upstream}`)] : [])])
     const c = (k: string) => d.counts[k] ?? 0
     const total = Object.values(d.counts).reduce((a, b) => a + b, 0)
     if (d.needs.length) side.push(...needLines(d.needs, o.columns))
@@ -473,6 +478,19 @@ export function cardOf(d: WelcomeData, o: CardOptions): Card {
 }
 
 export type Card = { side: Line[]; info: Line[]; lessons: Line[] }
+
+/** A focus of several repositories: a line for each, its name, branch and phase, then how far ahead and its merge request. */
+function repoLines(repos: readonly RepoData[], columns: number): Line[] {
+  const w = Math.min(24, Math.max(...repos.map(r => r.name.length)) + 2)
+  return repos.map(r => {
+    const rest = [
+      r.phase ?? 'no phase',
+      ...(r.ahead !== null && r.upstream ? [`${r.ahead} ahead of ${r.upstream}`] : []),
+      ...(r.mr ? [`MR ${r.mr}`] : []),
+    ].join(' · ')
+    return [dim('⎇ '), seg(pad(r.name, w), undefined, { bold: true }), seg(r.branch), dim(clip(`  ${rest}`, Math.max(0, columns - w - r.branch.length - 2)))]
+  })
+}
 
 /**
  * Where a card's lines go beside art `artRows` tall: the info beside the art when the side has the width for it,

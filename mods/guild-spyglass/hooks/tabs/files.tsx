@@ -5,7 +5,8 @@ import { CRIMSON, delta, foot, head, path, row, type Els } from './ui'
 
 // The files tab: every file the party changed, one group for each working tree it changed them in. The camp's own is
 // its branch against where it left the base (git merge-base HEAD origin/HEAD), committed or not, untracked files
-// included; an adventurer working in a worktree of its own (Claude Code's Agent tool, isolation: worktree) adds its
+// included. A focus of several repositories has no camp worktree but a folder holding projects/<name>, one worktree
+// each: each is a group of its own, against where it left its origin's default branch. An adventurer working in a worktree of its own (Claude Code's Agent tool, isolation: worktree) adds its
 // worktree as a group the first time it edits a file there. A press on a file opens it in the patron's editor
 // (editor: in guild.conf); the tab never shows a diff. What runs git and the editor is in register.tsx.
 

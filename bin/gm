@@ -524,7 +524,8 @@ SQL
 # the order given. Every focus so far works on one, and gets its row from its own columns, which stay: for a focus of
 # several, focus.camp is the folder holding them and focus.repo and focus.branch are the first one's. An event
 # records the repository it is about, when it is about one. A run records the repository it works in (multi-repository
-# focuses, slice 3), every run so far its focus's one; a run across every repository of its focus has none. Only adds.
+# focuses, slice 3), every run so far its focus's one; a run across every repository of its focus has none. A repository
+# may have a merge request, its URL as gm repo mr recorded it (slice 4). Only adds.
 gm_schema12_sql() {
   cat <<'SQL'
 CREATE TABLE focus_repo(
@@ -537,6 +538,7 @@ CREATE TABLE focus_repo(
   phase TEXT,
   position INTEGER NOT NULL,
   opened_at TEXT NOT NULL,
+  mr TEXT,
   UNIQUE (focus_id, name)
 );
 CREATE INDEX focus_repo_focus ON focus_repo(focus_id, position);
@@ -825,6 +827,9 @@ They are for advanced use, and for the Guildmaster.
   repo add <path> [--focus F] [--branch NAME] [--base REF]
                           one more repository for the current focus, or focus F, opened on several: a worktree
                           of it in projects/<name>/ of the camp, made as gm open makes them
+  repo mr <name> <url> [--focus F]
+                          records the merge request of the focus's repository <name>, which gm where, gm show
+                          and the welcome card then show
   up [--quiet]            the muster, plain code with no model: start the front desk's Guildmaster, every open
                           focus's Party Leader and, while guild.conf says collector: on, the tracing collector,
                           whichever is dead or missing, and leave the running ones alone; one that fails to start
@@ -2000,6 +2005,26 @@ SELECT '  '||e.at||'  '||COALESCE(e.line, e.kind) FROM event e WHERE e.posting_i
 SQL
 }
 
+# One project worktree's git state, on one line, from git now: its HEAD, how far it is ahead of and behind its
+# upstream, and how many files are changed in it.
+gm_project_git_state() {
+  local dir=$1 head up counts behind ahead n out
+  [ -d "$dir" ] || { printf 'missing'; return 0; }
+  head=$(git -C "$dir" log -1 --format='%h %<(52,trunc)%s' 2>/dev/null | sed 's/ *$//' || true)
+  out="HEAD ${head:-none}"
+  up=$(git -C "$dir" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || true)
+  if [ -n "$up" ]; then
+    counts=$(git -C "$dir" rev-list --left-right --count '@{upstream}...HEAD' 2>/dev/null || true)
+    read -r behind ahead <<<"$counts"
+    out="$out; ${ahead:-?} ahead, ${behind:-?} behind $up"
+  else
+    out="$out; no upstream"
+  fi
+  n=$(git -C "$dir" status --porcelain 2>/dev/null | grep -c . || true)
+  if [ "${n:-0}" = 0 ]; then out="$out; clean"; else out="$out; $n changed file$([ "$n" = 1 ] || printf s)"; fi
+  printf '%s' "$out"
+}
+
 gm_where() {
   local focus=$1 fid kind camp playbook rules repo pos phase
   fid=$(gm_focus_id "$focus")
@@ -2011,12 +2036,25 @@ gm_where() {
   rules=$(gm_rules_path "$repo")
   pos=''
   [ -z "$phase" ] || pos=$(gm_phase_position "$phase" "$playbook")
-  local camp_sql="'. Camp: '||f.camp||' on branch '||f.branch||' (repository '||f.repo||').'" repos_sql='' least="''"
+  local camp_sql="'. Camp: '||f.camp||' on branch '||f.branch||' (repository '||f.repo||').'
+  ||COALESCE(' Merge request: '||(SELECT mr FROM focus_repo WHERE focus_id=f.id ORDER BY position LIMIT 1)||'.','')"
+  local repos_sql='' least="''" layered=0
   if gm_focus_layered "$focus"; then
-    # A focus on several repositories: its camp holds a worktree of each, one line each, with its own phase.
-    camp_sql="'. Camp: '||f.camp||', holding a worktree of each repository:'"
-    repos_sql="SELECT '- '||name||': '||camp||' on branch '||branch||' (repository '||repo||'), phase '||COALESCE(phase,'unset')
-FROM focus_repo WHERE focus_id=$fid ORDER BY position;"
+    # A focus on several repositories: its camp holds a worktree of each, one line each, with its own branch, phase,
+    # merge request and git state, read from git now; the camp folder itself is no git repository.
+    layered=1
+    camp_sql="'. Camp: '||f.camp||', holding a worktree of each repository in projects/<name> (git state from git, now):'"
+    local name rrepo rcamp rbranch rphase rmr rpos block='' line
+    while IFS=$'\t' read -r name rrepo rcamp rbranch rphase rmr; do
+      [ -n "$name" ] || continue
+      rpos=''
+      [ -z "$rphase" ] || rpos=$(gm_phase_position "$rphase" "$playbook")
+      line="- $name on $rbranch, phase ${rphase:-unset}${rpos:+ ($rpos)}${rmr:+, MR $rmr}: $(gm_project_git_state "$rcamp")"
+      [ -d "$rcamp" ] || line="$line; gm open $focus makes it again"
+      line="$line (repository $rrepo)"
+      block="$block${block:+$'\n'}$line"
+    done <<<"$(gm_sql "SELECT name, repo, camp, branch, COALESCE(phase,''), COALESCE(mr,'') FROM focus_repo WHERE focus_id=$fid ORDER BY position;")"
+    repos_sql="SELECT $(gm_q "$block");"
     least="', the least advanced of its repositories'"
   fi
   gm_sql <<SQL
@@ -2093,7 +2131,9 @@ SELECT char(10)||'Next on the board: '||CASE
              (SELECT '#'||num||' '||slug||' is first in the queue.' FROM posting WHERE focus_id=$fid AND state='queued' ORDER BY num LIMIT 1),
              'nothing is queued.');
 SQL
-  if [ -d "$camp" ]; then
+  if [ "$layered" = 1 ]; then
+    [ -d "$camp" ] || printf '\nThe camp %s is missing; gm open %s makes it again.\n' "$camp" "$focus"
+  elif [ -d "$camp" ]; then
     printf '\nCamp git state (from git, now):\n'
     git -C "$camp" log -1 --format='HEAD %h %s' 2>/dev/null || true
     git -C "$camp" status --short --branch 2>/dev/null | head -n 20 || true
@@ -2145,12 +2185,25 @@ gm_welcome_party_leader() {
     [ -z "$upstream" ] || ahead=$(git -C "$camp" rev-list --count '@{upstream}..HEAD' 2>/dev/null || true)
   fi
   [[ $ahead =~ ^[0-9]+$ ]] || ahead=NULL
+  # Each repository of the focus, its own upstream and how far ahead of it, read from its worktree: one for a focus of
+  # one repository, whose fields above stay as they were.
+  local repos='' name rcamp rbranch rphase rmr rup rahead
+  while IFS=$'\t' read -r name rcamp rbranch rphase rmr; do
+    [ -n "$name" ] || continue
+    rup='' rahead=''
+    if [ -d "$rcamp" ]; then
+      rup=$(git -C "$rcamp" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || true)
+      [ -z "$rup" ] || rahead=$(git -C "$rcamp" rev-list --count '@{upstream}..HEAD' 2>/dev/null || true)
+    fi
+    [[ $rahead =~ ^[0-9]+$ ]] || rahead=NULL
+    repos="$repos${repos:+, }json_object('name', $(gm_q "$name"), 'branch', $(gm_q "$rbranch"), 'phase', $(gm_qn "$rphase"), 'mr', $(gm_qn "$rmr"), 'upstream', $(gm_qn "$rup"), 'ahead', $rahead)"
+  done <<<"$(gm_sql "SELECT name, camp, branch, COALESCE(phase,''), COALESCE(mr,'') FROM focus_repo WHERE focus_id=$fid ORDER BY position;")"
   gm_sql <<SQL
 SELECT json_object(
   'seat', 'party-leader', 'focus', f.name, 'kind', f.kind,
   'tickets', json((SELECT COALESCE(json_group_array(key), '[]') FROM (SELECT key FROM ticket WHERE focus_id=f.id ORDER BY key))),
   'phase', f.phase, 'phases', json_array($phases), 'branch', f.branch,
-  'upstream', $(gm_qn "$upstream"), 'ahead', $ahead,
+  'upstream', $(gm_qn "$upstream"), 'ahead', $ahead, 'repos', json_array($repos),
   'counts', json((SELECT COALESCE(json_group_object(state, n), '{}') FROM (SELECT state, count(*) n FROM posting
     WHERE focus_id=f.id AND state NOT IN ('done','closed') GROUP BY state))),
   'needs', json((SELECT COALESCE(json_group_array(json_object('ref', '#'||p.num, 'question', $(gm_welcome_question_sql p))), '[]')
@@ -2226,9 +2279,16 @@ gm_cmd_statusline() {
   playbook=$(gm_playbook_path "$kind")
   pos=''
   [ -z "$phase" ] || pos=$(gm_phase_position "$phase" "$playbook")
+  # The branch the camp is on; in a focus of several repositories, each repository and its phase instead, cut short
+  # when they are many.
+  local where="f.branch"
+  if gm_focus_layered "$focus"; then
+    where="(SELECT CASE WHEN length(l)>72 THEN substr(l,1,71)||'…' ELSE l END FROM (SELECT group_concat(name||' '||COALESCE(phase,'unset'), ' · ') AS l
+      FROM (SELECT name, phase FROM focus_repo WHERE focus_id=$fid ORDER BY position)))"
+  fi
   gm_sql <<SQL
 SELECT '▸ '||f.name||' · '||f.kind||COALESCE(' · '||(SELECT group_concat(key, ',') FROM ticket WHERE focus_id=f.id),'')
-  ||' · phase '||$(gm_q "${pos:+$pos }")||COALESCE(f.phase,'unset')||' · '||f.branch
+  ||' · phase '||$(gm_q "${pos:+$pos }")||COALESCE(f.phase,'unset')||' · '||$where
 FROM focus f WHERE f.id=$fid;
 SELECT 'postings '||COALESCE((
   SELECT group_concat(n||' '||CASE state WHEN 'needs-you' THEN 'need you' ELSE state END, ' · ') FROM (
@@ -9212,7 +9272,8 @@ gm_cmd_repo() {
   [ $# -eq 0 ] || shift
   case $sub in
     add) gm_cmd_repo_add "$@" ;;
-    *) gm_die "repo: gm repo add <path> [--focus F] [--branch NAME] [--base REF]" ;;
+    mr) gm_cmd_repo_mr "$@" ;;
+    *) gm_die "repo: gm repo add <path> [--focus F] [--branch NAME] [--base REF] | gm repo mr <name> <url> [--focus F]" ;;
   esac
 }
 
@@ -9270,6 +9331,40 @@ SQL
     gm_die "repo add: could not record $name in the register"
   fi
   printf '%s works on %s too: %s on branch %s\n' "$focus" "$name" "$dir" "$branch"
+}
+
+# gm repo mr <name> <url>: the merge request of one repository of the focus, kept on its focus_repo row; a focus of one
+# repository has a row too, named for its clone. Recording it again replaces it.
+gm_cmd_repo_mr() {
+  local name='' url='' focus=''
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --focus) focus=${2:?--focus needs a focus}; shift 2 ;;
+      -*) gm_die "repo mr: unknown option $1" ;;
+      *)
+        if [ -z "$name" ]; then name=$1
+        elif [ -z "$url" ]; then url=$1
+        else gm_die "repo mr: gm repo mr <name> <url> [--focus F]"; fi
+        shift ;;
+    esac
+  done
+  [ -n "$name" ] && [ -n "$url" ] || gm_die "repo mr: gm repo mr <name> <url> [--focus F]"
+  case $url in *[[:space:]]*) gm_die "repo mr: a merge request is one URL, without spaces" ;; esac
+  gm_db_ensure
+  focus=$(gm_require_focus "$focus")
+  local fid
+  fid=$(gm_focus_id "$focus")
+  [ -n "$(gm_sql "SELECT 1 FROM focus_repo WHERE focus_id=$fid AND name=$(gm_q "$name");")" ] ||
+    gm_die "repo mr: focus $focus has no repository named $name (it has: $(gm_sql "SELECT group_concat(name, ', ') FROM (SELECT name FROM focus_repo WHERE focus_id=$fid ORDER BY position);"))"
+  gm_sql >/dev/null <<SQL
+BEGIN IMMEDIATE;
+UPDATE focus_repo SET mr=$(gm_q "$url") WHERE focus_id=$fid AND name=$(gm_q "$name");
+INSERT INTO event(at, actor, kind, focus_id, detail, repo, line)
+  SELECT $GM_NOW, 'party-leader', 'focus.repo-mr', id, $(gm_q "$url"), $(gm_q "$name"),
+         name||' merge request of '||$(gm_q "$name")||': '||$(gm_q "$url") FROM focus WHERE id=$fid;
+COMMIT;
+SQL
+  printf '%s merge request of %s: %s\n' "$focus" "$name" "$url"
 }
 
 command -v sqlite3 >/dev/null 2>&1 || gm_die "gm needs the sqlite3 command"

@@ -4697,9 +4697,10 @@ t_open_several_repos_makes_a_folder_of_worktrees() {
 web $web $c/projects/web feature/CRM-1 intake 2" "a row for each repository" &&
     assert_eq "$(db "SELECT camp||' '||repo||' '||branch FROM focus;")" "$c $api feature/CRM-1" "the focus's camp is the folder, and the first repository's" || return 1
   out=$(cd "$c/projects/web" && unset GM_FOCUS && gm where)
-  assert_contains "$out" "Camp: $c, holding a worktree of each repository:" "where: the camp" &&
-    assert_contains "$out" "- api: $c/projects/api on branch feature/CRM-1 (repository $api), phase intake" "where: a line for api" &&
-    assert_contains "$out" "- web: $c/projects/web on branch feature/CRM-1 (repository $web), phase intake" "where: a line for web" || return 1
+  assert_contains "$out" "Camp: $c, holding a worktree of each repository in projects/<name>" "where: the camp" &&
+    assert_contains "$out" "- api on feature/CRM-1, phase intake (1/8): HEAD " "where: a line for api" &&
+    assert_contains "$out" "(repository $api)" "where: api's clone" &&
+    assert_contains "$out" "- web on feature/CRM-1, phase intake (1/8): HEAD " "where: a line for web" || return 1
   # Reopening rebuilds a missing project; a changed set of repositories is refused.
   git -C "$web" worktree remove --force "$c/projects/web"
   gm open crm-1 --no-launch >/dev/null 2>&1 || fail "reopen"
@@ -4846,6 +4847,73 @@ t_phase_per_repository_and_the_focus_follows_the_least() {
     assert_contains "$(gm where)" "Phase: camp (2/8 of the playbook), the least advanced of its repositories." "where" || return 1
   gm phase build --repo nope >/dev/null 2>&1 && fail "a repository the focus does not have"
   assert_contains "$(gm statusline <<<'{}')" "phase 2/8 camp" "the status line reads the focus's phase"
+}
+
+# Slice 4: each repository shows its own branch, phase, merge request and git state, wherever the focus is shown.
+t_layered_focus_shows_each_repository() {
+  export GM_HALL=$WORK/showrepos/hall
+  local api web c out f
+  api=$(remote_repo showrepos/api)
+  web=$(remote_repo showrepos/web)
+  gm open crm-5 --repo "$api" --repo "$web" --ticket CRM-5 --no-launch >/dev/null 2>&1 || fail "open"
+  c=$GM_HALL/camps/crm-5
+  export GM_FOCUS=crm-5
+  gm phase build >/dev/null
+  gm phase dev-test --repo api >/dev/null
+  # api: pushed, then one commit more and a changed file; web: never pushed.
+  git -C "$c/projects/api" push -q -u origin feature/CRM-5 2>/dev/null
+  git -C "$c/projects/api" -c user.name=t -c user.email=t@t commit -q --allow-empty -m "the owner is kept after save"
+  printf 'x\n' >"$c/projects/api/new.txt"
+  out=$(gm repo mr api https://git.example/api/-/merge_requests/7) || fail "repo mr"
+  assert_eq "$out" "crm-5 merge request of api: https://git.example/api/-/merge_requests/7" "repo mr says what it recorded" &&
+    assert_eq "$(db "SELECT name||' '||COALESCE(mr,'-') FROM focus_repo ORDER BY position;")" "api https://git.example/api/-/merge_requests/7
+web -" "on api's row only" &&
+    assert_eq "$(db "SELECT repo||' '||detail FROM event WHERE kind='focus.repo-mr';")" "api https://git.example/api/-/merge_requests/7" "as an event" || return 1
+  gm repo mr nope https://x >/dev/null 2>&1 && fail "a repository the focus does not have"
+  out=$(gm repo mr web 2>&1) && fail "no URL"
+  out=$(gm repo mr web https://git.example/web/-/merge_requests/9 --focus crm-5) || fail "repo mr --focus"
+  # gm where, gm show and the resume summary: a line for each repository, and no camp git state of the folder.
+  out=$(gm where)
+  assert_contains "$out" "- api on feature/CRM-5, phase dev-test (4/8), MR https://git.example/api/-/merge_requests/7: HEAD " "where: api" &&
+    assert_contains "$out" "the owner is kept after save; 1 ahead, 0 behind origin/feature/CRM-5; 1 changed file (repository $api)" "where: api's git state" &&
+    assert_contains "$out" "- web on feature/CRM-5, phase build (3/8), MR https://git.example/web/-/merge_requests/9: HEAD " "where: web" &&
+    assert_contains "$out" "no upstream; clean (repository $web)" "where: web's git state" &&
+    assert_not_contains "$out" "Camp git state" "no git state of the folder" &&
+    assert_eq "$(gm show crm-5 | tail -n +2)" "$(printf '%s\n' "$out" | tail -n +2)" "gm show of the focus is the same" || return 1
+  out=$(printf '{"session_id":"s1","source":"startup","hook_event_name":"SessionStart"}' | gm hook session-start)
+  out=$(json "SELECT json_extract($(sqlq "$out"),'\$.hookSpecificOutput.additionalContext');")
+  assert_contains "$out" "- api on feature/CRM-5, phase dev-test (4/8), MR https://git.example/api/-/merge_requests/7" "resume: api" &&
+    assert_contains "$out" "- web on feature/CRM-5, phase build (3/8)" "resume: web" || return 1
+  # The status line: each repository and its phase, in place of one branch; cut short when they are many.
+  assert_eq "$(gm statusline <<<'{}' | sed -n 1p)" "▸ crm-5 · ticket · CRM-5 · phase 3/8 build · api dev-test · web build" "status line" || return 1
+  db "UPDATE focus_repo SET name=name||'-with-a-rather-long-repository-name-that-goes-on-and-on' WHERE name='api';"
+  out=$(gm statusline <<<'{}' | sed -n 1p)
+  assert_contains "$out" "· phase 3/8 build · api-with-a-rather-long-repository-name-that-goes-on-and-on dev-test · w" "a long one" &&
+    assert_contains "$out" "…" "cut short" || return 1
+  db "UPDATE focus_repo SET name='api' WHERE name LIKE 'api-%';"
+  # The welcome: a repos array, each with its branch, phase, merge request, upstream and how far ahead.
+  f=$WORK/showrepos/welcome.json
+  gm welcome --json >"$f" || fail "welcome"
+  assert_eq "$(json "SELECT group_concat(r.value->>'name'||' '||(r.value->>'branch')||' '||(r.value->>'phase')||' '||COALESCE(r.value->>'mr','-')||' '||COALESCE(r.value->>'upstream','-')||' '||COALESCE(r.value->>'ahead','-'), char(10)) FROM json_each(json(readfile('$f')),'\$.repos') r;")" \
+    "api feature/CRM-5 dev-test https://git.example/api/-/merge_requests/7 origin/feature/CRM-5 1
+web feature/CRM-5 build https://git.example/web/-/merge_requests/9 - -" "each repository in the welcome"
+}
+
+# A focus of one repository shows as before: where, the status line and the welcome; a merge request adds one line.
+t_single_repo_focus_shows_as_before() {
+  setup onerepo
+  export GM_FOCUS=appt-v2
+  local out f=$WORK/onerepo/welcome.json
+  out=$(gm where)
+  assert_contains "$out" "Camp: $CAMP on branch feature/CRM-8965 (repository $REPO)." "the camp line" &&
+    assert_contains "$out" "Camp git state (from git, now):" "the camp's git state" &&
+    assert_not_contains "$out" "Merge request" "no merge request yet" || return 1
+  assert_eq "$(gm statusline <<<'{}' | sed -n 1p)" "▸ appt-v2 · ticket · CRM-8965 · phase 1/8 intake · feature/CRM-8965" "the status line's branch" || return 1
+  gm welcome --json >"$f"
+  assert_eq "$(json "SELECT (j->>'branch')||' '||json_array_length(j->'repos')||' '||(j->'repos'->0->>'name') FROM (SELECT json(readfile('$f')) AS j);")" \
+    "feature/CRM-8965 1 repo" "the branch as before, and the one repository" || return 1
+  gm repo mr repo https://git.example/repo/-/merge_requests/3 >/dev/null || fail "repo mr on a single camp"
+  assert_contains "$(gm where)" "(repository $REPO). Merge request: https://git.example/repo/-/merge_requests/3." "where says it"
 }
 
 # schema12_undo: the register as schema 11 had it, main's parallel runs and no focus_repo, no event.repo, no run.repo;
