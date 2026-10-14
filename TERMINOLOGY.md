@@ -48,7 +48,7 @@ Where a term replaces one from Firstmate, the Firstmate column records the origi
 | --- | --- | --- |
 | **Guildhall** | One instance's private home: its archive, ledgers, standing orders, and project clones. | operational home (`FM_HOME`) |
 | **Chapter House** | A party leader's own guildhall, isolated from every other. | secondmate home |
-| **Camp** | An isolated, disposable workspace for exactly one job. Never the main checkout. | worktree |
+| **Camp** | An isolated, disposable workspace for exactly one job. Never the main checkout. A focus on one repository has a worktree of it as its camp; a focus on several has a plain folder holding a worktree of each in `projects/<name>/`. | worktree |
 | **Roster** | Every worker the guildhall currently commands. | fleet |
 
 ## Records
