@@ -298,7 +298,7 @@ A Party Leader's card names its focus and tickets, draws the road through the pl
 
 The roster, or a Party Leader's now, next and last, sits beside the art when there is room for it; a wide band lays the commands out in two columns.
 
-The patron's first message folds the card to one rule naming the seat and what needs the patron (`welcome-fold: rule`), or takes it away (`vanish`); either way the idle sprite has the band again while the session waits.
+The session's first message, the patron's or one gm sends a Party Leader, folds the card to one rule naming the seat and what needs the patron (`welcome-fold: rule`), or takes it away (`vanish`); either way the idle sprite has the band again while the session waits.
 A slash command (`/spyglass`, `/veil`) is no message to the model, so the card stays up through it, and while Claude Code's typeahead is up (a draft starting with `/`, or a word at the cursor starting with `@`) the card steps aside, since the typeahead draws over the band.
 A session that resumes starts folded; a `/clear` shows the card again, read anew from the board, with another piece of art. The card is drawn on the screen only: the model never reads it, and it costs no tokens.
 

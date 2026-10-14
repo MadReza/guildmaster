@@ -34,9 +34,9 @@ import {
 // The mod repaints each one on its own tick through $.ui.blit, as Firstmate's calm mod repaints its boat.
 //
 // The welcome (../lib/welcome.ts): while guild.conf says welcome: on, the band above the prompt holds a card from the
-// session's start until the patron's first message: who answers, what needs the patron, where the work stands, and
-// the commands the patron has yet to learn, beside a piece of guild art. gm welcome --json, run through the guild's one
-// gm, says what the card shows. After the first message it folds to one rule (welcome-fold: rule) or goes
+// session's start until its first message, the patron's or gm's: who answers, what needs the patron, where the work
+// stands, and the commands the patron has yet to learn, beside a piece of guild art. gm welcome --json, run through the
+// guild's one gm, says what the card shows. After the first message it folds to one rule (welcome-fold: rule) or goes
 // (welcome-fold: vanish), and the idle sprite takes the band again. It is drawn on screen only: the model never
 // reads it.
 
@@ -409,7 +409,7 @@ const said = (v: Veil) => (v.on ? 'The veil is drawn' : 'The veil is lifted')
 
 const HUES: Readonly<Record<Hue, string>> = { gold: GOLD, crimson: CRIMSON, royal: ROYAL, steel: STEEL, green: GREEN, orange: '#d77757' }
 
-// What this session's card shows, once gm has said; its art, drawn at the start; whether the patron's first message
+// What this session's card shows, once gm has said; its art, drawn at the start; whether the session's first message
 // folded it; and the tutorial's counts as the store holds them, with the commands this patron had never been shown.
 let welcomeData: WelcomeData | undefined
 let welcomeArt: readonly string[] | undefined
@@ -535,7 +535,8 @@ function typing($: EngineInterface, up: boolean): void {
   if (welcomeData && !folded) $.ui.invalidate('ui.render')
 }
 
-// The patron's first message folds the card, whatever it says; the band is drawn again only when a card is up.
+// The session's first message folds the card, whoever sent it and whatever it says; the band is drawn again only
+// when a card is up.
 function fold($: EngineInterface): void {
   if (folded) return
   folded = true
@@ -721,10 +722,11 @@ export const register: Register = on => {
     )
   })
 
-  // The patron's own messages fold the welcome and teach the tutorial what they used.
+  // Any message that starts a turn folds the welcome, the patron's or one gm sent a Party Leader; only the patron's
+  // own teach the tutorial what they used.
   on('prompt.submit', async ($, e, next) => {
+    fold($)
     if (e.origin.kind === 'composer' || e.origin.kind === 'bridge') {
-      fold($)
       typing($, false)
       // A count the store will not keep never holds up the prompt.
       await used($, commandsIn(e.text)).catch(() => undefined)
@@ -752,7 +754,7 @@ export const register: Register = on => {
     return box
   })
 
-  // Above the prompt: the welcome until the patron's first message, then its rule; and while the session waits, the
+  // Above the prompt: the welcome until the session's first message, then its rule; and while the session waits, the
   // idle sprite, under the rule. A survey, or an agent's transcript, keeps the band. What the mods beneath draw there,
   // such as paste-viewer's pasted rows, stays under guild-chat's own.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
