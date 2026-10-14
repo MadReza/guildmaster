@@ -5258,12 +5258,56 @@ gm_rules_push_line() {
   done <<<"$GM_R_PUSH"
 }
 
-# The result of one simple command: GM_RV (allow, deny, ask, cd, or nothing) and GM_RW, why.
+# The result of one simple command: GM_RV (allow, deny, ask, cd, or nothing) and GM_RW, why. In a focus of several
+# repositories, why names the repository the git command is about.
 gm_rules_set() {
   case $GM_RV/$1 in
     deny/* | ask/allow | ask/cd | ask/) return 0 ;;
   esac
   GM_RV=$1 GM_RW=$2
+  [ -z "${GM_R_LABEL:-}" ] || GM_RW=${GM_RW/#gm rules:/gm rules ($GM_R_LABEL):}
+}
+
+# gm_rules_target <dir>: the repository of the focus a git command in dir is about, from GM_R_ROWS (one
+# "name<TAB>repo<TAB>camp<TAB>branch<TAB>phase" line each): the one whose camp holds dir, else the one whose clone
+# holds it, else, in a focus of one, that one. Its rules file, feature branch and phase become the GM_R_* the checks
+# read, loaded again only when the repository changes. In a focus of several, dir in the focus's folder and in none
+# of its projects sets GM_R_AT_FOLDER instead; anywhere else, the first repository's, as a focus of one has it.
+gm_rules_target() {
+  local p line name repo camp branch phase pick='' first='' cp
+  p=$(cd "$1" 2>/dev/null && pwd -P) || p=$1
+  GM_R_AT_FOLDER='' GM_R_LABEL=''
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    [ -n "$first" ] || first=$line
+    IFS=$'\t' read -r _ _ camp _ <<<"$line"
+    cp=$(cd "$camp" 2>/dev/null && pwd -P) || cp=$camp
+    case $p/ in "$cp"/* | "$camp"/*) pick=$line; break ;; esac
+  done <<<"$GM_R_ROWS"
+  [ -n "$pick" ] || while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    IFS=$'\t' read -r _ repo _ <<<"$line"
+    cp=$(cd "$repo" 2>/dev/null && pwd -P) || cp=$repo
+    case $p/ in "$cp"/* | "$repo"/*) pick=$line; break ;; esac
+  done <<<"$GM_R_ROWS"
+  if [ -z "$pick" ] && [ -n "$GM_R_LAYERED" ]; then
+    cp=$(cd "$GM_R_FOLDER" 2>/dev/null && pwd -P) || cp=$GM_R_FOLDER
+    case $p/ in "$cp"/* | "$GM_R_FOLDER"/*) GM_R_AT_FOLDER=1; return 0 ;; esac
+  fi
+  [ -n "$pick" ] || pick=$first
+  IFS=$'\t' read -r name repo camp branch phase <<<"$pick"
+  [ -z "$GM_R_LAYERED" ] || GM_R_LABEL=$name
+  [ "$pick" != "${GM_R_PICKED:-}" ] || return 0
+  GM_R_PICKED=$pick GM_R_FEATURE=$branch GM_R_PHASE=$phase
+  gm_rules_load "$(gm_rules_path "$repo")" "$GM_R_PLAYBOOK_PATH"
+}
+
+# The focus's folder holds its repositories and is none of them: a git command there that would change one is denied,
+# naming where to go.
+gm_rules_at_folder() {
+  local projects
+  projects=$(printf '%s\n' "$GM_R_ROWS" | awk -F '\t' -v f="$GM_R_FOLDER/" 'NF { c = $3; if (index(c, f) == 1) c = substr(c, length(f) + 1); print c }' | paste -sd ' ' - | sed 's/ /, /g')
+  gm_rules_set deny "gm rules: $GM_R_FOLDER is the focus's folder, not a repository; cd into the project the change is for first ($projects), and its own rules answer there."
 }
 
 # gm_rules_holders: the focus's contract runs that are live, or whose run branch holds commits not landed on the
@@ -5394,12 +5438,13 @@ gm_rules_push() {
 }
 
 gm_rules_new_branch() {
+  [ -z "${GM_R_AT_FOLDER:-}" ] || { gm_rules_at_folder; return; }
   gm_rules_set deny "gm rules: no new branch: this focus's work stays on $GM_R_FEATURE, the branch of its ticket (the repository's rules: no new branch for work that belongs to an open ticket)."
 }
 
 # gm_rules_git <dir> <args after git>
 gm_rules_git() {
-  local dir=$1 sub a skip=0 cur pos=0 b
+  local dir=$1 sub
   shift
   while [ $# -gt 0 ]; do
     case $1 in
@@ -5411,6 +5456,20 @@ gm_rules_git() {
   done
   sub=${1:-}
   [ $# = 0 ] || shift
+  gm_rules_target "$dir"
+  if [ -n "$GM_R_AT_FOLDER" ]; then
+    case $sub in
+      push | commit | merge | rebase | cherry-pick | revert | am | pull | tag | reset) gm_rules_at_folder; GM_R_LABEL=''; return ;;
+    esac
+  fi
+  gm_rules_git_sub "$dir" "$sub" "$@"
+  GM_R_LABEL=''
+}
+
+# gm_rules_git_sub <dir> <subcommand> <its args>: the checks for one git command, with its repository's rules.
+gm_rules_git_sub() {
+  local dir=$1 sub=$2 a skip=0 cur pos=0 b top
+  shift 2
   case $sub in
     push) gm_rules_push "$dir" "$@" ;;
     checkout)
@@ -5438,8 +5497,13 @@ gm_rules_git() {
     commit)
       if [ "${GM_R_KIND:-}" = survey ]; then
         gm_rules_set deny "gm rules: a survey changes nothing, so it never commits: what you found goes in your field report, your last message."
-      elif [ -n "${GM_R_LANDING:-}" ] && [ "$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)" = "$GM_R_CAMP" ]; then
-        gm_rules_set deny "gm rules: gm is landing a run on the feature branch in this camp; commit nothing here until it has, in a few seconds."
+      elif [ -n "${GM_R_LANDING:-}" ]; then
+        # gm lands in the camp, or in a focus of several in the project of the run's repository: each is held.
+        top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || return 0
+        if printf '%s\n' "$GM_R_ROWS" | cut -f 3 | grep -qxF "$top" ||
+          printf '%s\n' "$GM_R_ROWS" | cut -f 3 | while IFS= read -r a; do (cd "$a" 2>/dev/null && pwd -P); done | grep -qxF "$top"; then
+          gm_rules_set deny "gm rules: gm is landing a run on the feature branch in this camp; commit nothing here until it has, in a few seconds."
+        fi
       fi ;;
   esac
   # The feature branch is never rewritten under a run: a rebase of it, or a reset that moves it, while a run of the
@@ -5575,6 +5639,7 @@ gm_rules_simple() {
 # gm hook rules: reads the hook's JSON, prints its decision or nothing.
 gm_hook_rules() {
   local input tool focus fid camp branch repo kind phase cmd cwd path b
+  local GM_R_ROWS GM_R_FOLDER GM_R_LAYERED='' GM_R_PICKED='' GM_R_AT_FOLDER='' GM_R_LABEL='' GM_R_PLAYBOOK_PATH
   input=$(cat)
   focus=${GM_FOCUS:-}
   [ -n "$focus" ] && [ -s "$GM_DB" ] || return 0
@@ -5584,7 +5649,11 @@ gm_hook_rules() {
   [ -n "$fid" ] || return 0
   # Runs work in worktrees of their own (slice 4), so the camp is the Party Leader's: it is held only while gm lands a
   # run there, for seconds.
-  GM_R_FEATURE=$branch GM_R_PHASE=$phase GM_R_CAMP=$camp GM_R_FID=$fid GM_R_LANDING='' GM_R_KIND='' GM_R_PUSHED=''
+  GM_R_FEATURE=$branch GM_R_PHASE=$phase GM_R_FOLDER=$camp GM_R_FID=$fid GM_R_LANDING='' GM_R_KIND='' GM_R_PUSHED=''
+  # Each repository of the focus, its own rules, branch and phase; a focus from before them has its own columns.
+  GM_R_ROWS=$(gm_sql "SELECT name, repo, camp, branch, COALESCE(phase,'') FROM focus_repo WHERE focus_id=$fid ORDER BY position;" 2>/dev/null || true)
+  [ -n "$GM_R_ROWS" ] || GM_R_ROWS=$(basename "$repo")$'\t'$repo$'\t'$camp$'\t'$branch$'\t'$phase
+  ! printf '%s\n' "$GM_R_ROWS" | cut -f 3 | grep -qvxF "$camp" || GM_R_LAYERED=1
   if [[ ${GM_RUN:-} =~ ^[0-9]+$ ]]; then
     GM_R_KIND=$(gm_sql "SELECT kind FROM run WHERE id=$GM_RUN;" 2>/dev/null || true)
   elif [ -z "${GM_RUN:-}" ] && gm_locked "land-$focus"; then
@@ -5596,7 +5665,7 @@ gm_hook_rules() {
     Bash)
       cmd=$(gm_guard_field "$input" tool_input.command)
       case $cmd in *git* | *glab* | *gh\ *) ;; *) return 0 ;; esac
-      gm_rules_load "$(gm_rules_path "$repo")" "$(gm_playbook_path "$kind")"
+      GM_R_PLAYBOOK_PATH=$(gm_playbook_path "$kind")
       GM_RV='' GM_RW=''
       gm_rules_command "$cmd" "$cwd"
       [ -z "$GM_RV" ] || gm_guard_json "$GM_RV" "$GM_RW"
@@ -6322,6 +6391,21 @@ gm_refs_snapshot() {
   { gm_git "$camp" for-each-ref --format='%(refname) %(objectname) %(symref)' refs/heads refs/remotes 2>/dev/null || true; } | awk '$3 == "" { print $1, $2 }'
 }
 
+# gm_refs_snapshot_focus <focus>: gm_refs_snapshot of its camp; for a focus of several repositories, of each one's,
+# each after a "repo <name>" line.
+gm_refs_snapshot_focus() {
+  local name camp
+  if ! gm_focus_layered "$1"; then
+    gm_refs_snapshot "$(gm_focus_field "$1" camp)"
+    return
+  fi
+  while IFS=$'\t' read -r name camp; do
+    [ -n "$name" ] || continue
+    printf 'repo %s\n' "$name"
+    gm_refs_snapshot "$camp"
+  done <<<"$(gm_sql "SELECT r.name, r.camp FROM focus_repo r JOIN focus f ON f.id=r.focus_id WHERE f.name=$(gm_q "$1") ORDER BY r.position;")"
+}
+
 # gm_check_ref <snapshot> <ref>: the commit the snapshot has for the ref, or nothing.
 gm_check_ref() { printf '%s\n' "$1" | awk -v r="$2" '$1 == r { print $2; exit }'; }
 
@@ -6349,14 +6433,38 @@ gm_check_pushed() {
 }
 
 # gm_check_facts <run>: the rules run $1 broke, from git alone, into GM_CK ("rule<TAB>evidence" lines), and into
-# GM_CK_NOTE what gm could not see.
+# GM_CK_NOTE what gm could not see: for each repository of its focus, in its own camp, by its own rules and phase. In a
+# focus of several, each piece of evidence starts with the repository it is about.
 gm_check_facts() {
-  local id=$1 fid camp branch repo kind phase before after others since cur head ref sha old new pre rem b tip
-  local devok=0 vl n0 n1 refs=() pending='' ls lsok line tips commits more
+  local id=$1 fid kind since folder all layered=0 name repo camp branch phase before
   GM_CK='' GM_CK_NOTE=''
-  IFS=$'\t' read -r fid camp branch repo kind since phase <<<"$(gm_sql "SELECT r.focus_id, f.camp, f.branch, f.repo, f.kind, CAST(strftime('%s', r.started_at) AS INTEGER), COALESCE(f.phase,'') FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
-  before=$(gm_sql "SELECT COALESCE(refs_before,'') FROM run WHERE id=$id;")
-  others=$(gm_sql "SELECT branch FROM focus WHERE id<>$fid AND repo=$(gm_q "$repo");")
+  IFS=$'\t' read -r fid kind since folder <<<"$(gm_sql "SELECT r.focus_id, f.kind, CAST(strftime('%s', r.started_at) AS INTEGER), f.camp FROM run r JOIN focus f ON f.id=r.focus_id WHERE r.id=$id;")"
+  all=$(gm_sql "SELECT COALESCE(refs_before,'') FROM run WHERE id=$id;")
+  [ -z "$(gm_sql "SELECT 1 FROM focus_repo WHERE focus_id=$fid AND camp<>$(gm_q "$folder") LIMIT 1;")" ] || layered=1
+  while IFS=$'\t' read -r name repo camp branch phase; do
+    [ -n "$name" ] || continue
+    if [ "$layered" = 0 ]; then
+      before=$all
+    else
+      before=$(printf '%s\n' "$all" | awk -v n="$name" '$1 == "repo" { on = ($2 == n); next } on')
+      if ! printf '%s\n' "$all" | grep -qxF "repo $name"; then
+        GM_CK_NOTE="$GM_CK_NOTE${GM_CK_NOTE:+; }gm dispatch kept no refs for $name, so it was not checked"
+        continue
+      fi
+    fi
+    gm_check_repo "$fid" "$kind" "$since" "$name" "$repo" "$camp" "$branch" "$phase" "$before" "$([ "$layered" = 0 ] || printf '%s: ' "$name")"
+  done <<<"$(gm_sql "SELECT name, repo, camp, branch, COALESCE(phase,'') FROM focus_repo WHERE focus_id=$fid ORDER BY position;")"
+}
+
+# gm_check_repo <focus id> <kind> <since> <name> <repo> <camp> <branch> <phase> <refs before> <label>: gm_check_facts
+# for one repository of the focus; label starts each piece of evidence.
+gm_check_repo() {
+  local fid=$1 kind=$2 since=$3 repo=$5 camp=$6 branch=$7 phase=$8 before=$9 label=${10}
+  local after others cur head ref sha old new pre rem b tip
+  local devok=0 vl n0 n1 refs=() pending='' ls lsok line tips commits more
+  # gm_check_broke, with the repository named.
+  gm_check_hit() { gm_check_broke "$1" "$label$2"; }
+  others=$(gm_sql "SELECT branch FROM focus_repo WHERE focus_id<>$fid AND repo=$(gm_q "$repo");")
   after=$(gm_refs_snapshot "$camp")
   gm_check_other() { [ -n "$others" ] && printf '%s\n' "$others" | grep -qxF "$1"; }
   # The development branch may move, forward only, when a push: development line allows or merges in this phase.
@@ -6369,9 +6477,9 @@ gm_check_facts() {
   # The camp is still on the recorded branch.
   read -r _ head cur <<<"$(printf '%s\n' "$after" | sed -n 1p)"
   if [ -z "$cur" ]; then
-    gm_check_broke "$GM_CHECK_BRANCH" "HEAD is detached at $(gm_check_short "$head"), not on $branch"
+    gm_check_hit "$GM_CHECK_BRANCH" "HEAD is detached at $(gm_check_short "$head"), not on $branch"
   elif [ "$cur" != "$branch" ]; then
-    gm_check_broke "$GM_CHECK_BRANCH" "the camp is on $cur, not $branch"
+    gm_check_hit "$GM_CHECK_BRANCH" "the camp is on $cur, not $branch"
   fi
   # No local branch was created; another focus's branch is that focus's.
   while read -r ref sha; do
@@ -6379,7 +6487,7 @@ gm_check_facts() {
     b=${ref#refs/heads/}
     [ -z "$(gm_check_ref "$before" "$ref")" ] || continue
     if [ "$b" = "$branch" ] || gm_check_other "$b"; then continue; fi
-    gm_check_broke "$GM_CHECK_NEW" "the branch $b was created, at $(gm_check_short "$sha")"
+    gm_check_hit "$GM_CHECK_NEW" "the branch $b was created, at $(gm_check_short "$sha")"
   done <<<"$(printf '%s\n' "$after" | sed 1,2d)"
   # After a fetch, no remote branch moved except the feature branch and, when the playbook allows it, the development
   # branch, forward. Only a move this clone made counts: a push recorded in the remote-tracking ref's reflog since the
@@ -6389,7 +6497,7 @@ gm_check_facts() {
     [ -n "$rem" ] || continue
     lsok=1
     ls=$(GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND=${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o ConnectTimeout=15} gm_git "$camp" ls-remote --heads "$rem" 2>/dev/null) || lsok=0
-    [ "$lsok" = 1 ] || GM_CK_NOTE="$GM_CK_NOTE${GM_CK_NOTE:+; }gm could not reach the remote $rem, so only pushes this clone recorded were checked there"
+    [ "$lsok" = 1 ] || GM_CK_NOTE="$GM_CK_NOTE${GM_CK_NOTE:+; }${label}gm could not reach the remote $rem, so only pushes this clone recorded were checked there"
     while IFS= read -r b; do
       [ -n "$b" ] || continue
       old=$(gm_check_ref "$before" "refs/remotes/$rem/$b")
@@ -6404,7 +6512,7 @@ gm_check_facts() {
       if [ "$b" = "$branch" ]; then
         tip=$(gm_check_ref "$after" "refs/heads/$branch")
         if [ -n "$new" ] && ! gm_git "$camp" merge-base --is-ancestor "$new" "$tip" 2>/dev/null; then
-          gm_check_broke "$GM_CHECK_LINE" "$rem/$b is at $(gm_check_short "$new"), which $branch does not contain"
+          gm_check_hit "$GM_CHECK_LINE" "$rem/$b is at $(gm_check_short "$new"), which $branch does not contain"
         fi
         continue
       fi
@@ -6413,11 +6521,11 @@ gm_check_facts() {
         continue
       fi
       if [ -z "$new" ]; then
-        gm_check_broke "$GM_CHECK_REMOTE" "$rem/$b was deleted (it was at $(gm_check_short "$old"))"
+        gm_check_hit "$GM_CHECK_REMOTE" "$rem/$b was deleted (it was at $(gm_check_short "$old"))"
       elif [ -z "$old" ]; then
-        gm_check_broke "$GM_CHECK_REMOTE" "$rem/$b was created, at $(gm_check_short "$new")"
+        gm_check_hit "$GM_CHECK_REMOTE" "$rem/$b was created, at $(gm_check_short "$new")"
       else
-        gm_check_broke "$GM_CHECK_REMOTE" "$rem/$b moved from $(gm_check_short "$old") to $(gm_check_short "$new")"
+        gm_check_hit "$GM_CHECK_REMOTE" "$rem/$b moved from $(gm_check_short "$old") to $(gm_check_short "$new")"
       fi
     done <<<"$({
       printf '%s\n%s\n' "$before" "$after" | awk -v p="refs/remotes/$rem/" 'index($1, p) == 1 { print substr($1, length(p) + 1) }'
@@ -6425,12 +6533,12 @@ gm_check_facts() {
     } | sort -u)"
     [ "$lsok" = 0 ] || GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND=${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o ConnectTimeout=15} \
       gm_git "$camp" fetch --quiet --no-tags "$rem" >/dev/null 2>&1 ||
-      GM_CK_NOTE="$GM_CK_NOTE${GM_CK_NOTE:+; }gm could not fetch from $rem"
+      GM_CK_NOTE="$GM_CK_NOTE${GM_CK_NOTE:+; }${label}gm could not fetch from $rem"
   done <<<"$(gm_git "$camp" remote 2>/dev/null || true)"
   while read -r rem b old new; do
     [ -n "$rem" ] || continue
     gm_git "$camp" merge-base --is-ancestor "$old" "$new" 2>/dev/null ||
-      gm_check_broke "$GM_CHECK_REMOTE" "$rem/$b moved from $(gm_check_short "$old") to $(gm_check_short "$new"), which does not contain it: not forward"
+      gm_check_hit "$GM_CHECK_REMOTE" "$rem/$b moved from $(gm_check_short "$old") to $(gm_check_short "$new"), which does not contain it: not forward"
   done <<<"$pending"
   # No commit exists outside the feature branch's line: none made since the dispatch (each new entry of the camp's
   # HEAD reflog, each local branch's tip, HEAD) that the feature branch does not contain, nor any branch had before,
@@ -6461,9 +6569,9 @@ gm_check_facts() {
   if [ -n "$commits" ]; then
     more=$(printf '%s\n' "$commits" | awk 'END { print NR - 5 }')
     while IFS= read -r line; do
-      gm_check_broke "$GM_CHECK_LINE" "commit $line is not on $branch"
+      gm_check_hit "$GM_CHECK_LINE" "commit $line is not on $branch"
     done <<<"$(printf '%s\n' "$commits" | head -n 5 | gm_git "$camp" log --no-walk=unsorted --stdin --format='%h "%s"' 2>/dev/null || true)"
-    [ "$more" -le 0 ] || gm_check_broke "$GM_CHECK_LINE" "and $more more commits that are not on $branch"
+    [ "$more" -le 0 ] || gm_check_hit "$GM_CHECK_LINE" "and $more more commits that are not on $branch"
   fi
 }
 

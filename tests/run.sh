@@ -4015,7 +4015,7 @@ EOF
   done
   assert_eq "$(decision "$(GM_RUN=1 rules Bash 'git push origin feature/CRM-8965')")" deny "nor pushes: gm lands its work" || return 1
   # Once a merge request is open, the playbook's phase-scoped line keeps the feature branch from a force-push.
-  db "UPDATE focus SET phase='fix-loop';"
+  db "UPDATE focus SET phase='fix-loop'; UPDATE focus_repo SET phase='fix-loop';"
   out=$(rules Bash 'git push --force origin feature/CRM-8965')
   assert_eq "$(decision "$out")" deny "no force-push in fix-loop" &&
     assert_contains "$(reason "$out")" '"push: feature merge in merge-request fix-loop sealed closed' "quoting the phase's line" &&
@@ -4890,6 +4890,139 @@ t_migration_from_schema11_backfills_focus_repo() {
   schema12_undo
   gm list >/dev/null || fail "gm on a schema-11 register"
   migrated_focus_repo
+}
+# ---- The rules of the repository a command is about (multi-repository focuses, slice 2) ----
+
+# multi_setup <name>: focus crm-5 on two repositories with remotes, api and web, whose rules differ: api's shared
+# development branch is develop, web's is development; api is in build, web in merge-request.
+multi_setup() {
+  export GM_HALL=$WORK/$1/hall
+  API=$(remote_repo "$1/api")
+  WEB=$(remote_repo "$1/web")
+  gm open crm-5 --repo "$API" --repo "$WEB" --ticket CRM-5 --no-launch >/dev/null 2>&1 || fail "open"
+  MC=$GM_HALL/camps/crm-5
+  export GM_FOCUS=crm-5
+  printf 'development-branch: develop\nintegration-branch: integration\nprotected-branch: master, main\n' >>"$GM_HALL/rules/api.md"
+  gm phase build >/dev/null
+  gm phase merge-request --repo web >/dev/null
+}
+
+# mrules <command, or the file for Edit and Write> [cwd] [tool]: gm hook rules' answer in crm-5, for Bash from the
+# focus's folder by default.
+mrules() {
+  local input
+  input=$(json "SELECT json_object('session_id','r1','hook_event_name','PreToolUse','cwd',$(sqlq "${2:-$MC}"),'tool_name',$(sqlq "${3:-Bash}"),
+    'tool_input', json_object('command',$(sqlq "$1"),'file_path',$(sqlq "$1"),'content','x'));")
+  printf '%s' "$input" | GM_FOCUS=crm-5 bash "$GM" hook rules
+}
+
+t_rules_of_the_repository_a_command_is_about() {
+  multi_setup rulesmulti
+  local out a=$MC/projects/api w=$MC/projects/web f=feature/CRM-5
+  # web has no branch names yet: its pushes are denied, naming its own rules file; api's go by api's.
+  out=$(mrules "git push origin $f" "$w")
+  assert_eq "$(decision "$out")" deny "web, with no branch names" &&
+    assert_contains "$(reason "$out")" "gm rules (web): every push is denied" "names the repository" &&
+    assert_contains "$(reason "$out")" "development-branch: in $GM_HALL/rules/web.md" "and its rules file" &&
+    assert_not_contains "$(reason "$out")" "api.md" "not api's" &&
+    assert_eq "$(decision "$(mrules "git push origin $f" "$a")")" allow "api pushes its feature branch" || return 1
+  printf 'development-branch: development\nintegration-branch: integration\nprotected-branch: master, main\n' >>"$GM_HALL/rules/web.md"
+  # Each repository's own development branch.
+  assert_eq "$(decision "$(mrules 'git push origin develop' "$a")")" allow "api's development branch is develop" &&
+    assert_eq "$(decision "$(mrules 'git push origin development' "$a")")" deny "development is no branch of api's" &&
+    assert_contains "$(reason "$(mrules 'git push origin development' "$a")")" "gm rules (api): development has no push rule" "says so, for api" &&
+    assert_eq "$(decision "$(mrules 'git push origin development' "$w")")" allow "web's is development" &&
+    assert_eq "$(decision "$(mrules 'git push origin develop' "$w")")" deny "develop is no branch of web's" || return 1
+  # Each repository's own phase: web's merge request is open, so its feature branch is never forced; api's may be.
+  out=$(mrules "git push --force origin $f" "$w")
+  assert_eq "$(decision "$out")" deny "a forced push in web, in merge-request" &&
+    assert_contains "$(reason "$out")" '"push: feature merge in merge-request' "quoting the phase's line" &&
+    assert_eq "$(decision "$(mrules "git push --force origin $f" "$a")")" allow "the same in api, in build" &&
+    assert_eq "$(decision "$(mrules "git push --force origin $f" "$a/src")")" allow "from a folder inside api" || return 1
+  # The repository is the one the command is about: -C, a cd, one command after another.
+  assert_eq "$(decision "$(mrules "git -C projects/web push --force origin $f")")" deny "git -C into web" &&
+    assert_eq "$(decision "$(mrules "git -C projects/api push --force origin $f")")" allow "git -C into api" &&
+    assert_eq "$(decision "$(mrules "cd projects/api && git push origin develop")")" allow "after a cd into api" &&
+    assert_eq "$(decision "$(mrules "cd $a && git push origin develop && cd $w && git push origin develop")")" deny "a second push, in web" &&
+    assert_eq "$(decision "$(mrules "git push origin develop" "$API")")" allow "in the patron's clone of api, api's rules" || return 1
+  # No new branch in a project.
+  out=$(mrules 'git checkout -b other' "$w")
+  assert_eq "$(decision "$out")" deny "a new branch in web" &&
+    assert_contains "$(reason "$out")" "gm rules (web): no new branch: this focus's work stays on $f" "names the repository and its branch" &&
+    assert_eq "$(decision "$(mrules 'git switch -c other' "$a")")" deny "nor in api" || return 1
+  # The focus's folder is no repository: what would push, branch or commit there is denied, naming the projects.
+  out=$(mrules "git push origin $f")
+  assert_eq "$(decision "$out")" deny "a push from the folder" &&
+    assert_contains "$(reason "$out")" "cd into the project the change is for first (projects/api, projects/web)" "naming where to go" &&
+    assert_eq "$(decision "$(mrules 'git commit -m x')")" deny "a commit from the folder" &&
+    assert_eq "$(decision "$(mrules 'git checkout -b other')")" deny "a new branch from the folder" &&
+    assert_eq "$(decision "$(mrules 'git push origin develop' "$MC/.claude")")" deny "from a folder of the folder's own" &&
+    assert_eq "$(mrules 'git status')" "" "reading is left alone" &&
+    assert_eq "$(mrules 'git log --oneline')" "" "so is the log" || return 1
+  # While gm lands a run, the whole folder is held: an edit or a commit in any project.
+  mkdir -p "$GM_HALL/locks/land-crm-5.lock" && printf '%s' "$$" >"$GM_HALL/locks/land-crm-5.lock/pid"
+  assert_eq "$(decision "$(mrules 'git commit -m wip' "$w")")" deny "a commit in web while gm lands" &&
+    assert_eq "$(decision "$(mrules 'git commit -m wip' "$a")")" deny "or in api" &&
+    assert_eq "$(decision "$(mrules "$w/app.js" "$MC" Edit)")" deny "an edit in web" &&
+    assert_eq "$(decision "$(mrules "$MC/notes.md" "$MC" Write)")" deny "or in the folder" || return 1
+  rm -rf "$GM_HALL/locks/land-crm-5.lock"
+  assert_eq "$(mrules "$w/app.js" "$MC" Edit)" "" "the landing over, edits go again" &&
+    assert_eq "$(mrules 'git commit -m wip' "$w")" "" "and commits"
+}
+
+# msnap: each repository's refs in crm-5 as gm keeps them for a run with no worktree of its own, after a
+# "repo <name>" line.
+msnap() {
+  local n d
+  for n in api web; do
+    d=$MC/projects/$n
+    printf 'repo %s\n' "$n"
+    printf 'HEAD %s %s\n' "$(git -C "$d" rev-parse -q --verify HEAD)" "$(git -C "$d" symbolic-ref --short -q HEAD || true)"
+    printf 'reflog %s\n' "$(git -C "$d" reflog show --format=%H HEAD | awk 'END { print NR }')"
+    git -C "$d" for-each-ref --format='%(refname) %(objectname) %(symref)' refs/heads refs/remotes | awk '$3 == "" { print $1, $2 }'
+  done
+}
+
+# mcheck_post <words> <script>: a run of crm-5 with no worktree of its own, recorded by hand with its refs; the script
+# is what it did, from the focus's folder; then gm check. Prints the run.
+mcheck_post() {
+  local num run sq="'"
+  gm post "$1" >/dev/null
+  num=$(db "SELECT max(num) FROM posting WHERE focus_id=(SELECT id FROM focus WHERE name='crm-5');")
+  gm notice "$num" started >/dev/null
+  db "INSERT INTO run(focus_id, kind, permission_mode, session_id, started_at, refs_before)
+    SELECT id, 'contract', 'bypass', 'm-$num', strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 seconds'), '$(msnap | sed "s/$sq/$sq$sq/g")' FROM focus WHERE name='crm-5';
+    INSERT INTO run_posting(run_id, posting_id) SELECT (SELECT max(id) FROM run), id FROM posting WHERE num=$num AND focus_id=(SELECT id FROM focus WHERE name='crm-5');"
+  run=$(db "SELECT max(id) FROM run;")
+  (cd "$MC" && bash -c "set -e; $2") || fail "the run's script"
+  db "UPDATE run SET ended_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=$run;"
+  gm check "$run" >/dev/null 2>&1
+  printf '%s' "$run"
+}
+
+t_check_each_repository_by_its_own_rules() {
+  multi_setup checkmulti
+  printf 'development-branch: development\nintegration-branch: integration\nprotected-branch: master, main\n' >>"$GM_HALL/rules/web.md"
+  local r out
+  git -C "$API" push -q origin main:develop main:teammate 2>/dev/null
+  git -C "$WEB" push -q origin main:development 2>/dev/null
+  # A run with no worktree of its own is checked in each repository, by its rules: a clean one, a commit in each
+  # project, each pushed to its feature branch, and api's to its development branch.
+  r=$(mcheck_post "a clean fix" "cd projects/api && $(commit_in api) && git push -q origin HEAD:feature/CRM-5 && git push -q origin HEAD:develop && cd ../web && $(commit_in web) && git push -q origin HEAD:feature/CRM-5")
+  assert_eq "$(db "SELECT check_result FROM run WHERE id=$r;")" passed "a clean run in both repositories passes" || return 1
+  gm notice 1 'done' >/dev/null
+  # web's development branch is development, not develop: moving develop there is a breach, named as web's.
+  r=$(mcheck_post "pushed elsewhere" "cd projects/web && git push -q origin HEAD:develop && git branch side")
+  out=$(db "SELECT check_evidence FROM run WHERE id=$r;")
+  assert_eq "$(db "SELECT check_result FROM run WHERE id=$r;")" failed "the breach fails the check" &&
+    assert_contains "$out" "- no remote branch moves but the feature branch, and the development branch only forward when the playbook allows it: web: origin/develop was created, at" "web's remote branch, named as web's" &&
+    assert_contains "$out" "- no new local branch: web: the branch side was created" "web's new branch" &&
+    assert_not_contains "$out" "api:" "nothing in api" &&
+    assert_contains "$(cat "$GM_HALL/runs/$r/check.txt")" "web: the branch side was created" "check.txt too" || return 1
+  gm notice 2 'done' >/dev/null
+  # api left on another branch.
+  r=$(mcheck_post "left detached" "cd projects/api && git checkout -q --detach")
+  assert_contains "$(db "SELECT check_evidence FROM run WHERE id=$r;")" "the camp stays on its feature branch: api: HEAD is detached at" "api's camp, named"
 }
 
 t_shellcheck() {
