@@ -170,6 +170,20 @@ describe('the card', () => {
     expect(lines(card.info)).toEqual(['now   #6 retry-on-timeout', 'next  #7 owner-empty-after-save', 'last  09:12 crm-1234#5 done'])
   })
 
+  test('a focus of several repositories: a line for each, its branch, phase, how far ahead and its merge request', () => {
+    const repos = [
+      { name: 'api', branch: 'feature/CRM-1234', phase: 'dev-test', mr: 'https://git.example/api/-/merge_requests/7', upstream: 'origin/feature/CRM-1234', ahead: 1 },
+      { name: 'web', branch: 'feature/CRM-1234', phase: 'build', mr: null, upstream: null, ahead: null },
+    ]
+    const side = lines(cardOf({ ...FOCUS, repos }, opts({ columns: 120 })).side)
+    expect(side[3]).toBe('⎇ api  feature/CRM-1234  dev-test · 1 ahead of origin/feature/CRM-1234 · MR https://git.example/api/-/merge_requests/7')
+    expect(side[4]).toBe('⎇ web  feature/CRM-1234  build')
+    expect(side[5]).toBe('1 active · 2 queued · 0 needs you · 0 parked')
+    expect(lines(cardOf({ ...FOCUS, repos }, opts()).side)[3]!.length).toBeLessThanOrEqual(70)
+    // One repository draws the branch line as before.
+    expect(lines(cardOf({ ...FOCUS, repos: [repos[0]!] }, opts()).side)[3]).toBe('⎇ feature/CRM-1234  4 ahead of origin/main')
+  })
+
   test('a fresh focus asks for work; a question for the patron comes before the counts', () => {
     expect(lines(cardOf({ ...FOCUS, counts: {}, active: null, next: null, last: null }, opts()).side)).toContain('Nothing on the board yet. Tell me what to work on.')
     const side = lines(cardOf({ ...FOCUS, needs: [{ ref: '#12', question: 'Open the merge request?' }] }, opts()).side)

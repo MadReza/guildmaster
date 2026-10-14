@@ -213,6 +213,9 @@ const dirOf = (path: string) => path.slice(0, Math.max(1, path.lastIndexOf('/'))
 async function noteTree($: EngineInterface, path: string, agentId: string): Promise<void> {
   const root = await toplevel($, dirOf(path))
   if (!root || !cwd || root === (await toplevel($, cwd))) return
+  // A project of a focus of several repositories is the camp's own group, not an adventurer's.
+  const project = root.startsWith(`${cwd}/projects/`) ? root.slice(`${cwd}/projects/`.length) : undefined
+  if (project && !project.includes('/')) return
   const label = `ADVENTURER · ${adventurers.get(agentId) ?? root.slice(root.lastIndexOf('/') + 1)}`
   await update($, trees, list => (list.some(t => t.root === root) ? list : [...list, { root, label }]))
 }
@@ -220,10 +223,21 @@ async function noteTree($: EngineInterface, path: string, agentId: string): Prom
 // git's empty tree: what a repository with no commit yet is compared against.
 const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
 
+// Where a tree left its origin's default branch: origin/HEAD, or origin/main or origin/master when the clone never
+// set origin/HEAD, as a worktree gm made from a fresh fetch may not have.
+async function baseOf($: EngineInterface, root: string): Promise<{ out: string } | { why: string }> {
+  let got: { out: string } | { why: string } = { why: 'no origin' }
+  for (const ref of ['origin/HEAD', 'origin/main', 'origin/master']) {
+    got = await git($, ['-C', root, 'merge-base', 'HEAD', ref])
+    if ('out' in got && got.out.trim()) return got
+  }
+  return got
+}
+
 // One tree's changes against where it left the base, since its last commit when it has no base, or everything when
 // it has no commit yet.
 async function changesIn($: EngineInterface, root: string): Promise<{ files: SpyglassChangedFile[] } | { why: string }> {
-  const base = await git($, ['-C', root, 'merge-base', 'HEAD', 'origin/HEAD'])
+  const base = await baseOf($, root)
   const head = 'out' in base ? undefined : await git($, ['-C', root, 'rev-parse', '--verify', '--quiet', 'HEAD'])
   const from = 'out' in base && base.out.trim() ? base.out.trim() : head && 'why' in head ? EMPTY_TREE : 'HEAD'
   const tracked = await git($, ['-C', root, 'diff', '--numstat', '-z', '--no-renames', from])
@@ -241,19 +255,32 @@ async function changesIn($: EngineInterface, root: string): Promise<{ files: Spy
   return { files: merged(parseNumstat(tracked.out), untracked(fresh, p => lines.get(p) ?? 0)) }
 }
 
+// A focus of several repositories: its camp is a plain folder, and each repository a worktree in projects/<name>.
+async function projectsOf($: EngineInterface, folder: string): Promise<{ root: string; name: string }[]> {
+  const entries = await $.fs.list(`${folder}/projects`).catch(() => [])
+  const found: { root: string; name: string }[] = []
+  for (const e of entries.filter(e => e.kind === 'dir').sort((a, b) => a.name.localeCompare(b.name))) {
+    const root = `${folder}/projects/${e.name}`
+    if ((await toplevel($, root)) === root) found.push({ root, name: e.name })
+  }
+  return found
+}
+
 async function refreshFiles($: EngineInterface): Promise<void> {
   const camp = cwd ? await toplevel($, cwd) : undefined
   const focus = await focusOf($)
   const groups: SpyglassFileGroup[] = []
+  const projects = !camp && cwd ? await projectsOf($, cwd) : []
   const wanted = [
     ...(camp ? [{ root: camp, label: focus ? `CAMP · ${focus}` : camp.slice(camp.lastIndexOf('/') + 1), isCamp: true }] : []),
+    ...projects.map(p => ({ root: p.root, label: `PROJECT · ${p.name}`, isCamp: true })),
     ...(await read($, trees)).map(t => ({ ...t, isCamp: false })),
   ]
   for (const w of wanted) {
     const got = await changesIn($, w.root)
     groups.push('why' in got ? { ...w, files: [], why: got.why } : { ...w, files: got.files })
   }
-  if (!camp) groups.unshift({ root: cwd ?? '', label: 'this session', isCamp: true, files: [], why: 'not in a git working tree' })
+  if (!camp && !projects.length) groups.unshift({ root: cwd ?? '', label: 'this session', isCamp: true, files: [], why: 'not in a git working tree' })
   await update($, files, () => ({ groups, isLoaded: true }))
 }
 

@@ -13,7 +13,7 @@ worktree-setup:
 test-command:
 
 - `feature-branch` is the pattern for a new focus's branch. `{ticket}` is the first ticket key given to `gm open` (the focus name when there is none), and `{focus}` is the focus name. `gm open --branch` overrides it.
-- `base-branch` is where a new feature branch starts when it does not exist yet. Empty means the remote's default branch (`origin/HEAD`), or the clone's current commit when there is no remote. `gm open --base` overrides it.
+- `base-branch` is where a new feature branch starts when it does not exist yet. Empty means `origin`'s default branch, fetched first, or the clone's current commit when there is no remote. `gm open --base` overrides it.
 - `adventurer-allow` is a command an Adventurer may run, as a Claude Code permission rule, one a line: this repository's build and test commands, such as `adventurer-allow: Bash(npm test*)`. Headless, a command nobody allowed is refused.
 - `development-branch`, `integration-branch`, `protected-branch`: the branches of the playbook's `push:` lines. While one is empty, no push goes.
 - `worktree-setup` runs in each new run's worktree before its Adventurer starts (`npm ci`); `test-command` runs on the feature branch after a landing that made a merge commit, which is not pushed until it passes. Empty means none.

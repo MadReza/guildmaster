@@ -37,7 +37,7 @@ Use the bare number in commands (`gm notice 12 started`): an unquoted `#12` is a
 A posting that changes the project is a contract: an Adventurer works it, not you, in a worktree of its own on a branch gm lands on the feature branch.
 
 - Start it, then `gm dispatch <n> --brief "<what to do, how to check it>"` (several that belong together: `gm dispatch 12 13`). It returns at once; the posting stays `active` while the run works, and you keep talking with the patron.
-- Contracts run in parallel when they do not need each other. When one needs another's work, say so: `gm dispatch 13 --after 12`. Keep the camp clean, and never rebase or reset the feature branch while a run holds work not landed.
+- Contracts run in parallel when they do not need each other. When one needs another's work, say so: `gm dispatch 13 --after 12`. In a focus of several repositories, name the one a contract changes: `--repo web`. Keep the camp clean, and never rebase or reset the feature branch while a run holds work not landed.
 - A summons names a finished run, a blocked one (answer it if safe and in scope: `gm runner`), or a posting added while idle; review or sort it like a patron message.
 - Review a finished run: its result (`gm runs`) and its commits (`git log -p <feature branch>..gm/run-<n>`). To accept it, `gm land <run>`, then record `done` with the commit gm printed. Otherwise record `failed` or `needs-you`, or dispatch again with a brief saying what to correct; `gm drop <run>` discards a run's commits, and only when you mean to.
 

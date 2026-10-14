@@ -55,6 +55,11 @@ function world(on: On, env: Record<string, string> = LEADER, placed = true): Wor
     }
     return { deny: `ENOENT: ${e.path}` }
   })
+  // A folder's directories: those of the trees under it, as a focus of several repositories holds them in projects/.
+  on('fs.list', async (_$, e) => {
+    const names = [...w.trees.keys()].filter(r => r.startsWith(`${e.path}/`)).map(r => r.slice(e.path.length + 1).split('/')[0]!)
+    return names.length ? { value: [...new Set(names)].map(name => ({ name, kind: 'dir' as const })) } : { deny: `ENOENT: ${e.path}` }
+  })
   on('fs.stat', async (_$, e) =>
     e.path === GM ? { value: { kind: 'file' as const, size: 1, mtimeMs: 0, isLink: true, realPath: '/clone/bin/gm' } } : { deny: `ENOENT: ${e.path}` })
   // gm list --json [--all] [focus]: the board, as gm prints it.
@@ -558,6 +563,23 @@ describe('the files tab', () => {
     const ui = await opened($)
     expect(await texts(ui)).toMatch(/a\.txt\n\n\s*\+1\s*new/)
     expect(w.journal.gits).toContainEqual(['git', '-C', CAMP, 'diff', '--numstat', '-z', '--no-renames', '4b825dc642cb6eb9a060e54bf8d69288fbee4904'])
+  })
+
+  test('a focus of several repositories: a group for each project worktree, each against its own base', async ($, on) => {
+    const w = world(on)
+    const FOLDER = '/camps/crm-5'
+    w.trees.set(`${FOLDER}/projects/web`, { numstat: [], untracked: { 'b.ts': 'b\n' }, hasBase: false })
+    w.trees.set(`${FOLDER}/projects/api`, { numstat: ['5\t1\tsrc/a.ts'], untracked: {}, hasBase: true })
+    await $.session.start({ ...sessionStart, cwd: FOLDER })
+    await $.command.run(spyglass())
+    const ui = await $.ui.mount(pane('terminal'))
+    await ui.press({ key: 'tab:files' })
+    const all = await texts(ui)
+    expect(all).toMatch(/PROJECT · API[\s\S]*src\/a\.ts[\s\S]*PROJECT · WEB[\s\S]*b\.ts/)
+    expect(all).not.toContain('not in a git working tree')
+    expect(w.journal.gits).toContainEqual(['git', '-C', `${FOLDER}/projects/api`, 'diff', '--numstat', '-z', '--no-renames', 'abc123'])
+    expect(w.journal.gits).toContainEqual(['git', '-C', `${FOLDER}/projects/web`, 'merge-base', 'HEAD', 'origin/main'])
+    expect(w.journal.gits).toContainEqual(['git', '-C', `${FOLDER}/projects/web`, 'diff', '--numstat', '-z', '--no-renames', 'HEAD'])
   })
 
   test('says why when git cannot read a tree, and when the session is in none', async ($, on) => {
