@@ -1254,8 +1254,24 @@ gm_open_undo() {
   [ "$2" = 0 ] || rm -rf "$3"
 }
 
+# The commands a Party Leader's charter has it run routinely, besides gm, allowed so it never stops on a prompt for
+# them: reads only, of git, herdr and GitHub. Nothing that pushes, merges, or makes or moves a branch; no wildcard
+# before a subcommand (git -C * status would match git -C x push origin status), and git fetch only bare or from
+# origin, since a wildcard would let --upload-pack run a command. git log, show and diff --output write a file, so
+# GM_LEADER_ASK still asks for those.
+GM_LEADER_ASK="'Bash(git *--output*)'"
+GM_LEADER_ALLOW="'Bash(git status)', 'Bash(git status *)', 'Bash(git log)', 'Bash(git log *)', 'Bash(git show)', 'Bash(git show *)',
+  'Bash(git diff)', 'Bash(git diff *)', 'Bash(git branch --show-current)', 'Bash(git rev-parse *)',
+  'Bash(git fetch)', 'Bash(git fetch origin)', 'Bash(git fetch --prune)', 'Bash(git fetch --prune origin)',
+  'Bash(herdr status)', 'Bash(herdr pane list)', 'Bash(herdr pane list *)', 'Bash(herdr pane current)', 'Bash(herdr pane current *)',
+  'Bash(herdr pane get *)', 'Bash(herdr pane read *)', 'Bash(herdr workspace list)', 'Bash(herdr workspace list *)',
+  'Bash(herdr workspace get *)', 'Bash(herdr tab list)', 'Bash(herdr tab list *)', 'Bash(herdr tab get *)',
+  'Bash(herdr agent list)', 'Bash(herdr agent list *)', 'Bash(herdr agent get *)', 'Bash(herdr agent read *)',
+  'Bash(gh issue view *)', 'Bash(gh issue list)', 'Bash(gh issue list *)',
+  'Bash(gh pr view)', 'Bash(gh pr view *)', 'Bash(gh pr list)', 'Bash(gh pr list *)'"
+
 # gm_install_camp <focus> <camp>: the Party Leader's Claude Code settings in its camp: the worktree of a focus on one
-# repository, kept out of git, or the plain folder holding a focus's several.
+# repository, kept out of git, or the plain folder holding a focus's several; and Claude Code's trust of the camp.
 gm_install_camp() {
   local focus=$1 camp=$2 settings dir exclude prefix gmcmd worktree=0
   dir=$camp/.claude
@@ -1275,7 +1291,7 @@ gm_install_camp() {
   sqlite3 -batch :memory: >"$tmp" <<SQL
 SELECT json_object(
   'env', json_object('GM_HALL', $(gm_q "$GM_HALL"), 'GM_FOCUS', $(gm_q "$focus")),
-  'permissions', json_object('allow', json_array('Bash(gm *)', $(gm_q "Bash($gmcmd *)"))),
+  'permissions', json_object('allow', json_array('Bash(gm *)', $(gm_q "Bash($gmcmd *)"), $GM_LEADER_ALLOW), 'ask', json_array($GM_LEADER_ASK)),
   'hooks', json_object(
     'SessionStart', json_array(json_object('hooks', json_array(
       json_object('type','command','command', $(gm_q "$prefix hook session-start")),
@@ -1289,6 +1305,8 @@ SELECT json_object(
       json_object('type','command','command', $(gm_q "$prefix hook watch"), 'asyncRewake', json('true'), 'timeout', $GM_WATCH_TIMEOUT)))),
     'PreCompact', json_array(json_object('hooks', json_array(
       json_object('type','command','command', $(gm_q "$prefix hook precompact"))))),
+    'Notification', json_array(json_object('matcher', 'permission_prompt', 'hooks', json_array(
+      json_object('type','command','command', $(gm_q "$prefix hook notification"), 'timeout', 10)))),
     'SessionEnd', json_array(json_object('hooks', json_array(
       json_object('type','command','command', $(gm_q "$prefix hook session-end"), 'timeout', 5)))),
     'PreToolUse', json_array(json_object('hooks', json_array(
@@ -1317,6 +1335,11 @@ SQL
     mkdir -p "$(dirname "$exclude")"
     printf '%s\n' '/.claude/settings.local.json' >>"$exclude"
   fi
+  # Claude Code does not ask the Party Leader whether to trust its camp, as for an Adventurer's worktree. A store gm
+  # cannot read or write only warns: the patron is at the workspace and can say yes once, so the open still goes.
+  local why
+  why=$(gm_claude_trust "$camp") ||
+    printf 'gm open: Claude Code will ask once whether to trust the camp, since gm could not record that it is trusted: %s\n' "$why" >&2
 }
 
 # ---- The front desk: the Guildmaster's own Claude Code session (vision/zero-touch-start.md) ----
@@ -4915,6 +4938,28 @@ $(gm_sql "SELECT '#'||num||' '||slug||' '||state FROM posting WHERE focus_id=$fi
   rm -f "$tmp"
 }
 
+# The Party Leader's Notification hook, for a permission prompt only (its matcher): an allow rule cannot lift an ask
+# rule in managed settings (git push, say), so the patron hears of it from herdr's notification, wherever they are,
+# instead of only from a roster that says blocked. Recorded as an event too; a herdr that is not there is no error.
+gm_hook_notification() {
+  local tmp focus fid sid kind msg s
+  tmp=$(gm_tmp)
+  cat >"$tmp"
+  focus=${GM_FOCUS:-}
+  [ -n "$focus" ] && [ -s "$GM_DB" ] && fid=$(gm_focus_id "$focus" 2>/dev/null) && [ -n "$fid" ] || { rm -f "$tmp"; return 0; }
+  kind=$(gm_json_field "$tmp" notification_type)
+  [ -z "$kind" ] || [ "$kind" = permission_prompt ] || { rm -f "$tmp"; return 0; }
+  sid=$(gm_json_field "$tmp" session_id)
+  msg=$(gm_json_field "$tmp" message)
+  rm -f "$tmp"
+  msg=${msg:-Claude Code asks for permission}
+  gm_sql "BEGIN IMMEDIATE; INSERT INTO event(at, actor, kind, focus_id, session_id, detail) VALUES ($GM_NOW, 'hook', 'leader.permission', $fid, $(gm_qn "$sid"), $(gm_q "$msg")); COMMIT;" >/dev/null 2>&1 || true
+  command -v "$GM_HERDR" >/dev/null 2>&1 || return 0
+  s=$(gm_sql "SELECT session FROM endpoint WHERE key=$(gm_q "party-leader:$focus");" 2>/dev/null || true)
+  gm_herdr "${s:-$GM_HERDR_SESSION}" notification show "$focus's Party Leader waits for your answer" --body "$msg" --sound request >/dev/null
+  return 0
+}
+
 gm_cmd_hook() {
   local which=${1:-}
   case $which in
@@ -4923,6 +4968,7 @@ gm_cmd_hook() {
     charter) gm_hook_charter "${2:-}" ;;
     stop) gm_hook_stop ;;
     precompact) gm_hook_precompact ;;
+    notification) gm_hook_notification ;;
     watch) gm_hook_watch ;;
     rules) gm_hook_rules ;;
     run-stop) gm_hook_run_stop ;;
@@ -5917,9 +5963,10 @@ gm_dispatch_permission_mode() {
   case $GM_CONF_VAL in bypass) printf bypassPermissions ;; *) printf '%s' "$GM_CONF_VAL" ;; esac
 }
 
-# gm_claude_trust <camp>: Claude Code will not ask whether to trust the camp when an Adventurer starts there, as
-# Firstmate registers each crewmate's worktree before launch (bin/fm-claude-trust.sh). In a pane the question would
-# stop the Adventurer before it reads its writ, and --dangerously-skip-permissions does not skip it. The camp is
+# gm_claude_trust <camp>: Claude Code will not ask whether to trust the camp when an Adventurer, or a Party Leader,
+# starts there, as Firstmate registers each crewmate's worktree before launch (bin/fm-claude-trust.sh). In a pane the
+# question would stop the Adventurer before it reads its writ, and --dangerously-skip-permissions does not skip it,
+# so gm dispatch refuses when it fails; gm open only warns (gm_install_camp). The camp is
 # trusted when projects in Claude Code's own store (${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json) says
 # hasTrustDialogAccepted for the camp, a folder above it, or the clone it is a worktree of, which is where Claude Code
 # looks first. Otherwise gm records it for the camp alone, keeping every other key, by an atomic replacement of a
@@ -8186,7 +8233,8 @@ gm_party_leader_workspace() {
 # tab in the guild's workspace. The pane runs gm start, which starts claude in the camp, or in the clone.
 gm_endpoint_launch() {
   local key=$1 state=$2 cause=$3 name s ws tab pane out dir line v val fid vars role label focus=''
-  vars="GM_HALL GM_CLAUDE GM_TELEMETRY GM_CHAT GM_OTEL_ENDPOINT GM_OTEL_PORT"
+  # CLAUDE_CONFIG_DIR: a Party Leader reads the Claude Code store gm open recorded its camp's trust in.
+  vars="GM_HALL GM_CLAUDE GM_TELEMETRY GM_CHAT GM_OTEL_ENDPOINT GM_OTEL_PORT CLAUDE_CONFIG_DIR"
   case $key in
     front-desk)
       name=$GM_FRONT_DESK

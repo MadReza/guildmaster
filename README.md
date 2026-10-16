@@ -66,7 +66,7 @@ Talk to the Guildmaster in plain words:
 
 ```
 you:          start a focus for CRM-1234 in the appointments repo
-Guildmaster:  crm-1234 is open: its Party Leader is in herdr workspace └ crm-1234. Claude Code will ask once to trust the folder.
+Guildmaster:  crm-1234 is open: its Party Leader is in herdr workspace └ crm-1234.
 ```
 
 It finds the repository among the clones it knows and those under your usual source folders, or asks you one short question.

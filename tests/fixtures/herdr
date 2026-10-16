@@ -21,6 +21,7 @@
 #   exit-ignored present while a claude pane ignores /exit; otherwise /exit and Enter leave it holding a shell
 #   focused      each workspace or tab focused, one a line
 #   attached     present once a client attached (herdr with no command)
+#   notifications title<TAB>body<TAB>sound of each notification show
 # Every call must carry --session $HERDR_STUB_SESSION; any other session is refused and recorded in violations.
 set -u
 D=${HERDR_STUB:?HERDR_STUB is not set}
@@ -199,6 +200,10 @@ case "${1:-} ${2:-}" in
       [ ! -f "$D/screens/$((n + 1))" ] || { n=$((n + 1)); printf '%s' "$n" >"$D/screens/at"; }
       [ ! -f "$D/screens/$n" ] || cat "$D/screens/$n"
     fi ;;
+  "notification show")
+    up
+    printf '%s\t%s\t%s\n' "$3" "$(opt body "$@")" "$(opt sound "$@")" >>"$D/notifications"
+    printf '{"result":{}}\n' ;;
   "agent get")
     up
     [ "$(field panes "$3" 4)" = claude ] || err agent_not_found "agent target $3 not found"

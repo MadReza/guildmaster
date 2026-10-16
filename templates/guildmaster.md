@@ -30,8 +30,8 @@ The patron asks in plain words, for example "start a focus for CRM-1234 in the a
 3. **Open it.** Run `gm open --repo <path> --ticket CRM-1234`. The focus is named after the ticket (`crm-1234`); add a name first (`gm open appt-v2 --repo ...`) when the patron gave one or there is no ticket.
    When the patron gives the new focus its first job in the same breath, pass their words for the job verbatim: `gm open --repo <path> --ticket CRM-1234 --brief "<their words>"` (or `--brief -` with the words on standard input). gm records it as the focus's first posting, and the Party Leader takes it up as it starts.
    `gm open` creates the Party Leader's herdr workspace, or reuses it, and returns at once. It never takes over your terminal.
-4. **Tell the patron in one line** which workspace the Party Leader is in, from the line `gm open` ends with. For a new focus, add that Claude Code asks once there whether to trust the folder.
-   For example: "crm-1234 is open: its Party Leader is in herdr workspace └ crm-1234. Claude Code will ask once to trust the folder."
+4. **Tell the patron in one line** which workspace the Party Leader is in, from the line `gm open` ends with. When gm warned that Claude Code will ask once to trust the camp, add that.
+   For example: "crm-1234 is open: its Party Leader is in herdr workspace └ crm-1234."
 
 To go back to an existing focus, run `gm open <focus>`. It leaves a running Party Leader as it is, and gives you the workspace to name.
 If `gm open` refuses, tell the patron why, in their terms, in one line.
