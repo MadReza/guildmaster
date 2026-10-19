@@ -191,7 +191,7 @@ t_settings_are_project_local_and_complete() {
   json "SELECT json_valid(CAST(readfile('$s') AS TEXT));" | grep -qx 1 || fail "settings are not valid JSON"
   local events
   events=$(json "SELECT group_concat(key, ' ') FROM (SELECT key FROM json_each(json_extract(CAST(readfile('$s') AS TEXT),'\$.hooks')) ORDER BY key);")
-  assert_eq "$events" "PostToolUse PostToolUseFailure PreCompact PreToolUse SessionEnd SessionStart Stop StopFailure SubagentStart SubagentStop UserPromptSubmit" "hook events" &&
+  assert_eq "$events" "Notification PostToolUse PostToolUseFailure PreCompact PreToolUse SessionEnd SessionStart Stop StopFailure SubagentStart SubagentStop UserPromptSubmit" "hook events" &&
     assert_eq "$(json "SELECT json_extract(CAST(readfile('$s') AS TEXT),'\$.statusLine.type')||' '||json_extract(CAST(readfile('$s') AS TEXT),'\$.statusLine.refreshInterval');")" "command 5" "status line" &&
     assert_eq "$(json "SELECT json_extract(CAST(readfile('$s') AS TEXT),'\$.env.GM_FOCUS');")" appt-v2 "focus env"
   git -C "$CAMP" check-ignore -q .claude/settings.local.json || fail "camp settings would show up in git status"
@@ -3640,6 +3640,72 @@ t_dispatch_trusts_the_camp() {
   done
   assert_eq "$(cat "$WORK/trust/real.json")" "{}" "a linked store is never written" &&
     assert_contains "$out" "CLAUDE_CONFIG_DIR is config, not an absolute path" "names a relative CLAUDE_CONFIG_DIR"
+}
+
+# gm open records Claude Code's trust for the camp it makes, as gm dispatch does for a run's worktree, unless the
+# camp, a folder above it or its clone is trusted; a store it cannot write warns and the open goes on. The camp's
+# settings allow gm and the reads a Party Leader runs routinely, and nothing that pushes, merges or makes a branch.
+t_open_trusts_the_camp() {
+  export HOME=$WORK/otrust/home GM_HALL=$WORK/otrust/hall
+  unset GM_FOCUS
+  mkdir -p "$HOME"
+  local cfg=$HOME/.claude.json out camp repo before s rule
+  trusted() { json "SELECT COALESCE(json_type(CAST(readfile($(sqlq "$cfg")) AS TEXT), $(sqlq "\$.projects.\"$1\".hasTrustDialogAccepted")), 'absent');"; }
+  repo=$(new_repo otrust/repo)
+  repo=$(cd "$repo" && pwd -P)
+  json "SELECT writefile($(sqlq "$cfg"), json_object('theme', 'dark', 'projects', json_object('/elsewhere', json_object('hasTrustDialogAccepted', json('true')))));" >/dev/null
+  out=$(gm open one --repo "$repo" --no-launch 2>&1) || fail "open failed: $out" || return 1
+  camp=$(cd "$GM_HALL/camps/one" && pwd -P)
+  assert_eq "$(trusted "$camp")" true "the new camp recorded as trusted" &&
+    assert_eq "$(json "SELECT json_extract(j,'\$.theme')||' '||json_extract(j,'\$.projects./elsewhere.hasTrustDialogAccepted') FROM (SELECT CAST(readfile($(sqlq "$cfg")) AS TEXT) AS j);")" "dark 1" "every other key kept" &&
+    assert_eq "$(find "$HOME" -name '.claude.json.gm.*' | head -n 1)" "" "no temporary file left" || return 1
+  # A folder above the camp trusted: nothing written. So with the clone trusted.
+  json "SELECT writefile($(sqlq "$cfg"), json_object('projects', json_object($(sqlq "$GM_HALL"), json_object('hasTrustDialogAccepted', json('true')))));" >/dev/null
+  before=$(cat "$cfg")
+  gm open two --repo "$repo" --no-launch >/dev/null 2>&1 || fail "open with a parent trusted failed" || return 1
+  assert_eq "$(cat "$cfg")" "$before" "nothing written when a folder above is trusted" || return 1
+  json "SELECT writefile($(sqlq "$cfg"), json_object('projects', json_object($(sqlq "$repo"), json_object('hasTrustDialogAccepted', json('true')))));" >/dev/null
+  before=$(cat "$cfg")
+  gm open three --repo "$repo" --no-launch >/dev/null 2>&1 || fail "open with the clone trusted failed" || return 1
+  assert_eq "$(cat "$cfg")" "$before" "nothing written when the clone is trusted" || return 1
+  # A focus of several repositories: its plain folder is trusted.
+  local repo2
+  repo2=$(new_repo otrust/repo2)
+  printf '{}\n' >"$cfg"
+  gm open four --repo "$repo" --repo "$repo2" --no-launch >/dev/null 2>&1 || fail "open of two repositories failed" || return 1
+  assert_eq "$(trusted "$(cd "$GM_HALL/camps/four" && pwd -P)")" true "the folder of several recorded as trusted" || return 1
+  # A store gm cannot read: a warning, and the open still goes.
+  printf '{"projects": \n' >"$cfg"
+  out=$(gm open five --repo "$repo" --no-launch 2>&1) || fail "open refused over an unreadable store: $out" || return 1
+  assert_contains "$out" "Claude Code will ask once whether to trust the camp" "warns when the store is not JSON" &&
+    assert_eq "$(cat "$cfg")" '{"projects": ' "the store left as it was" &&
+    assert_eq "$(db "SELECT count(*) FROM focus WHERE name='five';")" 1 "the focus still opened" || return 1
+  # The camp's allow list.
+  s="CAST(readfile($(sqlq "$camp/.claude/settings.local.json")) AS TEXT)"
+  for rule in 'Bash(gm *)' 'Bash(git status)' 'Bash(git log *)' 'Bash(git show *)' 'Bash(git diff *)' 'Bash(git branch --show-current)' \
+    'Bash(git rev-parse *)' 'Bash(git fetch)' 'Bash(git fetch origin)' 'Bash(herdr pane read *)' 'Bash(herdr workspace list)' \
+    'Bash(gh issue view *)' 'Bash(gh issue list *)' 'Bash(gh pr view *)' 'Bash(gh pr list)'; do
+    assert_eq "$(json "SELECT count(*) FROM json_each(json_extract($s,'\$.permissions.allow')) WHERE value=$(sqlq "$rule")")" 1 "allows $rule" || return 1
+  done
+  assert_eq "$(json "SELECT count(*) FROM json_each(json_extract($s,'\$.permissions.allow')) WHERE value GLOB '*push*' OR value GLOB '*merge*' OR value GLOB '*checkout*' OR value GLOB '*switch*' OR value GLOB '*rebase*' OR value GLOB 'Bash(git branch*[*])' OR value GLOB 'Bash(git fetch*[*])' OR value GLOB 'Bash(git -C*' OR value GLOB '*send*' OR value GLOB '*close*'")" 0 "nothing that pushes, merges, makes a branch or acts on a pane" &&
+    assert_eq "$(json "SELECT json_extract($s,'\$.permissions.ask[0]')")" 'Bash(git *--output*)' "a git read that writes a file still asks"
+}
+
+# A Party Leader on a permission prompt, one an allow rule cannot lift (a managed ask rule), reaches the patron as
+# herdr's notification and an event; other notifications, and a session outside a focus, are left alone.
+t_leader_permission_prompt_notifies() {
+  setup pnotify
+  local s=$CAMP/.claude/settings.local.json
+  assert_eq "$(json "SELECT json_extract(CAST(readfile('$s') AS TEXT),'\$.hooks.Notification[0].matcher');")" permission_prompt "the hook matches permission prompts" || return 1
+  touch "$HERDR_STUB/running"
+  hookj "'session_id','s1','hook_event_name','Notification','notification_type','permission_prompt','message','Claude needs your permission to use Bash'" |
+    GM_FOCUS=appt-v2 gm hook notification || fail "the hook failed" || return 1
+  assert_eq "$(cat "$HERDR_STUB/notifications")" "appt-v2's Party Leader waits for your answer	Claude needs your permission to use Bash	request" "herdr notifies the patron" &&
+    assert_eq "$(db "SELECT kind||' '||detail FROM event WHERE kind='leader.permission';")" "leader.permission Claude needs your permission to use Bash" "recorded as an event" || return 1
+  hookj "'session_id','s1','hook_event_name','Notification','notification_type','idle_prompt','message','waiting'" | GM_FOCUS=appt-v2 gm hook notification
+  hookj "'session_id','s2','hook_event_name','Notification','notification_type','permission_prompt','message','x'" | gm hook notification
+  assert_eq "$(grep -c . "$HERDR_STUB/notifications")" 1 "nothing for an idle prompt or outside a focus" &&
+    assert_eq "$(db "SELECT count(*) FROM event WHERE kind='leader.permission';")" 1 "and no event"
 }
 
 t_lost_run_is_reaped() {
